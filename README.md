@@ -1,8 +1,6 @@
 # Skron Core
 
-Skron Core is a Git-compatible Rust core that can be used as a library, a CLI foundation, or a custom transport/runtime integration point.
-
-This repository is intentionally limited to the Git layer. Product-specific modules live elsewhere and consume this package as an external dependency.
+Skron Core is a Git-compatible Rust core for reusable Git primitives, command-line tooling, and custom transport/runtime integration.
 
 ## What Is Here
 

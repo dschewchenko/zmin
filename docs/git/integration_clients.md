@@ -1,6 +1,6 @@
 # Client Integration Guide
 
-This repository can be consumed as a library without shelling out to `git`.
+This repository can be used as a library without shelling out to `git`.
 
 ## Minimal model
 
