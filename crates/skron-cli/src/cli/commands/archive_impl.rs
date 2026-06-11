@@ -109,7 +109,10 @@ pub(crate) fn archive(options: ArchiveOptions) -> Result<()> {
     if let Some(path) = options.output {
         fs::write(path, out)?;
     } else {
-        io::stdout().write_all(&out)?;
+        // `git archive` uses stdout as the archive data channel when no output
+        // path is given. This is command output, not diagnostic logging.
+        let mut stdout = io::stdout().lock();
+        io::copy(&mut std::io::Cursor::new(out), &mut stdout)?;
     }
     Ok(())
 }
