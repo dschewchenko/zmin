@@ -1,0 +1,42 @@
+[workspace]
+members = [
+    ".",
+    "crates/skron-primitives",
+    "crates/skron-git-core",
+    "crates/skron-git-remote-http",
+    "crates/skron-cli",
+]
+resolver = "2"
+
+[package]
+name = "skron-core"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+authors = ["Skron Authors"]
+license = "UNLICENSED"
+description = "Git-compatible Rust primitives, transports, and CLI building blocks."
+repository = "https://github.com/comstud-io/skron-core"
+autobins = false
+
+[lib]
+name = "skron_core"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[features]
+default = []
+cli = ["skron-primitives/cli"]
+
+[dependencies]
+skron-primitives = { path = "crates/skron-primitives" }
+skron-git-core = { path = "crates/skron-git-core" }
+
+[dev-dependencies]
+tempfile = "3.10.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
