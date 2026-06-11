@@ -2,6 +2,30 @@
 
 Skron Core is a Git-compatible Rust core for reusable Git primitives, command-line tooling, and custom transport/runtime integration.
 
+## What This Project Is
+
+Skron Core is a Rust implementation of Git-oriented repository primitives and workflow building blocks.
+
+The goal is not only to reproduce Git-compatible behavior, but to expose the lower-level pieces as explicit, composable modules that can be reused independently:
+
+- repository and object primitives;
+- command and workflow building blocks;
+- transport and runtime boundaries;
+- replaceable hashing, identifier, storage, and adapter layers.
+
+## How It Differs From Upstream Git
+
+Skron Core is not the upstream Git project and not a line-by-line port of the upstream Git codebase.
+
+It keeps Git concepts and compatibility goals while reorganizing the implementation into modular primitives and extension points.
+
+The focus is on:
+
+- compatibility with Git repositories and common Git workflows;
+- modularity instead of a monolithic implementation;
+- embeddability instead of a standalone tool only;
+- replaceable internal components instead of fixed built-in choices.
+
 ## What Is Here
 
 - `skron-git-core`: low-level Git-compatible objects, refs, index, pack, checkout, diff, merge-file, commit, tag, and reachability primitives.
@@ -28,7 +52,8 @@ In practice that means:
 
 - stock Git can continue from repositories written by Skron;
 - Skron can continue from repositories written by stock Git;
-- repository structure, refs, loose objects, packfiles, index state, reflogs, and worktree state stay compatible.
+- repository structure, refs, loose objects, packfiles, index state, reflogs, and worktree state stay compatible;
+- stock Git validation commands such as `fsck`, `verify-pack`, and related compatibility suites are part of the gate.
 
 Current proof lives in:
 
@@ -88,3 +113,19 @@ tools/git-cli-readiness-status.sh --require-complete
 ## Direction
 
 The core primitives are the stable foundation. Planned work is concentrated on a richer terminal interface and a more approachable CLI built on top of the same Git-compatible engine.
+
+## Status
+
+Active development. The core primitives are intended to remain a stable foundation while the command-line and terminal interfaces continue to expand around them.
+
+## Trademark Notice
+
+Skron Core is not affiliated with the Git Project or Software Freedom Conservancy.
+
+Git is a registered trademark of Software Freedom Conservancy, Inc.
+
+## License
+
+This repository is currently shared publicly for evaluation and reference only.
+
+No permission is granted to use, copy, modify, distribute, sublicense, or create derivative works from this code without prior written consent.
