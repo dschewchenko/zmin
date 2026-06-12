@@ -62,6 +62,14 @@ Current proof lives in:
 - `docs/cli/compatibility_acceptance.md`
 - `tools/git-cli-readiness-status.sh`
 
+## Performance
+
+In a local MacBook Pro M1 16 GB benchmark, the current Skron CLI release build measured faster than upstream/Homebrew Git `2.53.0` by `13%` to `93%` across the validated local history, write, pack, clone, fetch, and push operations.
+
+Against Gitoxide `gix 0.54.0`, Skron matched the median for `log` and `merge-base`, and measured `50%` to `82%` faster on the other comparable CLI-adjacent operations.
+
+Detailed operation-by-operation results and methodology notes are in `docs/cli/performance_benchmark_2026-05-18.md`.
+
 ## Small Example
 
 ```rust

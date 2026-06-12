@@ -116,29 +116,41 @@ fn multi_pack_index_expire(objects_dir: &std::path::Path) -> Result<()> {
         return Ok(());
     }
     let pack_counts = multi_pack_index_pack_object_counts(&pack_dir, &packs)?;
-    let mut removed = false;
+    let mut redundant = Vec::new();
     for (idx, pack) in packs.iter().enumerate() {
         if pack_counts[idx] == 0
             || !multi_pack_index_pack_is_redundant(&pack_dir, &packs, &pack_counts, idx)?
         {
             continue;
         }
-        let pack_path = pack_dir.join(pack);
-        for path in [
-            pack_path.clone(),
-            pack_path.with_extension("pack"),
-            pack_path.with_extension("rev"),
-        ] {
-            match fs::remove_file(path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(CliError::Io(error)),
-            }
-        }
-        removed = true;
+        redundant.push(pack.clone());
+    }
+    let removed = !redundant.is_empty();
+    for pack in redundant {
+        remove_pack_family(&pack_dir.join(pack))?;
     }
     if removed {
         multi_pack_index_write(objects_dir, false)?;
+    }
+    Ok(())
+}
+
+fn remove_pack_family(idx_path: &std::path::Path) -> Result<()> {
+    for path in [
+        idx_path.to_path_buf(),
+        idx_path.with_extension("pack"),
+        idx_path.with_extension("rev"),
+    ] {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(CliError::Io(io::Error::new(
+                    error.kind(),
+                    format!("remove {}: {error}", path.display()),
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -149,9 +161,18 @@ fn multi_pack_index_pack_object_counts(
 ) -> Result<Vec<usize>> {
     let mut counts = Vec::with_capacity(packs.len());
     for pack in packs {
-        counts.push(pack_index_object_count(&pack_dir.join(pack))?);
+        counts.push(pack_index_object_count_with_context(&pack_dir.join(pack))?);
     }
     Ok(counts)
+}
+
+fn pack_index_object_count_with_context(path: &std::path::Path) -> Result<usize> {
+    pack_index_object_count(path).map_err(|error| {
+        CliError::Io(io::Error::new(
+            error.kind(),
+            format!("read pack index {}: {error}", path.display()),
+        ))
+    })
 }
 
 fn multi_pack_index_pack_is_redundant(
@@ -174,7 +195,17 @@ fn multi_pack_index_pack_is_redundant(
             GitHashAlgorithm::Sha1,
             &pack_dir.join(name),
             &pack_dir.join(other_name),
-        )? {
+        )
+        .map_err(|error| {
+            CliError::Io(io::Error::new(
+                error.kind(),
+                format!(
+                    "compare pack indexes {} and {}: {error}",
+                    pack_dir.join(name).display(),
+                    pack_dir.join(other_name).display()
+                ),
+            ))
+        })? {
             return Ok(true);
         }
     }
@@ -3855,7 +3886,6 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         });
     }
     let index_version = requested_pack_index_version(options.index_version.as_deref())?;
-    let repo = find_repo()?;
     if options.verify {
         if options.stdin || options.pack_file.is_none() {
             return Err(CliError::Fatal {
@@ -3906,6 +3936,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         && options.strict.is_none()
         && options.fsck_objects.is_none()
     {
+        let repo = find_repo()?;
         let pack_dir = repo.objects_dir.join("pack");
         fs::create_dir_all(&pack_dir)?;
         let temp_pack = unique_temp_sibling(&pack_dir.join("index-pack-stdin.pack"));
@@ -3940,18 +3971,18 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(reverse_index) = indexed.reverse_index.as_ref() {
             write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
         }
-        let output_kind = if let Some(message) = options.keep {
-            let keep_path = pack_path.with_extension("keep");
-            fs::write(keep_path, message)?;
-            "keep"
+        let kept = if let Some(message) = options.keep {
+            fs::write(pack_path.with_extension("keep"), message)?;
+            true
         } else {
-            "pack"
+            false
         };
         let _ = (options.rev_index, options.verbose);
-        println!("{output_kind}\t{}", indexed.pack_id.to_hex());
+        print_index_pack_installed_output(&indexed.pack_id, kept);
         return Ok(());
     }
     if options.stdin && !options.fix_thin {
+        let repo = find_repo()?;
         let pack_dir = repo.objects_dir.join("pack");
         fs::create_dir_all(&pack_dir)?;
         let temp_pack = unique_temp_sibling(&pack_dir.join("index-pack-stdin-validated.pack"));
@@ -3995,18 +4026,18 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(reverse_index) = indexed.reverse_index.as_ref() {
             write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
         }
-        let output_kind = if let Some(message) = options.keep {
-            let keep_path = pack_path.with_extension("keep");
-            fs::write(keep_path, message)?;
-            "keep"
+        let kept = if let Some(message) = options.keep {
+            fs::write(pack_path.with_extension("keep"), message)?;
+            true
         } else {
-            "pack"
+            false
         };
         let _ = (options.rev_index, options.verbose);
-        println!("{output_kind}\t{}", indexed.pack_id.to_hex());
+        print_index_pack_installed_output(&indexed.pack_id, kept);
         return Ok(());
     }
     if options.stdin && options.fix_thin {
+        let repo = find_repo()?;
         let pack_dir = repo.objects_dir.join("pack");
         fs::create_dir_all(&pack_dir)?;
         let input_pack = unique_temp_sibling(&pack_dir.join("index-pack-thin-input.pack"));
@@ -4063,15 +4094,14 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
                 &repair.indexed.reverse_index,
             )?;
         }
-        let output_kind = if let Some(message) = options.keep {
-            let keep_path = pack_path.with_extension("keep");
-            fs::write(keep_path, message)?;
-            "keep"
+        let kept = if let Some(message) = options.keep {
+            fs::write(pack_path.with_extension("keep"), message)?;
+            true
         } else {
-            "pack"
+            false
         };
         let _ = (options.rev_index, options.verbose, repair.fixed_objects);
-        println!("{output_kind}\t{}", repair.indexed.pack_id.to_hex());
+        print_index_pack_installed_output(&repair.indexed.pack_id, kept);
         return Ok(());
     }
     if options.fix_thin {
@@ -4084,6 +4114,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         && !options.fix_thin
         && (options.strict.is_some() || options.fsck_objects.is_some())
     {
+        let repo = find_repo()?;
         let Some(pack_path) = options.pack_file.clone() else {
             return Err(CliError::Fatal {
                 code: 129,
@@ -4107,15 +4138,14 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         if let Some(reverse_index) = indexed.reverse_index.as_ref() {
             write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
         }
-        let output_kind = if let Some(message) = options.keep {
-            let keep_path = pack_path.with_extension("keep");
-            fs::write(keep_path, message)?;
-            "keep"
+        let kept = if let Some(message) = options.keep {
+            fs::write(pack_path.with_extension("keep"), message)?;
+            true
         } else {
-            "pack"
+            false
         };
         let _ = (options.rev_index, options.verbose);
-        println!("{output_kind}\t{}", indexed.pack_id.to_hex());
+        print_index_pack_output(&indexed.pack_id, kept);
         return Ok(());
     }
     let Some(pack_path) = options.pack_file.clone() else {
@@ -4135,16 +4165,31 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
     if let Some(reverse_index) = indexed.reverse_index.as_ref() {
         write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
     }
-    let output_kind = if let Some(message) = options.keep {
-        let keep_path = pack_path.with_extension("keep");
-        fs::write(keep_path, message)?;
-        "keep"
+    let kept = if let Some(message) = options.keep {
+        fs::write(pack_path.with_extension("keep"), message)?;
+        true
     } else {
-        "pack"
+        false
     };
     let _ = (options.rev_index, options.verbose);
-    println!("{output_kind}\t{}", indexed.pack_id.to_hex());
+    print_index_pack_output(&indexed.pack_id, kept);
     Ok(())
+}
+
+fn print_index_pack_output(pack_id: &ObjectId, kept: bool) {
+    if kept {
+        println!("keep\t{}", pack_id.to_hex());
+    } else {
+        println!("{}", pack_id.to_hex());
+    }
+}
+
+fn print_index_pack_installed_output(pack_id: &ObjectId, kept: bool) {
+    if kept {
+        println!("keep\t{}", pack_id.to_hex());
+    } else {
+        println!("pack\t{}", pack_id.to_hex());
+    }
 }
 
 fn copy_index_pack_stdin_to_temp_pack(path: &Path) -> Result<()> {

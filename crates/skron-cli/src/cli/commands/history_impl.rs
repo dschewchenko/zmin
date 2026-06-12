@@ -2004,12 +2004,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     .into(),
         });
     }
+    let diff_format = options.diff_format();
     let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
     let max_count = parse_log_max_count(options.max_count)?;
     let Some(since) = parse_log_since(options.since) else {
         return Ok(());
     };
-    let diff_format = options.diff_format();
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let revs = if options.revs.is_empty() && !options.all {
@@ -2721,7 +2721,15 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         )?;
         return Ok(());
     }
-    let mut commit_ids = collect_commits_with_exclusions_uncached(&repo, &store, &revs, max_count)?;
+    if count && !objects {
+        println!(
+            "{}",
+            count_commits_with_exclusions(&repo, &store, &revs, max_count)?
+        );
+        return Ok(());
+    }
+
+    let mut commit_ids = collect_commits_with_exclusions(&repo, &store, &revs, max_count)?;
     if reverse {
         commit_ids.reverse();
     }
@@ -2731,11 +2739,8 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         Vec::new()
     };
     if count {
-        let object_count = if objects {
-            count_rev_list_objects(&store, &commit_ids, &revs.extra_objects, &excluded_commits)?
-        } else {
-            0
-        };
+        let object_count =
+            count_rev_list_objects(&store, &commit_ids, &revs.extra_objects, &excluded_commits)?;
         println!("{}", commit_ids.len() + object_count);
         return Ok(());
     }
@@ -2969,9 +2974,18 @@ pub(crate) fn merge_base(is_ancestor: bool, octopus: bool, commits: Vec<String>)
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
+    let commit_graph = CommitGraphIndex::open(&repo)?;
     let resolved = commits
         .iter()
-        .map(|commit| resolve_commitish_for_ancestor_check(&repo, &store, commit))
+        .map(|commit| {
+            resolve_commitish_for_ancestor_check_with_graph_cached(
+                &repo,
+                &store,
+                &commit_cache,
+                commit_graph.as_ref(),
+                commit,
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
     let left = &resolved[0];
     let right = &resolved[1];
@@ -2984,6 +2998,15 @@ pub(crate) fn merge_base(is_ancestor: bool, octopus: bool, commits: Vec<String>)
     }
 
     if is_ancestor {
+        if let Some(commit_graph) = commit_graph.as_ref() {
+            if let Some(result) = commit_graph.is_ancestor(left, right)? {
+                return if result {
+                    Ok(())
+                } else {
+                    Err(CliError::Exit(1))
+                };
+            }
+        }
         return if is_ancestor_commit_uncached(&store, left, right)? {
             Ok(())
         } else {
@@ -2994,7 +3017,7 @@ pub(crate) fn merge_base(is_ancestor: bool, octopus: bool, commits: Vec<String>)
     let base = if octopus {
         best_octopus_merge_base_cached(&commit_cache, &resolved)?
     } else if resolved.len() == 2 {
-        best_merge_base_cached(&commit_cache, left, right)?
+        best_merge_base_with_commit_graph_cached(commit_graph.as_ref(), &commit_cache, left, right)?
     } else {
         best_multi_merge_base_cached(&commit_cache, &resolved)?
     };

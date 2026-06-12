@@ -26,11 +26,11 @@ fn git_seed_handoff_keeps_repository_state_identical() {
     configure_identity_with_git(&seed);
     seed_repository_with_git(&seed);
 
-    git(
+    git_with_fixed_env(
         dir.path(),
         ["clone", seed.to_str().expect("seed path"), "git-handoff"],
     );
-    git(
+    git_with_fixed_env(
         dir.path(),
         ["clone", seed.to_str().expect("seed path"), "skron-handoff"],
     );
@@ -61,11 +61,11 @@ fn skron_seed_handoff_keeps_repository_state_identical() {
     configure_identity_with_git(&seed);
     seed_repository_with_skron(&seed);
 
-    git(
+    git_with_fixed_env(
         dir.path(),
         ["clone", seed.to_str().expect("seed path"), "git-handoff"],
     );
-    git(
+    git_with_fixed_env(
         dir.path(),
         ["clone", seed.to_str().expect("seed path"), "skron-handoff"],
     );

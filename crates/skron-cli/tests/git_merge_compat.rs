@@ -96,6 +96,33 @@ fn merge_base_matches_stock_git_for_linear_history() {
 }
 
 #[test]
+fn merge_base_uses_commit_graph_without_changing_results() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    for idx in 0..6 {
+        write_file(repo.path(), "a.txt", &format!("{idx}\n"));
+        git(repo.path(), ["add", "-A"]);
+        git_with_env(repo.path(), ["commit", "-m", &format!("commit {idx}")]);
+    }
+    git(repo.path(), ["commit-graph", "write", "--reachable"]);
+
+    assert_eq!(
+        run_skron(repo.path(), ["merge-base", "HEAD", "HEAD~4"]),
+        git(repo.path(), ["merge-base", "HEAD", "HEAD~4"])
+    );
+    assert_eq!(
+        run_skron_status(
+            repo.path(),
+            ["merge-base", "--is-ancestor", "HEAD~4", "HEAD"]
+        ),
+        git_status(
+            repo.path(),
+            ["merge-base", "--is-ancestor", "HEAD~4", "HEAD"]
+        )
+    );
+}
+
+#[test]
 fn merge_base_multi_commit_modes_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

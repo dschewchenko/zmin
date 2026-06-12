@@ -2708,6 +2708,50 @@ fn index_pack_stdin_writes_stock_readable_pack_index() {
 }
 
 #[test]
+fn index_pack_file_does_not_require_git_repository_like_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+    write_file(source.path(), "a.txt", "two\n");
+    git(source.path(), ["commit", "-am", "two"]);
+    let pack = command_stdout_bytes_with_stdin(
+        "git",
+        source.path(),
+        &["pack-objects", "--stdout", "--revs"],
+        b"HEAD\n",
+    );
+
+    let git_target = TempDir::new().expect("git standalone dir");
+    let skron_target = TempDir::new().expect("skron standalone dir");
+    let git_pack = git_target.path().join("input.pack");
+    let skron_pack = skron_target.path().join("input.pack");
+    fs::write(&git_pack, &pack).expect("write git pack");
+    fs::write(&skron_pack, &pack).expect("write skron pack");
+
+    assert_eq!(
+        command_any_output(
+            skron_bin(),
+            skron_target.path(),
+            &["index-pack", "input.pack"],
+            "skron",
+        ),
+        command_any_output(
+            "git",
+            git_target.path(),
+            &["index-pack", "input.pack"],
+            "git"
+        )
+    );
+    assert!(skron_target.path().join("input.idx").is_file());
+    assert_eq!(
+        fs::read(skron_target.path().join("input.idx")).expect("read skron standalone idx"),
+        fs::read(git_target.path().join("input.idx")).expect("read git standalone idx")
+    );
+}
+
+#[test]
 fn index_pack_keep_and_index_version_match_stock_git_output() {
     let source = git_init();
     configure_identity(source.path());

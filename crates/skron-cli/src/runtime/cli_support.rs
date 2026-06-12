@@ -53,10 +53,39 @@ pub(crate) fn parse_cli_invocation(
     set_global_config_entries(global_configs);
     set_global_repo_options(global_repo_options);
     set_global_pathspec_options(pathspec_options);
+    let command_args = normalize_history_count_shorthand(command_args);
     validate_scalar_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
+}
+
+fn normalize_history_count_shorthand(args: Vec<String>) -> Vec<String> {
+    let Some(command) = args.first().map(String::as_str) else {
+        return args;
+    };
+    if !matches!(command, "log" | "whatchanged" | "rev-list") {
+        return args;
+    }
+    let mut normalized = Vec::with_capacity(args.len());
+    let mut after_separator = false;
+    for arg in args {
+        if arg == "--" {
+            after_separator = true;
+            normalized.push(arg);
+            continue;
+        }
+        if !after_separator {
+            if let Some(value) = arg.strip_prefix('-').filter(|value| {
+                !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+            }) {
+                normalized.push(format!("--max-count={value}"));
+                continue;
+            }
+        }
+        normalized.push(arg);
+    }
+    normalized
 }
 
 fn validate_scalar_invocation_before_clap(command_args: &[String]) -> Result<()> {

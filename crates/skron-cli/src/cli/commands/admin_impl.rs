@@ -754,6 +754,7 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
         &mut helper,
         &repo.objects_dir,
         roots,
+        &[],
     )?;
     if pack_fetched {
         return Ok(());

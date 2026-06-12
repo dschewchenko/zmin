@@ -1,4 +1,4 @@
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -1356,10 +1356,16 @@ pub fn write_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
     if !pack_encode_options_allows_delta(options) {
         return write_undeltified_pack_from_store(store, algorithm, ids, out);
     }
+    if store
+        .try_write_reusable_pack(algorithm, ids, out)?
+        .is_some()
+    {
+        return Ok(());
+    }
     write_delta_pack_from_store_with_options(store, algorithm, ids, options, out)
 }
 
-fn write_delta_pack_from_store_with_options<S: GitObjectStore>(
+fn write_delta_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
     store: &S,
     algorithm: GitHashAlgorithm,
     ids: &[ObjectId],
@@ -1376,6 +1382,7 @@ fn write_delta_pack_from_store_with_options<S: GitObjectStore>(
         options,
     ));
     let mut encoded_content_bytes = 0_usize;
+    let mut reusable_entry_buffer = [0_u8; PACK_REUSABLE_ENTRY_COPY_BUFFER_CAPACITY];
     for id in ids {
         if id.algorithm() != algorithm {
             return Err(io::Error::new(
@@ -1400,7 +1407,13 @@ fn write_delta_pack_from_store_with_options<S: GitObjectStore>(
                 options,
             );
         } else {
-            write_packed_base_object_to_writer(&mut writer, object.kind, &object.content)?;
+            if !store.try_write_reusable_pack_object_with_buffer(
+                id,
+                &mut writer,
+                &mut reusable_entry_buffer,
+            )? {
+                write_packed_base_object_to_writer(&mut writer, object.kind, &object.content)?;
+            }
             push_encoded_pack_object(
                 &mut encoded,
                 &mut encoded_content_bytes,
@@ -3431,6 +3444,15 @@ impl PackedObjectStore {
         count_packed_object_ids(self.algorithm, &idx_paths)
     }
 
+    pub(crate) fn has_object_ids(&self) -> io::Result<bool> {
+        for idx_path in self.idx_paths()?.iter() {
+            if pack_index_object_count(idx_path)? > 0 {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn pack_names(&self) -> io::Result<Vec<String>> {
         let idx_paths = self.idx_paths()?;
         let mut names = Vec::with_capacity(pack_index_list_initial_capacity(idx_paths.len()));
@@ -3897,6 +3919,76 @@ impl PackedObjectStore {
         })
     }
 
+    fn try_write_reusable_pack_from_full_pack_parts(
+        &self,
+        idx_paths: &[PathBuf],
+        ids: &[ObjectId],
+        writer: &mut dyn Write,
+    ) -> io::Result<Option<ObjectId>> {
+        let requested = ids.iter().cloned().collect::<HashSet<_>>();
+        if requested.len() != ids.len() {
+            return Ok(None);
+        }
+        let mut covered =
+            HashSet::with_capacity(ids.len().min(PACK_OBJECT_ID_GROWTH_CAPACITY_LIMIT));
+        let mut selected = Vec::<memmap2::Mmap>::new();
+
+        for idx_path in idx_paths {
+            let index = read_cached_pack_index(idx_path, self.algorithm)?;
+            if index.count == 0 || index.count > ids.len().saturating_sub(covered.len()) {
+                continue;
+            }
+
+            let mut pack_ids =
+                Vec::with_capacity(index.count.min(PACK_OBJECT_ID_GROWTH_CAPACITY_LIMIT));
+            let usable = index.object_ids_all(&mut |id| {
+                if !requested.contains(id) || covered.contains(id) {
+                    return Ok(false);
+                }
+                pack_ids.push(id.clone());
+                Ok(true)
+            })?;
+            if !usable || pack_ids.len() != index.count {
+                continue;
+            }
+
+            let pack_path = idx_path.with_extension("pack");
+            let file = fs::File::open(&pack_path)?;
+            let bytes = unsafe { memmap2::Mmap::map(&file)? };
+            let validated = validate_pack_header_and_checksum(self.algorithm, &bytes)?;
+            if validated.object_count != index.count || validated.pack_id != index.pack_checksum() {
+                continue;
+            }
+
+            for id in pack_ids {
+                covered.insert(id);
+            }
+            selected.push(bytes);
+            if covered.len() == ids.len() {
+                break;
+            }
+        }
+
+        if selected.is_empty() || covered.len() != ids.len() {
+            return Ok(None);
+        }
+
+        let mut pack_writer = PackHashWriter::new(writer, self.algorithm);
+        pack_writer.write_all(PACK_MAGIC)?;
+        pack_writer.write_all(&PACK_VERSION_2.to_be_bytes())?;
+        pack_writer.write_all(&pack_object_count_u32(ids.len())?.to_be_bytes())?;
+        let digest_len = self.algorithm.digest_len();
+        for bytes in &selected {
+            let data_end = bytes.len().checked_sub(digest_len).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "pack stream is too short")
+            })?;
+            pack_writer.write_all(&bytes[PACK_HEADER_LEN..data_end])?;
+        }
+        let pack_id = pack_writer.finalize();
+        writer.write_all(pack_id.as_bytes())?;
+        Ok(Some(pack_id))
+    }
+
     fn try_write_blob_inner(&self, id: &ObjectId, writer: &mut dyn Write) -> io::Result<bool> {
         if id.algorithm() != self.algorithm {
             return Err(io::Error::new(
@@ -4002,6 +4094,18 @@ fn reserve_pack_object_ids_spare(ids: &mut Vec<ObjectId>, object_hint: usize) {
     }
 }
 
+fn pack_index_ids_match_sorted_ids(index: &PackIndex, sorted_ids: &[ObjectId]) -> io::Result<bool> {
+    let mut idx = 0_usize;
+    let matches = index.object_ids_all(&mut |id| {
+        let matches = sorted_ids
+            .get(idx)
+            .is_some_and(|expected| expected.as_bytes() == id.as_bytes());
+        idx += 1;
+        Ok(matches)
+    })?;
+    Ok(matches && idx == sorted_ids.len())
+}
+
 fn count_packed_object_ids(
     algorithm: GitHashAlgorithm,
     idx_paths: &[PathBuf],
@@ -4062,6 +4166,50 @@ impl GitObjectStore for PackedObjectStore {
             index.for_each_object_id(for_each)?;
         }
         Ok(())
+    }
+
+    fn try_write_reusable_pack(
+        &self,
+        algorithm: GitHashAlgorithm,
+        ids: &[ObjectId],
+        writer: &mut dyn Write,
+    ) -> io::Result<Option<ObjectId>> {
+        if algorithm != self.algorithm {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "pack algorithm does not match packed store",
+            ));
+        }
+        if ids.is_empty() {
+            return Ok(None);
+        }
+
+        let mut sorted_ids = ids.to_vec();
+        sorted_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+
+        let idx_paths = self.idx_paths()?;
+        for idx_path in idx_paths.iter() {
+            let index = read_cached_pack_index(idx_path, self.algorithm)?;
+            if index.count != ids.len() || !pack_index_ids_match_sorted_ids(&index, &sorted_ids)? {
+                continue;
+            }
+
+            let pack_path = idx_path.with_extension("pack");
+            let file = fs::File::open(&pack_path)?;
+            let bytes = unsafe { memmap2::Mmap::map(&file)? };
+            let validated = validate_pack_header_and_checksum(self.algorithm, &bytes)?;
+            if validated.object_count != ids.len() || validated.pack_id != index.pack_checksum() {
+                continue;
+            }
+            writer.write_all(&bytes)?;
+            return Ok(Some(validated.pack_id));
+        }
+        if let Some(pack_id) =
+            self.try_write_reusable_pack_from_full_pack_parts(&idx_paths, ids, writer)?
+        {
+            return Ok(Some(pack_id));
+        }
+        Ok(None)
     }
 
     fn append_object_ids(&self, ids: &mut Vec<ObjectId>) -> io::Result<()> {
@@ -6336,6 +6484,169 @@ mod tests {
         assert_eq!(objects[0].id, id);
         assert_eq!(objects[0].content, b"packed content\n");
         index_pack_bytes(GitHashAlgorithm::Sha1, &pack).expect("index reused pack");
+    }
+
+    #[test]
+    fn packed_store_reuses_entire_pack_when_ids_match_single_pack() {
+        let repo = git_init();
+        git_env(&repo, ["config", "user.name", "Skron Test"]);
+        git_env(&repo, ["config", "user.email", "skron@example.invalid"]);
+        std::fs::write(repo.path().join("first.txt"), b"first\n").expect("write first");
+        git_env(&repo, ["add", "first.txt"]);
+        git_env(&repo, ["commit", "-m", "first"]);
+        std::fs::write(repo.path().join("second.txt"), b"second\n").expect("write second");
+        git_env(&repo, ["add", "second.txt"]);
+        git_env(&repo, ["commit", "-m", "second"]);
+        git_env(&repo, ["repack", "-ad"]);
+        let pack_dir = repo.path().join(".git/objects/pack");
+        let pack_path = fs::read_dir(&pack_dir)
+            .expect("read pack dir")
+            .map(|entry| entry.expect("pack entry").path())
+            .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("pack"))
+            .expect("pack path");
+        let expected = fs::read(&pack_path).expect("read source pack");
+        let store =
+            PackedObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+        let mut ids = Vec::new();
+        store
+            .for_each_object_id(&mut |id| {
+                ids.push(id.clone());
+                Ok(())
+            })
+            .expect("collect ids");
+        let mut actual = Vec::new();
+
+        let reused = <PackedObjectStore as GitObjectStore>::try_write_reusable_pack(
+            &store,
+            GitHashAlgorithm::Sha1,
+            &ids,
+            &mut actual,
+        )
+        .expect("reuse whole pack");
+
+        assert!(reused.is_some());
+        assert_eq!(actual, expected);
+        index_pack_bytes(GitHashAlgorithm::Sha1, &actual).expect("index reused whole pack");
+    }
+
+    #[test]
+    fn packed_store_reuses_matching_pack_from_multi_pack_store() {
+        let repo = git_init();
+        git_env(&repo, ["config", "user.name", "Skron Test"]);
+        git_env(&repo, ["config", "user.email", "skron@example.invalid"]);
+        std::fs::write(repo.path().join("first.txt"), b"first\n").expect("write first");
+        git_env(&repo, ["add", "first.txt"]);
+        git_env(&repo, ["commit", "-m", "first"]);
+        git_env(&repo, ["repack", "-ad"]);
+        std::fs::write(repo.path().join("second.txt"), b"second\n").expect("write second");
+        git_env(&repo, ["add", "second.txt"]);
+        git_env(&repo, ["commit", "-m", "second"]);
+        let pack_base = repo.path().join(".git/objects/pack/pack-latest");
+        let pack_base_arg = pack_base.to_str().expect("pack base path");
+        git_with_stdin(&repo, ["pack-objects", "--revs", pack_base_arg], b"HEAD\n");
+        let store =
+            PackedObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+        let mut ids = Vec::new();
+        store
+            .for_each_object_id(&mut |id| {
+                ids.push(id.clone());
+                Ok(())
+            })
+            .expect("collect ids");
+        let expected_pack = fs::read_dir(repo.path().join(".git/objects/pack"))
+            .expect("read pack dir")
+            .map(|entry| entry.expect("pack entry").path())
+            .find(|path| {
+                path.extension().and_then(|ext| ext.to_str()) == Some("idx")
+                    && pack_index_object_count(path).expect("pack index count") == ids.len()
+            })
+            .expect("matching pack index")
+            .with_extension("pack");
+        let expected = fs::read(expected_pack).expect("read matching pack");
+        let mut actual = Vec::new();
+
+        let reused = <PackedObjectStore as GitObjectStore>::try_write_reusable_pack(
+            &store,
+            GitHashAlgorithm::Sha1,
+            &ids,
+            &mut actual,
+        )
+        .expect("reuse matching pack");
+
+        assert!(reused.is_some());
+        assert_eq!(actual, expected);
+        index_pack_bytes(GitHashAlgorithm::Sha1, &actual).expect("index reused multi-pack");
+    }
+
+    #[test]
+    fn packed_store_reuses_full_pack_parts_when_no_single_pack_matches() {
+        let repo = git_init();
+        git_env(&repo, ["config", "user.name", "Skron Test"]);
+        git_env(&repo, ["config", "user.email", "skron@example.invalid"]);
+        let mut previous = None::<String>;
+        for idx in 1..=3 {
+            std::fs::write(
+                repo.path().join(format!("file-{idx}.txt")),
+                format!("content {idx}\n"),
+            )
+            .expect("write file");
+            git_env(&repo, ["add", "."]);
+            git_env(&repo, ["commit", "-m", &format!("commit {idx}")]);
+            let revs = if let Some(previous) = previous.as_deref() {
+                git(
+                    &repo,
+                    [
+                        "rev-list",
+                        "--objects",
+                        "--no-object-names",
+                        "HEAD",
+                        previous,
+                    ],
+                )
+            } else {
+                git(
+                    &repo,
+                    ["rev-list", "--objects", "--no-object-names", "HEAD"],
+                )
+            };
+            let pack_base = repo
+                .path()
+                .join(format!(".git/objects/pack/pack-part-{idx}"));
+            let pack_base_arg = pack_base.to_str().expect("pack base path");
+            git_with_stdin(&repo, ["pack-objects", pack_base_arg], revs.as_bytes());
+            git_env(&repo, ["prune-packed", "-q"]);
+            previous = Some(format!("^{}", git(&repo, ["rev-parse", "HEAD"])));
+        }
+        let store =
+            PackedObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+        let mut ids = Vec::new();
+        store
+            .for_each_object_id(&mut |id| {
+                ids.push(id.clone());
+                Ok(())
+            })
+            .expect("collect ids");
+        let has_single_matching_pack = fs::read_dir(repo.path().join(".git/objects/pack"))
+            .expect("read pack dir")
+            .map(|entry| entry.expect("pack entry").path())
+            .any(|path| {
+                path.extension().and_then(|ext| ext.to_str()) == Some("idx")
+                    && pack_index_object_count(&path).expect("pack index count") == ids.len()
+            });
+        let mut actual = Vec::new();
+
+        let reused = <PackedObjectStore as GitObjectStore>::try_write_reusable_pack(
+            &store,
+            GitHashAlgorithm::Sha1,
+            &ids,
+            &mut actual,
+        )
+        .expect("reuse full pack parts");
+        let indexed = index_pack_bytes(GitHashAlgorithm::Sha1, &actual).expect("index reused pack");
+
+        assert!(!has_single_matching_pack);
+        assert!(reused.is_some());
+        assert_eq!(indexed.objects, ids.len());
     }
 
     #[test]

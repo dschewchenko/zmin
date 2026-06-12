@@ -11,8 +11,8 @@ use skron_git_core::{
 };
 
 use super::{
-    CliError, GitRepo, RefStore, Result, resolve_objectish, resolve_treeish, short_ref_name,
-    signature_timestamp,
+    CliError, CommitGraphIndex, GitRepo, RefStore, Result, resolve_objectish, resolve_treeish,
+    short_ref_name, signature_timestamp,
 };
 
 const REV_LIST_INITIAL_CAPACITY_LIMIT: usize = 8192;
@@ -287,6 +287,48 @@ where
     Ok(out)
 }
 
+fn count_pending_commits<S>(
+    repo: &GitRepo,
+    commit_cache: &CommitObjectCache<'_, S>,
+    mut pending: BinaryHeap<HeapPendingCommit>,
+    mut scheduled: HashSet<ObjectId>,
+    mut sequence: u64,
+    max_count: Option<usize>,
+    excluded: &HashSet<ObjectId>,
+) -> Result<usize>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut count = 0_usize;
+    while let Some(heap_entry) = pending.pop() {
+        let pending_commit = heap_entry.pending;
+        let id = pending_commit.id;
+        let commit = pending_commit.commit;
+        if excluded.contains(&id) {
+            continue;
+        }
+        count += 1;
+        if max_count.is_some_and(|max| count >= max) {
+            break;
+        }
+        if shallow_commits.contains(&id) {
+            continue;
+        }
+        reserve_commit_parent_traversal(&mut pending, &mut scheduled, commit.parents.len());
+        for parent in &commit.parents {
+            if scheduled.insert(parent.clone()) {
+                pending.push(HeapPendingCommit::new(
+                    read_pending_commit(commit_cache, parent.clone())?,
+                    sequence,
+                ));
+                sequence += 1;
+            }
+        }
+    }
+    Ok(count)
+}
+
 fn collect_pending_commits_into_set<S>(
     repo: &GitRepo,
     commit_cache: &CommitObjectCache<'_, S>,
@@ -416,6 +458,24 @@ pub(crate) fn collect_commits_with_exclusions(
     collect_commits_with_exclusions_cached(repo, store, &commit_cache, revs, max_count)
 }
 
+pub(crate) fn count_commits_with_exclusions(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+) -> Result<usize> {
+    let commit_cache = CommitObjectCache::new(store);
+    let excluded = collect_excluded_commits_cached(repo, store, &commit_cache, &revs.exclude)?;
+    count_commits_cached_with_excluded(
+        repo,
+        store,
+        &commit_cache,
+        &revs.include,
+        max_count,
+        &excluded,
+    )
+}
+
 pub(crate) fn collect_commits_with_exclusions_cached<S>(
     repo: &GitRepo,
     store: &LooseObjectStore,
@@ -488,6 +548,42 @@ where
         sequence,
         max_count,
         Some(excluded),
+    )
+}
+
+fn count_commits_cached_with_excluded<S>(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, S>,
+    revs: &[String],
+    max_count: Option<usize>,
+    excluded: &HashSet<ObjectId>,
+) -> Result<usize>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let root_capacity = root_traversal_capacity_hint(revs.len());
+    let mut pending = BinaryHeap::with_capacity(root_capacity);
+    let mut scheduled = HashSet::with_capacity(root_capacity);
+    let mut sequence = 0_u64;
+    for rev in revs {
+        let id = resolve_commitish(repo, store, rev)?;
+        if scheduled.insert(id.clone()) {
+            pending.push(HeapPendingCommit::new(
+                read_pending_commit(commit_cache, id)?,
+                sequence,
+            ));
+            sequence += 1;
+        }
+    }
+    count_pending_commits(
+        repo,
+        commit_cache,
+        pending,
+        scheduled,
+        sequence,
+        max_count,
+        excluded,
     )
 }
 
@@ -587,16 +683,6 @@ pub(crate) fn read_commit_tree_uncached(
     parse_commit_tree_id(id.algorithm(), &object.content).map_err(CliError::Io)
 }
 
-pub(crate) fn collect_commits_with_exclusions_uncached(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-    revs: &RevListRevs,
-    max_count: Option<usize>,
-) -> Result<Vec<ObjectId>> {
-    let excluded = collect_excluded_commits_uncached(repo, store, &revs.exclude)?;
-    collect_commits_uncached_with_excluded(repo, store, &revs.include, max_count, &excluded)
-}
-
 pub(crate) fn collect_commit_trees_with_exclusions_uncached(
     repo: &GitRepo,
     store: &LooseObjectStore,
@@ -661,38 +747,6 @@ fn collect_commits_uncached_into_set(
         }
     }
     collect_pending_commits_uncached_into_set(repo, store, pending, scheduled, sequence, out)
-}
-
-fn collect_commits_uncached_with_excluded(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-    revs: &[String],
-    max_count: Option<usize>,
-    excluded: &HashSet<ObjectId>,
-) -> Result<Vec<ObjectId>> {
-    let root_capacity = root_traversal_capacity_hint(revs.len());
-    let mut pending = BinaryHeap::with_capacity(root_capacity);
-    let mut scheduled = HashSet::with_capacity(root_capacity);
-    let mut sequence = 0_u64;
-    for rev in revs {
-        let id = resolve_commitish(repo, store, rev)?;
-        if scheduled.insert(id.clone()) {
-            pending.push(HeapPendingCommitLite::new(
-                read_pending_commit_uncached(store, id)?,
-                sequence,
-            ));
-            sequence += 1;
-        }
-    }
-    collect_pending_commits_uncached(
-        repo,
-        store,
-        pending,
-        scheduled,
-        sequence,
-        max_count,
-        Some(excluded),
-    )
 }
 
 fn collect_commit_trees_uncached_with_excluded(
@@ -1774,6 +1828,7 @@ fn count_rev_list_tree_ref_objects(
     Ok(count)
 }
 
+#[cfg(test)]
 fn for_each_rev_list_tree_object_id_ordered_into<F>(
     tree_cache: &mut TreeObjectRefCache<'_>,
     tree_id: &ObjectId,
@@ -2048,13 +2103,13 @@ pub(crate) fn commit_depths_cached(
     let mut pending = VecDeque::from([start.clone()]);
     while let Some(id) = pending.pop_front() {
         let depth = depths[&id];
-        let commit = commit_cache.read_commit(&id)?;
+        let links = commit_cache.read_commit_links(&id)?;
         let parent_depth = depth.checked_add(1).ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "commit depth overflow".into(),
         })?;
-        reserve_commit_depth_parent_traversal(&mut pending, &mut depths, commit.parents.len());
-        for parent in &commit.parents {
+        reserve_commit_depth_parent_traversal(&mut pending, &mut depths, links.parents.len());
+        for parent in &links.parents {
             if let Entry::Vacant(entry) = depths.entry(parent.clone()) {
                 pending.push_back(entry.key().clone());
                 entry.insert(parent_depth);
@@ -2069,6 +2124,13 @@ pub(crate) fn best_merge_base_cached(
     left: &ObjectId,
     right: &ObjectId,
 ) -> Result<Option<ObjectId>> {
+    if is_ancestor_commit_cached(commit_cache, right, left)? {
+        return Ok(Some(right.clone()));
+    }
+    if is_ancestor_commit_cached(commit_cache, left, right)? {
+        return Ok(Some(left.clone()));
+    }
+
     let left_depths = commit_depths_cached(commit_cache, left)?;
     let right_depths = commit_depths_cached(commit_cache, right)?;
     let (scan_depths, lookup_depths) = if left_depths.len() <= right_depths.len() {
@@ -2089,11 +2151,35 @@ pub(crate) fn best_merge_base_cached(
     Ok(best.map(|(_, id)| id))
 }
 
+pub(crate) fn best_merge_base_with_commit_graph_cached(
+    commit_graph: Option<&CommitGraphIndex>,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    left: &ObjectId,
+    right: &ObjectId,
+) -> Result<Option<ObjectId>> {
+    if let Some(commit_graph) = commit_graph {
+        if commit_graph.is_ancestor(right, left)? == Some(true) {
+            return Ok(Some(right.clone()));
+        }
+        if commit_graph.is_ancestor(left, right)? == Some(true) {
+            return Ok(Some(left.clone()));
+        }
+    }
+    best_merge_base_cached(commit_cache, left, right)
+}
+
 pub(crate) fn merge_bases_all_cached(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     left: &ObjectId,
     right: &ObjectId,
 ) -> Result<Vec<ObjectId>> {
+    if is_ancestor_commit_cached(commit_cache, right, left)? {
+        return Ok(vec![right.clone()]);
+    }
+    if is_ancestor_commit_cached(commit_cache, left, right)? {
+        return Ok(vec![left.clone()]);
+    }
+
     let left_depths = commit_depths_cached(commit_cache, left)?;
     let right_depths = commit_depths_cached(commit_cache, right)?;
     let (scan_depths, lookup_depths) = if left_depths.len() <= right_depths.len() {
@@ -2362,30 +2448,11 @@ pub(crate) fn resolve_commitish_or_bad_revision(
     })
 }
 
-pub(crate) fn resolve_commitish_or_invalid_object(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-    commitish: &str,
-) -> Result<ObjectId> {
-    resolve_commitish_io(repo, store, commitish).map_err(|_| CliError::Fatal {
-        code: 128,
-        message: format!("Not a valid object name {commitish}"),
-    })
-}
-
-pub(crate) fn resolve_commitish_for_ancestor_check(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-    commitish: &str,
-) -> Result<ObjectId> {
-    let commit_cache = CommitObjectCache::new(store);
-    resolve_commitish_for_ancestor_check_cached(repo, store, &commit_cache, commitish)
-}
-
-pub(crate) fn resolve_commitish_for_ancestor_check_cached(
+pub(crate) fn resolve_commitish_for_ancestor_check_with_graph_cached(
     repo: &GitRepo,
     store: &LooseObjectStore,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    commit_graph: Option<&CommitGraphIndex>,
     commitish: &str,
 ) -> Result<ObjectId> {
     if let Some((base, depth)) = commitish.split_once('~') {
@@ -2405,7 +2472,18 @@ pub(crate) fn resolve_commitish_for_ancestor_check_cached(
                 )
             })?
         };
-        let mut id = resolve_commitish_for_ancestor_check_cached(repo, store, commit_cache, base)?;
+        let mut id = resolve_commitish_for_ancestor_check_with_graph_cached(
+            repo,
+            store,
+            commit_cache,
+            commit_graph,
+            base,
+        )?;
+        if let Some(commit_graph) = commit_graph {
+            if let Some(parent) = commit_graph.first_parent_after(&id, generations)? {
+                return Ok(parent);
+            }
+        }
         for _ in 0..generations {
             let object = store.read_object(&id)?;
             if object.kind != GitObjectKind::Commit {
@@ -2439,6 +2517,9 @@ pub(crate) fn resolve_commitish_for_ancestor_check_cached(
         code: 128,
         message: format!("Not a valid object name {commitish}"),
     })?;
+    if commit_graph.is_some_and(|commit_graph| commit_graph.position(&id).is_some()) {
+        return Ok(id);
+    }
     match object_kind_hint_or_read(store, &id)? {
         GitObjectKind::Commit => Ok(id),
         _ => Err(CliError::Fatal {

@@ -1,6 +1,7 @@
 use super::*;
 
 const LOCAL_TRANSPORT_INITIAL_CAPACITY_LIMIT: usize = 8192;
+const PARALLEL_OBJECT_FILE_THRESHOLD: usize = 64;
 
 #[derive(Debug, Clone)]
 pub(crate) struct LocalCloneSource {
@@ -544,7 +545,7 @@ pub(crate) fn copy_dir_contents_to_fresh_destination(
     destination: &std::path::Path,
 ) -> Result<()> {
     reject_symlinked_object_path(source, source)?;
-    copy_dir_contents_fresh_checked(source, destination)
+    copy_dir_contents_fresh_parallel_checked(source, destination)
 }
 
 fn copy_dir_contents_checked(
@@ -573,40 +574,62 @@ fn copy_dir_contents_checked(
     Ok(())
 }
 
-fn copy_dir_contents_fresh_checked(
-    source: &std::path::Path,
-    destination: &std::path::Path,
-) -> Result<()> {
-    reject_destination_symlink(destination)?;
-    fs::create_dir_all(destination)?;
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let source_path = entry.path();
-        let destination_path = destination.join(entry.file_name());
-        let metadata = fs::symlink_metadata(&source_path)?;
-        if metadata.file_type().is_symlink() {
-            return Err(symlinked_object_path_error(source, &source_path));
-        }
-        if metadata.is_dir() {
-            copy_dir_contents_fresh_checked(&source_path, &destination_path)?;
-        } else if metadata.is_file() {
-            fs::copy(&source_path, &destination_path)?;
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn hardlink_dir_contents_to_fresh_destination(
     source: &std::path::Path,
     destination: &std::path::Path,
 ) -> Result<()> {
     reject_symlinked_object_path(source, source)?;
-    hardlink_dir_contents_fresh_checked(source, destination)
+    hardlink_dir_contents_fresh_parallel_checked(source, destination)
 }
 
-fn hardlink_dir_contents_fresh_checked(
+#[derive(Clone, Copy)]
+enum FreshObjectFileOpKind {
+    Copy,
+    Hardlink,
+}
+
+struct FreshObjectFileOp {
+    source: PathBuf,
+    destination: PathBuf,
+    kind: FreshObjectFileOpKind,
+}
+
+fn copy_dir_contents_fresh_parallel_checked(
     source: &std::path::Path,
     destination: &std::path::Path,
+) -> Result<()> {
+    let mut ops = Vec::new();
+    collect_fresh_object_file_ops(
+        source,
+        source,
+        destination,
+        FreshObjectFileOpKind::Copy,
+        &mut ops,
+    )?;
+    run_fresh_object_file_ops(&ops)
+}
+
+fn hardlink_dir_contents_fresh_parallel_checked(
+    source: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<()> {
+    let mut ops = Vec::new();
+    collect_fresh_object_file_ops(
+        source,
+        source,
+        destination,
+        FreshObjectFileOpKind::Hardlink,
+        &mut ops,
+    )?;
+    run_fresh_object_file_ops(&ops)
+}
+
+fn collect_fresh_object_file_ops(
+    root: &std::path::Path,
+    source: &std::path::Path,
+    destination: &std::path::Path,
+    kind: FreshObjectFileOpKind,
+    ops: &mut Vec<FreshObjectFileOp>,
 ) -> Result<()> {
     reject_destination_symlink(destination)?;
     fs::create_dir_all(destination)?;
@@ -616,12 +639,72 @@ fn hardlink_dir_contents_fresh_checked(
         let destination_path = destination.join(entry.file_name());
         let metadata = fs::symlink_metadata(&source_path)?;
         if metadata.file_type().is_symlink() {
-            return Err(symlinked_object_path_error(source, &source_path));
+            return Err(symlinked_object_path_error(root, &source_path));
         }
         if metadata.is_dir() {
-            hardlink_dir_contents_fresh_checked(&source_path, &destination_path)?;
+            collect_fresh_object_file_ops(root, &source_path, &destination_path, kind, ops)?;
         } else if metadata.is_file() {
-            fs::hard_link(&source_path, &destination_path)?;
+            ops.push(FreshObjectFileOp {
+                source: source_path,
+                destination: destination_path,
+                kind,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn run_fresh_object_file_ops(ops: &[FreshObjectFileOp]) -> Result<()> {
+    if ops.len() < PARALLEL_OBJECT_FILE_THRESHOLD {
+        return run_fresh_object_file_ops_sequential(ops);
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(ops.len());
+    if workers <= 1 {
+        return run_fresh_object_file_ops_sequential(ops);
+    }
+    let chunk_len = ops.len().div_ceil(workers);
+    let results = std::thread::scope(|scope| {
+        ops.chunks(chunk_len)
+            .map(|chunk| {
+                scope.spawn(move || {
+                    for op in chunk {
+                        run_fresh_object_file_op(op)?;
+                    }
+                    Ok::<(), io::Error>(())
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|handle| {
+                handle.join().unwrap_or_else(|_| {
+                    Err(io::Error::other("parallel object copy worker panicked"))
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    for result in results {
+        result?;
+    }
+    Ok(())
+}
+
+fn run_fresh_object_file_ops_sequential(ops: &[FreshObjectFileOp]) -> Result<()> {
+    for op in ops {
+        run_fresh_object_file_op(op)?;
+    }
+    Ok(())
+}
+
+fn run_fresh_object_file_op(op: &FreshObjectFileOp) -> io::Result<()> {
+    match op.kind {
+        FreshObjectFileOpKind::Copy => {
+            fs::copy(&op.source, &op.destination)?;
+        }
+        FreshObjectFileOpKind::Hardlink => {
+            fs::hard_link(&op.source, &op.destination)?;
         }
     }
     Ok(())
@@ -647,6 +730,25 @@ pub(crate) fn validate_local_clone_ownership(
 pub(crate) fn validate_object_store_no_symlinks(objects_dir: &std::path::Path) -> Result<()> {
     reject_symlinked_object_path(objects_dir, objects_dir)?;
     reject_symlinked_object_entries(objects_dir, objects_dir)
+}
+
+pub(crate) fn validate_destination_object_store_no_symlinks(
+    objects_dir: &std::path::Path,
+) -> Result<()> {
+    reject_destination_symlink(objects_dir)?;
+    reject_destination_object_entries(objects_dir)
+}
+
+fn reject_destination_object_entries(path: &std::path::Path) -> Result<()> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        reject_destination_symlink(&path)?;
+        if path.is_dir() {
+            reject_destination_object_entries(&path)?;
+        }
+    }
+    Ok(())
 }
 
 fn reject_symlinked_object_entries(root: &std::path::Path, path: &std::path::Path) -> Result<()> {

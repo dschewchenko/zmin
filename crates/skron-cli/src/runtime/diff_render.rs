@@ -2869,6 +2869,7 @@ fn cached_patch_write_context<'a>(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn commit_message_body(message: &[u8]) -> String {
     let body = commit_message_body_view(message);
     if let Ok(body) = std::str::from_utf8(body) {
@@ -5837,50 +5838,6 @@ pub(crate) fn unified_hunk_ranges(
         ranges.push(range);
     }
     ranges
-}
-
-pub(crate) fn hunk_ranges(
-    ops: &[DiffLineOp<'_>],
-    start: usize,
-    end: usize,
-) -> (usize, usize, usize, usize) {
-    let mut old_line = 1usize;
-    let mut new_line = 1usize;
-    for op in &ops[..start] {
-        match op {
-            DiffLineOp::Equal(_) => {
-                old_line += 1;
-                new_line += 1;
-            }
-            DiffLineOp::Delete(_) => old_line += 1,
-            DiffLineOp::Insert(_) => new_line += 1,
-        }
-    }
-
-    let mut old_count = 0usize;
-    let mut new_count = 0usize;
-    for op in &ops[start..end] {
-        match op {
-            DiffLineOp::Equal(_) => {
-                old_count += 1;
-                new_count += 1;
-            }
-            DiffLineOp::Delete(_) => old_count += 1,
-            DiffLineOp::Insert(_) => new_count += 1,
-        }
-    }
-
-    let old_start = if old_count == 0 {
-        old_line.saturating_sub(1)
-    } else {
-        old_line
-    };
-    let new_start = if new_count == 0 {
-        new_line.saturating_sub(1)
-    } else {
-        new_line
-    };
-    (old_start, new_start, old_count, new_count)
 }
 
 pub(crate) fn split_diff_lines(content: &[u8]) -> Vec<&[u8]> {

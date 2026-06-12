@@ -109,6 +109,60 @@ fn fetch_local_remote_updates_remote_refs_like_stock_git() {
 }
 
 #[test]
+fn fetch_local_remote_does_not_copy_unreachable_objects() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let client = dir.path().join("client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("README.md"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+    let output = Command::new("git")
+        .args(["hash-object", "-w", "--stdin"])
+        .current_dir(&source)
+        .output()
+        .expect("hash unreachable object");
+    assert!(
+        output.status.success(),
+        "hash unreachable object failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let unreachable = String::from_utf8(output.stdout)
+        .expect("unreachable oid utf8")
+        .trim()
+        .to_owned();
+
+    run_skron(dir.path(), ["init", "-b", "main", "client"]);
+    run_skron(
+        &client,
+        [
+            "remote",
+            "add",
+            "origin",
+            source.to_str().expect("source path"),
+        ],
+    );
+    run_skron(&client, ["fetch", "origin"]);
+
+    assert_eq!(
+        git_status_args(&client, &["cat-file", "-e", &unreachable]),
+        1
+    );
+    assert_eq!(
+        git(
+            &client,
+            ["cat-file", "-p", "refs/remotes/origin/main:README.md"]
+        ),
+        "main"
+    );
+}
+
+#[test]
 fn fetch_with_depth_like_stock_git_for_local_remote() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
@@ -1991,6 +2045,60 @@ fn push_local_remote_updates_bare_refs_like_stock_git() {
             ["rev-parse", "--verify", "refs/heads/feature"]
         ),
         git_status(&git_remote, ["rev-parse", "--verify", "refs/heads/feature"])
+    );
+}
+
+#[test]
+fn push_local_remote_does_not_copy_unreachable_objects() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+
+    git(
+        dir.path(),
+        ["init", "--bare", remote.to_str().expect("remote path")],
+    );
+    run_skron(
+        dir.path(),
+        ["init", "-b", "main", work.to_str().expect("work path")],
+    );
+    configure_identity(&work);
+    run_skron(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    fs::write(work.join("README.md"), b"main\n").expect("write main");
+    run_skron(&work, ["add", "-A"]);
+    run_skron_with_env(&work, ["commit", "-m", "main"]);
+    let output = Command::new("git")
+        .args(["hash-object", "-w", "--stdin"])
+        .current_dir(&work)
+        .output()
+        .expect("hash unreachable object");
+    assert!(
+        output.status.success(),
+        "hash unreachable object failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let unreachable = String::from_utf8(output.stdout)
+        .expect("unreachable oid utf8")
+        .trim()
+        .to_owned();
+
+    run_skron(&work, ["push", "origin", "HEAD:main"]);
+
+    assert_eq!(
+        git_status_args(&remote, &["cat-file", "-e", &unreachable]),
+        1
+    );
+    assert_eq!(
+        git(&remote, ["cat-file", "-p", "refs/heads/main:README.md"]),
+        "main"
     );
 }
 

@@ -314,19 +314,6 @@ pub(crate) fn read_head_index_with_caches(
     Ok(tree_cache.read_tree_to_index(&commit.tree)?)
 }
 
-pub(crate) fn read_head_tree_id(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-) -> Result<Option<ObjectId>> {
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let head = match refs.resolve("HEAD") {
-        Ok(head) => head,
-        Err(_) => return Ok(None),
-    };
-    let commit_cache = CommitObjectCache::new(store);
-    Ok(Some(commit_cache.read_commit(&head)?.tree.clone()))
-}
-
 pub(crate) fn read_head_tree_id_from_primitive_stores(
     refs: &dyn GitRefsStore,
     store: &dyn GitObjectStore,

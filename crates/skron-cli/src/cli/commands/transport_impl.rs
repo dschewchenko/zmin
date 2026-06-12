@@ -33,6 +33,7 @@ const HTTP_EXTRA_HEADER_CAPACITY_HINT: usize = 4;
 const HTTP_CREDENTIAL_HELPER_CAPACITY_HINT: usize = 2;
 const HTTP_REDIRECT_LIMIT: usize = 10;
 const COPY_REACHABLE_SEEN_INITIAL_CAPACITY_LIMIT: usize = 8192;
+const PACK_MISSING_REACHABLE_OBJECT_THRESHOLD: usize = 128;
 static TEMP_HTTP_HELPER_BODY_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
@@ -862,11 +863,12 @@ pub(crate) fn http_fetch_smart_pack_with_helper(
     helper: &mut RemoteHttpHelperSession,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let request = build_upload_pack_request(roots, None)?;
+    let request = build_upload_pack_request(roots, haves, None)?;
 
     let response_path = temp_http_helper_output_path()?;
     let result = (|| {
@@ -908,11 +910,12 @@ fn http_fetch_smart_pack_direct(
     url: &ParsedHttpUrl,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
 ) -> Result<bool> {
     if roots.is_empty() {
         return Ok(true);
     }
-    let request = build_upload_pack_request(roots, None)?;
+    let request = build_upload_pack_request(roots, haves, None)?;
     let (head, mut body) = {
         let _trace = phase_trace("http_fetch_smart_pack.direct_request");
         http_request_reader(url, "POST", "git-upload-pack", &request)?
@@ -4026,6 +4029,7 @@ pub(crate) fn upload_pack_repo_from_path(path: &std::path::Path, strict: bool) -
     })
 }
 
+#[cfg(test)]
 fn write_upload_pack_advertisement<W: Write>(refs: &RefStore, out: &mut W) -> Result<()> {
     let capabilities = upload_pack_capabilities(refs)?;
     let mut wrote = false;
@@ -4054,6 +4058,7 @@ fn write_upload_pack_advertisement<W: Write>(refs: &RefStore, out: &mut W) -> Re
     Ok(())
 }
 
+#[cfg(test)]
 fn upload_pack_capabilities(refs: &RefStore) -> Result<String> {
     let mut capabilities = String::from(
         "multi_ack thin-pack side-band side-band-64k ofs-delta shallow filter \
@@ -4177,7 +4182,7 @@ fn append_object_id_or_zero(out: &mut Vec<u8>, id: Option<&ObjectId>, algorithm:
 }
 
 #[derive(Debug)]
-struct UploadPackRequest {
+pub(crate) struct UploadPackRequest {
     wants: Vec<ObjectId>,
     haves: Vec<ObjectId>,
     shallows: Vec<ObjectId>,
@@ -5467,7 +5472,31 @@ fn copy_reachable_objects_into(
     id: &ObjectId,
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
-    copy_reachable_objects_inner(repo, source, destination, id, seen)
+    copy_reachable_objects_inner(
+        repo,
+        source,
+        destination,
+        id,
+        seen,
+        PackEncodeOptions::delta(10, 50),
+    )
+}
+
+fn copy_reachable_objects_into_undeltified_pack(
+    repo: &GitRepo,
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    id: &ObjectId,
+    seen: &mut HashSet<ObjectId>,
+) -> Result<()> {
+    copy_reachable_objects_inner(
+        repo,
+        source,
+        destination,
+        id,
+        seen,
+        PackEncodeOptions::UNDELTIFIED,
+    )
 }
 
 fn copy_reachable_objects_inner(
@@ -5476,10 +5505,13 @@ fn copy_reachable_objects_inner(
     destination: &LooseObjectStore,
     id: &ObjectId,
     seen: &mut HashSet<ObjectId>,
+    pack_options: PackEncodeOptions,
 ) -> Result<()> {
+    let mut missing = Vec::new();
     let mut current = id.clone();
     loop {
-        if !copy_object_if_missing(source, destination, &current, seen)? {
+        if !record_object_if_missing(destination, &current, seen, &mut missing)? {
+            copy_or_pack_missing_objects(source, destination, &missing, pack_options)?;
             return Ok(());
         }
         let kind = object_kind_hint_or_read(source, &current)?;
@@ -5490,6 +5522,7 @@ fn copy_reachable_objects_inner(
             continue;
         }
         if kind != GitObjectKind::Commit {
+            copy_or_pack_missing_objects(source, destination, &missing, pack_options)?;
             return Ok(());
         }
         break;
@@ -5499,17 +5532,20 @@ fn copy_reachable_objects_inner(
         collect_commits_from_ids_cached(repo, &commit_cache, std::slice::from_ref(&current), None)?;
     reserve_transport_history_set(seen, commits.len());
     for commit in &commits {
-        let _ = copy_object_if_missing(source, destination, commit, seen)?;
+        let _ = record_object_if_missing(destination, commit, seen, &mut missing)?;
     }
-    for_each_rev_list_object_id_into_cached(
+    let mut object_ids = Vec::with_capacity(transport_history_collection_capacity(commits.len()));
+    collect_rev_list_object_ids_into_cached(
         source,
         &commit_cache,
         &commits,
         &[],
         &[],
         seen,
-        |object_id| copy_object_payload_if_missing(source, destination, object_id),
+        &mut object_ids,
     )?;
+    record_missing_objects(destination, &object_ids, &mut missing)?;
+    copy_or_pack_missing_objects(source, destination, &missing, pack_options)?;
     Ok(())
 }
 
@@ -5519,19 +5555,29 @@ fn copy_reachable_objects_for_depth_into(
     commit_ids: &[ObjectId],
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
+    let mut missing = Vec::new();
     reserve_transport_history_set(seen, commit_ids.len());
     for commit_id in commit_ids {
-        let _ = copy_object_if_missing(source, destination, commit_id, seen)?;
+        let _ = record_object_if_missing(destination, commit_id, seen, &mut missing)?;
     }
     let commit_cache = CommitObjectCache::new(source);
-    for_each_rev_list_object_id_into_cached(
+    let mut object_ids =
+        Vec::with_capacity(transport_history_collection_capacity(commit_ids.len()));
+    collect_rev_list_object_ids_into_cached(
         source,
         &commit_cache,
         commit_ids,
         &[],
         &[],
         seen,
-        |object_id| copy_object_payload_if_missing(source, destination, object_id),
+        &mut object_ids,
+    )?;
+    record_missing_objects(destination, &object_ids, &mut missing)?;
+    copy_or_pack_missing_objects(
+        source,
+        destination,
+        &missing,
+        PackEncodeOptions::delta(10, 50),
     )?;
     Ok(())
 }
@@ -5547,6 +5593,100 @@ fn copy_object_if_missing(
     }
     copy_object_payload_if_missing(source, destination, id)?;
     Ok(true)
+}
+
+fn record_object_if_missing(
+    destination: &LooseObjectStore,
+    id: &ObjectId,
+    seen: &mut HashSet<ObjectId>,
+    missing: &mut Vec<ObjectId>,
+) -> Result<bool> {
+    if !seen.insert(id.clone()) {
+        return Ok(false);
+    }
+    record_missing_object(destination, id, missing)?;
+    Ok(true)
+}
+
+fn record_missing_objects(
+    destination: &LooseObjectStore,
+    ids: &[ObjectId],
+    missing: &mut Vec<ObjectId>,
+) -> Result<()> {
+    for id in ids {
+        record_missing_object(destination, id, missing)?;
+    }
+    Ok(())
+}
+
+fn record_missing_object(
+    destination: &LooseObjectStore,
+    id: &ObjectId,
+    missing: &mut Vec<ObjectId>,
+) -> Result<()> {
+    match destination.contains_object(id) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            missing.push(id.clone());
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            missing.push(id.clone());
+            Ok(())
+        }
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn copy_or_pack_missing_objects(
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    ids: &[ObjectId],
+    pack_options: PackEncodeOptions,
+) -> Result<()> {
+    if ids.len() < PACK_MISSING_REACHABLE_OBJECT_THRESHOLD {
+        for id in ids {
+            copy_object_payload_to_known_missing_destination(source, destination, id)?;
+        }
+        return Ok(());
+    }
+    write_missing_objects_pack(source, destination, ids, pack_options)
+}
+
+fn write_missing_objects_pack(
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    ids: &[ObjectId],
+    pack_options: PackEncodeOptions,
+) -> Result<()> {
+    let pack_dir = destination.objects_dir().join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    let temp_pack = unique_temp_sibling(&pack_dir.join("local-fetch.pack"));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_pack)?;
+        let packed_first = source.packed_first();
+        write_pack_from_store_with_options(
+            &packed_first,
+            GitHashAlgorithm::Sha1,
+            ids,
+            pack_options,
+            &mut file,
+        )?;
+        file.flush()?;
+        Ok::<_, CliError>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_pack);
+    }
+    result?;
+    let result = write_indexed_pack_file(destination.objects_dir(), &temp_pack);
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_pack);
+    }
+    result
 }
 
 fn copy_object_payload_if_missing(
@@ -5736,7 +5876,7 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
     for push_ref in push_refs {
         if !options.dry_run {
             if let Some(id) = &push_ref.id {
-                copy_reachable_objects_into(
+                copy_reachable_objects_into_undeltified_pack(
                     &repo,
                     &source_store,
                     &destination_store,
@@ -6386,9 +6526,9 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
             }
         } else {
             let pack_fetched = if let Some(helper) = helper.as_mut() {
-                http_fetch_smart_pack_with_helper(&url, helper, &repo.objects_dir, &roots)?
+                http_fetch_smart_pack_with_helper(&url, helper, &repo.objects_dir, &roots, &[])?
             } else {
-                http_fetch_smart_pack_direct(&url, &repo.objects_dir, &roots)?
+                http_fetch_smart_pack_direct(&url, &repo.objects_dir, &roots, &[])?
             };
             if !pack_fetched {
                 let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&url)?);
@@ -6978,6 +7118,7 @@ pub(crate) fn validate_positive_depth(depth: &str) -> Result<usize> {
         })
 }
 
+#[cfg(test)]
 fn ls_remote_rows(
     refs: &RefStore,
     store: &LooseObjectStore,
@@ -7014,21 +7155,6 @@ fn ls_remote_rows(
         })?;
     }
     Ok(rows)
-}
-
-pub(crate) fn http_ls_remote_rows(
-    url: &str,
-    heads: bool,
-    tags: bool,
-    refs_only: bool,
-    patterns: &[String],
-) -> Result<Vec<LsRemoteRow>> {
-    let url = parsed_http_url_with_extra_headers(None, url)?;
-    if url.scheme == HttpScheme::Http {
-        return http_ls_remote_rows_direct(&url, heads, tags, refs_only, patterns);
-    }
-    let mut helper = RemoteHttpHelperSession::spawn(&url)?;
-    http_ls_remote_rows_with_helper(&url, &mut helper, heads, tags, refs_only, patterns)
 }
 
 fn http_ls_remote_rows_direct(
@@ -7168,6 +7294,7 @@ fn http_smart_discovery_with_helper(
     Ok(None)
 }
 
+#[cfg(test)]
 fn parse_smart_http_ls_remote_rows_from_reader<R: Read + ?Sized>(
     reader: &mut R,
     heads: bool,
@@ -7179,6 +7306,7 @@ fn parse_smart_http_ls_remote_rows_from_reader<R: Read + ?Sized>(
         .map(|value| value.map(|discovery| discovery.rows))
 }
 
+#[cfg(test)]
 fn parse_smart_http_discovery_from_reader<R: Read + ?Sized>(
     reader: &mut R,
     heads: bool,
@@ -7736,18 +7864,38 @@ pub(crate) fn run_push(
     let destination = local_clone_source(&remote_path)?;
     let source_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let destination_refs = refs_adapter_from_git_dir(&destination.git_dir);
-    let destination_store = object_adapter_from_objects_dir(destination.git_dir.join("objects"));
+    let source_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_objects_dir = destination.git_dir.join("objects");
+    validate_destination_object_store_no_symlinks(&destination_objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(destination_objects_dir);
     let destination_commit_cache = CommitObjectCache::new(&destination_store);
     let specs = if refspecs.is_empty() {
         vec![default_push_refspec(&source_refs)?]
     } else {
         refspecs
     };
+    let mut copied_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        specs.len(),
+    ));
 
     for spec in specs {
         let push_ref = parse_push_refspec(&repo, &source_refs, &spec, &url)?;
-        if push_ref.id.is_some() {
-            copy_dir_contents(&repo.objects_dir, &destination.git_dir.join("objects"))?;
+        if let Some(id) = &push_ref.id {
+            if !destination_ref_has_object(
+                &destination_refs,
+                &destination_store,
+                &push_ref.destination,
+                id,
+            )? {
+                copy_reachable_objects_into(
+                    &repo,
+                    &source_store,
+                    &destination_store,
+                    id,
+                    &mut copied_objects,
+                )?;
+            }
             validate_push_update(
                 &destination_refs,
                 &destination_commit_cache,
@@ -7798,6 +7946,7 @@ fn push_with_daemon_remote(
     let advertisement = daemon_receive_pack_advertisement(url)?;
     let source_store = object_adapter_from_objects_dir(&repo.objects_dir);
     let source_commit_cache = CommitObjectCache::new(&source_store);
+    let advertised_roots = receive_pack_advertised_roots(&advertisement);
 
     let initial_capacity = transport_ref_collection_capacity(specs.len());
     let mut push_refs = Vec::with_capacity(initial_capacity);
@@ -7824,6 +7973,7 @@ fn push_with_daemon_remote(
                 &source_store,
                 &source_commit_cache,
                 id,
+                &advertised_roots,
                 &mut object_ids,
                 &mut seen_objects,
             )?;
@@ -7906,6 +8056,7 @@ fn push_with_https_helper_remote(
     let advertisement = http_receive_pack_advertisement_with_helper(url, &mut helper)?;
     let source_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let source_commit_cache = CommitObjectCache::new(&source_store);
+    let advertised_roots = receive_pack_advertised_roots(&advertisement);
 
     let initial_capacity = transport_ref_collection_capacity(specs.len());
     let mut push_refs = Vec::with_capacity(initial_capacity);
@@ -7932,6 +8083,7 @@ fn push_with_https_helper_remote(
                 &source_store,
                 &source_commit_cache,
                 id,
+                &advertised_roots,
                 &mut object_ids,
                 &mut seen_objects,
             )?;
@@ -7993,6 +8145,7 @@ fn push_with_ssh_remote(
     let advertisement = ssh_receive_pack_advertisement(url)?;
     let source_store = object_adapter_from_objects_dir(&repo.objects_dir);
     let source_commit_cache = CommitObjectCache::new(&source_store);
+    let advertised_roots = receive_pack_advertised_roots(&advertisement);
 
     let initial_capacity = specs.len();
     let mut push_refs = Vec::with_capacity(initial_capacity);
@@ -8019,6 +8172,7 @@ fn push_with_ssh_remote(
                 &source_store,
                 &source_commit_cache,
                 id,
+                &advertised_roots,
                 &mut object_ids,
                 &mut seen_objects,
             )?;
@@ -8067,16 +8221,25 @@ fn collect_push_pack_ids(
     store: &LooseObjectStore,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     id: &ObjectId,
+    excluded_roots: &[ObjectId],
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
+    let available_excluded_roots = available_push_pack_excluded_roots(store, excluded_roots)?;
+    let excluded_root_set = push_pack_excluded_root_set(&available_excluded_roots);
+    if excluded_root_set.contains(id) {
+        return Ok(());
+    }
     let mut current = id.clone();
     loop {
+        let kind = object_kind_hint_or_read(store, &current)?;
+        if kind == GitObjectKind::Commit && excluded_root_set.contains(&current) {
+            return Ok(());
+        }
         if !seen.insert(current.clone()) {
             return Ok(());
         }
         out.push(current.clone());
-        let kind = object_kind_hint_or_read(store, &current)?;
         if kind == GitObjectKind::Tag {
             let object = store.read_object(&current)?;
             let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
@@ -8088,8 +8251,24 @@ fn collect_push_pack_ids(
         }
         break;
     }
-    let commits =
-        collect_commits_from_ids_cached(repo, commit_cache, std::slice::from_ref(&current), None)?;
+    let excluded_commits = collect_rev_list_excluded_commits_from_ids_cached(
+        repo,
+        store,
+        commit_cache,
+        &available_excluded_roots,
+        &[],
+    )?;
+    let mut excluded = HashSet::with_capacity(transport_history_collection_capacity(
+        excluded_commits.len(),
+    ));
+    excluded.extend(excluded_commits.iter().cloned());
+    let commits = collect_commits_from_ids_cached_with_excluded(
+        repo,
+        commit_cache,
+        std::slice::from_ref(&current),
+        None,
+        &excluded,
+    )?;
     reserve_transport_history_vec(out, commits.len());
     reserve_transport_history_set(seen, commits.len());
     for commit in &commits {
@@ -8097,8 +8276,46 @@ fn collect_push_pack_ids(
             out.push(commit.clone());
         }
     }
-    collect_rev_list_object_ids_into_cached(store, commit_cache, &commits, &[], &[], seen, out)?;
+    collect_rev_list_object_ids_into_cached(
+        store,
+        commit_cache,
+        &commits,
+        &[],
+        &excluded_commits,
+        seen,
+        out,
+    )?;
     Ok(())
+}
+
+fn receive_pack_advertised_roots(advertisement: &ReceivePackAdvertisement) -> Vec<ObjectId> {
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(advertisement.refs.len()));
+    roots.extend(advertisement.refs.values().cloned());
+    sort_dedup_object_ids(&mut roots);
+    roots
+}
+
+fn available_push_pack_excluded_roots(
+    store: &LooseObjectStore,
+    roots: &[ObjectId],
+) -> Result<Vec<ObjectId>> {
+    let mut available = Vec::with_capacity(transport_ref_collection_capacity(roots.len()));
+    for root in roots {
+        match store.contains_object(root) {
+            Ok(true) => available.push(root.clone()),
+            Ok(false) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Ok(available)
+}
+
+fn push_pack_excluded_root_set(excluded_roots: &[ObjectId]) -> HashSet<ObjectId> {
+    let mut roots =
+        HashSet::with_capacity(transport_history_collection_capacity(excluded_roots.len()));
+    roots.extend(excluded_roots.iter().cloned());
+    roots
 }
 
 fn fetch_with_depth(
@@ -8156,7 +8373,15 @@ pub(crate) fn fetch_with_repo_and_remote(
     let source = local_clone_source(&source_path)?;
     let source_refs = refs_adapter_from_git_dir(&source.git_dir);
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    copy_dir_contents(&source.git_dir.join("objects"), &repo.objects_dir)?;
+    copy_local_fetch_objects(
+        &source,
+        &repo,
+        &source_refs,
+        &destination_refs,
+        &remote,
+        branch.as_deref(),
+        missing_ref_code,
+    )?;
     if let Some(ref branch) = branch {
         let ref_name = branch_ref_name(&branch)?;
         let id = source_refs
@@ -8172,6 +8397,143 @@ pub(crate) fn fetch_with_repo_and_remote(
         source_head_branch(&source_refs)?.as_deref(),
         true,
     )
+}
+
+fn copy_local_fetch_objects(
+    source: &LocalCloneSource,
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    destination_refs: &RefStore,
+    remote: &str,
+    branch: Option<&str>,
+    missing_ref_code: i32,
+) -> Result<()> {
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.git_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
+    if let Some(branch) = branch {
+        let ref_name = branch_ref_name(branch)?;
+        let id = source_refs
+            .resolve(&ref_name)
+            .map_err(|_| missing_remote_ref_error(branch, missing_ref_code))?;
+        let destination_ref = format!("refs/remotes/{remote}/{branch}");
+        if !destination_ref_has_object(destination_refs, &destination_store, &destination_ref, &id)?
+        {
+            roots.push(id);
+        }
+    } else {
+        source_refs.for_each_resolved_ref("refs/heads/", |ref_name, id| {
+            let branch = ref_name
+                .strip_prefix("refs/heads/")
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid source branch ref '{ref_name}'"),
+                })?;
+            let destination_ref = format!("refs/remotes/{remote}/{branch}");
+            if !destination_ref_has_object(
+                destination_refs,
+                &destination_store,
+                &destination_ref,
+                id,
+            )? {
+                roots.push(id.clone());
+            }
+            Ok::<(), CliError>(())
+        })?;
+        source_refs.for_each_resolved_ref("refs/tags/", |ref_name, id| {
+            if !destination_ref_has_object(destination_refs, &destination_store, ref_name, id)? {
+                roots.push(id.clone());
+            }
+            Ok::<(), CliError>(())
+        })?;
+    }
+    sort_dedup_object_ids(&mut roots);
+
+    let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        roots.len(),
+    ));
+    for id in roots {
+        copy_reachable_objects_into(
+            &source_repo,
+            &source_store,
+            &destination_store,
+            &id,
+            &mut seen,
+        )?;
+    }
+    Ok(())
+}
+
+fn destination_ref_has_object(
+    refs: &RefStore,
+    store: &LooseObjectStore,
+    ref_name: &str,
+    id: &ObjectId,
+) -> Result<bool> {
+    match refs.resolve(ref_name) {
+        Ok(existing) if existing == *id => match store.contains_object(id) {
+            Ok(present) => Ok(present),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(CliError::Io(error)),
+        },
+        Ok(_) => Ok(false),
+        Err(_) => Ok(false),
+    }
+}
+
+fn local_clone_source_repo(source: &LocalCloneSource) -> GitRepo {
+    let root = source
+        .git_dir
+        .file_name()
+        .and_then(|name| (name == ".git").then_some(()))
+        .and_then(|_| source.git_dir.parent())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| source.git_dir.clone());
+    GitRepo {
+        root,
+        git_dir: source.git_dir.clone(),
+        objects_dir: source.git_dir.join("objects"),
+        index_path: source.git_dir.join("index"),
+    }
+}
+
+pub(crate) fn collect_upload_pack_haves(
+    store: &LooseObjectStore,
+    refs: &RefStore,
+) -> Result<Vec<ObjectId>> {
+    let mut haves = Vec::with_capacity(transport_ref_collection_capacity(32));
+    for prefix in ["refs/heads/", "refs/remotes/", "refs/tags/"] {
+        refs.for_each_resolved_ref(prefix, |_, id| {
+            if let Some(commit) = upload_pack_have_commit(store, id)? {
+                haves.push(commit);
+            }
+            Ok::<(), CliError>(())
+        })?;
+    }
+    sort_dedup_object_ids(&mut haves);
+    Ok(haves)
+}
+
+fn upload_pack_have_commit(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<ObjectId>> {
+    let mut current = id.clone();
+    for _ in 0..8 {
+        let object = match store.read_object(&current) {
+            Ok(object) => object,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        match object.kind {
+            GitObjectKind::Commit => return Ok(Some(current)),
+            GitObjectKind::Tag => {
+                current = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(None)
 }
 
 fn fetch_with_http_remote(
@@ -8197,6 +8559,7 @@ fn fetch_with_http_remote(
     )?;
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let fetch_options = HttpFetchOptions {
         commit: false,
         tags: false,
@@ -8249,9 +8612,9 @@ fn fetch_with_http_remote(
     }
     sort_dedup_object_ids(&mut roots);
     let pack_fetched = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_with_helper(&parsed_url, helper, &repo.objects_dir, &roots)?
+        http_fetch_smart_pack_with_helper(&parsed_url, helper, &repo.objects_dir, &roots, &haves)?
     } else {
-        http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &roots)?
+        http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &roots, &haves)?
     };
     if !pack_fetched {
         let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
@@ -8409,7 +8772,9 @@ fn fetch_with_daemon_remote(
         }
     }
     sort_dedup_object_ids(&mut roots);
-    daemon_fetch_pack(url, &repo.objects_dir, &roots)
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    daemon_fetch_pack_with_haves(url, &repo.objects_dir, &roots, &haves)
 }
 
 fn fetch_with_daemon_remote_depth(
@@ -8521,7 +8886,9 @@ fn fetch_with_ssh_remote(
         }
     }
     sort_dedup_object_ids(&mut roots);
-    ssh_fetch_pack(url, &repo.objects_dir, &roots)
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    ssh_fetch_pack_with_haves(url, &repo.objects_dir, &roots, &haves)
 }
 
 fn fetch_with_ssh_remote_depth(
@@ -9495,8 +9862,12 @@ fn parse_smart_http_receive_pack_advertisement_from_reader<R: BufRead + ?Sized>(
     Ok(Some(parse_receive_pack_advertisement(reader)?))
 }
 
-fn build_upload_pack_request(roots: &[ObjectId], depth: Option<usize>) -> Result<Vec<u8>> {
-    let mut request = Vec::with_capacity(upload_pack_request_capacity(roots, depth));
+fn build_upload_pack_request(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+) -> Result<Vec<u8>> {
+    let mut request = Vec::with_capacity(upload_pack_request_capacity(roots, haves, depth));
     let first_extra = b" side-band-64k ofs-delta include-tag";
     for (idx, root) in roots.iter().enumerate() {
         let extra = if idx == 0 {
@@ -9525,12 +9896,22 @@ fn build_upload_pack_request(roots: &[ObjectId], depth: Option<usize>) -> Result
         );
     }
     request.extend_from_slice(b"0000");
+    for have in haves {
+        append_pkt_line_len(&mut request, b"have ".len() + have.hex_len() + 1)?;
+        request.extend_from_slice(b"have ");
+        have.write_hex_bytes(&mut request);
+        request.push(b'\n');
+    }
     append_pkt_line_len(&mut request, b"done\n".len())?;
     request.extend_from_slice(b"done\n");
     Ok(request)
 }
 
-fn upload_pack_request_capacity(roots: &[ObjectId], depth: Option<usize>) -> usize {
+fn upload_pack_request_capacity(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+) -> usize {
     let first_extra = " side-band-64k ofs-delta include-tag".len();
     let wants = roots
         .iter()
@@ -9542,7 +9923,11 @@ fn upload_pack_request_capacity(roots: &[ObjectId], depth: Option<usize>) -> usi
     let deepen = depth
         .map(|depth| 4 + "deepen ".len() + decimal_len(depth) + 1)
         .unwrap_or(0);
-    wants + deepen + 4 + 4 + "done\n".len()
+    let haves = haves
+        .iter()
+        .map(|have| 4 + "have ".len() + have.hex_len() + 1)
+        .sum::<usize>();
+    wants + deepen + haves + 4 + 4 + "done\n".len()
 }
 
 fn decimal_len(mut value: usize) -> usize {
@@ -9614,7 +9999,7 @@ fn http_fetch_smart_pack_with_depth_with_helper(
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request(roots, depth)?;
+    let request = build_upload_pack_request(roots, &[], depth)?;
     let response_path = temp_http_helper_output_path()?;
     let result = (|| {
         let head = helper.request_to_file(
@@ -9658,7 +10043,7 @@ fn http_fetch_smart_pack_with_depth_direct(
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request(roots, depth)?;
+    let request = build_upload_pack_request(roots, &[], depth)?;
     let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
     if head.status_code != 200 {
         return Err(CliError::Fatal {
@@ -9727,18 +10112,29 @@ fn ssh_head_branch(url: &str) -> Result<Option<String>> {
     Ok(branch)
 }
 
-pub(crate) fn ssh_fetch_pack(
+pub(crate) fn ssh_fetch_pack_with_haves(
     url: &str,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
 ) -> Result<()> {
-    ssh_fetch_pack_with_depth(url, objects_dir, roots, None).map(|_| ())
+    ssh_fetch_pack_with_depth_and_haves(url, objects_dir, roots, haves, None).map(|_| ())
 }
 
 fn ssh_fetch_pack_with_depth(
     url: &str,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    depth: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    ssh_fetch_pack_with_depth_and_haves(url, objects_dir, roots, &[], depth)
+}
+
+fn ssh_fetch_pack_with_depth_and_haves(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
@@ -9755,7 +10151,7 @@ fn ssh_fetch_pack_with_depth(
         while read_pkt_line_payload_into(stdout, &mut line)? {}
     }
 
-    let request = build_upload_pack_request(roots, depth)?;
+    let request = build_upload_pack_request(roots, haves, depth)?;
     session
         .stdin
         .as_mut()
@@ -10074,18 +10470,29 @@ fn daemon_head_branch(url: &str) -> Result<Option<String>> {
     Ok(head_symref_branch_from_capabilities(capabilities))
 }
 
-pub(crate) fn daemon_fetch_pack(
+pub(crate) fn daemon_fetch_pack_with_haves(
     url: &str,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
 ) -> Result<()> {
-    daemon_fetch_pack_with_depth(url, objects_dir, roots, None).map(|_| ())
+    daemon_fetch_pack_with_depth_and_haves(url, objects_dir, roots, haves, None).map(|_| ())
 }
 
 fn daemon_fetch_pack_with_depth(
     url: &str,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    depth: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    daemon_fetch_pack_with_depth_and_haves(url, objects_dir, roots, &[], depth)
+}
+
+fn daemon_fetch_pack_with_depth_and_haves(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
@@ -10098,7 +10505,7 @@ fn daemon_fetch_pack_with_depth(
     let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     while read_pkt_line_payload_into(&mut reader, &mut line)? {}
 
-    let request = build_upload_pack_request(roots, depth)?;
+    let request = build_upload_pack_request(roots, haves, depth)?;
     stream.write_all(&request)?;
     stream.flush()?;
 
@@ -10514,6 +10921,7 @@ fn split_shell_words(input: &str) -> Result<Vec<String>> {
     Ok(words)
 }
 
+#[cfg(test)]
 fn write_receive_pack_advertisement<W: Write>(refs: &RefStore, out: &mut W) -> Result<()> {
     let capabilities =
         "report-status delete-refs quiet ofs-delta object-format=sha1 agent=skron/0.1.0";
@@ -10937,8 +11345,10 @@ mod transport_request_tests {
     fn upload_pack_request_matches_git_pkt_line_shape() {
         let first = oid("1111111111111111111111111111111111111111");
         let second = oid("2222222222222222222222222222222222222222");
-        let actual = build_upload_pack_request(&[first.clone(), second.clone()], Some(12))
-            .expect("upload-pack request");
+        let have = oid("3333333333333333333333333333333333333333");
+        let actual =
+            build_upload_pack_request(&[first.clone(), second.clone()], &[have.clone()], Some(12))
+                .expect("upload-pack request");
         let mut expected = Vec::new();
         write_pkt_line(
             &mut expected,
@@ -10956,6 +11366,11 @@ mod transport_request_tests {
         .expect("second want");
         write_pkt_line(&mut expected, b"deepen 12\n").expect("deepen");
         expected.extend_from_slice(b"0000");
+        write_pkt_line(
+            &mut expected,
+            format!("have {}\n", have.to_hex()).as_bytes(),
+        )
+        .expect("have");
         write_pkt_line(&mut expected, b"done\n").expect("done");
         assert_eq!(actual, expected);
     }
@@ -12271,11 +12686,11 @@ mod transport_request_tests {
         let roots = [first, second];
 
         let request =
-            build_upload_pack_request(&roots, Some(123_456)).expect("upload-pack request");
+            build_upload_pack_request(&roots, &[], Some(123_456)).expect("upload-pack request");
 
         assert_eq!(
             request.len(),
-            upload_pack_request_capacity(&roots, Some(123_456))
+            upload_pack_request_capacity(&roots, &[], Some(123_456))
         );
         assert!(
             request

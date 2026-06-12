@@ -117,6 +117,10 @@ fn assert_global_config_contains_repo(home: &TempDir, section: &str, repo: &str)
     );
 }
 
+fn git_config_get(repo: &std::path::Path, key: &str) -> (i32, String, String) {
+    common::command_any_output("git", repo, &["config", "--get", key], "git")
+}
+
 fn bare_remote_with_main_branch() -> (TempDir, std::path::PathBuf) {
     let workspace = TempDir::new().expect("remote workspace");
     let source = workspace.path().join("source");
@@ -1325,8 +1329,8 @@ fn scalar_run_config_and_reconfigure_keep_match_stock_scalar_config_effects() {
         "maintenance.strategy",
     ] {
         assert_eq!(
-            common::git_args(skron_repo.path(), &["config", "--get", key]),
-            common::git_args(stock_repo.path(), &["config", "--get", key]),
+            git_config_get(skron_repo.path(), key),
+            git_config_get(stock_repo.path(), key),
             "config key {key}"
         );
     }

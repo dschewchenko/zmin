@@ -471,13 +471,19 @@ fn maintenance_prefetch_local_remote(repo: &GitRepo, remote: &str) -> Result<()>
 fn maintenance_prefetch_daemon_remote(repo: &GitRepo, remote: &str, url: &str) -> Result<()> {
     let rows = transport_commands::daemon_ls_remote_rows(url, false, false, false, &[])?;
     let roots = write_prefetch_refs_from_rows(repo, remote, &rows)?;
-    transport_commands::daemon_fetch_pack(url, &repo.objects_dir, &roots)
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let haves = transport_commands::collect_upload_pack_haves(&store, &refs)?;
+    transport_commands::daemon_fetch_pack_with_haves(url, &repo.objects_dir, &roots, &haves)
 }
 
 fn maintenance_prefetch_ssh_remote(repo: &GitRepo, remote: &str, url: &str) -> Result<()> {
     let rows = transport_commands::ssh_ls_remote_rows(url, false, false, false, &[])?;
     let roots = write_prefetch_refs_from_rows(repo, remote, &rows)?;
-    transport_commands::ssh_fetch_pack(url, &repo.objects_dir, &roots)
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let haves = transport_commands::collect_upload_pack_haves(&store, &refs)?;
+    transport_commands::ssh_fetch_pack_with_haves(url, &repo.objects_dir, &roots, &haves)
 }
 
 fn maintenance_prefetch_http_remote(repo: &GitRepo, remote: &str, url: &str) -> Result<()> {
@@ -505,11 +511,14 @@ fn maintenance_prefetch_http_remote(repo: &GitRepo, remote: &str, url: &str) -> 
         args: Vec::new(),
     };
     let roots = write_prefetch_refs_from_rows(repo, remote, &rows)?;
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let haves = transport_commands::collect_upload_pack_haves(&store, &refs)?;
     let pack_fetched = transport_commands::http_fetch_smart_pack_with_helper(
         &parsed_url,
         &mut helper,
         &repo.objects_dir,
         &roots,
+        &haves,
     )?;
     if !pack_fetched {
         let commit_cache = CommitObjectCache::new(&store);
@@ -1108,7 +1117,7 @@ fn maintenance_schedule_minute() -> u8 {
 
 #[cfg(any(test, all(unix, not(target_os = "macos"))))]
 fn maintenance_crontab_region(executable: &Path, minute: u8) -> String {
-    let executable = diff_commands::shell_quote_path(executable);
+    let executable = maintenance_shell_quote_path(executable);
     format!(
         "# BEGIN GIT MAINTENANCE SCHEDULE\n\
 # The following schedule was created by Git\n\
@@ -1121,6 +1130,17 @@ fn maintenance_crontab_region(executable: &Path, minute: u8) -> String {
 \n\
 # END GIT MAINTENANCE SCHEDULE\n"
     )
+}
+
+#[cfg(any(test, all(unix, not(target_os = "macos"))))]
+#[cfg(not(windows))]
+fn maintenance_shell_quote_path(path: &Path) -> String {
+    diff_commands::shell_quote_path(path)
+}
+
+#[cfg(all(test, windows))]
+fn maintenance_shell_quote_path(path: &Path) -> String {
+    diff_commands::cmd_quote_path(path)
 }
 
 #[cfg(any(test, all(unix, not(target_os = "macos"))))]

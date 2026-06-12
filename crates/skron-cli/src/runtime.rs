@@ -77,6 +77,10 @@ pub(crate) use fs_ops_primitives::*;
 mod pack_index_primitives;
 pub(crate) use pack_index_primitives::*;
 
+#[path = "runtime/commit_graph.rs"]
+mod commit_graph_primitives;
+pub(crate) use commit_graph_primitives::*;
+
 #[path = "runtime/merge_worktree.rs"]
 mod merge_worktree_primitives;
 pub(crate) use merge_worktree_primitives::*;

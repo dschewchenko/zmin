@@ -821,19 +821,48 @@ impl LooseObjectStore {
         &self,
         for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
         visited: &mut HashSet<PathBuf>,
+        emitted: &mut HashSet<ObjectId>,
     ) -> io::Result<()> {
         let key = canonical_or_original(&self.objects_dir);
         if !visited.insert(key) {
             return Ok(());
         }
-        self.for_each_loose_object_id(for_each)?;
-        self.packed_store.for_each_object_id(for_each)?;
-        for alternate in self.alternate_object_dirs()?.iter().cloned() {
+        let alternates = self.alternate_object_dirs()?;
+        if emitted.is_empty() && alternates.is_empty() {
+            return self.for_each_local_object_id(for_each);
+        }
+        self.for_each_loose_object_id(&mut |id| emit_unique_object_id(id, emitted, for_each))?;
+        self.packed_store
+            .for_each_object_id(&mut |id| emit_unique_object_id(id, emitted, for_each))?;
+        for alternate in alternates.iter().cloned() {
             Self::new(alternate, self.algorithm)
                 .with_max_object_bytes(self.max_object_bytes)
-                .for_each_object_id_inner(for_each, visited)?;
+                .for_each_object_id_inner(for_each, visited, emitted)?;
         }
         Ok(())
+    }
+
+    fn for_each_local_object_id(
+        &self,
+        for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
+    ) -> io::Result<()> {
+        if !self.packed_store.has_object_ids()? {
+            return self.for_each_loose_object_id(for_each);
+        }
+
+        let mut loose_ids = Vec::new();
+        self.for_each_loose_object_id(&mut |id| {
+            for_each(id)?;
+            loose_ids.push(id.clone());
+            Ok(())
+        })?;
+        if loose_ids.is_empty() {
+            return self.packed_store.for_each_object_id(for_each);
+        }
+
+        let mut emitted = loose_ids.into_iter().collect::<HashSet<_>>();
+        self.packed_store
+            .for_each_object_id(&mut |id| emit_unique_object_id(id, &mut emitted, for_each))
     }
 
     fn read_object_from_alternates(
@@ -1067,7 +1096,7 @@ impl GitObjectStore for LooseObjectStore {
         &self,
         for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
     ) -> io::Result<()> {
-        self.for_each_object_id_inner(for_each, &mut HashSet::new())
+        self.for_each_object_id_inner(for_each, &mut HashSet::new(), &mut HashSet::new())
     }
 
     fn try_write_reusable_pack(
@@ -1332,6 +1361,17 @@ fn loose_object_id_growth_capacity(current_len: usize) -> usize {
         .max(1024)
         .saturating_mul(2)
         .min(LOOSE_OBJECT_ID_GROWTH_CAPACITY_LIMIT)
+}
+
+fn emit_unique_object_id(
+    id: &ObjectId,
+    emitted: &mut HashSet<ObjectId>,
+    for_each: &mut dyn FnMut(&ObjectId) -> io::Result<()>,
+) -> io::Result<()> {
+    if emitted.insert(id.clone()) {
+        for_each(id)?;
+    }
+    Ok(())
 }
 
 fn canonical_or_original(path: &Path) -> PathBuf {
@@ -2010,6 +2050,52 @@ mod tests {
             id
         );
         assert!(store.object_ids().expect("object ids").contains(&id));
+    }
+
+    #[test]
+    fn for_each_object_id_deduplicates_loose_packed_and_alternate_ids() {
+        let alternate = git_init();
+        let local = git_init();
+        for repo in [&alternate, &local] {
+            std::fs::write(repo.path().join("README.md"), b"same content\n")
+                .expect("write tracked file");
+            git(repo, ["add", "README.md"]);
+            git_env(repo, ["commit", "-m", "same commit"]);
+        }
+        let id = git(&local, ["rev-parse", "HEAD"]);
+        assert_eq!(git(&alternate, ["rev-parse", "HEAD"]), id);
+
+        let loose_path = local
+            .path()
+            .join(".git/objects")
+            .join(&id[..2])
+            .join(&id[2..]);
+        let loose_copy_path = local.path().join("duplicate-head-copy");
+        std::fs::copy(&loose_path, &loose_copy_path).expect("copy loose commit");
+        git(&local, ["repack", "-adq"]);
+        std::fs::create_dir_all(loose_path.parent().expect("loose parent"))
+            .expect("create loose dir");
+        std::fs::copy(&loose_copy_path, &loose_path).expect("restore loose commit");
+        std::fs::write(
+            local.path().join(".git/objects/info/alternates"),
+            format!("{}\n", alternate.path().join(".git/objects").display()),
+        )
+        .expect("write alternates");
+
+        let store =
+            LooseObjectStore::new(local.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+        let target = ObjectId::from_hex(GitHashAlgorithm::Sha1, &id).expect("object id");
+        let mut ids = Vec::new();
+        store
+            .for_each_object_id(&mut |id| {
+                ids.push(id.clone());
+                Ok(())
+            })
+            .expect("iterate object ids");
+        let unique = ids.iter().cloned().collect::<HashSet<_>>();
+
+        assert_eq!(ids.len(), unique.len());
+        assert_eq!(ids.iter().filter(|id| *id == &target).count(), 1);
     }
 
     #[test]
