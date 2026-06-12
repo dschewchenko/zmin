@@ -480,7 +480,7 @@ fn gitdir_include_pattern_matches(
 
 fn normalize_gitdir_include_pattern(pattern: &str, base_dir: &Path) -> Option<String> {
     let raw = if let Some(rest) = pattern.strip_prefix("~/") {
-        PathBuf::from(std::env::var_os("HOME")?).join(rest)
+        config_home_dir()?.join(rest)
     } else {
         let path = Path::new(pattern);
         if path.is_absolute() {
@@ -493,9 +493,19 @@ fn normalize_gitdir_include_pattern(pattern: &str, base_dir: &Path) -> Option<St
 }
 
 fn path_for_config_match(path: &Path) -> String {
-    let mut value = path.display().to_string().replace('\\', "/");
+    let mut value = normalize_windows_verbatim_path(path.display().to_string().replace('\\', "/"));
     while value.len() > 1 && value.ends_with('/') {
         value.pop();
+    }
+    value
+}
+
+fn normalize_windows_verbatim_path(value: String) -> String {
+    if let Some(rest) = value.strip_prefix("//?/UNC/") {
+        return format!("//{rest}");
+    }
+    if let Some(rest) = value.strip_prefix("//?/") {
+        return rest.to_owned();
     }
     value
 }
@@ -565,7 +575,7 @@ fn resolve_config_include_path(
 ) -> Option<(PathBuf, String)> {
     let decoded = decode_config_value(value);
     if let Some(rest) = decoded.strip_prefix("~/") {
-        let home = PathBuf::from(std::env::var_os("HOME")?);
+        let home = config_home_dir()?;
         let actual = home.join(rest);
         return Some((actual.clone(), actual.display().to_string()));
     }
@@ -580,6 +590,17 @@ fn resolve_config_include_path(
         base_dir.join(include_path),
         format!("{base_origin}/{decoded}"),
     ))
+}
+
+fn config_home_dir() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(PathBuf::from(home));
+    }
+    #[cfg(windows)]
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(user_profile));
+    }
+    None
 }
 
 pub(crate) fn local_config_path(repo: &GitRepo) -> io::Result<PathBuf> {
@@ -647,14 +668,16 @@ pub(crate) fn common_git_dir_for_config(repo: &GitRepo) -> io::Result<PathBuf> {
 }
 
 pub(crate) fn decode_config_value(value: &str) -> String {
-    let Some(inner) = value
+    let inner = value
         .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
-    else {
-        return value.to_owned();
-    };
-    let mut out = String::with_capacity(inner.len());
-    let mut chars = inner.chars();
+        .unwrap_or(value);
+    decode_config_escapes(inner)
+}
+
+fn decode_config_escapes(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
     while let Some(ch) = chars.next() {
         if ch != '\\' {
             out.push(ch);
@@ -1014,10 +1037,31 @@ pub(crate) fn write_config_entries(
         if entry.implicit_bool {
             out.push_str(&format!("\t{}\n", entry.key));
         } else {
-            out.push_str(&format!("\t{} = {}\n", entry.key, entry.value));
+            out.push_str(&format!(
+                "\t{} = {}\n",
+                entry.key,
+                encode_config_value(&entry.value)
+            ));
         }
     }
     fs::write(path, out)
+}
+
+fn encode_config_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => encoded.push_str("\\\\"),
+            '"' => encoded.push_str("\\\""),
+            '\n' => encoded.push_str("\\n"),
+            '\t' => encoded.push_str("\\t"),
+            '\u{08}' => encoded.push_str("\\b"),
+            _ => encoded.push(ch),
+        }
+    }
+    encoded.push('"');
+    encoded
 }
 
 pub(crate) fn parse_config_section(raw: &str) -> (String, String) {

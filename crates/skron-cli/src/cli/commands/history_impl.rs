@@ -22,7 +22,7 @@ pub(crate) fn run_replay(
     if advance.is_none() && onto.is_none() {
         return Err(CliError::Stderr {
             code: 129,
-            text: replay_usage_error("option --onto or --advance is mandatory"),
+            text: replay_usage_error("exactly one of --onto, --advance, or --revert is required"),
         });
     }
     if revision_ranges.is_empty() {
@@ -61,13 +61,8 @@ pub(crate) fn run_replay(
     if let Some(branch) = advance {
         let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
         let branch_ref = branch_ref_name(&branch)?;
-        let old_tip = refs.resolve(&branch_ref)?;
-        println!(
-            "update {} {} {}",
-            branch_ref,
-            new_tip.to_hex(),
-            old_tip.to_hex()
-        );
+        refs.resolve(&branch_ref)?;
+        refs.write_ref(&branch_ref, &new_tip)?;
     }
     Ok(())
 }
@@ -75,12 +70,14 @@ pub(crate) fn run_replay(
 fn replay_usage_error(message: &str) -> String {
     format!(
         "error: {message}\n\
-         usage: (EXPERIMENTAL!) git replay ([--contained] --onto <newbase> | --advance <branch>) <revision-range>...\n\n\
-         \x20   --[no-]advance <branch>\n\
-         \x20                         make replay advance given branch\n\
-         \x20   --[no-]onto <revision>\n\
-         \x20                         replay onto given commit\n\
-         \x20   --[no-]contained      advance all branches contained in revision-range\n"
+         usage: (EXPERIMENTAL!) git replay ([--contained] --onto=<newbase> | --advance=<branch> | --revert=<branch>)\n\
+         \x20      [--ref=<ref>] [--ref-action=<mode>] <revision-range>\n\n\
+         \x20   --[no-]contained      update all branches that point at commits in <revision-range>\n\
+         \x20   --onto <revision>     replay onto given commit\n\
+         \x20   --advance <branch>    make replay advance given branch\n\
+         \x20   --revert <branch>     revert commits onto given branch\n\
+         \x20   --ref <branch>        reference to update with result\n\
+         \x20   --ref-action <mode>   control ref update behavior (update|print)\n"
     )
 }
 

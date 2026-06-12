@@ -1639,12 +1639,7 @@ fn run_sequence_editor(repo: &GitRepo, path: &Path) -> Result<()> {
 }
 
 fn run_shell_command_with_path(command: &str, path: &Path) -> Result<()> {
-    let status = std::process::Command::new(git_shell_path())
-        .arg("-c")
-        .arg(format!("{} \"$1\"", command))
-        .arg("skron-editor")
-        .arg(path)
-        .status()?;
+    let status = run_editor_command_with_path(command, path)?;
     if status.success() {
         Ok(())
     } else {

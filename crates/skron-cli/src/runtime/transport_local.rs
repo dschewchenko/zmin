@@ -495,11 +495,30 @@ pub(crate) fn write_alternates_file(
     let mut content = String::with_capacity(alternates_file_content_capacity_hint(alternates));
     use std::fmt::Write as _;
     for alternate in alternates {
-        writeln!(&mut content, "{}", alternate.display())
+        writeln!(&mut content, "{}", alternate_path_line(alternate))
             .expect("writing alternate path to String cannot fail");
     }
     fs::write(objects_dir.join("info/alternates"), content)?;
     Ok(())
+}
+
+fn alternate_path_line(path: &Path) -> String {
+    let value = path.display().to_string();
+    if cfg!(windows) {
+        normalize_windows_alternate_path(value.replace('\\', "/"))
+    } else {
+        value
+    }
+}
+
+fn normalize_windows_alternate_path(value: String) -> String {
+    if let Some(rest) = value.strip_prefix("//?/UNC/") {
+        return format!("//{rest}");
+    }
+    if let Some(rest) = value.strip_prefix("//?/") {
+        return rest.to_owned();
+    }
+    value
 }
 
 fn alternates_file_content_capacity_hint(alternates: &[PathBuf]) -> usize {

@@ -310,10 +310,8 @@ pub fn command_output_with_env(
     envs: &[(&str, &str)],
     label: &str,
 ) -> (i32, String, String) {
-    let output = Command::new(command)
-        .args(args)
-        .envs(envs.iter().copied())
-        .current_dir(cwd)
+    let mut command = command_with_test_envs(command, cwd, args, envs);
+    let output = command
         .output()
         .unwrap_or_else(|err| panic!("run {label}: {err}"));
     assert!(
@@ -358,10 +356,8 @@ pub fn command_failure_output_with_env(
     envs: &[(&str, &str)],
     label: &str,
 ) -> (i32, String, String) {
-    let output = Command::new(command)
-        .args(args)
-        .envs(envs.iter().copied())
-        .current_dir(cwd)
+    let mut command = command_with_test_envs(command, cwd, args, envs);
+    let output = command
         .output()
         .unwrap_or_else(|err| panic!("run {label}: {err}"));
     assert!(
@@ -380,6 +376,37 @@ pub fn command_failure_output_with_env(
             .trim_end_matches('\n')
             .to_owned(),
     )
+}
+
+fn command_with_test_envs(
+    command: &str,
+    cwd: &Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Command {
+    let mut command = Command::new(command);
+    command.args(args).current_dir(cwd);
+    for (key, value) in envs {
+        command.env(key, test_env_value(key, value));
+    }
+    command
+}
+
+#[cfg(windows)]
+fn test_env_value(key: &str, value: &str) -> String {
+    if matches!(
+        key,
+        "GIT_EDITOR" | "GIT_SEQUENCE_EDITOR" | "VISUAL" | "EDITOR"
+    ) {
+        return value.replace('\\', "/");
+    }
+
+    value.to_owned()
+}
+
+#[cfg(not(windows))]
+fn test_env_value(_key: &str, value: &str) -> String {
+    value.to_owned()
 }
 
 pub fn command_stdout_bytes(command: &str, cwd: &std::path::Path, args: &[&str]) -> Vec<u8> {

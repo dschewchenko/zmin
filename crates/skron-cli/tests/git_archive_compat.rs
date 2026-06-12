@@ -9,6 +9,15 @@ use common::{
     run_skron, run_skron_status, run_skron_with_stdin_bytes, skron_bin,
 };
 
+fn skron_upload_archive_exec() -> String {
+    let path = skron_bin();
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    #[cfg(not(windows))]
+    let path = path.to_owned();
+    format!("--exec={path} upload-archive")
+}
+
 #[test]
 fn get_tar_commit_id_matches_stock_git_archive_metadata() {
     let repo = common::git_init();
@@ -323,7 +332,7 @@ fn upload_archive_serves_stock_git_archive_remote_tar() {
     git_with_env(repo.path(), ["commit", "-m", "archive fixture"]);
 
     let remote = format!("--remote={}", repo.path().display());
-    let exec = format!("--exec={} upload-archive", skron_bin());
+    let exec = skron_upload_archive_exec();
     let skron_tar = command_stdout_bytes(
         "git",
         repo.path(),
@@ -378,7 +387,7 @@ fn upload_archive_accepts_remote_archive_options_like_stock_git() {
     git_with_env(repo.path(), ["commit", "-m", "archive fixture"]);
 
     let remote = format!("--remote={}", repo.path().display());
-    let exec = format!("--exec={} upload-archive", skron_bin());
+    let exec = skron_upload_archive_exec();
     let skron_tar = command_stdout_bytes(
         "git",
         repo.path(),

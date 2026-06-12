@@ -1,7 +1,27 @@
 pub(crate) mod commands;
 pub(crate) mod schema;
 
+#[cfg(windows)]
+const WINDOWS_CLI_STACK_SIZE: usize = 16 * 1024 * 1024;
+
+#[cfg(windows)]
 pub fn run_cli() {
+    let handle = std::thread::Builder::new()
+        .name("skron-cli-main".to_owned())
+        .stack_size(WINDOWS_CLI_STACK_SIZE)
+        .spawn(run_cli_inner)
+        .expect("spawn Windows CLI thread");
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn run_cli() {
+    run_cli_inner();
+}
+
+fn run_cli_inner() {
     crate::runtime::install_broken_pipe_panic_hook();
     let result = match std::panic::catch_unwind(run_main) {
         Ok(result) => result,

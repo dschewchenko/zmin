@@ -6583,7 +6583,6 @@ mod tests {
         let repo = git_init();
         git_env(&repo, ["config", "user.name", "Skron Test"]);
         git_env(&repo, ["config", "user.email", "skron@example.invalid"]);
-        let mut previous = None::<String>;
         for idx in 1..=3 {
             std::fs::write(
                 repo.path().join(format!("file-{idx}.txt")),
@@ -6592,31 +6591,27 @@ mod tests {
             .expect("write file");
             git_env(&repo, ["add", "."]);
             git_env(&repo, ["commit", "-m", &format!("commit {idx}")]);
-            let revs = if let Some(previous) = previous.as_deref() {
-                git(
-                    &repo,
-                    [
-                        "rev-list",
-                        "--objects",
-                        "--no-object-names",
-                        "HEAD",
-                        previous,
-                    ],
-                )
-            } else {
-                git(
-                    &repo,
-                    ["rev-list", "--objects", "--no-object-names", "HEAD"],
-                )
-            };
+        }
+        let revs = git(
+            &repo,
+            ["rev-list", "--objects", "--no-object-names", "--all"],
+        );
+        let object_ids = revs.lines().collect::<Vec<_>>();
+        assert!(object_ids.len() > 1);
+        let chunk_size = object_ids.len().div_ceil(2);
+        for (idx, chunk) in object_ids.chunks(chunk_size).enumerate() {
             let pack_base = repo
                 .path()
-                .join(format!(".git/objects/pack/pack-part-{idx}"));
+                .join(format!(".git/objects/pack/pack-part-{}", idx + 1));
             let pack_base_arg = pack_base.to_str().expect("pack base path");
-            git_with_stdin(&repo, ["pack-objects", pack_base_arg], revs.as_bytes());
-            git_env(&repo, ["prune-packed", "-q"]);
-            previous = Some(format!("^{}", git(&repo, ["rev-parse", "HEAD"])));
+            let pack_input = format!("{}\n", chunk.join("\n"));
+            git_with_stdin(
+                &repo,
+                ["pack-objects", pack_base_arg],
+                pack_input.as_bytes(),
+            );
         }
+        git_env(&repo, ["prune-packed", "-q"]);
         let store =
             PackedObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
         let mut ids = Vec::new();
@@ -6626,12 +6621,18 @@ mod tests {
                 Ok(())
             })
             .expect("collect ids");
+        let expected_ids = ids.iter().cloned().collect::<HashSet<_>>();
         let has_single_matching_pack = fs::read_dir(repo.path().join(".git/objects/pack"))
             .expect("read pack dir")
             .map(|entry| entry.expect("pack entry").path())
             .any(|path| {
                 path.extension().and_then(|ext| ext.to_str()) == Some("idx")
-                    && pack_index_object_count(&path).expect("pack index count") == ids.len()
+                    && PackIndex::read(&path, GitHashAlgorithm::Sha1)
+                        .expect("read pack index")
+                        .object_ids()
+                        .into_iter()
+                        .collect::<HashSet<_>>()
+                        == expected_ids
             });
         let mut actual = Vec::new();
 

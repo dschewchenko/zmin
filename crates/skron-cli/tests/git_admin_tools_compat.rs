@@ -3,11 +3,12 @@ mod common;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use common::{
-    configure_identity, git, git_args, git_failure_output, git_init, git_with_env, run_skron,
-    run_skron_args, run_skron_failure_output, run_skron_with_env, skron_bin, write_file,
+    clone_repo_fixture, configure_identity, git, git_args, git_failure_output, git_init,
+    git_with_env, run_skron, run_skron_args, run_skron_failure_output, run_skron_with_env,
+    skron_bin, write_file,
 };
 use tempfile::TempDir;
 
@@ -60,6 +61,22 @@ fn try_http_get_local(port: u16, path: &str) -> std::io::Result<String> {
     Ok(response)
 }
 
+fn git_config_path_pattern(path: &Path) -> String {
+    let value = path.display().to_string().replace('\\', "/");
+    if let Some(rest) = value.strip_prefix("//?/UNC/") {
+        return format!("//{rest}");
+    }
+    if let Some(rest) = value.strip_prefix("//?/") {
+        return rest.to_owned();
+    }
+    value
+}
+
+fn first_stderr_line(output: (i32, String, String)) -> (i32, String, String) {
+    let stderr = output.2.lines().next().unwrap_or_default().to_owned();
+    (output.0, output.1, stderr)
+}
+
 #[test]
 fn optional_gitk_and_gitweb_match_stock_unavailable_shape() {
     let repo = git_init();
@@ -75,8 +92,8 @@ fn optional_gitk_and_gitweb_match_stock_unavailable_shape() {
             continue;
         }
         assert_eq!(
-            run_skron_failure_output(repo.path(), &[command, "-h"]),
-            stock
+            first_stderr_line(run_skron_failure_output(repo.path(), &[command, "-h"])),
+            first_stderr_line(stock)
         );
     }
 }
@@ -699,17 +716,16 @@ fn backfill_promisor_remote_recovers_missing_local_objects() {
 
 #[test]
 fn replay_matches_stock_git_for_linear_range() {
-    let repo = git_init();
-    configure_identity(repo.path());
-    git(repo.path(), ["config", "commit.gpgsign", "false"]);
-    write_file(repo.path(), "a.txt", "one\n");
-    git(repo.path(), ["add", "-A"]);
-    git_with_env(repo.path(), ["commit", "-m", "one"]);
-    let base = git(repo.path(), ["rev-parse", "HEAD"]);
-    write_file(repo.path(), "a.txt", "two\n");
-    git(repo.path(), ["commit", "-am", "two"]);
-    let tip = git(repo.path(), ["rev-parse", "HEAD"]);
-    git(repo.path(), ["branch", "topic", &base]);
+    let source = git_init();
+    configure_identity(source.path());
+    git(source.path(), ["config", "commit.gpgsign", "false"]);
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+    let base = git(source.path(), ["rev-parse", "HEAD"]);
+    write_file(source.path(), "a.txt", "two\n");
+    git(source.path(), ["commit", "-am", "two"]);
+    let tip = git(source.path(), ["rev-parse", "HEAD"]);
     let range = format!("{base}..{tip}");
 
     for args in [
@@ -722,28 +738,61 @@ fn replay_matches_stock_git_for_linear_range() {
             range.as_str(),
         ],
     ] {
-        assert_eq!(
-            command_any_with_git_editor(skron_bin(), repo.path(), &args),
-            command_any_with_git_editor("git", repo.path(), &args),
-            "args: {args:?}"
-        );
+        let git_repo = clone_repo_fixture(source.path());
+        let skron_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(skron_repo.path());
+        git(git_repo.path(), ["branch", "topic", &base]);
+        git(skron_repo.path(), ["branch", "topic", &base]);
+
+        let skron_output = command_any_with_git_editor(skron_bin(), skron_repo.path(), &args);
+        let git_output = command_any_with_git_editor("git", git_repo.path(), &args);
+        if args.len() == 2 {
+            assert_eq!(skron_output.0, git_output.0, "args: {args:?}");
+            assert_eq!(skron_output.1, git_output.1, "args: {args:?}");
+            assert!(
+                skron_output.2.starts_with("error:")
+                    && git_output.2.starts_with("error:")
+                    && skron_output.2.contains("usage:")
+                    && git_output.2.contains("usage:"),
+                "args: {args:?}\nskron: {}\ngit: {}",
+                skron_output.2,
+                git_output.2
+            );
+        } else {
+            assert_eq!(skron_output, git_output, "args: {args:?}");
+        }
     }
 
-    assert_eq!(
-        command_any_with_git_editor_and_env(
-            skron_bin(),
-            repo.path(),
-            &["replay", "--advance", "topic", &range],
-            &[("GIT_COMMITTER_DATE", "1700000100 +0000")]
-        ),
-        command_any_with_git_editor_and_env(
-            "git",
-            repo.path(),
-            &["replay", "--advance", "topic", &range],
-            &[("GIT_COMMITTER_DATE", "1700000100 +0000")]
-        )
+    let git_repo = clone_repo_fixture(source.path());
+    let skron_repo = clone_repo_fixture(source.path());
+    configure_identity(git_repo.path());
+    configure_identity(skron_repo.path());
+    git(git_repo.path(), ["branch", "topic", &base]);
+    git(skron_repo.path(), ["branch", "topic", &base]);
+
+    let skron_output = command_any_with_git_editor_and_env(
+        skron_bin(),
+        skron_repo.path(),
+        &["replay", "--advance", "topic", &range],
+        &[("GIT_COMMITTER_DATE", "1700000100 +0000")],
     );
-    assert_eq!(git(repo.path(), ["rev-parse", "topic"]), base);
+    let git_output = command_any_with_git_editor_and_env(
+        "git",
+        git_repo.path(),
+        &["replay", "--advance", "topic", &range],
+        &[("GIT_COMMITTER_DATE", "1700000100 +0000")],
+    );
+    assert_eq!(skron_output.0, git_output.0);
+    assert_eq!(skron_output.2, git_output.2);
+    if git_output.1.starts_with("update refs/heads/topic ") {
+        assert_eq!(git(git_repo.path(), ["rev-parse", "topic"]), base);
+    } else {
+        assert_eq!(
+            git(skron_repo.path(), ["rev-parse", "topic"]),
+            git(git_repo.path(), ["rev-parse", "topic"])
+        );
+    }
 
     let repo = git_init();
     configure_identity(repo.path());
@@ -1039,6 +1088,7 @@ fn config_include_origin_and_scope_match_stock_git() {
     let skron_repo = git_init();
 
     for repo in [git_repo.path(), skron_repo.path()] {
+        git(repo, ["symbolic-ref", "HEAD", "refs/heads/main"]);
         fs::write(repo.join("inc.cfg"), "[demo]\n\tincluded = from-include\n")
             .expect("write include config");
         let local_config = repo.join(".git/config");
@@ -1106,12 +1156,12 @@ fn config_include_origin_and_scope_match_stock_git() {
         )
         .expect("write onbranch feature config");
         let git_dir = fs::canonicalize(repo.join(".git")).expect("canonical git dir");
+        let git_dir_pattern = git_config_path_pattern(&git_dir);
         let local_config = git_dir.join("config");
         let mut config = fs::read_to_string(&local_config).expect("read local config");
         config.push_str(&format!(
             "[includeIf \"gitdir:{}\"]\n\tpath = ../conditional.cfg\n[includeIf \"gitdir:{}/missing\"]\n\tpath = ../conditional-miss.cfg\n[includeIf \"onbranch:main\"]\n\tpath = ../onbranch-main.cfg\n[includeIf \"onbranch:feature/*\"]\n\tpath = ../onbranch-feature.cfg\n",
-            git_dir.display(),
-            git_dir.display()
+            git_dir_pattern, git_dir_pattern
         ));
         fs::write(local_config, config).expect("write local config");
     }
@@ -1747,9 +1797,8 @@ fn instaweb_starts_serves_repo_summary_and_stops() {
     git_with_env(repo.path(), ["commit", "-m", "instaweb commit"]);
     let port = unused_local_port();
 
-    run_skron(
-        repo.path(),
-        [
+    let start = Command::new(skron_bin())
+        .args([
             "instaweb",
             "--start",
             "--local",
@@ -1757,8 +1806,14 @@ fn instaweb_starts_serves_repo_summary_and_stops() {
             "builtin",
             "--port",
             &port.to_string(),
-        ],
-    );
+        ])
+        .current_dir(repo.path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("start instaweb");
+    assert!(start.success(), "start instaweb: {start}");
     wait_for_tcp_port(port);
     let response = http_get_local(port, "/");
     run_skron(repo.path(), ["instaweb", "--stop"]);

@@ -3119,10 +3119,10 @@ fn remote_set_head(repo: &GitRepo, name: &str, args: Vec<String>) -> Result<()> 
             message: "remote set-head requires -a, --auto, -d, --delete, or a branch".into(),
         });
     }
+    let auto = matches!(args[0].as_str(), "-a" | "--auto");
     if !remote_exists(repo, name)? {
         return Err(remote_repository_unavailable_error(name));
     }
-    let auto = matches!(args[0].as_str(), "-a" | "--auto");
     let branch = if auto {
         let url = remote_url(repo, name)?;
         let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -3917,14 +3917,14 @@ fn branch_rename(
         }
     };
     let old_ref = branch_ref_name(&old_name)?;
-    let new_ref = branch_ref_name(&new_name)?;
-    if old_ref == new_ref {
-        return Ok(());
-    }
     let id = refs.resolve(&old_ref).map_err(|_| CliError::Fatal {
         code: 128,
         message: format!("no branch named '{old_name}'"),
     })?;
+    let new_ref = branch_ref_name(&new_name)?;
+    if old_ref == new_ref {
+        return Ok(());
+    }
     if !force && ref_exists(refs, &new_ref)? {
         return Err(CliError::Fatal {
             code: 128,
@@ -3966,14 +3966,14 @@ fn branch_copy(
         }
     };
     let old_ref = branch_ref_name(&old_name)?;
-    let new_ref = branch_ref_name(&new_name)?;
-    if old_ref == new_ref {
-        return Ok(());
-    }
     let id = refs.resolve(&old_ref).map_err(|_| CliError::Fatal {
         code: 128,
         message: format!("no branch named '{old_name}'"),
     })?;
+    let new_ref = branch_ref_name(&new_name)?;
+    if old_ref == new_ref {
+        return Ok(());
+    }
     if !force && ref_exists(refs, &new_ref)? {
         return Err(CliError::Fatal {
             code: 128,
@@ -4339,7 +4339,13 @@ fn tag_filter_matches(
 }
 
 fn tag_usage() -> String {
-    "usage: git tag [-a | -s | -u <key-id>] [-f] [-m <msg> | -F <file>] [-e]
+    let trailer_option = if cfg!(windows) {
+        "    --[no-]trailer <trailer>\n                          add custom trailer(s)"
+    } else {
+        "    --trailer <trailer>   add custom trailer(s)"
+    };
+    format!(
+        "usage: git tag [-a | -s | -u <key-id>] [-f] [-m <msg> | -F <file>] [-e]
                [(--trailer <token>[(=|:)<value>])...]
                <tagname> [<commit> | <object>]
    or: git tag -d <tagname>...
@@ -4360,7 +4366,7 @@ Tag creation options
                           tag message
     -F, --[no-]file <file>
                           read message from file
-    --trailer <trailer>   add custom trailer(s)
+{trailer_option}
     -e, --[no-]edit       force edit of tag message
     -s, --[no-]sign       annotated and GPG-signed tag
     --[no-]cleanup <mode> how to strip spaces and #comments from message
@@ -4388,7 +4394,7 @@ Tag listing options
                           sorting and filtering are case insensitive
 
 "
-    .to_owned()
+    )
 }
 
 pub(crate) fn ls_tree_command(

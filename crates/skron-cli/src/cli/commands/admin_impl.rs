@@ -288,7 +288,10 @@ fn for_each_repo(config: &str, keep_going: bool, arguments: Vec<String>) -> Resu
             message: "for-each-repo requires command arguments".into(),
         });
     }
-    let repos = read_multi_config_values(config)?;
+    let repos = read_multi_config_values(config)?
+        .into_iter()
+        .map(normalize_for_each_repo_config_path)
+        .collect::<Vec<_>>();
     let executable = std::env::current_exe()?;
     let mut failed = None;
     for repo in repos {
@@ -299,7 +302,7 @@ fn for_each_repo(config: &str, keep_going: bool, arguments: Vec<String>) -> Resu
         {
             Ok(status) => status,
             Err(error) => {
-                if error.kind() == io::ErrorKind::NotFound {
+                if for_each_repo_missing_dir_error(&error) {
                     eprintln!("fatal: cannot change to '{repo}': No such file or directory");
                 } else {
                     eprintln!("fatal: cannot change to '{repo}': {error}");
@@ -323,6 +326,28 @@ fn for_each_repo(config: &str, keep_going: bool, arguments: Vec<String>) -> Resu
         return Err(CliError::Exit(code));
     }
     Ok(())
+}
+
+fn for_each_repo_missing_dir_error(error: &io::Error) -> bool {
+    if error.kind() == io::ErrorKind::NotFound {
+        return true;
+    }
+    #[cfg(windows)]
+    if error.raw_os_error() == Some(267) {
+        return true;
+    }
+    false
+}
+
+fn normalize_for_each_repo_config_path(path: String) -> String {
+    #[cfg(windows)]
+    {
+        return path.replace("\\\\", "\\");
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
 }
 
 fn update_index(options: UpdateIndexCommandOptions) -> Result<()> {
@@ -2854,7 +2879,9 @@ fn instaweb_spawn_builtin(
     repo: &GitRepo,
     options: &InstawebCommandOptions,
 ) -> Result<std::process::Child> {
-    Ok(ProcessCommand::new(std::env::current_exe()?)
+    let mut command = ProcessCommand::new(std::env::current_exe()?);
+    configure_instaweb_daemon_command(&mut command);
+    Ok(command
         .args([
             "instaweb",
             "--daemon-internal",
@@ -2877,7 +2904,9 @@ fn instaweb_spawn_external(
     options: &InstawebCommandOptions,
     httpd: &str,
 ) -> Result<std::process::Child> {
-    Ok(ProcessCommand::new(httpd)
+    let mut command = ProcessCommand::new(httpd);
+    configure_instaweb_daemon_command(&mut command);
+    Ok(command
         .current_dir(&repo.root)
         .env("GIT_DIR", &repo.git_dir)
         .env("GIT_WORK_TREE", &repo.root)
@@ -2898,6 +2927,18 @@ fn instaweb_spawn_external(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?)
+}
+
+fn configure_instaweb_daemon_command(_command: &mut ProcessCommand) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+        _command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+    }
 }
 
 fn instaweb_stop(repo: &GitRepo) -> Result<()> {
@@ -2986,6 +3027,8 @@ fn instaweb_handle_connection(repo: &GitRepo, stream: &mut std::net::TcpStream) 
         body.len()
     )?;
     stream.write_all(&body)?;
+    stream.flush()?;
+    let _ = stream.shutdown(std::net::Shutdown::Both);
     Ok(())
 }
 

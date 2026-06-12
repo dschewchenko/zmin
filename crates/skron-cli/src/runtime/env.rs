@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 
@@ -29,12 +29,7 @@ pub(crate) fn edit_temp_buffer(
     file.write_all(message)?;
     file.flush()?;
     drop(file);
-    let status = ProcessCommand::new("sh")
-        .arg("-c")
-        .arg(format!("{} \"$1\"", editor))
-        .arg("skron-editor")
-        .arg(&path)
-        .status()?;
+    let status = run_editor_command_with_path(&editor, &path)?;
     if !status.success() {
         let _ = fs::remove_file(&path);
         return Err(CliError::Fatal {
@@ -78,7 +73,8 @@ pub(crate) fn git_editor(repo: &GitRepo) -> Result<Option<String>> {
         .ok()
         .or_else(|| read_config_value(repo, "core.editor").ok().flatten())
         .or_else(|| std::env::var("VISUAL").ok())
-        .or_else(|| std::env::var("EDITOR").ok()))
+        .or_else(|| std::env::var("EDITOR").ok())
+        .or_else(default_git_editor))
 }
 
 pub(crate) fn git_sequence_editor(repo: &GitRepo) -> Result<Option<String>> {
@@ -93,13 +89,13 @@ pub(crate) fn git_pager(repo: &GitRepo) -> Result<String> {
         .ok()
         .or_else(|| read_config_value(repo, "core.pager").ok().flatten())
         .or_else(|| std::env::var("PAGER").ok())
-        .unwrap_or_else(|| "cat".to_owned()))
+        .unwrap_or_else(default_git_pager))
 }
 
 pub(crate) fn git_shell_path() -> &'static str {
     #[cfg(windows)]
     {
-        "sh"
+        "C:/Program Files/Git/usr/bin/sh.exe"
     }
     #[cfg(not(windows))]
     {
@@ -107,10 +103,83 @@ pub(crate) fn git_shell_path() -> &'static str {
     }
 }
 
+fn default_git_editor() -> Option<String> {
+    #[cfg(windows)]
+    {
+        Some("vim".to_owned())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+fn default_git_pager() -> String {
+    #[cfg(windows)]
+    {
+        "less".to_owned()
+    }
+    #[cfg(not(windows))]
+    {
+        "cat".to_owned()
+    }
+}
+
+pub(crate) fn git_shell_command_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Some(path) = find_executable_on_path("sh.exe") {
+            return path;
+        }
+        for path in [
+            r"C:\Program Files\Git\usr\bin\sh.exe",
+            r"C:\Program Files\Git\bin\sh.exe",
+        ] {
+            let path = PathBuf::from(path);
+            if path.is_file() {
+                return path;
+            }
+        }
+    }
+    PathBuf::from(git_shell_path())
+}
+
+pub(crate) fn run_editor_command_with_path(
+    command: &str,
+    path: &std::path::Path,
+) -> io::Result<std::process::ExitStatus> {
+    #[cfg(windows)]
+    {
+        let command_path = std::path::Path::new(command);
+        if command_path.extension().and_then(|ext| ext.to_str()) == Some("sh")
+            && command_path.is_file()
+        {
+            return ProcessCommand::new(git_shell_command_path())
+                .arg(command_path)
+                .arg(path)
+                .status();
+        }
+    }
+    ProcessCommand::new(git_shell_command_path())
+        .arg("-c")
+        .arg(format!("{} \"$1\"", command))
+        .arg("skron-editor")
+        .arg(path)
+        .status()
+}
+
+#[cfg(windows)]
+fn find_executable_on_path(name: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths)
+        .map(|path| path.join(name))
+        .find(|path| path.is_file())
+}
+
 pub(crate) fn git_attr_system_path() -> &'static str {
     #[cfg(windows)]
     {
-        "C:/ProgramData/Git/etc/gitattributes"
+        "C:/Program Files/Git/etc/gitattributes"
     }
     #[cfg(not(windows))]
     {
@@ -123,7 +192,7 @@ pub(crate) fn git_attr_global_path() -> Result<String> {
     let xdg = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
-    Ok(xdg.join("git/attributes").display().to_string())
+    Ok(git_var_path_output(&xdg.join("git/attributes")))
 }
 
 pub(crate) fn git_config_global_paths() -> Result<Vec<PathBuf>> {
@@ -132,6 +201,18 @@ pub(crate) fn git_config_global_paths() -> Result<Vec<PathBuf>> {
         .map(PathBuf::from)
         .unwrap_or_else(|| home.join(".config"));
     Ok(vec![xdg.join("git/config"), home.join(".gitconfig")])
+}
+
+pub(crate) fn git_var_path_output(path: &std::path::Path) -> String {
+    let value = path.display().to_string();
+    #[cfg(windows)]
+    {
+        value.replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        value
+    }
 }
 
 pub(crate) fn signature_line(signature: &Signature) -> String {

@@ -285,11 +285,35 @@ fn format_config_path(value: &str) -> Result<String> {
     let Some(rest) = value.strip_prefix("~/") else {
         return Ok(value.to_owned());
     };
-    let home = std::env::var("HOME").map_err(|_| CliError::Fatal {
+    let home = config_home_dir().ok_or_else(|| CliError::Fatal {
         code: 128,
         message: "failed to expand user dir in: '~/': $HOME is unset".into(),
     })?;
-    Ok(Path::new(&home).join(rest).display().to_string())
+    Ok(format_config_path_output(
+        Path::new(&home).join(rest).display().to_string(),
+    ))
+}
+
+fn format_config_path_output(value: String) -> String {
+    #[cfg(windows)]
+    {
+        return value.replace('\\', "/");
+    }
+    #[cfg(not(windows))]
+    {
+        value
+    }
+}
+
+fn config_home_dir() -> Option<String> {
+    if let Ok(home) = std::env::var("HOME") {
+        return Some(home);
+    }
+    #[cfg(windows)]
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        return Some(user_profile);
+    }
+    None
 }
 
 fn format_config_expiry_date(name: &str, value: &str) -> Result<String> {
@@ -497,7 +521,7 @@ pub(crate) fn var(list: bool, variable: Option<&str>) -> Result<()> {
         println!("GIT_ATTR_SYSTEM={}", git_attr_system_path());
         println!("GIT_ATTR_GLOBAL={}", git_attr_global_path()?);
         for path in git_config_global_paths()? {
-            println!("GIT_CONFIG_GLOBAL={}", path.display());
+            println!("GIT_CONFIG_GLOBAL={}", git_var_path_output(&path));
         }
         return Ok(());
     }
@@ -541,7 +565,7 @@ pub(crate) fn var(list: bool, variable: Option<&str>) -> Result<()> {
         }
         Some("GIT_CONFIG_GLOBAL") => {
             for path in git_config_global_paths()? {
-                println!("{}", path.display());
+                println!("{}", git_var_path_output(&path));
             }
             Ok(())
         }

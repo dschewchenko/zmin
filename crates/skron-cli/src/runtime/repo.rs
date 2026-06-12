@@ -97,6 +97,11 @@ pub(crate) fn file_url_to_path(location: &str) -> Result<Option<PathBuf>> {
     };
     let path = if rest.starts_with('/') {
         rest
+    } else if cfg!(windows)
+        && rest.as_bytes().get(1) == Some(&b':')
+        && matches!(rest.as_bytes().get(2), Some(b'/') | Some(b'\\'))
+    {
+        rest
     } else {
         let Some((host, path)) = rest.split_once('/') else {
             return Ok(None);
@@ -370,4 +375,19 @@ pub(crate) fn find_repo_or_bare() -> Result<GitRepo> {
         });
     }
     find_repo()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_url_to_path;
+
+    #[cfg(windows)]
+    #[test]
+    fn file_url_to_path_accepts_windows_display_paths() {
+        let path = file_url_to_path(r"file://D:\a\repo")
+            .expect("parse file url")
+            .expect("file url path");
+
+        assert_eq!(path.to_string_lossy(), r"D:\a\repo");
+    }
 }

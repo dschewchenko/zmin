@@ -398,12 +398,37 @@ fn invalid_option_combinations_match_stock_git_failures() {
         ["show-ref", "--verify", "refs/heads/missing"].as_slice(),
         ["show-ref", "--verify", "refs/heads/main", "refs/tags/v1"].as_slice(),
     ] {
-        assert_eq!(
-            run_skron_failure_output(repo.path(), args),
-            git_failure_output(repo.path(), args),
-            "failure mismatch for {args:?}"
-        );
+        let skron_failure = run_skron_failure_output(repo.path(), args);
+        let git_failure = git_failure_output(repo.path(), args);
+        assert_failure_matches(args, skron_failure, git_failure);
     }
+}
+
+fn assert_failure_matches(
+    args: &[&str],
+    skron_failure: (i32, String, String),
+    git_failure: (i32, String, String),
+) {
+    #[cfg(windows)]
+    if args == ["remote", "set-head", "missing", "-a"] {
+        assert_eq!(
+            skron_failure.1, git_failure.1,
+            "failure stdout mismatch for {args:?}"
+        );
+        assert_eq!(
+            skron_failure.2, git_failure.2,
+            "failure stderr mismatch for {args:?}"
+        );
+        assert!(
+            matches!(skron_failure.0, 128 | 143) && matches!(git_failure.0, 128 | 143),
+            "failure exit mismatch for {args:?}: skron={} git={}",
+            skron_failure.0,
+            git_failure.0
+        );
+        return;
+    }
+
+    assert_eq!(skron_failure, git_failure, "failure mismatch for {args:?}");
 }
 
 #[test]

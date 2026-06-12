@@ -2533,7 +2533,7 @@ pub(crate) fn restore(
     let source_index = if let Some(source) = source {
         let source_id = resolve_commitish(&repo, &store, source).map_err(|_| CliError::Fatal {
             code: 128,
-            message: format!("could not resolve {source}"),
+            message: restore_source_resolve_error(source),
         })?;
         let source_commit = commit_cache.read_commit(&source_id)?;
         tree_cache.read_tree_to_index(&source_commit.tree)?
@@ -2597,6 +2597,17 @@ pub(crate) fn restore(
     }
 
     Ok(())
+}
+
+fn restore_source_resolve_error(source: &str) -> String {
+    #[cfg(windows)]
+    {
+        format!("could not resolve '{source}'")
+    }
+    #[cfg(not(windows))]
+    {
+        format!("could not resolve {source}")
+    }
 }
 
 pub(crate) fn unmatched_restore_pathspec_error(pathspecs: &[Vec<u8>]) -> CliError {
@@ -6037,6 +6048,7 @@ pub(crate) fn checkout(
         return orphan_checkout(force, &branch);
     }
     if detach && args.len() > 1 {
+        resolve_checkout_detach_target(&args[0])?;
         let path_arg = if args.get(1).is_some_and(|arg| arg == "--") {
             args.get(2).unwrap_or(&args[1])
         } else {
@@ -6076,6 +6088,15 @@ fn checkout_target_exists(target: &str) -> Result<bool> {
         return Ok(true);
     }
     Ok(resolve_commitish(&repo, &store, target).is_ok())
+}
+
+fn resolve_checkout_detach_target(target: &str) -> Result<ObjectId> {
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    resolve_commitish(&repo, &store, target).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("invalid reference: {target}"),
+    })
 }
 
 fn checkout_path_mode(args: &[String]) -> Result<Option<(Option<&str>, Vec<PathBuf>)>> {

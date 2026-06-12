@@ -473,6 +473,17 @@ struct TreeNode {
     leaves: BTreeMap<Vec<u8>, (IndexMode, ObjectId)>,
 }
 
+impl Drop for TreeNode {
+    fn drop(&mut self) {
+        let mut pending = std::mem::take(&mut self.children)
+            .into_values()
+            .collect::<Vec<_>>();
+        while let Some(mut node) = pending.pop() {
+            pending.extend(std::mem::take(&mut node.children).into_values());
+        }
+    }
+}
+
 impl TreeNode {
     fn insert(&mut self, entry: &IndexEntry) -> io::Result<()> {
         let mut parts = entry.path.split(|byte| *byte == b'/').peekable();

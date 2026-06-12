@@ -305,13 +305,32 @@ fn maintenance_repo_path(repo: &GitRepo) -> Result<String> {
 }
 
 fn global_config_path() -> Result<PathBuf> {
+    Ok(user_global_config_dir()?.join(".gitconfig"))
+}
+
+#[cfg(windows)]
+fn user_global_config_dir() -> Result<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME") {
+        return Ok(PathBuf::from(home));
+    }
+    let Some(profile) = std::env::var_os("USERPROFILE") else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "%USERPROFILE% is unset".into(),
+        });
+    };
+    Ok(PathBuf::from(profile))
+}
+
+#[cfg(not(windows))]
+fn user_global_config_dir() -> Result<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
         return Err(CliError::Fatal {
             code: 128,
             message: "$HOME is unset".into(),
         });
     };
-    Ok(PathBuf::from(home).join(".gitconfig"))
+    Ok(PathBuf::from(home))
 }
 
 fn maintenance_config_path(config_file: Option<&Path>) -> Result<PathBuf> {
@@ -621,7 +640,12 @@ fn maintenance_launchctl_cleanup_plan() -> Vec<String> {
         .collect()
 }
 
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(all(test, windows))]
+fn maintenance_launch_agents_dir() -> Result<PathBuf> {
+    Ok(windows_test_unix_scheduler_home_dir().join("Library/LaunchAgents"))
+}
+
+#[cfg(any(target_os = "macos", all(test, not(windows))))]
 fn maintenance_launch_agents_dir() -> Result<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
         return Err(CliError::Fatal {
@@ -984,7 +1008,13 @@ fn maintenance_crontab_read() -> Result<String> {
 }
 
 #[allow(dead_code)]
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(all(test, windows))]
+fn maintenance_systemd_user_dir() -> Result<PathBuf> {
+    Ok(windows_test_unix_scheduler_home_dir().join(".config/systemd/user"))
+}
+
+#[allow(dead_code)]
+#[cfg(any(target_os = "linux", all(test, not(windows))))]
 fn maintenance_systemd_user_dir() -> Result<PathBuf> {
     let Some(home) = std::env::var_os("HOME") else {
         return Err(CliError::Fatal {
@@ -1132,15 +1162,19 @@ fn maintenance_crontab_region(executable: &Path, minute: u8) -> String {
     )
 }
 
-#[cfg(any(test, all(unix, not(target_os = "macos"))))]
-#[cfg(not(windows))]
+#[cfg(all(test, windows))]
+fn maintenance_shell_quote_path(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+#[cfg(all(not(windows), any(test, all(unix, not(target_os = "macos")))))]
 fn maintenance_shell_quote_path(path: &Path) -> String {
     diff_commands::shell_quote_path(path)
 }
 
 #[cfg(all(test, windows))]
-fn maintenance_shell_quote_path(path: &Path) -> String {
-    diff_commands::cmd_quote_path(path)
+fn windows_test_unix_scheduler_home_dir() -> PathBuf {
+    PathBuf::from("C:/Users/skron-test")
 }
 
 #[cfg(any(test, all(unix, not(target_os = "macos"))))]
@@ -2151,6 +2185,7 @@ mod tests {
         let repo = TempDir::new().expect("temp repo");
         let output = Command::new("git")
             .arg("init")
+            .args(["-b", "main"])
             .arg("--quiet")
             .current_dir(repo.path())
             .output()

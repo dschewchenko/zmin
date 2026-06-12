@@ -7845,6 +7845,12 @@ pub(crate) fn run_push(
     let remote = remote.unwrap_or_else(|| "origin".to_owned());
     validate_remote_name(&remote)?;
     if !remote_exists(&repo, &remote)? {
+        if !refspecs.is_empty() {
+            let source_refs = refs_adapter_from_git_dir(&repo.git_dir);
+            for spec in &refspecs {
+                parse_push_refspec(&repo, &source_refs, spec, &remote)?;
+            }
+        }
         return Err(remote_repository_unavailable_error(&remote));
     }
     let url = remote_url(&repo, &remote)?;
@@ -9715,12 +9721,27 @@ impl RemoteCommandSession {
 }
 
 pub(crate) fn is_ssh_transport_url(value: &str) -> bool {
+    if value.starts_with("file://") {
+        return false;
+    }
+
+    #[cfg(windows)]
+    if is_windows_drive_path(value) {
+        return false;
+    }
+
     value.starts_with("ssh://")
         || (!value.contains("://")
             && value.contains(':')
             && !value.starts_with('/')
             && !value.starts_with("./")
             && !value.starts_with("../"))
+}
+
+#[cfg(windows)]
+fn is_windows_drive_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    matches!(bytes, [drive, b':', ..] if drive.is_ascii_alphabetic())
 }
 
 fn shell_quote_single(value: &str) -> String {
@@ -14884,5 +14905,15 @@ done
         let mut rest = Vec::new();
         reader.read_to_end(&mut rest).expect("remaining bytes");
         assert_eq!(rest, b"-rest");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ssh_transport_detection_keeps_windows_drive_paths_local() {
+        assert!(!is_ssh_transport_url(r"C:\repos\remote.git"));
+        assert!(!is_ssh_transport_url(r"C:relative\remote.git"));
+        assert!(!is_ssh_transport_url("file://C:/repos/remote.git"));
+        assert!(is_ssh_transport_url("example.test:org/repo.git"));
+        assert!(is_ssh_transport_url("ssh://example.test/org/repo.git"));
     }
 }
