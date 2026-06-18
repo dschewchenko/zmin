@@ -2549,3 +2549,41 @@ The larger scoped macOS fixture used
 also favored Zmin despite one paired outlier. Keep broader clone performance
 open for still-larger fixtures, real network/auth/proxy variants, and repeated
 cross-platform gates.
+
+Windows SSH preservation retry caveat:
+Follow-up Windows/Git-for-Windows `clone-instant-ssh` retries after the macOS
+closure are not accepted as clean preservation evidence. Correctness checks
+stayed ok in the produced benchmark artifacts, but the VM was concurrently
+running a focused `git_transport_http_compat` test and an isolated
+`zmin-git-remote-http` helper build under
+`C:\Users\skron\zmin-20260618T221408Z-5443\target\test-remote-http-helper`.
+That guest build/test contention makes the stopwatch ratios unsuitable for a
+product regression or preservation claim.
+
+Artifacts to treat as noisy/contended:
+
+- traced failed build attempt:
+  `C:\Users\skron\zmin-bench-20260618T215515Z-94520` (removed before out dir)
+- traced 3-repeat run:
+  `C:\Users\skron\zmin-bench-20260618T220543Z-3057-out`
+- traced warm 3-repeat run:
+  `C:\Users\skron\zmin-bench-20260618T221053Z-3916-out`
+- untraced 5-repeat run:
+  `C:\Users\skron\zmin-bench-20260618T221238Z-4289-out`
+- clean untraced retry after guest processes cleared:
+  `C:\Users\skron\zmin-bench-20260618T222044Z-11414-out` (failed before
+  timing; `work\ssh-remote.git` was absent and no CSVs were produced)
+
+The traced 3-repeat runs were slower/noisy despite ok checks, and the untraced
+5-repeat run had a faster aggregate median but slower paired/mean ratios while
+the guest was building the remote HTTP helper. Keep the earlier clean Windows
+3-repeat gate `C:\Users\skron\zmin-bench-20260618T181638Z-28896-out` as the
+current accepted Windows SSH preservation point until a clean VM rerun replaces
+it.
+
+Test-helper stabilization note:
+`ensure_remote_http_helper()` now builds `zmin-git-remote-http` into an isolated
+`target/test-remote-http-helper` directory and copies the helper beside the
+current test executable when needed, so transport tests do not contend with the
+parent test package target. Focused macOS validation passed:
+`cargo test -p zmin-cli --test git_transport_http_compat clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects -- --exact --test-threads=1 --nocapture`.

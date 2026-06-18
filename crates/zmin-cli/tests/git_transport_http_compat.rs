@@ -8,9 +8,9 @@ use tempfile::TempDir;
 
 use common::{
     command_failure_output, command_failure_output_with_env, command_output,
-    command_output_with_env, configure_identity, git, git_args, git_init, git_with_env,
-    git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_failure_output,
-    run_zmin_with_env, run_zmin_with_stdin_args, zmin_bin,
+    command_output_with_env, configure_identity, ensure_remote_http_helper, git, git_args,
+    git_init, git_with_env, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin_args, zmin_bin,
 };
 
 fn unused_local_port() -> u16 {
@@ -4362,6 +4362,8 @@ fn clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs() {
 
 #[test]
 fn clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects() {
+    ensure_remote_http_helper();
+
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
     let work = dir.path().join("work");

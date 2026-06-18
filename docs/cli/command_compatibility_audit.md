@@ -33,18 +33,55 @@ claim of full upstream Git parity outside the supported and tested surface.
 
 `zmin clone --worktree-first` and `zmin clone --instant` are
 additive Zmin clone modes. They do not change default `zmin clone`
-behavior. The first slice supports local repositories only: it creates a
-canonical Git repository, materializes the worktree, keeps full local history
-available, and writes `zmin.worktreeFirst=true` to `.git/config`. Local
-worktree-first repositories keep using canonical `fetch` and `pull --ff-only`
-behavior and preserve the marker across updates. Smart HTTP, SSH, and
-git-daemon worktree-first hydration are not implemented yet and fail fast
-instead of silently falling back to a normal clone.
+behavior. The current surface supports local repositories, smart HTTP remotes,
+git-daemon remotes, and SSH remotes. It creates a canonical Git repository,
+materializes the selected `HEAD` working tree first, writes
+`zmin.worktreeFirst=true` to `.git/config`, and keeps normal `fetch` /
+`pull --ff-only` behavior available for later hydration. Remote worktree-first
+clones initially write refs only for objects they requested; a later
+`fetch origin` hydrates additional branch and tag refs.
+
+`--background-fetch` and `--demand-hydrate` are explicit Zmin-only options for
+remote worktree-first clones. `--background-fetch` starts a detached
+`fetch origin` after checkout and records the background-fetch config keys.
+`--demand-hydrate` marks `remote.origin.promisor=true`, records the demand
+hydrate config keys, and lets missing `HEAD` objects hydrate on object reads.
+Both options reject non-worktree-first modes and local repositories instead of
+falling back to a different clone strategy.
 
 Validation:
 
 - `cargo fmt --all -- --check`
 - `cargo test -p zmin-cli --test git_clone_compat -- --nocapture`
+- `cargo test -p zmin-cli --test git_transport_http_compat clone_instant_ --
+  --nocapture` (`9/9`)
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_smart_http_background_fetch_hydrates_refs`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_git_daemon_background_fetch_hydrates_refs`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_ssh_background_fetch_hydrates_refs`
+- `ZMIN_WINDOWS_VALIDATE_NO_FMT=1 tools/parallels-windows-runner.sh validate
+  targeted git_transport_http_compat
+  clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`
 - `tools/parallels-windows-runner.sh validate targeted git_clone_compat
   clone_instant_local_repo_fetch_and_pull_remain_canonical_git_operations`
 - `tools/parallels-windows-runner.sh validate targeted git_clone_compat

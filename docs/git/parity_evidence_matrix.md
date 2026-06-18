@@ -635,6 +635,22 @@ same canonical `.git` repository state.
   git_clone_compat clone_worktree_first_rejects_non_worktree_or_remote_modes`.
   The same object-plumbing validation fixed root-commit `show HEAD` so
   single-object `show` includes the root patch like stock Git.
+- 2026-06-18 additive surface refresh: macOS
+  `cargo test -p zmin-cli --test git_cms_porcelain_compat -- --nocapture`
+  passed `4/4`, macOS `cargo test -p zmin-cli --test git_admin_tools_compat
+  hook -- --nocapture` passed `2/2`, macOS
+  `cargo test -p zmin-cli --test git_clone_compat
+  clone_worktree_first_rejects_non_worktree_or_remote_modes -- --nocapture`
+  passed `1/1`, and macOS `cargo test -p zmin-cli --test
+  git_transport_http_compat clone_instant_ -- --nocapture` passed `9/9`.
+  Windows/Git-for-Windows refresh passed CMS porcelain `4/4`, managed hooks
+  `1/1`, and exact smart HTTP / git-daemon / SSH `clone_instant_*` materialize,
+  background-fetch, and demand-hydrate tests `9/9` through
+  `tools/parallels-windows-runner.sh validate targeted`. The refresh also fixed
+  the test helper contract for smart HTTP demand hydration: missing
+  `zmin-git-remote-http` is built in a separate test-only target directory and
+  copied beside the test `zmin.exe`, avoiding a nested Cargo target-lock hang on
+  Windows.
 - Performance-gate smoke for worktree-first clone now includes local
   `clone-instant`, loopback git-daemon `clone-instant-git-daemon`, and fake-SSH
   `clone-instant-ssh` in `tools/git-performance-bench.sh` and
@@ -689,6 +705,13 @@ same canonical `.git` repository state.
   one-repeat gate (aggregate and paired ratio `0.955303`; raw rows Git
   `1.949853s`, Zmin `1.862700s`). Fake SSH remote lifetime was Git
   `0.382498s` vs Zmin `0.312930s`.
+- Later Windows/Git-for-Windows `clone-instant-ssh` retries at
+  `C:\Users\skron\zmin-bench-20260618T220543Z-3057-out`,
+  `C:\Users\skron\zmin-bench-20260618T221053Z-3916-out`, and
+  `C:\Users\skron\zmin-bench-20260618T221238Z-4289-out` are not accepted as
+  clean preservation evidence. Checks stayed ok, but the VM was concurrently
+  running a focused `git_transport_http_compat` test and an isolated
+  `zmin-git-remote-http` helper build, so stopwatch ratios are contended/noisy.
 - Fake-SSH benchmark fixture follow-up fixed an unfair local upload-pack binary
   mismatch by prepending the benchmark Git executable's `git --exec-path` in
   the fake SSH wrapper. Packet traces before the fix showed macOS Git using

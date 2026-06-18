@@ -20,29 +20,50 @@ pub fn ensure_remote_http_helper() -> &'static Path {
                 return PathBuf::from(path);
             }
 
-            let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .and_then(Path::parent)
-                .expect("workspace root");
             let helper_name = if cfg!(windows) {
                 "zmin-git-remote-http.exe"
             } else {
                 "zmin-git-remote-http"
             };
-            let helper = workspace_root
-                .join("target")
-                .join("debug")
-                .join(helper_name);
+            let current_exe = std::env::current_exe().expect("current test executable");
+            let profile_dir = current_exe
+                .parent()
+                .and_then(|parent| {
+                    if parent.file_name().and_then(|name| name.to_str()) == Some("deps") {
+                        parent.parent()
+                    } else {
+                        Some(parent)
+                    }
+                })
+                .expect("test profile directory");
+            let helper = profile_dir.join(helper_name);
             if helper.is_file() {
                 return helper;
             }
 
+            let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(Path::parent)
+                .expect("workspace root");
+            let helper_target = workspace_root
+                .join("target")
+                .join("test-remote-http-helper");
             let status = Command::new("cargo")
                 .args(["build", "-p", "zmin-git-remote-http", "--quiet"])
+                .arg("--target-dir")
+                .arg(&helper_target)
                 .current_dir(workspace_root)
                 .status()
                 .expect("build zmin-git-remote-http");
             assert!(status.success(), "failed to build zmin-git-remote-http");
+            let built_helper = helper_target.join("debug").join(helper_name);
+            fs::copy(&built_helper, &helper).unwrap_or_else(|error| {
+                panic!(
+                    "copy zmin-git-remote-http helper from {} to {}: {error}",
+                    built_helper.display(),
+                    helper.display()
+                )
+            });
             helper
         })
         .as_path()
