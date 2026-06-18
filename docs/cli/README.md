@@ -1,6 +1,6 @@
 # CLI Notes
 
-`crates/skron-cli` is the user-facing Git-compatible command surface in this repository.
+`crates/zmin-cli` is the user-facing Git-compatible command surface in this repository.
 
 The important references are:
 

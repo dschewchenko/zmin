@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-baseline="${SKRON_GIT_BASELINE:-v2.32.0}"
+baseline="${ZMIN_GIT_BASELINE:-v2.32.0}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-skron_bin="${SKRON_BIN:-}"
+zmin_bin="${ZMIN_BIN:-}"
 
-if [[ -z "$skron_bin" ]]; then
-  rustup run stable cargo build --manifest-path "$repo_root/Cargo.toml" --release -p skron-cli --bin skron-git >/dev/null
-  skron_bin="$repo_root/target/release/skron-git"
-elif [[ "$skron_bin" != /* ]]; then
-  skron_bin="$(cd "$repo_root" && pwd)/$skron_bin"
+if [[ -z "$zmin_bin" ]]; then
+  rustup run stable cargo build --manifest-path "$repo_root/Cargo.toml" --release -p zmin-cli --bin zmin >/dev/null
+  zmin_bin="$repo_root/target/release/zmin"
+elif [[ "$zmin_bin" != /* ]]; then
+  zmin_bin="$(cd "$repo_root" && pwd)/$zmin_bin"
 fi
 
 if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
-  if [[ ! -x "$skron_bin" && -x "${skron_bin}.exe" ]]; then
-    skron_bin="${skron_bin}.exe"
+  if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
+    zmin_bin="${zmin_bin}.exe"
   fi
 else
-  if [[ ! -x "$skron_bin" && -x "${skron_bin}.exe" ]]; then
-    skron_bin="${skron_bin}.exe"
+  if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
+    zmin_bin="${zmin_bin}.exe"
   fi
 fi
 
@@ -26,8 +26,8 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
 command_list="$tmp_dir/command-list.txt"
-if [[ -n "${SKRON_GIT_COMMAND_LIST:-}" ]]; then
-  cp "$SKRON_GIT_COMMAND_LIST" "$command_list"
+if [[ -n "${ZMIN_GIT_COMMAND_LIST:-}" ]]; then
+  cp "$ZMIN_GIT_COMMAND_LIST" "$command_list"
 else
   curl -fsSL "https://raw.githubusercontent.com/git/git/${baseline}/command-list.txt" -o "$command_list"
 fi
@@ -46,7 +46,7 @@ awk '
   }
 ' "$command_list" | sort -u >"$baseline_commands"
 
-"$skron_bin" --help \
+"$zmin_bin" --help \
   | awk '/^  [a-z0-9][a-z0-9-]+[[:space:]]/ { print $1 }' \
   | sort -u >"$implemented_commands"
 
@@ -84,6 +84,6 @@ awk '{ count[$2]++ } END { for (category in count) print category, count[categor
 printf '\nMissing commands:\n'
 column -t -s $'\t' "$missing"
 
-if [[ "${SKRON_GIT_GAP_STRICT:-0}" == "1" && "$missing_command_baseline_count" != "0" ]]; then
+if [[ "${ZMIN_GIT_GAP_STRICT:-0}" == "1" && "$missing_command_baseline_count" != "0" ]]; then
   exit 1
 fi

@@ -1648,78 +1648,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
-name = "skron-cli"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "clap",
- "flate2",
- "memmap2",
- "native-tls",
- "regex",
- "similar",
- "skron-git-core",
- "skron-primitives",
- "tempfile",
-]
-
-[[package]]
-name = "skron-core"
-version = "0.0.1"
-dependencies = [
- "skron-git-core",
- "skron-primitives",
- "tempfile",
-]
-
-[[package]]
-name = "skron-git-core"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "flate2",
- "hex",
- "memmap2",
- "sha1",
- "sha2",
- "tempfile",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "skron-git-remote-http"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "clap",
- "h3",
- "h3-quinn",
- "http",
- "quinn",
- "reqwest",
- "rustls",
- "rustls-platform-verifier",
- "rustls-webpki",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "skron-primitives"
-version = "0.1.0"
-dependencies = [
- "base64",
- "dirs",
- "hex",
- "nanoid",
- "reqwest",
- "serde",
- "serde_json",
- "sha3",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2692,3 +2620,88 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zmin-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "flate2",
+ "memmap2",
+ "native-tls",
+ "regex",
+ "similar",
+ "tempfile",
+ "zmin-cli-runtime",
+ "zmin-cli-schema",
+ "zmin-git-core",
+ "zmin-primitives",
+]
+
+[[package]]
+name = "zmin-cli-runtime"
+version = "0.1.0"
+
+[[package]]
+name = "zmin-cli-schema"
+version = "0.1.0"
+dependencies = [
+ "clap",
+]
+
+[[package]]
+name = "zmin-core"
+version = "0.0.1"
+dependencies = [
+ "tempfile",
+ "zmin-git-core",
+ "zmin-primitives",
+]
+
+[[package]]
+name = "zmin-git-core"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "hex",
+ "memmap2",
+ "sha1",
+ "sha2",
+ "tempfile",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "zmin-git-remote-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "h3",
+ "h3-quinn",
+ "http",
+ "quinn",
+ "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
+ "rustls-webpki",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "zmin-primitives"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "dirs",
+ "hex",
+ "nanoid",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha3",
+ "thiserror 1.0.69",
+]

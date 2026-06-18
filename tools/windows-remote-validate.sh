@@ -25,7 +25,7 @@ Modes are passed to tools/windows-native-validate.ps1:
 
 Examples:
   WINDOWS_SSH_TARGET=dev@192.168.64.10 tools/windows-remote-validate.sh targeted
-  WINDOWS_SSH_TARGET=skron@127.0.0.1 WINDOWS_SSH_PORT=2222 tools/windows-remote-validate.sh targeted
+  WINDOWS_SSH_TARGET=zmin@127.0.0.1 WINDOWS_SSH_PORT=2222 tools/windows-remote-validate.sh targeted
   tools/windows-remote-validate.sh dev@192.168.64.10 targeted -TestFile git_cli_failure_compat -Case invalid_option_combinations_match_stock_git_failures
 USAGE
   exit 2
@@ -39,7 +39,7 @@ else
 fi
 
 native_args=("-Mode" "$mode" "$@")
-job_id="skron-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+job_id="zmin-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 remote_archive_name=".${job_id}.tar.gz"
 remote_script_name=".${job_id}.ps1"
 remote_powershell="${WINDOWS_REMOTE_POWERSHELL:-powershell}"
@@ -92,7 +92,7 @@ ps_quote() {
   echo "\$ArchiveName = $(ps_quote "$remote_archive_name")"
   echo "\$ScriptName = $(ps_quote "$remote_script_name")"
   echo '$HomeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { (Get-Location).Path }'
-  echo '$RemoteRoot = if ($env:SKRON_WINDOWS_REMOTE_ROOT) { $env:SKRON_WINDOWS_REMOTE_ROOT } else { Join-Path $env:TEMP "skron-remote-validate" }'
+  echo '$RemoteRoot = if ($env:ZMIN_WINDOWS_REMOTE_ROOT) { $env:ZMIN_WINDOWS_REMOTE_ROOT } else { Join-Path $env:TEMP "zmin-remote-validate" }'
   echo '$ArchivePath = Join-Path $HomeDir $ArchiveName'
   echo '$ScriptPath = Join-Path $HomeDir $ScriptName'
   echo '$JobRoot = Join-Path $RemoteRoot $JobId'
@@ -133,7 +133,7 @@ try {
   }
   Write-Error $_
 } finally {
-  if ($env:SKRON_WINDOWS_REMOTE_KEEP -ne "1") {
+  if ($env:ZMIN_WINDOWS_REMOTE_KEEP -ne "1") {
     if (Test-Path -LiteralPath $JobRoot) {
       Remove-Item -LiteralPath $JobRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

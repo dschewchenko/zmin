@@ -4,33 +4,33 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 smoke_script="$repo_root/tools/git-real-repo-smoke.sh"
 
-skron_bin="${SKRON_BIN:-}"
-if [[ -z "$skron_bin" ]]; then
-  rustup run stable cargo build --manifest-path "$repo_root/Cargo.toml" --release -p skron-cli --bin skron-git >/dev/null
-  skron_bin="$repo_root/target/release/skron-git"
-elif [[ "$skron_bin" != /* ]]; then
+zmin_bin="${ZMIN_BIN:-}"
+if [[ -z "$zmin_bin" ]]; then
+  rustup run stable cargo build --manifest-path "$repo_root/Cargo.toml" --release -p zmin-cli --bin zmin >/dev/null
+  zmin_bin="$repo_root/target/release/zmin"
+elif [[ "$zmin_bin" != /* ]]; then
   if command -v realpath >/dev/null 2>&1; then
-    skron_bin="$(realpath "$skron_bin")"
+    zmin_bin="$(realpath "$zmin_bin")"
   else
-    skron_bin="$(cd "$repo_root" && cd "$(dirname "$skron_bin")" && pwd)/$(basename "$skron_bin")"
+    zmin_bin="$(cd "$repo_root" && cd "$(dirname "$zmin_bin")" && pwd)/$(basename "$zmin_bin")"
   fi
 fi
 
 if [[ "${RUNNER_OS:-}" == "Windows" || "${OS:-}" == "Windows_NT" ]]; then
-  if [[ ! -x "$skron_bin" && -x "${skron_bin}.exe" ]]; then
-    skron_bin="${skron_bin}.exe"
+  if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
+    zmin_bin="${zmin_bin}.exe"
   fi
 else
-  if [[ ! -x "$skron_bin" && -x "${skron_bin}.exe" ]]; then
-    skron_bin="${skron_bin}.exe"
+  if [[ ! -x "$zmin_bin" && -x "${zmin_bin}.exe" ]]; then
+    zmin_bin="${zmin_bin}.exe"
   fi
 fi
 
-provider_only=",${SKRON_PROVIDER_ONLY:-},"
-allow_skip="${SKRON_PROVIDER_ALLOW_SKIP:-0}"
-remote_only="${SKRON_PROVIDER_REMOTE_ONLY:-0}"
-retry_count="${SKRON_PROVIDER_RETRIES:-2}"
-retry_delay="${SKRON_PROVIDER_RETRY_DELAY_SECONDS:-3}"
+provider_only=",${ZMIN_PROVIDER_ONLY:-},"
+allow_skip="${ZMIN_PROVIDER_ALLOW_SKIP:-0}"
+remote_only="${ZMIN_PROVIDER_REMOTE_ONLY:-0}"
+retry_count="${ZMIN_PROVIDER_RETRIES:-2}"
+retry_delay="${ZMIN_PROVIDER_RETRY_DELAY_SECONDS:-3}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -68,8 +68,8 @@ providers=(
   "forgejo|https://codeberg.org/Codeberg/Documentation.git"
 )
 
-if [[ -n "${SKRON_PROVIDER_AZURE_URL:-}" ]]; then
-  providers+=("azure-devops|$SKRON_PROVIDER_AZURE_URL")
+if [[ -n "${ZMIN_PROVIDER_AZURE_URL:-}" ]]; then
+  providers+=("azure-devops|$ZMIN_PROVIDER_AZURE_URL")
 fi
 
 failures=0
@@ -98,7 +98,7 @@ for entry in "${providers[@]}"; do
 
   if [[ "$remote_only" == "1" ]]; then
     git_refs="$tmp_dir/$provider.git.refs"
-    skron_refs="$tmp_dir/$provider.skron.refs"
+    zmin_refs="$tmp_dir/$provider.zmin.refs"
     if ! run_with_retries "$provider git ls-remote --refs" bash -lc "GIT_TERMINAL_PROMPT=0 git ls-remote --refs \"$url\" >\"$git_refs\""; then
       if [[ "$allow_skip" == "1" ]]; then
         echo "skip: $provider is not reachable without interactive credentials"
@@ -109,16 +109,16 @@ for entry in "${providers[@]}"; do
       continue
     fi
 
-    if ! run_with_retries "$provider skron ls-remote --refs" bash -lc "GIT_TERMINAL_PROMPT=0 \"$skron_bin\" ls-remote --refs \"$url\" >\"$skron_refs\""; then
+    if ! run_with_retries "$provider zmin ls-remote --refs" bash -lc "GIT_TERMINAL_PROMPT=0 \"$zmin_bin\" ls-remote --refs \"$url\" >\"$zmin_refs\""; then
       if [[ "$allow_skip" == "1" ]]; then
-        echo "skip: $provider skron-cli unreachable in this environment"
+        echo "skip: $provider zmin-cli unreachable in this environment"
         continue
       fi
-      echo "failed: $provider skron ls-remote --refs mismatch/unreachable" >&2
+      echo "failed: $provider zmin ls-remote --refs mismatch/unreachable" >&2
       failures=$((failures + 1))
       continue
     fi
-    if ! diff -u "$git_refs" "$skron_refs"; then
+    if ! diff -u "$git_refs" "$zmin_refs"; then
       echo "failed: $provider remote refs mismatch" >&2
       failures=$((failures + 1))
       continue
@@ -127,7 +127,7 @@ for entry in "${providers[@]}"; do
     continue
   fi
 
-  if ! run_with_retries "$provider real-repo-smoke" bash -c "GIT_TERMINAL_PROMPT=0 SKRON_BIN=\"$skron_bin\" \"$smoke_script\" \"$url\""; then
+  if ! run_with_retries "$provider real-repo-smoke" bash -c "GIT_TERMINAL_PROMPT=0 ZMIN_BIN=\"$zmin_bin\" \"$smoke_script\" \"$url\""; then
     echo "failed: $provider smoke mismatch" >&2
     failures=$((failures + 1))
     continue

@@ -29,17 +29,17 @@ esac
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-skron_bin="${SKRON_BIN:-$repo_root/target/debug/skron}"
-if [[ ! -x "$skron_bin" ]]; then
-  cargo build -p skron-cli --bin skron --quiet
+zmin_bin="${ZMIN_BIN:-$repo_root/target/debug/zmin}"
+if [[ ! -x "$zmin_bin" ]]; then
+  cargo build -p zmin-cli --bin zmin --quiet
 fi
 
 report="$(mktemp)"
 inventory="$(mktemp)"
 trap 'rm -f "$report" "$inventory"' EXIT
 
-"$skron_bin" compat --profile v2-47 --format text >"$report"
-SKRON_BIN="$skron_bin" tools/run-current-git-command-inventory.sh >"$inventory"
+"$zmin_bin" compat --profile v2-47 --format text >"$report"
+ZMIN_BIN="$zmin_bin" tools/run-current-git-command-inventory.sh >"$inventory"
 
 ready_line="$(grep -E '^Ready commands: [0-9]+ \(explicitly not ready: [0-9]+\)$' "$report")"
 command_line="$(grep -E '^Commands: expected [0-9]+, implemented [0-9]+, matching baseline [0-9]+, missing [0-9]+, extra [0-9]+$' "$report")"

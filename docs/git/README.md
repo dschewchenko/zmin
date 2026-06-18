@@ -4,10 +4,10 @@ This repository implements a Git-compatible core in Rust and exposes it as reusa
 
 ## Layers
 
-- `skron-git-core`: canonical Git data structures and repository operations.
-- `skron-primitives`: runtime contracts and adapter seams.
-- `skron-cli`: command surface built on top of the same primitives.
-- `skron-git-remote-http`: dedicated HTTP helper for remote flows.
+- `zmin-git-core`: canonical Git data structures and repository operations.
+- `zmin-primitives`: runtime contracts and adapter seams.
+- `zmin-cli`: command surface built on top of the same primitives.
+- `zmin-git-remote-http`: dedicated HTTP helper for remote flows.
 
 ## Repository compatibility
 
@@ -20,7 +20,7 @@ The repository path stays in canonical Git form:
 - reflogs
 - worktree files
 
-That is the basis for bidirectional handoff between stock Git and Skron.
+That is the basis for bidirectional handoff between stock Git and Zmin.
 
 ## Extensibility
 

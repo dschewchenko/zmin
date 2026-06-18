@@ -2,7 +2,7 @@
 
 The public API is intentionally split into a few narrow seams.
 
-## `skron-git-core`
+## `zmin-git-core`
 
 Repository-format primitives:
 
@@ -14,7 +14,7 @@ Repository-format primitives:
 - diff and reachability
 - loose object and pack handling
 
-## `skron-primitives`
+## `zmin-primitives`
 
 Reusable outer seams:
 
@@ -32,7 +32,7 @@ These are the interfaces to use when embedding the core into another client or s
 
 There are two separate knobs:
 
-- repository object hashing through `skron_git_core::GitHashAlgorithm`
-- higher-level opaque ids through `skron_primitives::id`
+- repository object hashing through `zmin_git_core::GitHashAlgorithm`
+- higher-level opaque ids through `zmin_primitives::id`
 
 That separation is deliberate. Git compatibility stays anchored in canonical repository state, while surrounding metadata can evolve independently.

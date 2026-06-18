@@ -1,0 +1,17 @@
+# mode<TAB>test<TAB>reason
+quick	t0001-init.sh	repository creation, gitdir layout, init options
+quick	t0002-gitfile.sh	gitfile discovery and redirected gitdir behavior
+quick	t0008-ignores.sh	ignore matching and status-adjacent path behavior
+standard	t1006-cat-file.sh	object inspection and batch plumbing
+standard	t1500-rev-parse.sh	revision/path parsing plumbing
+standard	t2000-conflict-when-checking-files-out.sh	checkout/index path collision behavior
+standard	t3200-branch.sh	branch porcelain compatibility
+standard	t3700-add.sh	index mutation and add porcelain compatibility
+standard	t3903-stash.sh	stash porcelain compatibility
+exhaustive	t0000-basic.sh	upstream test harness and basic command assumptions
+exhaustive	t0021-conversion.sh	attributes and worktree conversion behavior
+exhaustive	t0027-auto-crlf.sh	auto crlf and eol conversion behavior
+exhaustive	t1410-reflog.sh	reflog behavior
+exhaustive	t2020-checkout-detach.sh	checkout detach behavior
+exhaustive	t4013-diff-various.sh	diff output compatibility corpus
+exhaustive	t5510-fetch.sh	fetch transport behavior

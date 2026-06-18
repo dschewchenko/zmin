@@ -1,0 +1,1 @@
+standard	t3700-add.sh	index mutation and add porcelain compatibility

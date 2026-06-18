@@ -1,5 +1,5 @@
 param(
-  [ValidateSet("targeted", "quick", "integration", "full")]
+  [ValidateSet("targeted", "file", "quick", "integration", "integration-from", "full")]
   [string]$Mode = "targeted",
 
   [string]$TestFile = "git_cli_failure_compat",
@@ -8,7 +8,9 @@ param(
 
   [int]$TimeoutSeconds = 300,
 
-  [switch]$NoFmt
+  [switch]$NoFmt,
+
+  [string]$BuildProfile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,9 +24,30 @@ $env:GIT_CONFIG_NOSYSTEM = "1"
 if (-not $env:CARGO_TARGET_DIR) {
   $env:CARGO_TARGET_DIR = Join-Path $RepoRoot "target"
 }
-$ReleaseDir = Join-Path $env:CARGO_TARGET_DIR "release"
-$SkronExe = Join-Path $ReleaseDir "skron.exe"
-$SkronGitExe = Join-Path $ReleaseDir "skron-git.exe"
+if (-not $BuildProfile) {
+  $BuildProfile = if ($env:ZMIN_WINDOWS_VALIDATE_BUILD_PROFILE) { $env:ZMIN_WINDOWS_VALIDATE_BUILD_PROFILE } else { "release" }
+}
+$BuildDir = Join-Path $env:CARGO_TARGET_DIR $BuildProfile
+$ZminExe = Join-Path $BuildDir "zmin.exe"
+$ZminGitExe = Join-Path $BuildDir "zmin.exe"
+
+function Get-CargoBuildArgs {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Package,
+
+    [string[]]$ExtraArgs = @()
+  )
+
+  $args = @("build", "-p", $Package)
+  if ($BuildProfile -eq "release") {
+    $args += "--release"
+  } else {
+    $args += @("--profile", $BuildProfile)
+  }
+  $args += $ExtraArgs
+  return $args
+}
 
 function Invoke-Checked {
   param(
@@ -65,7 +88,19 @@ function Invoke-CheckedWithTimeout {
   Write-Host "::group::$Label"
   Write-Host "+ $FilePath $($Arguments -join ' ')"
   try {
-    $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments -NoNewWindow -PassThru
+    $resolvedFilePath = (Get-Command $FilePath -ErrorAction Stop).Source
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $resolvedFilePath
+    $processInfo.WorkingDirectory = (Get-Location).Path
+    $processInfo.Arguments = ($Arguments | ForEach-Object {
+      if ($_ -match '[\s"]') {
+        '"' + ($_ -replace '"', '\"') + '"'
+      } else {
+        $_
+      }
+    }) -join " "
+    $processInfo.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($processInfo)
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
       Stop-Process -Id $process.Id -Force
       throw "Timed out after ${TimeoutSeconds}s: $Label"
@@ -88,7 +123,7 @@ function Invoke-TargetedTest {
   Invoke-Checked -Label "Targeted CLI integration test" -FilePath "cargo" -Arguments @(
     "test",
     "-p",
-    "skron-cli",
+    "zmin-cli",
     "--test",
     $TestFile,
     $Case,
@@ -99,14 +134,36 @@ function Invoke-TargetedTest {
   )
 }
 
+function Invoke-TestFile {
+  Invoke-Checked -Label "CLI integration test file" -FilePath "cargo" -Arguments @(
+    "test",
+    "-p",
+    "zmin-cli",
+    "--test",
+    $TestFile,
+    "--",
+    "--test-threads=1",
+    "--nocapture"
+  )
+}
+
 function Invoke-CliIntegrationSurface {
-  $testFiles = Get-ChildItem "crates/skron-cli/tests" -Filter "*.rs" |
+  param(
+    [string]$StartAt = ""
+  )
+
+  $testFiles = Get-ChildItem "crates/zmin-cli/tests" -Filter "*.rs" |
+    Where-Object { -not $_.Name.StartsWith("._") } |
     ForEach-Object { $_.BaseName } |
     Sort-Object
 
   foreach ($testFile in $testFiles) {
-    Write-Host "::group::list tests -p skron-cli --test $testFile"
-    $listOutput = & cargo test -p skron-cli --test $testFile -- --list
+    if ($StartAt -and ([string]::CompareOrdinal($testFile, $StartAt) -lt 0)) {
+      continue
+    }
+
+    Write-Host "::group::list tests -p zmin-cli --test $testFile"
+    $listOutput = & cargo test -p zmin-cli --test $testFile -- --list
     $listExit = $LASTEXITCODE
     Write-Host "::endgroup::"
     if ($listExit -ne 0) {
@@ -121,9 +178,9 @@ function Invoke-CliIntegrationSurface {
 
     foreach ($caseName in $cases) {
       Invoke-CheckedWithTimeout `
-        -Label "cargo test -p skron-cli --test $testFile $caseName" `
+        -Label "cargo test -p zmin-cli --test $testFile $caseName" `
         -FilePath "cargo" `
-        -Arguments @("test", "-p", "skron-cli", "--test", $testFile, $caseName, "--", "--exact", "--test-threads=1") `
+        -Arguments @("test", "-p", "zmin-cli", "--test", $testFile, $caseName, "--", "--exact", "--test-threads=1") `
         -TimeoutSeconds $TimeoutSeconds
     }
   }
@@ -138,32 +195,41 @@ switch ($Mode) {
     Invoke-TargetedTest
   }
 
+  "file" {
+    Invoke-FormatCheck
+    Invoke-TestFile
+  }
+
   "quick" {
     Invoke-FormatCheck
-    Invoke-Checked -Label "Check CLI binary" -FilePath "cargo" -Arguments @("check", "-p", "skron-cli", "--bin", "skron")
+    Invoke-Checked -Label "Check CLI binary" -FilePath "cargo" -Arguments @("check", "-p", "zmin-cli", "--bin", "zmin")
     Invoke-TargetedTest
-    Invoke-Checked -Label "Build Windows CLI binaries" -FilePath "cargo" -Arguments @("build", "-p", "skron-cli", "--release", "--bins")
-    Invoke-Checked -Label "Run skron.exe" -FilePath $SkronExe -Arguments @("--version")
-    Invoke-Checked -Label "Run skron-git.exe" -FilePath $SkronGitExe -Arguments @("--version")
+    Invoke-Checked -Label "Build Windows CLI binaries ($BuildProfile)" -FilePath "cargo" -Arguments (Get-CargoBuildArgs -Package "zmin-cli" -ExtraArgs @("--bins"))
+    Invoke-Checked -Label "Run zmin.exe" -FilePath $ZminExe -Arguments @("--version")
+    Invoke-Checked -Label "Run zmin.exe" -FilePath $ZminGitExe -Arguments @("--version")
   }
 
   "integration" {
     Invoke-CliIntegrationSurface
   }
 
+  "integration-from" {
+    Invoke-CliIntegrationSurface -StartAt $TestFile
+  }
+
   "full" {
     Invoke-FormatCheck
     Invoke-Checked -Label "Check workspace" -FilePath "cargo" -Arguments @("check", "--workspace", "--all-targets")
     Invoke-Checked -Label "Clippy workspace" -FilePath "cargo" -Arguments @("clippy", "--workspace", "--all-targets", "--all-features")
-    Invoke-Checked -Label "Test skron-core" -FilePath "cargo" -Arguments @("test", "-p", "skron-core", "--all-targets")
-    Invoke-Checked -Label "Test skron-primitives" -FilePath "cargo" -Arguments @("test", "-p", "skron-primitives", "--all-targets")
-    Invoke-Checked -Label "Test skron-git-core" -FilePath "cargo" -Arguments @("test", "-p", "skron-git-core", "--all-targets")
-    Invoke-Checked -Label "Test skron-git-remote-http" -FilePath "cargo" -Arguments @("test", "-p", "skron-git-remote-http", "--all-targets")
-    Invoke-Checked -Label "Test CLI unit surface" -FilePath "cargo" -Arguments @("test", "-p", "skron-cli", "--bin", "skron")
+    Invoke-Checked -Label "Test zmin-core" -FilePath "cargo" -Arguments @("test", "-p", "zmin-core", "--all-targets")
+    Invoke-Checked -Label "Test zmin-primitives" -FilePath "cargo" -Arguments @("test", "-p", "zmin-primitives", "--all-targets")
+    Invoke-Checked -Label "Test zmin-git-core" -FilePath "cargo" -Arguments @("test", "-p", "zmin-git-core", "--all-targets")
+    Invoke-Checked -Label "Test zmin-git-remote-http" -FilePath "cargo" -Arguments @("test", "-p", "zmin-git-remote-http", "--all-targets")
+    Invoke-Checked -Label "Test CLI unit surface" -FilePath "cargo" -Arguments @("test", "-p", "zmin-cli", "--bin", "zmin")
     Invoke-CliIntegrationSurface
-    Invoke-Checked -Label "Build Windows CLI binaries" -FilePath "cargo" -Arguments @("build", "-p", "skron-cli", "--release", "--bins")
-    Invoke-Checked -Label "Build Windows remote helper" -FilePath "cargo" -Arguments @("build", "-p", "skron-git-remote-http", "--release")
-    Invoke-Checked -Label "Run skron.exe" -FilePath $SkronExe -Arguments @("--version")
-    Invoke-Checked -Label "Run skron-git.exe" -FilePath $SkronGitExe -Arguments @("--version")
+    Invoke-Checked -Label "Build Windows CLI binaries ($BuildProfile)" -FilePath "cargo" -Arguments (Get-CargoBuildArgs -Package "zmin-cli" -ExtraArgs @("--bins"))
+    Invoke-Checked -Label "Build Windows remote helper ($BuildProfile)" -FilePath "cargo" -Arguments (Get-CargoBuildArgs -Package "zmin-git-remote-http")
+    Invoke-Checked -Label "Run zmin.exe" -FilePath $ZminExe -Arguments @("--version")
+    Invoke-Checked -Label "Run zmin.exe" -FilePath $ZminGitExe -Arguments @("--version")
   }
 }

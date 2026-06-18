@@ -1,36 +1,38 @@
 [workspace]
 members = [
     ".",
-    "crates/skron-primitives",
-    "crates/skron-git-core",
-    "crates/skron-git-remote-http",
-    "crates/skron-cli",
+    "crates/zmin-cli-runtime",
+    "crates/zmin-cli-schema",
+    "crates/zmin-primitives",
+    "crates/zmin-git-core",
+    "crates/zmin-git-remote-http",
+    "crates/zmin-cli",
 ]
 resolver = "2"
 
 [package]
-name = "skron-core"
+name = "zmin-core"
 version = "0.0.1"
 edition = "2024"
 rust-version = "1.95"
-authors = ["Skron Authors"]
+authors = ["Zmin Authors"]
 license = "UNLICENSED"
-description = "Git-compatible Rust primitives, transports, and CLI building blocks."
-repository = "https://github.com/comstud-io/skron-core"
+description = "Git-compatible Rust VCS primitives, transports, CLI, and TUI building blocks."
+repository = "https://github.com/dschewchenko/zmin"
 autobins = false
 
 [lib]
-name = "skron_core"
+name = "zmin_core"
 path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [features]
 default = []
-cli = ["skron-primitives/cli"]
+cli = ["zmin-primitives/cli"]
 
 [dependencies]
-skron-primitives = { path = "crates/skron-primitives" }
-skron-git-core = { path = "crates/skron-git-core" }
+zmin-primitives = { path = "crates/zmin-primitives" }
+zmin-git-core = { path = "crates/zmin-git-core" }
 
 [dev-dependencies]
 tempfile = "3.10.1"
@@ -40,3 +42,9 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
+
+[profile.compat]
+inherits = "dev"
+opt-level = 1
+debug = 0
+incremental = true

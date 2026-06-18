@@ -1,7 +1,7 @@
 Pinned Certificate Store
 ========================
 
-The files in this directory define the root certificate that the CLI trusts when talking to skron.dev.
+The files in this directory define the root certificate that the CLI trusts when talking to zmin.dev.
 
 - `pinned_ca.pem` — PEM-encoded public certificate (no private key).
 - `pinned_ca.sha3` — SHA3-256 fingerprint (uppercase hex, no separators).
