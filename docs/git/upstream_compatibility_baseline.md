@@ -148,7 +148,7 @@ reftable assertions skipped:
 
 Latest expanded Windows/Git-for-Windows `exhaustive` supported-surface run with
 unsupported reftable assertions skipped:
-`C:\Users\zmin\zmin-upstream-20260616T051127Z-71706-out\summary.tsv`
+`C:\Users\skron\zmin-upstream-20260618T210215Z-22587-out\summary.tsv`
 
 Latest targeted `t1500-rev-parse.sh` macOS run:
 `/var/folders/l3/y2d_2zz51z731b86_sstzz0h0000gn/T/zmin-upstream-compat.rikbTw/summary.tsv`
@@ -236,45 +236,28 @@ is only a burn-down signal for the selected upstream files; it must not be used
 as a claim of full Git parity.
 
 Current expanded `exhaustive` supported-surface burn-down: `16/16` selected
-files pass on macOS with `ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`.
-Windows/Git-for-Windows has the previous integrated `15/15` supported-surface
-run plus a clean full-file `t0027-auto-crlf.sh` signoff; rerun the integrated
-16-file Windows list before claiming Windows `16/16`.
+files pass on macOS and Windows/Git-for-Windows with
+`ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`. Latest Windows/Git-for-Windows
+evidence is
+`C:\Users\skron\zmin-upstream-20260618T210215Z-22587-out\summary.tsv`: the
+detached `upstream-fast exhaustive` run wrote `upstream-runner.exit=0`,
+`total=16`, `passed=16`, `failed=0`, and post-run cleanup showed `tasks=0`,
+`procs=0`.
 
-The 2026-06-18 Windows integrated replay retry used a freshly rebuilt release
-`zmin.exe` (`C:\Users\skron\zmin-target\release\zmin.exe`, LastWriteTime
-`2026-06-18 20:43:37`) but is not accepted as green evidence. Detached
-`upstream-fast exhaustive` runs at
-`C:\Users\skron\zmin-upstream-20260618T191751Z-77416-out` and
-`C:\Users\skron\zmin-upstream-20260618T192030Z-78138-out` stopped without an
-`upstream-runner.exit` sentinel after runner contention from delayed
-`upstream-compat` / compat-profile tasks. The second retry recorded only
-`t0001-init.sh` and `t0002-gitfile.sh` as pass before the task was removed.
-Treat these artifacts as lifecycle noise; Windows still needs a clean
-integrated 16-file replay. The runner now refuses to start a new upstream run
-when another `ZminUpstream-*` task or `zmin-upstream-*` process is active,
-instead of killing the active run. Validation: a dummy active
-`ZminUpstream-guard-probe` made `upstream-fast` fail fast with
-`refusing to start upstream run while another upstream run is active`, and a
-real Windows `upstream-fast exhaustive` smoke with
-`tools/git-upstream-compat-tests-basic.txt` plus `--run=1 -q` passed `1/1` at
-`C:\Users\skron\zmin-upstream-20260618T193333Z-95929-out`.
-
-The post-guard Windows integrated replay refreshed the release binary again
-(`C:\Users\skron\zmin-target\release\zmin.exe`, LastWriteTime
-`2026-06-18 21:47:36`) and started clean
-`C:\Users\skron\zmin-upstream-20260618T194759Z-8937-out`, but it is still not
-accepted as integrated evidence. It recorded `t0001-init.sh` and
-`t0002-gitfile.sh` as pass, then `t0008-ignores.log` hit a Git-for-Windows/MSYS
-fork failure (`couldn't create signal pipe`, Win32 error `5`) before the parent
-wrote `upstream-runner.exit`; cleanup ended with `tasks=0`, `procs=0`.
-The matching stock-Git control quick replay at
-`C:\Users\skron\zmin-upstream-20260618T195534Z-22444-out` also recorded
-`t0001-init.sh` and `t0002-gitfile.sh` as pass, started `t0008-ignores.sh`, and
-then lost the scheduled task before writing `upstream-runner.exit` or a
-`t0008` TAP log. Treat the current Windows integrated replay blocker as
-Git-for-Windows/MSYS harness lifecycle instability, not a confirmed Zmin
-assertion failure.
+Earlier 2026-06-18 Windows integrated replay retries are retained only as
+runner-history evidence. Detached `upstream-fast exhaustive` runs at
+`C:\Users\skron\zmin-upstream-20260618T191751Z-77416-out`,
+`C:\Users\skron\zmin-upstream-20260618T192030Z-78138-out`, and
+`C:\Users\skron\zmin-upstream-20260618T194759Z-8937-out` stopped without an
+`upstream-runner.exit` sentinel before the later clean signoff above. The
+matching stock-Git quick control at
+`C:\Users\skron\zmin-upstream-20260618T195534Z-22444-out` also lost its
+scheduled task before a sentinel. Treat those older artifacts as
+Git-for-Windows/MSYS lifecycle noise, not Zmin assertion failures. The runner
+now refuses to start a new upstream run when another `ZminUpstream-*` task or
+`zmin-upstream-*` process is active; validation covered a dummy
+`ZminUpstream-guard-probe` refusal and a real Windows smoke at
+`C:\Users\skron\zmin-upstream-20260618T193333Z-95929-out` (`1/1`).
 
 Focused `t0008-ignores.sh` follow-up: `tools/git-upstream-compat-tests-ignores.txt`
 now selects only that file for standalone reruns. The macOS Zmin standalone run
@@ -292,8 +275,8 @@ detached stock-Git standalone `t0008` at
 `C:\Users\skron\zmin-upstream-20260618T201750Z-59901-out` both started the
 test, then lost the scheduled task before `upstream-runner.exit`; each artifact
 has only the `summary.tsv` header and a zero-byte `t0008-ignores.log`. This is
-not green parity evidence, but the matching stock-Git standalone control keeps
-the current blocker classified as Windows/Git-for-Windows/MSYS harness
+not green parity evidence, but the matching stock-Git standalone control kept
+those older artifacts classified as Windows/Git-for-Windows/MSYS harness
 lifecycle instability rather than a Zmin behavior failure. `upstream-poll` now
 prints artifact inventory, summary tail, and zero-byte log names for this
 missing-task/no-sentinel case.
@@ -333,8 +316,8 @@ Stock-Git control for the same bounded `--run=1-306 -q` at
 `C:\Users\skron\zmin-upstream-20260618T205844Z-14158-out` also lost the
 scheduled task before `upstream-runner.exit`, with header-only summary and a
 zero-byte `t0008-ignores.log`.
-Treat `1-300` as the current accepted Windows `t0008` bounded frontier; do not
-claim full Windows `t0008` or integrated `16/16` from this evidence.
+Treat `1-300` as historical bounded `t0008` evidence only; it is superseded by
+the clean full Windows integrated `16/16` run above.
 
 A current dirty-worktree macOS integrated rerun after the `t4013` separator fix
 is inconclusive, not green evidence:

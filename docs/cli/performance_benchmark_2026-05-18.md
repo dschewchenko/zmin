@@ -2519,3 +2519,33 @@ slightly faster for Zmin: Git mean/median `0.421419s` / `0.422468s`, Zmin
 `0.392450s` / `0.383335s`. Keep Windows as preserved after the exec-path
 fixture fix, while treating the packet-traced one-repeat stopwatch
 (`1.448177`) as diagnostic overhead/noise rather than acceptance evidence.
+
+Current macOS scoped SSH refresh after rebuilding the release binary:
+
+- 10-repeat fair run:
+  `/tmp/zmin-macos-ssh-current-fair-10x-20260618T210441Z`
+- one-repeat diagnostic trace:
+  `/tmp/zmin-macos-ssh-current-trace-1x-20260618T210909Z`
+- all `clone-instant-ssh` `HEAD`, `HEAD^{tree}`, and
+  `zmin.worktreeFirst=true` checks were `ok`
+
+| Run | Aggregate mean | Aggregate median | Paired mean | Paired median |
+| --- | ---: | ---: | ---: | ---: |
+| macOS 10x current release | `0.725666` | `0.695147` | `0.756060` | `0.740152` |
+| macOS larger 3x current release | `0.667712` | `0.715473` | `0.748495` | `0.784204` |
+
+This supersedes the earlier macOS SSH instant-clone gap on the scoped fixture:
+the current rebuilt release binary is faster than Git on mean, median, paired
+mean, and paired median. The diagnostic trace is not acceptance timing because
+it enables phase, fake-SSH, and packet logging; it still usefully confirms both
+rows use `agent=git/2.50.1-Darwin`, fake-SSH lifetime favors Zmin (Git
+`0.047380s`, Zmin `0.029343s`), and the remaining Zmin time is mostly local
+checkout/materialization (`checkout_fresh.checkout_index=0.097589s` for 600
+entries, with `materialize_file_open=0.048000s`).
+
+The larger scoped macOS fixture used
+`ZMIN_BENCH_COMMITS=180 ZMIN_BENCH_FILES_PER_COMMIT=40` with three repeats:
+`/tmp/zmin-macos-ssh-large-fair-3x-20260618T211317Z`. It kept all checks ok and
+also favored Zmin despite one paired outlier. Keep broader clone performance
+open for still-larger fixtures, real network/auth/proxy variants, and repeated
+cross-platform gates.

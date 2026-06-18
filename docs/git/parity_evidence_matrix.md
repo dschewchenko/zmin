@@ -37,12 +37,13 @@ As of 2026-06-16:
 - targeted `t3903-stash.sh` is green on macOS and Windows/Git-for-Windows;
   upstream records its own known breakage assertions as expected xfail
 - expanded `exhaustive` supported-surface burn-down passes `16/16` selected
-  files on macOS with `ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`. Windows
-  has the previous integrated `15/15` supported-surface run plus a clean
-  full-file `t0027-auto-crlf.sh` signoff; rerun the integrated 16-file Windows
-  list before claiming Windows `16/16`. A 2026-06-18 retry first refreshed the
-  Windows release `zmin.exe`, then started detached `upstream-fast exhaustive`,
-  but the artifacts
+  files on macOS and Windows/Git-for-Windows with
+  `ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`. Latest Windows evidence is
+  `C:\Users\skron\zmin-upstream-20260618T210215Z-22587-out`, which wrote
+  `upstream-runner.exit=0`, `total=16`, `passed=16`, `failed=0`, and cleanup
+  ended at `tasks=0`, `procs=0`. Earlier 2026-06-18 retries first refreshed
+  the Windows release `zmin.exe`, then started detached `upstream-fast
+  exhaustive`, but the artifacts
   `C:\Users\skron\zmin-upstream-20260618T191751Z-77416-out` and
   `C:\Users\skron\zmin-upstream-20260618T192030Z-78138-out` stopped without an
   `upstream-runner.exit` sentinel after delayed `upstream-compat` /
@@ -656,7 +657,7 @@ same canonical `.git` repository state.
   `C:\Users\zmin\zmin-bench-20260616T234622Z-4223-out` shows no second
   advertisement round trip; remaining time is dominated by checkout index
   materialization plus SSH discovery variance.
-- Latest macOS scoped fake-SSH refresh on the current dirty worktree is
+- Earlier macOS scoped fake-SSH refresh on the current dirty worktree was
   `/tmp/zmin-macos-ssh-current-fair-3x-20260618T180242Z`: all
   `clone-instant-ssh` checks are ok, but Zmin remains slower than Git
   (aggregate mean ratio `1.267754`, aggregate median `1.360408`, paired mean
@@ -664,7 +665,24 @@ same canonical `.git` repository state.
   `/tmp/zmin-macos-ssh-current-trace-1x-20260618T180304Z` shows
   `cli.process=0.259948s`, `ssh_upload_pack.open.advertisement=0.089031s`,
   `upload_pack.sideband=0.067104s`, and `checkout_fresh.checkout_index=0.042506s`;
-  the clone path already reuses the advertised SSH upload-pack session.
+  the clone path already reuses the advertised SSH upload-pack session. This
+  artifact is superseded by the current rebuilt-release refresh below.
+- Current macOS scoped fake-SSH refresh after rebuilding the release binary is
+  `/tmp/zmin-macos-ssh-current-fair-10x-20260618T210441Z`: all
+  `clone-instant-ssh` checks are ok and Zmin is now faster than Git on the
+  scoped fixture (aggregate mean ratio `0.725666`, aggregate median
+  `0.695147`, paired mean `0.756060`, paired median `0.740152`). The companion
+  diagnostic trace `/tmp/zmin-macos-ssh-current-trace-1x-20260618T210909Z`
+  confirms both rows use `agent=git/2.50.1-Darwin`, fake-SSH lifetime favors
+  Zmin (Git `0.047380s`, Zmin `0.029343s`), and the remaining Zmin local time
+  is mostly checkout materialization (`checkout_fresh.checkout_index=0.097589s`
+  for 600 entries). Treat this as closing the scoped macOS SSH instant-clone
+  gap for the current fixture, not the broader clone performance program.
+  A larger scoped fixture with `ZMIN_BENCH_COMMITS=180` and
+  `ZMIN_BENCH_FILES_PER_COMMIT=40` also passed all checks at
+  `/tmp/zmin-macos-ssh-large-fair-3x-20260618T211317Z` and favored Zmin
+  (aggregate mean `0.667712`, aggregate median `0.715473`, paired mean
+  `0.748495`, paired median `0.784204`).
 - Latest Windows/Git-for-Windows scoped fake-SSH refresh on the same dirty
   worktree is `C:\Users\skron\zmin-bench-20260618T180552Z-70636-out`: all
   `clone-instant-ssh` checks are ok and Zmin stayed faster than Git on the
