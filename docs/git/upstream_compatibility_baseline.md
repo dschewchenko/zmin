@@ -329,6 +329,10 @@ header-only/zero-byte-log pattern, while `--run=1-306 -q` at
 `t0008-ignores.log` containing Git-for-Windows/MSYS `sed` fork/signal-pipe
 errors (`child_copy` Win32 error `299`, `couldn't create signal pipe` Win32
 error `5`) before the parent task disappeared without `upstream-runner.exit`.
+Stock-Git control for the same bounded `--run=1-306 -q` at
+`C:\Users\skron\zmin-upstream-20260618T205844Z-14158-out` also lost the
+scheduled task before `upstream-runner.exit`, with header-only summary and a
+zero-byte `t0008-ignores.log`.
 Treat `1-300` as the current accepted Windows `t0008` bounded frontier; do not
 claim full Windows `t0008` or integrated `16/16` from this evidence.
 

@@ -87,7 +87,11 @@ As of 2026-06-16:
   most show the same no-sentinel/header-only/zero-byte-log lifecycle pattern,
   while `1-306` wrote a `t0008-ignores.log` with Git-for-Windows/MSYS `sed`
   fork/signal-pipe errors before the parent task disappeared. Current accepted
-  Windows `t0008` bounded coverage stops at `1-300`.
+  Windows `t0008` bounded coverage stops at `1-300`. A stock-Git control for
+  the same `1-306` bounded selector at
+  `C:\Users\skron\zmin-upstream-20260618T205844Z-14158-out` also stopped before
+  `upstream-runner.exit` with header-only summary and zero-byte
+  `t0008-ignores.log`.
 - targeted `t0021-conversion.sh` is green on macOS after fixes for `:path`
   blob objectish resolution, ident clean/smudge canonicalization, `eol=crlf`,
   one-shot and long-running clean/smudge filters, `%f` shell quoting, required
