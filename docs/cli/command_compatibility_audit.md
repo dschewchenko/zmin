@@ -24,10 +24,15 @@ Behavior parity is tracked by local compatibility tests, smoke scripts, and the
 selected upstream Git test-suite baseline in
 `docs/git/upstream_compatibility_baseline.md`.
 
-As of 2026-06-16, the selected upstream Git `standard` suite and the expanded
+As of 2026-06-18, the selected upstream Git `standard` suite and the expanded
 supported-surface `exhaustive` set are green on macOS and
 Windows/Git-for-Windows through the local Parallels runner. This is still not a
 claim of full upstream Git parity outside the supported and tested surface.
+Current command inventory validation is green for tracked baselines:
+`ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh`, `ZMIN_GIT_BASELINE=v2.47.1
+./tools/git-command-gap.sh`, and `cargo test -p zmin-cli --test
+compatibility_command -- --nocapture` all pass with zero missing baseline
+commands.
 
 ## Additive Zmin surface
 

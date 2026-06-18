@@ -2576,10 +2576,25 @@ Artifacts to treat as noisy/contended:
 
 The traced 3-repeat runs were slower/noisy despite ok checks, and the untraced
 5-repeat run had a faster aggregate median but slower paired/mean ratios while
-the guest was building the remote HTTP helper. Keep the earlier clean Windows
-3-repeat gate `C:\Users\skron\zmin-bench-20260618T181638Z-28896-out` as the
-current accepted Windows SSH preservation point until a clean VM rerun replaces
-it.
+the guest was building the remote HTTP helper. A later full 3-repeat Windows
+benchmark did complete cleanly before guest cleanup removed its artifact; the
+captured output for `C:\Users\skron\zmin-bench-20260618T222653Z-41023-out`
+had no failed checks, and its `clone-instant-ssh` row was mean/paired-mean
+faster than Git but median noisy (`0.974159` mean ratio, `1.046030` median
+ratio, `0.971601` paired mean, `1.046030` paired median).
+
+The current accepted scoped Windows SSH preservation point is the clean
+5-repeat rerun `C:\Users\skron\zmin-bench-20260618T223331Z-42606-out`.
+It produced `bench.csv`, `checks.csv`, `summary.csv`, and `comparison.csv`,
+had `15` checks with no failures, and left no matching guest processes. Zmin
+was faster than Git on aggregate and paired ratios:
+
+| Metric | Ratio |
+| --- | ---: |
+| aggregate mean | `0.979017` |
+| aggregate median | `0.932111` |
+| paired mean | `0.984014` |
+| paired median | `0.860411` |
 
 Test-helper stabilization note:
 `ensure_remote_http_helper()` now builds `zmin-git-remote-http` into an isolated
@@ -2593,7 +2608,8 @@ Current cross-platform performance gate refresh:
 - macOS full local 3-repeat gate:
   `/tmp/zmin-macos-performance-gate-20260618T222426Z`
 - Windows/Git-for-Windows full 3-repeat gate with real Gitoxide:
-  `C:\Users\skron\zmin-bench-20260618T222653Z-41023-out`
+  host-captured output from `C:\Users\skron\zmin-bench-20260618T222653Z-41023-out`
+  before guest cleanup removed the artifact
 - macOS failed-check filter returned only the header; Windows failed-check
   filter returned no rows. Treat both gates as correctness-clean.
 
@@ -2637,7 +2653,9 @@ The current macOS and Windows performance gates are correctness-clean and includ
 real Gitoxide where the benchmark has comparable operations. The remaining
 measured gaps are now explicit: macOS `fetch-incremental`, `fetch-batch`, and
 `push-batch`; Windows `add`, default `clone`, `clone-instant`, and
-`clone-instant-git-daemon`; Windows `clone-instant-ssh` is near parity but still
-median-slower in this gate. Do not claim all performance work is complete until
-those gaps are either improved or explicitly accepted as out of scope for the
-current release.
+`clone-instant-git-daemon`. Windows `clone-instant-ssh` was median-slower in
+the full gate but is superseded for the scoped SSH preservation check by
+`C:\Users\skron\zmin-bench-20260618T223331Z-42606-out`, where mean, median,
+paired mean, and paired median all favor Zmin. Do not claim all performance
+work is complete until the remaining non-SSH gaps are either improved or
+explicitly accepted as out of scope for the current release.

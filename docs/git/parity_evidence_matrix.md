@@ -699,12 +699,13 @@ same canonical `.git` repository state.
   `/tmp/zmin-macos-ssh-large-fair-3x-20260618T211317Z` and favored Zmin
   (aggregate mean `0.667712`, aggregate median `0.715473`, paired mean
   `0.748495`, paired median `0.784204`).
-- Latest Windows/Git-for-Windows scoped fake-SSH refresh on the same dirty
-  worktree is `C:\Users\skron\zmin-bench-20260618T180552Z-70636-out`: all
-  `clone-instant-ssh` checks are ok and Zmin stayed faster than Git on the
-  one-repeat gate (aggregate and paired ratio `0.955303`; raw rows Git
-  `1.949853s`, Zmin `1.862700s`). Fake SSH remote lifetime was Git
-  `0.382498s` vs Zmin `0.312930s`.
+- Latest accepted Windows/Git-for-Windows scoped fake-SSH refresh on the same
+  dirty worktree is
+  `C:\Users\skron\zmin-bench-20260618T223331Z-42606-out`: all
+  `clone-instant-ssh` checks are ok (`15` checks, no failures), no matching
+  guest processes remained after the run, and Zmin stayed faster than Git on
+  the 5-repeat gate (aggregate mean ratio `0.979017`, aggregate median
+  `0.932111`, paired mean `0.984014`, paired median `0.860411`).
 - Later Windows/Git-for-Windows `clone-instant-ssh` retries at
   `C:\Users\skron\zmin-bench-20260618T220543Z-3057-out`,
   `C:\Users\skron\zmin-bench-20260618T221053Z-3916-out`, and

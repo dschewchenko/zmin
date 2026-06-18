@@ -944,17 +944,16 @@ be skipped after reset/stash when the file metadata matched.
 
 Priority order:
 
-1. For every remaining supported command surface, add either upstream-file
-   coverage, local parity tests, or an explicit unsupported/out-of-scope
-   decision.
-2. Broaden real-repository, auth/proxy/network, and long-running transport
-   scenarios on the local Windows runner.
+1. Keep every supported command surface tied to either upstream-file coverage,
+   local parity tests, or an explicit unsupported/out-of-scope decision.
+2. Broaden real-repository scale and long-running transport scenarios on the
+   local Windows runner before expanding the supported parity claim.
 3. Keep Windows-only newline, executable-bit, symlink, path, quoting, and
    process-behavior differences under upstream or focused local coverage as the
    supported surface expands.
-4. Finish remote `--instant` follow-up work: checkout/SSH variance follow-up,
-   repeated larger remote worktree-first performance gates, and real
-   network/auth/proxy variants beyond local loopback coverage.
+4. Treat authenticated transport, proxy, and non-loopback network variants as
+   separate scenario gates rather than implied coverage from local loopback
+   transport tests.
 
 ## Unsupported / out-of-scope status
 
@@ -962,8 +961,28 @@ No unexplained failures are allowed for completion. A failing upstream assertion
 must either be fixed or moved to an explicit unsupported/out-of-scope list with
 the affected command, option, upstream test name, and product decision.
 
-At this baseline point, the following surfaces are not yet approved as complete
-Git parity:
+Current broader burn-down status as of 2026-06-18:
+
+- Command inventory is green for the tracked baselines. Validation:
+  `ZMIN_GIT_GAP_STRICT=1 ./tools/git-command-gap.sh` reported v2.32 baseline
+  `145/145`, `missing_command_baseline=0`; `ZMIN_GIT_BASELINE=v2.47.1
+  ./tools/git-command-gap.sh` reported raw v2.47 including help `151/151`,
+  `raw_missing_upstream_commands_including_help=0`; and
+  `cargo test -p zmin-cli --test compatibility_command -- --nocapture` passed
+  `4/4`.
+- Behavior parity is green only for the selected supported upstream surface:
+  current expanded `exhaustive` runs are `16/16` selected files on macOS and
+  Windows/Git-for-Windows with unsupported reftable assertions skipped.
+- Additive Zmin CLI surface is not counted as upstream parity, but its
+  canonical `.git` behavior is currently covered by focused macOS and Windows
+  tests for managed hooks, CMS porcelain, local/remote `clone --instant`,
+  `--background-fetch`, and `--demand-hydrate`.
+- Performance gates are collected and correctness-clean on macOS and Windows
+  with real Gitoxide where comparable. They do not close all optimization work;
+  the remaining measured gaps are tracked in
+  `docs/cli/performance_benchmark_2026-05-18.md`.
+
+The following surfaces are not approved as complete Git parity:
 
 - `cat-file` is green for the selected `t1006-cat-file.sh` file on macOS and
   Windows/Git-for-Windows; additional object-plumbing behavior outside this
@@ -988,6 +1007,21 @@ Git parity:
   `ZMIN_UPSTREAM_SKIP_UNSUPPORTED_REFTABLE=1`; full upstream runs without that
   flag must still report reftable-dependent assertions as outside current
   parity.
+- Authenticated HTTPS/SSH transport, credential-helper flows, corporate proxy
+  handling, custom enterprise TLS/proxy environments, and long-running
+  non-loopback network scenarios are outside the current supported parity claim
+  until each has a dedicated local and Windows scenario gate. Existing
+  unauthenticated public-provider and loopback transport smokes do not imply
+  parity for these environments.
+- Git LFS, partial clone filter negotiation beyond the explicit
+  demand-hydration surface, sparse-checkout expansion, signed commit/tag
+  verification workflows, and platform-specific file watcher / daemon behavior
+  remain outside the current parity claim unless a later test slice explicitly
+  adds them.
+- Larger real-repository scale scenarios are not complete. Existing real-repo
+  smokes are useful preservation evidence, but they are not a substitute for a
+  documented scale matrix with repository size, object count, ref count,
+  transport, auth/proxy mode, and macOS/Windows results.
 
 ## Completion rule
 
