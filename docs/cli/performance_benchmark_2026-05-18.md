@@ -2587,3 +2587,57 @@ Test-helper stabilization note:
 current test executable when needed, so transport tests do not contend with the
 parent test package target. Focused macOS validation passed:
 `cargo test -p zmin-cli --test git_transport_http_compat clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects -- --exact --test-threads=1 --nocapture`.
+
+Current cross-platform performance gate refresh:
+
+- macOS full local 3-repeat gate:
+  `/tmp/zmin-macos-performance-gate-20260618T222426Z`
+- Windows/Git-for-Windows full 3-repeat gate with real Gitoxide:
+  `C:\Users\skron\zmin-bench-20260618T222653Z-41023-out`
+- macOS failed-check filter returned only the header; Windows failed-check
+  filter returned no rows. Treat both gates as correctness-clean.
+
+macOS headline ratios from `comparison.csv`:
+
+| Operation | Zmin/Git mean | Zmin/Git median | Zmin/Gitoxide mean | Zmin/Gitoxide median | Note |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `add` | `0.677622` | `0.663224` | n/a | n/a | faster than Git |
+| `clone` | `0.969930` | `0.969726` | `0.381058` | `0.403940` | near Git parity, faster than Gitoxide |
+| `clone-instant` | `0.930454` | `0.896764` | n/a | n/a | faster than Git |
+| `clone-instant-git-daemon` | `0.925723` | `0.905785` | n/a | n/a | faster than Git |
+| `clone-instant-ssh` | `0.544516` | `0.824004` | n/a | n/a | faster than Git; one slow Git outlier affects mean |
+| `fetch-incremental` | `1.275221` | `1.335211` | `0.404165` | `0.420169` | slower than Git, faster than Gitoxide |
+| `fetch-batch` | `1.356012` | `1.213176` | `0.440008` | `0.440983` | slower than Git, faster than Gitoxide |
+| `log` | `0.575197` | `0.790373` | `0.987337` | `0.978569` | faster than Git, near Gitoxide parity |
+| `merge-base` | `0.603762` | `0.672728` | `0.740512` | `0.780194` | faster than Git and Gitoxide |
+| `pull-incremental` | `1.202770` | `0.830179` | n/a | n/a | mean slower from one Zmin outlier; median faster |
+| `push-batch` | `1.134906` | `1.093725` | n/a | n/a | slower than Git |
+| `status` | `0.906159` | `0.807158` | `0.557811` | `0.697167` | faster than Git and Gitoxide |
+
+Windows headline ratios from `comparison.csv`:
+
+| Operation | Zmin/Git mean | Zmin/Git median | Zmin/Gitoxide mean | Zmin/Gitoxide median | Note |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `add` | `1.147391` | `1.264337` | n/a | n/a | still slower than Git |
+| `add-dirty` | `0.745180` | `0.690004` | n/a | n/a | faster than Git |
+| `clone` | `2.234593` | `3.669840` | `0.969706` | `1.238878` | slower than Git; mean near Gitoxide, median slower |
+| `clone-instant` | `1.066094` | `1.028556` | n/a | n/a | slightly slower than Git |
+| `clone-instant-git-daemon` | `1.258647` | `1.266704` | n/a | n/a | slower than Git |
+| `clone-instant-ssh` | `0.974159` | `1.046030` | n/a | n/a | mean slightly faster, median slightly slower |
+| `fetch-incremental` | `0.495087` | `0.514856` | `0.628276` | `0.675862` | faster than Git and Gitoxide |
+| `fetch-noop` | `0.151291` | `0.129791` | `0.283590` | `0.265583` | faster than Git and Gitoxide |
+| `log` | `0.539253` | `0.553138` | `0.862014` | `0.693965` | faster than Git and Gitoxide on aggregate |
+| `merge-base` | `0.446136` | `0.471417` | `0.779132` | `0.703876` | faster than Git and Gitoxide on aggregate |
+| `pull-incremental` | `0.660155` | `0.448627` | n/a | n/a | faster than Git |
+| `push-noop` | `0.527369` | `0.797983` | n/a | n/a | faster than Git, but noisy |
+| `status` | `0.589863` | `0.556501` | `0.249768` | `0.182660` | faster than Git and Gitoxide |
+
+Gate conclusion:
+The current macOS and Windows performance gates are correctness-clean and include
+real Gitoxide where the benchmark has comparable operations. The remaining
+measured gaps are now explicit: macOS `fetch-incremental`, `fetch-batch`, and
+`push-batch`; Windows `add`, default `clone`, `clone-instant`, and
+`clone-instant-git-daemon`; Windows `clone-instant-ssh` is near parity but still
+median-slower in this gate. Do not claim all performance work is complete until
+those gaps are either improved or explicitly accepted as out of scope for the
+current release.
