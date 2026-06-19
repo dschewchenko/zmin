@@ -202,6 +202,10 @@ fn for_each_ref_date_atoms_match_stock_git() {
             "%(refname:short)|%(taggerdate)|%(taggerdate:unix)|%(taggerdate:raw)|%(taggerdate:iso)|%(taggerdate:iso-strict)|%(taggerdate:rfc)|%(taggerdate:rfc2822)|%(taggerdate:short)",
         ),
         (
+            "refs/heads refs/tags",
+            "%(refname:short)|%(taggername)|%(taggeremail)",
+        ),
+        (
             "refs/tags",
             "%(refname:short)|%(authorname)|%(authoremail)|%(authordate)|%(authordate:unix)|%(authordate:raw)|%(authordate:iso)|%(authordate:iso-strict)|%(authordate:rfc)|%(authordate:rfc2822)|%(authordate:short)",
         ),

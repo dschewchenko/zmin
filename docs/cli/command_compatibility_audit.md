@@ -71,6 +71,8 @@ Recently closed replacement gaps:
   `rfc2822`, and `short` formats
 - `for-each-ref` supports stock author atoms for commit refs:
   `authorname`, `authoremail`, and the same `authordate` formats
+- `for-each-ref` supports stock tagger identity atoms for annotated tags:
+  `taggername` and `taggeremail`
 - `for-each-ref` supports `creator` and `creatordate` for commit refs and
   annotated tag refs
 - `for-each-ref` supports stock `objectname:short=<n>` abbreviation lengths
