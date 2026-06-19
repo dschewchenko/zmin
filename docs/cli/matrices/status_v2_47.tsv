@@ -42,8 +42,8 @@ Basic Snapshotting	status	--renames	<empty>	--porcelain=v1	rename staged/local	l
 Basic Snapshotting	status	--no-renames	<empty>	--porcelain=v1	rename staged/local	local	all	git status --no-renames --porcelain=v1	open	not accepted by schema	rename detection control
 Basic Snapshotting	status	--find-renames	<empty>	--porcelain=v1	rename staged/local	local	all	git status --find-renames --porcelain=v1	open	not accepted by schema	default threshold
 Basic Snapshotting	status	--find-renames	<n>	--porcelain=v1	rename staged/local	local	all	git status --find-renames=50% --porcelain=v1	open	not accepted by schema	threshold value
-Basic Snapshotting	status	--untracked-cache	<empty>	<none>	any	local	all	git status --untracked-cache	open	not accepted by schema	performance/config side effect
-Basic Snapshotting	status	--no-untracked-cache	<empty>	<none>	any	local	all	git status --no-untracked-cache	open	not accepted by schema	performance/config side effect
-Basic Snapshotting	status	--split-index	<empty>	<none>	any	local	all	git status --split-index	open	not accepted by schema	index mode side effect
-Basic Snapshotting	status	--no-split-index	<empty>	<none>	any	local	all	git status --no-split-index	open	not accepted by schema	index mode side effect
+Basic Snapshotting	status	--untracked-cache	<empty>	<none>	any	local	all	git status --untracked-cache	invalid-input	git_status_compat::status_cache_index_toggles_are_not_stock_git_options	stock Git 2.47 rejects this status option; use update-index for untracked cache
+Basic Snapshotting	status	--no-untracked-cache	<empty>	<none>	any	local	all	git status --no-untracked-cache	invalid-input	git_status_compat::status_cache_index_toggles_are_not_stock_git_options	stock Git 2.47 rejects this status option; use update-index for untracked cache
+Basic Snapshotting	status	--split-index	<empty>	<none>	any	local	all	git status --split-index	invalid-input	git_status_compat::status_cache_index_toggles_are_not_stock_git_options	stock Git 2.47 rejects this status option; use update-index for split index
+Basic Snapshotting	status	--no-split-index	<empty>	<none>	any	local	all	git status --no-split-index	invalid-input	git_status_compat::status_cache_index_toggles_are_not_stock_git_options	stock Git 2.47 rejects this status option; use update-index for split index
 Basic Snapshotting	status	--no-optional-locks	<empty>	<none>	any	local	all	git --no-optional-locks status	open	global option not represented in status schema	check global option handling separately

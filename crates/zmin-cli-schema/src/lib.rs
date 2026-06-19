@@ -869,6 +869,14 @@ pub enum Command {
         column: Option<String>,
         #[arg(long = "no-column", overrides_with = "column", action = ArgAction::SetTrue)]
         no_column: bool,
+        #[arg(long = "untracked-cache", hide = true, action = ArgAction::SetTrue)]
+        untracked_cache: bool,
+        #[arg(long = "no-untracked-cache", hide = true, action = ArgAction::SetTrue)]
+        no_untracked_cache: bool,
+        #[arg(long = "split-index", hide = true, action = ArgAction::SetTrue)]
+        split_index: bool,
+        #[arg(long = "no-split-index", hide = true, action = ArgAction::SetTrue)]
+        no_split_index: bool,
         #[arg(
             short = 's',
             long = "short",

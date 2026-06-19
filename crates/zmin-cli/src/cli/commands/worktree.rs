@@ -147,25 +147,44 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_long: _,
             column,
             no_column,
+            untracked_cache,
+            no_untracked_cache,
+            split_index,
+            no_split_index,
             short,
             null,
             ignored,
             untracked_files,
             paths,
-        } => run_status(
-            porcelain,
-            branch,
-            !no_ahead_behind,
-            show_stash && !no_show_stash,
-            if no_verbose { 0 } else { verbose },
-            column,
-            no_column,
-            short,
-            null,
-            ignored,
-            untracked_files,
-            paths,
-        ),
+        } => {
+            for (enabled, option) in [
+                (untracked_cache, "untracked-cache"),
+                (no_untracked_cache, "no-untracked-cache"),
+                (split_index, "split-index"),
+                (no_split_index, "no-split-index"),
+            ] {
+                if enabled {
+                    return Err(runtime::CliError::Stderr {
+                        code: 129,
+                        text: format!("error: unknown option `{option}`\n"),
+                    });
+                }
+            }
+            run_status(
+                porcelain,
+                branch,
+                !no_ahead_behind,
+                show_stash && !no_show_stash,
+                if no_verbose { 0 } else { verbose },
+                column,
+                no_column,
+                short,
+                null,
+                ignored,
+                untracked_files,
+                paths,
+            )
+        }
         runtime::Command::ReadTree {
             empty,
             merge,

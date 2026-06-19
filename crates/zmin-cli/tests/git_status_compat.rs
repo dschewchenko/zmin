@@ -5,8 +5,8 @@ use std::fs;
 #[cfg(not(windows))]
 use common::write_file;
 use common::{
-    configure_identity, git, git_args, git_init, git_with_env, run_zmin, run_zmin_args,
-    run_zmin_with_env,
+    configure_identity, git, git_args, git_failure_output, git_init, git_with_env, run_zmin,
+    run_zmin_args, run_zmin_failure_output, run_zmin_with_env,
 };
 use tempfile::TempDir;
 
@@ -469,6 +469,22 @@ fn status_column_modes_match_stock_git() {
             git_args(repo.path(), args),
             "args with column.status=always: {args:?}"
         );
+    }
+}
+
+#[test]
+fn status_cache_index_toggles_are_not_stock_git_options() {
+    let repo = committed_repo();
+    for args in [
+        ["status", "--untracked-cache"].as_slice(),
+        ["status", "--no-untracked-cache"].as_slice(),
+        ["status", "--split-index"].as_slice(),
+        ["status", "--no-split-index"].as_slice(),
+    ] {
+        let git_output = git_failure_output(repo.path(), args);
+        let zmin_output = run_zmin_failure_output(repo.path(), args);
+        assert_eq!(git_output.0, 129, "stock Git args: {args:?}");
+        assert_eq!(zmin_output.0, 129, "Zmin args: {args:?}");
     }
 }
 
