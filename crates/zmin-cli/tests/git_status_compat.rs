@@ -402,6 +402,33 @@ fn status_long_mode_toggles_match_stock_git() {
     }
 }
 
+#[test]
+fn status_verbose_modes_match_stock_git() {
+    let repo = committed_repo();
+    fs::write(repo.path().join("a.txt"), b"hello\nchanged\n").expect("modify tracked");
+    fs::write(repo.path().join("staged.txt"), b"staged\n").expect("write staged");
+    git(repo.path(), ["add", "staged.txt"]);
+
+    for args in [
+        ["status", "--verbose"].as_slice(),
+        ["status", "-v"].as_slice(),
+        ["status", "-vv"].as_slice(),
+        ["status", "--verbose", "--no-verbose"].as_slice(),
+        ["status", "--no-verbose", "--verbose"].as_slice(),
+        ["status", "-vv", "--no-verbose"].as_slice(),
+        ["status", "--no-verbose", "-vv"].as_slice(),
+        ["status", "--short", "--verbose"].as_slice(),
+        ["status", "--porcelain=v1", "--verbose"].as_slice(),
+        ["status", "--porcelain=v2", "--verbose"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
 fn committed_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());

@@ -56,7 +56,7 @@ transports or platforms.
 
 | Command | Matrix | Total rows | Closed | Partial | Open |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `29` | `2` | `17` |
+| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `31` | `2` | `15` |
 
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also
@@ -69,6 +69,8 @@ upstream refs, then `--show-stash` and `--no-show-stash` for human output,
 porcelain v2 output and order-sensitive toggle forms. The latest slice closed
 `--long` and `--no-long`, including their order-sensitive interaction with
 `--short`.
+The following slice closed `--verbose` and `--no-verbose`, including `-v`,
+`-vv`, order-sensitive reset forms and machine-readable combinations.
 
 ## Required Matrix Columns
 

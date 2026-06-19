@@ -343,6 +343,7 @@ pub(crate) fn status(
     branch: bool,
     ahead_behind: bool,
     show_stash: bool,
+    verbose: u8,
     short: bool,
     null: bool,
     ignored: Option<&str>,
@@ -363,6 +364,7 @@ pub(crate) fn status(
         }
     };
     let untracked_mode = UntrackedMode::parse(untracked_files)?;
+    let diff_paths = pathspecs.clone();
 
     let repo = {
         let _trace = phase_trace("status.find_repo");
@@ -468,14 +470,16 @@ pub(crate) fn status(
     };
     if !machine_readable {
         let _trace = phase_trace("status.render_human");
-        return print_human_status(
+        print_human_status(
             &repo,
             &paths,
             &untracked,
             &ignored,
             untracked_mode,
             stash_count.unwrap_or(0),
-        );
+        )?;
+        print_status_verbose_diff(verbose, diff_paths)?;
+        return Ok(());
     }
 
     {
@@ -737,6 +741,38 @@ fn status_stash_count(repo: &GitRepo) -> Result<usize> {
             }
         }
         Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
+    if verbose > 0 {
+        println!();
+    }
+    match verbose {
+        0 => Ok(()),
+        1 => super::diff_commands::diff(DiffOptions {
+            cached: true,
+            paths,
+            ..DiffOptions::default()
+        }),
+        _ => {
+            println!("Changes to be committed:");
+            super::diff_commands::diff(DiffOptions {
+                cached: true,
+                src_prefix: Some("c/".to_owned()),
+                dst_prefix: Some("i/".to_owned()),
+                paths: paths.clone(),
+                ..DiffOptions::default()
+            })?;
+            println!("--------------------------------------------------");
+            println!("Changes not staged for commit:");
+            super::diff_commands::diff(DiffOptions {
+                src_prefix: Some("i/".to_owned()),
+                dst_prefix: Some("w/".to_owned()),
+                paths,
+                ..DiffOptions::default()
+            })
+        }
     }
 }
 
@@ -7911,6 +7947,7 @@ fn stash_apply(
             false,
             true,
             false,
+            0,
             false,
             false,
             None,
