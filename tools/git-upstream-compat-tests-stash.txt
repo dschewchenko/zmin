@@ -1,0 +1,1 @@
+standard	t3903-stash.sh	stash porcelain compatibility

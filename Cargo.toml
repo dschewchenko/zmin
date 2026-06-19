@@ -1,0 +1,50 @@
+[workspace]
+members = [
+    ".",
+    "crates/zmin-cli-runtime",
+    "crates/zmin-cli-schema",
+    "crates/zmin-primitives",
+    "crates/zmin-git-core",
+    "crates/zmin-git-remote-http",
+    "crates/zmin-cli",
+]
+resolver = "2"
+
+[package]
+name = "zmin-core"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.95"
+authors = ["Zmin Authors"]
+license = "UNLICENSED"
+description = "Git-compatible Rust VCS primitives, transports, CLI, and TUI building blocks."
+repository = "https://github.com/dschewchenko/zmin"
+autobins = false
+
+[lib]
+name = "zmin_core"
+path = "src/lib.rs"
+crate-type = ["rlib"]
+
+[features]
+default = []
+cli = ["zmin-primitives/cli"]
+
+[dependencies]
+zmin-primitives = { path = "crates/zmin-primitives" }
+zmin-git-core = { path = "crates/zmin-git-core" }
+
+[dev-dependencies]
+tempfile = "3.10.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.compat]
+inherits = "dev"
+opt-level = 1
+debug = 0
+incremental = true
