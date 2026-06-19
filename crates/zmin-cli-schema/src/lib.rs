@@ -882,6 +882,12 @@ pub enum Command {
             default_missing_value = ""
         )]
         find_renames: Option<String>,
+        #[arg(
+            long = "ignore-submodules",
+            num_args = 0..=1,
+            default_missing_value = "all"
+        )]
+        ignore_submodules: Option<String>,
         #[arg(long = "untracked-cache", hide = true, action = ArgAction::SetTrue)]
         untracked_cache: bool,
         #[arg(long = "no-untracked-cache", hide = true, action = ArgAction::SetTrue)]

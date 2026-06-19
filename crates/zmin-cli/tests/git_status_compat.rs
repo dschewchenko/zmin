@@ -511,6 +511,80 @@ fn status_rename_modes_match_stock_git() {
     }
 }
 
+#[test]
+fn status_ignore_submodules_modes_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let sub_src = dir.path().join("sub-src");
+    let super_repo = dir.path().join("super");
+    git(dir.path(), ["init", "sub-src"]);
+    configure_identity(&sub_src);
+    fs::write(sub_src.join("file.txt"), b"base\n").expect("write submodule source");
+    git(&sub_src, ["add", "-A"]);
+    git_with_env(&sub_src, ["commit", "-m", "sub init"]);
+
+    git(dir.path(), ["init", "super"]);
+    configure_identity(&super_repo);
+    git(
+        &super_repo,
+        [
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "../sub-src",
+            "sub",
+        ],
+    );
+    git_with_env(&super_repo, ["commit", "-m", "add submodule"]);
+
+    fs::write(super_repo.join("sub/file.txt"), b"base\ndirty\n").expect("dirty submodule");
+    for args in [
+        ["status", "--porcelain=v1"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=all"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=dirty"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=untracked"].as_slice(),
+        ["status", "--porcelain=v2"].as_slice(),
+        ["status", "--short", "--ignore-submodules=untracked"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(&super_repo, args),
+            git_args(&super_repo, args),
+            "dirty submodule args: {args:?}"
+        );
+    }
+
+    fs::write(super_repo.join("sub/new.txt"), b"untracked\n").expect("untracked submodule");
+    for args in [
+        ["status", "--porcelain=v1"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=dirty"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=untracked"].as_slice(),
+        ["status", "--short", "--ignore-submodules=untracked"].as_slice(),
+        ["status", "--ignore-submodules=untracked"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(&super_repo, args),
+            git_args(&super_repo, args),
+            "dirty and untracked submodule args: {args:?}"
+        );
+    }
+
+    git(&super_repo.join("sub"), ["add", "-A"]);
+    git_with_env(&super_repo.join("sub"), ["commit", "-m", "sub change"]);
+    for args in [
+        ["status", "--porcelain=v1"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=dirty"].as_slice(),
+        ["status", "--porcelain=v1", "--ignore-submodules=all"].as_slice(),
+        ["status", "--porcelain=v2", "--ignore-submodules=dirty"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(&super_repo, args),
+            git_args(&super_repo, args),
+            "new submodule commit args: {args:?}"
+        );
+    }
+}
+
 fn committed_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());

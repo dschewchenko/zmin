@@ -347,6 +347,7 @@ pub(crate) fn status(
     column: Option<&str>,
     no_column: bool,
     detect_renames: bool,
+    ignore_submodules: Option<&str>,
     short: bool,
     null: bool,
     ignored: Option<&str>,
@@ -367,6 +368,7 @@ pub(crate) fn status(
         }
     };
     let untracked_mode = UntrackedMode::parse(untracked_files)?;
+    let ignore_submodules_mode = StatusIgnoreSubmodulesMode::parse(ignore_submodules)?;
     let diff_paths = pathspecs.clone();
 
     let repo = {
@@ -440,6 +442,7 @@ pub(crate) fn status(
                 worktree_status,
                 old_path: None,
                 similarity: None,
+                submodule: None,
             },
         );
     }
@@ -468,6 +471,12 @@ pub(crate) fn status(
             }
             paths.entry(path).or_default().worktree_status = code;
         }
+        apply_status_submodule_worktree_states(
+            &repo,
+            status_index,
+            &mut paths,
+            ignore_submodules_mode,
+        )?;
     }
 
     let tracked_paths = tracked_path_set(&index);
@@ -519,12 +528,20 @@ pub(crate) fn status(
             .into_iter()
             .filter(|(path, _)| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
             .map(|(path, state)| {
+                let worktree_status = if short {
+                    state
+                        .submodule
+                        .map(StatusSubmoduleState::short_worktree_status)
+                        .unwrap_or(state.worktree_status)
+                } else {
+                    state.worktree_status.to_ascii_uppercase()
+                };
                 let row = if let Some(old_path) = state.old_path.as_ref() {
                     if null {
                         format!(
                             "{}{} {}\0{}",
                             state.index_status,
-                            state.worktree_status,
+                            worktree_status,
                             String::from_utf8_lossy(&path),
                             String::from_utf8_lossy(old_path)
                         )
@@ -532,7 +549,7 @@ pub(crate) fn status(
                         format!(
                             "{}{} {} -> {}",
                             state.index_status,
-                            state.worktree_status,
+                            worktree_status,
                             String::from_utf8_lossy(old_path),
                             String::from_utf8_lossy(&path)
                         )
@@ -541,7 +558,7 @@ pub(crate) fn status(
                     format!(
                         "{}{} {}",
                         state.index_status,
-                        state.worktree_status,
+                        worktree_status,
                         String::from_utf8_lossy(&path)
                     )
                 };
@@ -580,6 +597,7 @@ struct StatusPathState {
     worktree_status: char,
     old_path: Option<Vec<u8>>,
     similarity: Option<u8>,
+    submodule: Option<StatusSubmoduleState>,
 }
 
 impl Default for StatusPathState {
@@ -589,7 +607,52 @@ impl Default for StatusPathState {
             worktree_status: ' ',
             old_path: None,
             similarity: None,
+            submodule: None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StatusSubmoduleState {
+    commit_changed: bool,
+    modified: bool,
+    untracked: bool,
+}
+
+impl StatusSubmoduleState {
+    fn v2_flags(self) -> String {
+        format!(
+            "S{}{}{}",
+            if self.commit_changed { 'C' } else { '.' },
+            if self.modified { 'M' } else { '.' },
+            if self.untracked { 'U' } else { '.' }
+        )
+    }
+
+    fn short_worktree_status(self) -> char {
+        if self.commit_changed {
+            'M'
+        } else if self.modified {
+            'm'
+        } else if self.untracked {
+            '?'
+        } else {
+            ' '
+        }
+    }
+
+    fn human_suffix(self) -> Option<String> {
+        let mut parts = Vec::new();
+        if self.commit_changed {
+            parts.push("new commits");
+        }
+        if self.modified {
+            parts.push("modified content");
+        }
+        if self.untracked {
+            parts.push("untracked content");
+        }
+        (!parts.is_empty()).then(|| format!(" ({})", parts.join(", ")))
     }
 }
 
@@ -637,12 +700,17 @@ fn print_porcelain_v2_status(
                     ),
                 ));
             }
+            let submodule = state
+                .submodule
+                .map(StatusSubmoduleState::v2_flags)
+                .unwrap_or_else(|| "N...".to_owned());
             Ok((
                 path.clone(),
                 format!(
-                    "1 {}{} N... {} {} {} {} {} {}",
+                    "1 {}{} {} {} {} {} {} {} {}",
                     status_v2_code(state.index_status),
                     status_v2_code(state.worktree_status),
+                    submodule,
                     metadata.head_mode,
                     metadata.index_mode,
                     metadata.worktree_mode,
@@ -859,6 +927,87 @@ fn parse_status_column_value(value: &str) -> Result<bool> {
         }
     }
     Ok(enabled)
+}
+
+fn apply_status_submodule_worktree_states(
+    repo: &GitRepo,
+    index: &GitIndex,
+    paths: &mut HashMap<Vec<u8>, StatusPathState>,
+    ignore_mode: StatusIgnoreSubmodulesMode,
+) -> Result<()> {
+    for entry in index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0 && entry.mode == IndexMode::Gitlink)
+    {
+        let submodule_path = repo
+            .root
+            .join(String::from_utf8_lossy(&entry.path).as_ref());
+        let Some(state) = status_submodule_state(&submodule_path, entry, ignore_mode)? else {
+            continue;
+        };
+        let path_state = paths.entry(entry.path.to_vec()).or_default();
+        path_state.worktree_status = 'M';
+        path_state.submodule = Some(state);
+    }
+    Ok(())
+}
+
+fn status_submodule_state(
+    submodule_path: &Path,
+    entry: &IndexEntry,
+    ignore_mode: StatusIgnoreSubmodulesMode,
+) -> Result<Option<StatusSubmoduleState>> {
+    if ignore_mode == StatusIgnoreSubmodulesMode::All {
+        return Ok(None);
+    }
+    let Some(submodule_repo) = exact_repo_at(submodule_path) else {
+        return Ok(None);
+    };
+    let refs = RefStore::new(&submodule_repo.git_dir, GitHashAlgorithm::Sha1);
+    let commit_changed = refs.resolve("HEAD").is_ok_and(|head| head != entry.id);
+    let submodule_index = read_repo_index(&submodule_repo)?;
+    let runtime = CliPrimitiveRuntime::new_default(&submodule_repo);
+    let head_tree =
+        read_head_tree_id_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let index_dirty = !status_head_index_diff(
+        runtime.object_store_adapter(),
+        head_tree.as_ref(),
+        &submodule_index,
+        true,
+    )?
+    .is_empty();
+    let worktree_dirty = !worktree_status(&submodule_repo, &submodule_index)?.is_empty();
+    let modified = index_dirty || worktree_dirty;
+    let tracked_paths = tracked_path_set(&submodule_index);
+    let ignore = status_excludes(&submodule_repo)?;
+    let untracked = !untracked_files_with_mode(
+        &submodule_repo.root,
+        &tracked_paths,
+        &ignore,
+        UntrackedMode::Normal,
+    )?
+    .is_empty();
+
+    let state = match ignore_mode {
+        StatusIgnoreSubmodulesMode::None => StatusSubmoduleState {
+            commit_changed,
+            modified,
+            untracked,
+        },
+        StatusIgnoreSubmodulesMode::Dirty => StatusSubmoduleState {
+            commit_changed,
+            modified: false,
+            untracked: false,
+        },
+        StatusIgnoreSubmodulesMode::Untracked => StatusSubmoduleState {
+            commit_changed,
+            modified,
+            untracked: false,
+        },
+        StatusIgnoreSubmodulesMode::All => unreachable!("handled before inspecting submodule"),
+    };
+    Ok((state.commit_changed || state.modified || state.untracked).then_some(state))
 }
 
 fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
@@ -1082,6 +1231,29 @@ impl IgnoredMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusIgnoreSubmodulesMode {
+    None,
+    All,
+    Dirty,
+    Untracked,
+}
+
+impl StatusIgnoreSubmodulesMode {
+    fn parse(value: Option<&str>) -> Result<Self> {
+        match value {
+            None => Ok(Self::None),
+            Some("all") | Some("") => Ok(Self::All),
+            Some("dirty") => Ok(Self::Dirty),
+            Some("untracked") => Ok(Self::Untracked),
+            Some(value) => Err(CliError::Fatal {
+                code: 128,
+                message: format!("Invalid ignore-submodules mode '{value}'"),
+            }),
+        }
+    }
+}
+
 fn print_human_status(
     repo: &GitRepo,
     paths: &HashMap<Vec<u8>, StatusPathState>,
@@ -1121,7 +1293,7 @@ fn print_human_status(
     let mut worktree = paths
         .iter()
         .filter(|(_, state)| state.worktree_status != ' ')
-        .map(|(path, state)| (path.clone(), state.worktree_status))
+        .map(|(path, state)| (path.clone(), state.worktree_status, state.submodule))
         .collect::<Vec<_>>();
     staged.sort_by(|left, right| left.0.cmp(&right.0));
     worktree.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1156,17 +1328,24 @@ fn print_human_status(
             println!();
         }
         println!("Changes not staged for commit:");
-        if worktree.iter().any(|(_, status)| *status == 'D') {
+        if worktree.iter().any(|(_, status, _)| *status == 'D') {
             println!("  (use \"git add/rm <file>...\" to update what will be committed)");
         } else {
             println!("  (use \"git add <file>...\" to update what will be committed)");
         }
         println!("  (use \"git restore <file>...\" to discard changes in working directory)");
-        for (path, status) in &worktree {
+        if worktree.iter().any(|(_, _, submodule)| submodule.is_some()) {
+            println!("  (commit or discard the untracked or modified content in submodules)");
+        }
+        for (path, status, submodule) in &worktree {
+            let suffix = submodule
+                .and_then(StatusSubmoduleState::human_suffix)
+                .unwrap_or_default();
             println!(
-                "\t{:<12}{}",
+                "\t{:<12}{}{}",
                 human_status_label(*status),
-                String::from_utf8_lossy(path)
+                String::from_utf8_lossy(path),
+                suffix
             );
         }
         printed_body = true;
@@ -1557,7 +1736,7 @@ fn collect_untracked_files(
             continue;
         }
         if metadata.is_dir() {
-            if mode == UntrackedMode::Directory && tracked_paths.contains(relative.as_slice()) {
+            if tracked_paths.contains(relative.as_slice()) {
                 continue;
             }
             if mode == UntrackedMode::All || tracked_paths_under(tracked_paths, &relative) {
@@ -8128,6 +8307,7 @@ fn stash_apply(
             None,
             false,
             true,
+            None,
             false,
             false,
             None,

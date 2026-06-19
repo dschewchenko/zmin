@@ -128,13 +128,17 @@ Recently closed replacement gaps:
 - `status --renames`, `status --no-renames`, `status --find-renames`, and
   `status --find-renames=<n>` match stock Git for staged exact renames across
   human, porcelain v1/v2, and short forms
+- `status --ignore-submodules`, `status --ignore-submodules=all`,
+  `status --ignore-submodules=dirty`, and
+  `status --ignore-submodules=untracked` match stock Git for dirty, untracked
+  and new-commit submodule states across human, porcelain v1/v2 and short forms
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
 - Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `48`
-  rows: `38` closed, `2` partial, `4` open, and `4` invalid-input.
+  rows: `42` closed, `2` partial, `0` open and `4` invalid-input.
 - Variant inventory: the 2026-06-19 raw hard-fail scan has `132`
   `unsupported` / `not supported yet` / `not implemented yet` code hits to
   classify before any global percentage is honest.

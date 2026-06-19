@@ -148,37 +148,45 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-Zmin exposes every command entry point from Git `2.47`. That is an entry-point
-check, not full compatibility. Full compatibility is counted by behavior
-variants: command, option, value, option combination, repository state,
-transport and platform.
+Zmin exposes every command entry point from Git `2.47`. That is not full Git
+compatibility. Full compatibility is counted by behavior variants: command,
+option, value, option combination, repository state, transport and platform.
 
-| Git reference group | Git commands | Zmin entry points wired | Verified Git-parity variants |
-| --- | ---: | ---: | ---: |
-| Setup and Config | `6` | `6` | `0` |
-| Getting and Creating Projects | `2` | `2` | `2` |
-| Basic Snapshotting | `9` | `9` | `46` |
-| Branching and Merging | `9` | `9` | `30` |
-| Sharing and Updating Projects | `5` | `5` | `0` |
-| Inspection and Comparison | `7` | `7` | `8` |
-| Patching | `5` | `5` | `0` |
-| Debugging | `3` | `3` | `52` |
-| Email | `6` | `6` | `0` |
-| External Systems | `2` | `2` | `0` |
-| Administration | `8` | `8` | `17` |
-| Server Admin | `2` | `2` | `0` |
-| Plumbing Commands | `20` | `20` | `0` |
-| Other Git `2.47` commands | `71` | `71` | `4` |
-| **Git `2.47` total** | **`151`** | **`151`** | **`159`** |
+| Git reference group | Git commands | Zmin entry points wired | Git doc option seed rows | Audited closed behavior variants |
+| --- | ---: | ---: | ---: | ---: |
+| Setup and Config | `6` | `6` | `76` | `0` |
+| Getting and Creating Projects | `2` | `2` | `57` | `2` |
+| Basic Snapshotting | `9` | `9` | `252` | `50` |
+| Branching and Merging | `9` | `9` | `267` | `30` |
+| Sharing and Updating Projects | `5` | `5` | `119` | `0` |
+| Inspection and Comparison | `7` | `7` | `108` | `8` |
+| Patching | `5` | `5` | `179` | `0` |
+| Debugging | `3` | `3` | `127` | `52` |
+| Email | `6` | `6` | `229` | `0` |
+| External Systems | `2` | `2` | `95` | `0` |
+| Administration | `8` | `8` | `134` | `17` |
+| Server Admin | `2` | `2` | `28` | `0` |
+| Plumbing Commands | `20` | `20` | `332` | `0` |
+| Other Git `2.47` commands | `71` | `71` | `600` | `4` |
+| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`163`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
-Do not read command inventory as support percentage. The full Git `2.47`
-option/value matrix is still being enumerated from Git documentation, stock Git
-help output and upstream Git tests. A global percentage will be published only
-after that denominator is complete.
+Do not read command inventory or doc option rows as a support percentage. The
+option rows are a seed extracted from Git `2.47.1` docs. They still need to be
+split into values, negations, repeated options, order-sensitive combinations,
+repository states, transports and platforms.
+
+Current command-level matrices:
+
+| Command | Rows | Closed | Partial | Open | Invalid input | Closed rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `status` | `48` | `42` | `2` | `0` | `4` | `87.5%` |
+
+A global percentage will be published only after every Git `2.47.1` command has
+the same option/value/state matrix.
 
 <details>
 <summary>Commands counted in each group</summary>
