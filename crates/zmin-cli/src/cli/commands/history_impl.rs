@@ -1549,10 +1549,12 @@ struct BlameOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BlameDateMode {
     Iso,
+    IsoStrict,
     Default,
     Short,
     Raw,
     Unix,
+    Rfc2822,
 }
 
 #[derive(Debug, Clone)]
@@ -1787,10 +1789,12 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
 fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
     match value {
         "iso" => Ok(BlameDateMode::Iso),
+        "iso-strict" => Ok(BlameDateMode::IsoStrict),
         "default" => Ok(BlameDateMode::Default),
         "short" => Ok(BlameDateMode::Short),
         "raw" => Ok(BlameDateMode::Raw),
         "unix" => Ok(BlameDateMode::Unix),
+        "rfc" | "rfc2822" => Ok(BlameDateMode::Rfc2822),
         _ => Err(CliError::Fatal {
             code: 129,
             message: format!("unsupported blame date mode '{value}'"),
@@ -2082,7 +2086,11 @@ fn print_blame_lines(
         if options.show_number {
             print!(" {}", line.line_no);
         }
-        print!(" ({author} {date} {}) ", line.line_no);
+        if options.date_mode == BlameDateMode::IsoStrict {
+            print!(" ({author} {date:<25} {}) ", line.line_no);
+        } else {
+            print!(" ({author} {date} {}) ", line.line_no);
+        }
         io::stdout().write_all(&line.content)?;
         if !line.content.ends_with(b"\n") {
             println!();
@@ -2094,6 +2102,7 @@ fn print_blame_lines(
 fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
     match mode {
         BlameDateMode::Iso => signature_blame_date(signature),
+        BlameDateMode::IsoStrict => signature_strict_blame_date(signature),
         BlameDateMode::Default => signature_log_date(signature),
         BlameDateMode::Short => {
             let (timestamp, timezone) =
@@ -2128,7 +2137,27 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
                 })?;
             Ok(timestamp.to_string())
         }
+        BlameDateMode::Rfc2822 => signature_mail_date(signature),
     }
+}
+
+fn signature_strict_blame_date(signature: &[u8]) -> Result<String> {
+    let (timestamp, timezone) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid author date".into(),
+        })?;
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid author timezone".into(),
+    })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit author timestamp is out of range".into(),
+    })?;
+    Ok(utc
+        .with_timezone(&offset)
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
 fn print_annotate_lines(
