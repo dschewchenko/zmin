@@ -156,11 +156,19 @@ fn for_each_ref_date_atoms_match_stock_git() {
     for (pattern, format) in [
         (
             "refs/heads",
+            "%(refname:short)|%(authorname)|%(authoremail)|%(authordate)|%(authordate:unix)|%(authordate:raw)|%(authordate:iso)|%(authordate:iso-strict)|%(authordate:rfc)|%(authordate:rfc2822)|%(authordate:short)",
+        ),
+        (
+            "refs/heads",
             "%(refname:short)|%(committerdate)|%(committerdate:unix)|%(committerdate:raw)|%(committerdate:iso)|%(committerdate:iso-strict)|%(committerdate:rfc)|%(committerdate:rfc2822)|%(committerdate:short)",
         ),
         (
             "refs/tags",
             "%(refname:short)|%(taggerdate)|%(taggerdate:unix)|%(taggerdate:raw)|%(taggerdate:iso)|%(taggerdate:iso-strict)|%(taggerdate:rfc)|%(taggerdate:rfc2822)|%(taggerdate:short)",
+        ),
+        (
+            "refs/tags",
+            "%(refname:short)|%(authorname)|%(authoremail)|%(authordate)|%(authordate:unix)|%(authordate:raw)|%(authordate:iso)|%(authordate:iso-strict)|%(authordate:rfc)|%(authordate:rfc2822)|%(authordate:short)",
         ),
     ] {
         assert_eq!(
