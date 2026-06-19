@@ -232,6 +232,16 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
         ["blame", "--show-number", "--no-show-number", "a.txt"].as_slice(),
         ["blame", "--no-show-email", "a.txt"].as_slice(),
         ["blame", "--show-email", "--no-show-email", "a.txt"].as_slice(),
+        ["blame", "--no-progress", "a.txt"].as_slice(),
+        ["blame", "--progress", "--no-progress", "a.txt"].as_slice(),
+        ["blame", "--no-score-debug", "a.txt"].as_slice(),
+        ["blame", "--score-debug", "--no-score-debug", "a.txt"].as_slice(),
+        ["blame", "--no-color-lines", "a.txt"].as_slice(),
+        ["blame", "--color-lines", "--no-color-lines", "a.txt"].as_slice(),
+        ["blame", "--no-color-by-age", "a.txt"].as_slice(),
+        ["blame", "--color-by-age", "--no-color-by-age", "a.txt"].as_slice(),
+        ["blame", "--no-minimal", "a.txt"].as_slice(),
+        ["blame", "--minimal", "--no-minimal", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

@@ -45,6 +45,9 @@ Recently closed replacement gaps:
   supported blame surface; `--root --no-root` remains a separate nuanced case
 - `blame --no-abbrev` renders the full object id width and respects later
   `--abbrev=N` overrides like stock Git
+- final-disabled blame mode toggles match stock Git for progress, score debug,
+  color lines, color by age, and minimal modes; enabled modes remain open until
+  their output behavior is implemented
 - `init -q` and `init --quiet` suppress initialization output like stock Git
 - `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
   accepted and render the matching combined diff form

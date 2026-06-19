@@ -1649,6 +1649,11 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut abbrev_width = None;
     let mut date_mode = BlameDateMode::Iso;
     let mut ignore_whitespace = false;
+    let mut progress = false;
+    let mut score_debug = false;
+    let mut color_lines = false;
+    let mut color_by_age = false;
+    let mut minimal = false;
     let mut line_range = None;
     let mut positionals = Vec::new();
     let mut after_separator = false;
@@ -1692,6 +1697,16 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "--show-stats" => show_stats = true,
                 "--no-show-stats" => show_stats = false,
                 "-w" => ignore_whitespace = true,
+                "--progress" => progress = true,
+                "--no-progress" => progress = false,
+                "--score-debug" => score_debug = true,
+                "--no-score-debug" => score_debug = false,
+                "--color-lines" => color_lines = true,
+                "--no-color-lines" => color_lines = false,
+                "--color-by-age" => color_by_age = true,
+                "--no-color-by-age" => color_by_age = false,
+                "--minimal" => minimal = true,
+                "--no-minimal" => minimal = false,
                 "-M" | "-C" | "--find-renames" | "--find-copies" => {}
                 "--contents" => {
                     cursor += 1;
@@ -1786,6 +1801,20 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         }
         positionals.push(arg.clone());
         cursor += 1;
+    }
+    for (enabled, option) in [
+        (progress, "--progress"),
+        (score_debug, "--score-debug"),
+        (color_lines, "--color-lines"),
+        (color_by_age, "--color-by-age"),
+        (minimal, "--minimal"),
+    ] {
+        if enabled {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: format!("unsupported blame option '{option}'"),
+            });
+        }
     }
     let path = match positionals.as_slice() {
         [path] => path.clone(),
