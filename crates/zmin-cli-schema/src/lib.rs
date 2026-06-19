@@ -851,7 +851,16 @@ pub enum Command {
         show_stash: bool,
         #[arg(long = "no-show-stash", overrides_with = "show_stash", action = ArgAction::SetTrue)]
         no_show_stash: bool,
-        #[arg(short = 's', long = "short", action = ArgAction::SetTrue)]
+        #[arg(long = "long", overrides_with = "short", action = ArgAction::SetTrue)]
+        long: bool,
+        #[arg(long = "no-long", overrides_with = "short", action = ArgAction::SetTrue)]
+        no_long: bool,
+        #[arg(
+            short = 's',
+            long = "short",
+            overrides_with_all = ["long", "no_long"],
+            action = ArgAction::SetTrue
+        )]
         short: bool,
         #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
         null: bool,

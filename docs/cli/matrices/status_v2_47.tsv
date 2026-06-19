@@ -26,8 +26,8 @@ Basic Snapshotting	status	--ignored	no	--porcelain=v1	ignored files/directories	
 Basic Snapshotting	status	<pathspec>	path	--porcelain=v1	dirty/untracked under path	local	all	git status --porcelain=v1 -- <path>	partial	git_global_cli_compat pathspec tests	needs status-specific matrix rows for magic/pathspecs
 Basic Snapshotting	status	--verbose	<empty>	<none>	dirty/staged	local	all	git status --verbose	open	not accepted by schema	also short -v
 Basic Snapshotting	status	--no-verbose	<empty>	<none>	dirty/staged	local	all	git status --no-verbose	open	not accepted by schema	reset form
-Basic Snapshotting	status	--long	<empty>	<none>	dirty/untracked	local	all	git status --long	open	not accepted by schema	default long mode explicit spelling
-Basic Snapshotting	status	--no-long	<empty>	<none>	dirty/untracked	local	all	git status --no-long	open	not accepted by schema	final mode should select short/porcelain behavior per stock Git
+Basic Snapshotting	status	--long	<empty>	--short	dirty/staged	local	all	git status --long	closed	git_status_compat::status_long_mode_toggles_match_stock_git	default long mode explicit spelling; resets earlier --short
+Basic Snapshotting	status	--no-long	<empty>	--short	dirty/staged	local	all	git status --no-long	closed	git_status_compat::status_long_mode_toggles_match_stock_git	same long output as stock Git; resets earlier --short
 Basic Snapshotting	status	--show-stash	<empty>	human/porcelain v2	stash exists	local	all	git status --show-stash	closed	git_status_compat::status_show_stash_matches_stock_git	human prints stash count; porcelain v2 prints # stash N
 Basic Snapshotting	status	--no-show-stash	<empty>	--show-stash	stash exists	local	all	git status --show-stash --no-show-stash	closed	git_status_compat::status_show_stash_matches_stock_git	toggle reset
 Basic Snapshotting	status	--ahead-behind	<empty>	--porcelain=v2 --branch	upstream ahead/behind	local	all	git status --porcelain=v2 --branch --ahead-behind	closed	git_status_compat::status_branch_reports_upstream_ahead_count	explicit full counts

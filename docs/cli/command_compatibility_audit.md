@@ -113,13 +113,15 @@ Recently closed replacement gaps:
   headers for porcelain v1/v2 with equal and different upstream refs
 - `status --show-stash` and `status --no-show-stash` match stock Git for human
   output, porcelain v2 output and order-sensitive toggle forms
+- `status --long` and `status --no-long` match stock Git's long output and
+  order-sensitive interaction with `--short`
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
 - Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `48`
-  rows: `27` closed, `2` partial, and `19` open.
+  rows: `29` closed, `2` partial, and `17` open.
 - Variant inventory: the 2026-06-19 raw hard-fail scan has `132`
   `unsupported` / `not supported yet` / `not implemented yet` code hits to
   classify before any global percentage is honest.

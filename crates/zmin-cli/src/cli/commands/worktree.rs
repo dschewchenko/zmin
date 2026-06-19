@@ -141,6 +141,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_ahead_behind,
             show_stash,
             no_show_stash,
+            long: _,
+            no_long: _,
             short,
             null,
             ignored,
