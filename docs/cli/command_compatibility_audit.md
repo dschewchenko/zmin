@@ -74,6 +74,8 @@ Recently closed replacement gaps:
 - `reflog expire` applies the default `gc.reflogExpire` policy for current
   explicit refs and matches stock Git for empty args, branch refs, `HEAD`,
   `--updateref`, `--rewrite`, and `--verbose`
+- `reflog --date` supports stock display modes `default`, `local`,
+  `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, and `human`
 - `notes copy --for-rewrite=<command>` follows the configured rewrite gate for
   exact `notes.rewriteRef` refs and implies stdin pair input
 - `notes add --allow-empty` opens the configured editor and writes the edited

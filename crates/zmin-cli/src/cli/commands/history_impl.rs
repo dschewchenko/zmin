@@ -497,23 +497,14 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                 } else if arg == "-h" || arg == "--help" {
                     print!("{}", reflog_show_usage());
                     return Err(CliError::Exit(129));
-                } else if arg == "--date=iso" {
-                    date_mode = ReflogDateMode::Iso;
-                } else if arg == "--date=unix" {
-                    date_mode = ReflogDateMode::Unix;
-                } else if arg == "--date=raw" {
-                    date_mode = ReflogDateMode::Raw;
+                } else if let Some(value) = arg.strip_prefix("--date=") {
+                    date_mode = parse_reflog_date_mode(value)?;
                 } else if arg == "--no-abbrev-commit" {
                     no_abbrev_commit = true;
                 } else if arg == "--date" {
                     return Err(CliError::Fatal {
                         code: 129,
                         message: "reflog --date requires --date=<format>".into(),
-                    });
-                } else if arg.starts_with("--date=") {
-                    return Err(CliError::Fatal {
-                        code: 129,
-                        message: format!("unsupported reflog date format '{arg}'"),
                     });
                 } else if let Some(value) = arg.strip_prefix("--format=") {
                     format = Some(value.to_owned());
@@ -1155,9 +1146,35 @@ fn reflog_object_graph_complete(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReflogDateMode {
     Index,
+    Default,
+    Local,
     Iso,
+    IsoStrict,
+    Rfc2822,
+    Short,
     Unix,
     Raw,
+    Relative,
+    Human,
+}
+
+fn parse_reflog_date_mode(value: &str) -> Result<ReflogDateMode> {
+    match value {
+        "default" => Ok(ReflogDateMode::Default),
+        "local" => Ok(ReflogDateMode::Local),
+        "iso" => Ok(ReflogDateMode::Iso),
+        "iso-strict" => Ok(ReflogDateMode::IsoStrict),
+        "rfc" | "rfc2822" => Ok(ReflogDateMode::Rfc2822),
+        "short" => Ok(ReflogDateMode::Short),
+        "unix" => Ok(ReflogDateMode::Unix),
+        "raw" => Ok(ReflogDateMode::Raw),
+        "relative" => Ok(ReflogDateMode::Relative),
+        "human" => Ok(ReflogDateMode::Human),
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: format!("unsupported reflog date format '--date={value}'"),
+        }),
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1310,9 +1327,16 @@ fn reflog_line_utf8(line: &[u8]) -> Result<&str> {
 fn reflog_selector(index: usize, entry: &ReflogEntry, mode: ReflogDateMode) -> Result<String> {
     match mode {
         ReflogDateMode::Index => Ok(index.to_string()),
+        ReflogDateMode::Default => reflog_default_date(entry),
+        ReflogDateMode::Local => reflog_local_date(entry),
         ReflogDateMode::Iso => reflog_iso_selector(entry.timestamp, &entry.timezone),
+        ReflogDateMode::IsoStrict => reflog_strict_iso_selector(entry.timestamp, &entry.timezone),
+        ReflogDateMode::Rfc2822 => reflog_mail_date(entry),
+        ReflogDateMode::Short => reflog_short_date(entry),
         ReflogDateMode::Unix => Ok(entry.timestamp.to_string()),
         ReflogDateMode::Raw => Ok(format!("{} {}", entry.timestamp, entry.timezone)),
+        ReflogDateMode::Relative => reflog_relative_date(entry.timestamp),
+        ReflogDateMode::Human => reflog_human_date(entry),
     }
 }
 
@@ -1408,6 +1432,144 @@ fn reflog_iso_selector(timestamp: i64, timezone: &str) -> Result<String> {
         .with_timezone(&offset)
         .format("%Y-%m-%d %H:%M:%S %z")
         .to_string())
+}
+
+fn reflog_strict_iso_selector(timestamp: i64, timezone: &str) -> Result<String> {
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "reflog entry has invalid timezone".into(),
+    })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "reflog entry timestamp is out of range".into(),
+    })?;
+    let formatted = utc
+        .with_timezone(&offset)
+        .format("%Y-%m-%dT%H:%M:%S%:z")
+        .to_string();
+    if let Some(prefix) = formatted.strip_suffix("+00:00") {
+        Ok(format!("{prefix}Z"))
+    } else {
+        Ok(formatted)
+    }
+}
+
+fn reflog_mail_date(entry: &ReflogEntry) -> Result<String> {
+    let offset = parse_timezone_offset(&entry.timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "reflog entry has invalid timezone".into(),
+    })?;
+    let utc =
+        chrono::DateTime::from_timestamp(entry.timestamp, 0).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "reflog entry timestamp is out of range".into(),
+        })?;
+    Ok(utc
+        .with_timezone(&offset)
+        .format("%a, %d %b %Y %H:%M:%S %z")
+        .to_string())
+}
+
+fn reflog_short_date(entry: &ReflogEntry) -> Result<String> {
+    let offset = parse_timezone_offset(&entry.timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "reflog entry has invalid timezone".into(),
+    })?;
+    let utc =
+        chrono::DateTime::from_timestamp(entry.timestamp, 0).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "reflog entry timestamp is out of range".into(),
+        })?;
+    Ok(utc.with_timezone(&offset).format("%Y-%m-%d").to_string())
+}
+
+fn reflog_local_date(entry: &ReflogEntry) -> Result<String> {
+    let utc =
+        chrono::DateTime::from_timestamp(entry.timestamp, 0).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "reflog entry timestamp is out of range".into(),
+        })?;
+    Ok(utc
+        .with_timezone(&chrono::Local)
+        .format("%a %b %-d %H:%M:%S %Y")
+        .to_string())
+}
+
+fn reflog_relative_date(timestamp: i64) -> Result<String> {
+    let now = git_test_date_now().unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+            .unwrap_or(0)
+    });
+    Ok(relative_date_from_timestamps(timestamp, now))
+}
+
+fn relative_date_from_timestamps(timestamp: i64, now: i64) -> String {
+    if now < timestamp {
+        return "in the future".to_owned();
+    }
+    let mut diff = now - timestamp;
+    if diff < 90 {
+        return plural_blame_date(diff, "second");
+    }
+    diff = (diff + 30) / 60;
+    if diff < 90 {
+        return plural_blame_date(diff, "minute");
+    }
+    diff = (diff + 30) / 60;
+    if diff < 36 {
+        return plural_blame_date(diff, "hour");
+    }
+    diff = (diff + 12) / 24;
+    if diff < 14 {
+        return plural_blame_date(diff, "day");
+    }
+    if diff < 70 {
+        return plural_blame_date((diff + 3) / 7, "week");
+    }
+    if diff < 365 {
+        return plural_blame_date((diff + 15) / 30, "month");
+    }
+    if diff < 1825 {
+        let total_months = (diff * 12 * 2 + 365) / (365 * 2);
+        let years = total_months / 12;
+        let months = total_months % 12;
+        if months == 0 {
+            return plural_blame_date(years, "year");
+        }
+        let year_unit = if years == 1 { "year" } else { "years" };
+        let month_unit = if months == 1 { "month" } else { "months" };
+        return format!("{years} {year_unit}, {months} {month_unit} ago");
+    }
+    plural_blame_date((diff + 183) / 365, "year")
+}
+
+fn reflog_human_date(entry: &ReflogEntry) -> Result<String> {
+    let offset = parse_timezone_offset(&entry.timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "reflog entry has invalid timezone".into(),
+    })?;
+    let utc =
+        chrono::DateTime::from_timestamp(entry.timestamp, 0).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "reflog entry timestamp is out of range".into(),
+        })?;
+    let entry_time = utc.with_timezone(&offset);
+    let now = git_test_date_now()
+        .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+        .map(|timestamp| timestamp.with_timezone(&offset))
+        .unwrap_or_else(|| chrono::Local::now().with_timezone(&offset));
+    if entry_time.year() == now.year() && entry_time.month() == now.month() {
+        if entry_time.day() + 5 > now.day() {
+            return Ok(entry_time.format("%a %H:%M %z").to_string());
+        }
+        return Ok(entry_time.format("%b %-d %H:%M").to_string());
+    }
+    if entry_time.year() == now.year() {
+        return Ok(entry_time.format("%b %-d %H:%M").to_string());
+    }
+    Ok(entry_time.format("%b %-d %Y").to_string())
 }
 
 fn reflog_path(repo: &GitRepo, ref_name: &str) -> Result<PathBuf> {

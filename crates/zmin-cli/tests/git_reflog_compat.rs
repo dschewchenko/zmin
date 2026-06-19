@@ -40,6 +40,32 @@ fn reflog_show_list_and_exists_match_stock_git() {
 }
 
 #[test]
+fn reflog_show_date_modes_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+    let env = [("GIT_TEST_DATE_NOW", "1700003600")];
+
+    for args in [
+        ["reflog", "--date=default"].as_slice(),
+        ["reflog", "--date=local"].as_slice(),
+        ["reflog", "--date=iso-strict"].as_slice(),
+        ["reflog", "--date=rfc"].as_slice(),
+        ["reflog", "--date=rfc2822"].as_slice(),
+        ["reflog", "--date=short"].as_slice(),
+        ["reflog", "--date=relative"].as_slice(),
+        ["reflog", "--date=human"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output_with_env(zmin_bin(), repo.path(), args, &env, "zmin"),
+            command_output_with_env("git", repo.path(), args, &env, "git"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn reflog_subcommand_help_matches_stock_git_exit_shape() {
     let repo = git_init();
 
