@@ -148,17 +148,23 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-The command-name inventory is complete for the tracked Git baselines. Full Git
-compatibility also requires option, mode, repository-state and transport
-variants to match stock Git. That deeper denominator is still being audited for
-the preview.
+The command-name inventory is complete for the tracked Git baselines. Argument
+counts below come from the live Zmin CLI schema, so they prove parser coverage
+for that schema, not full behavior parity. Full Git compatibility also requires
+option combinations, modes, repository states and transports to match stock Git;
+that upstream denominator is still being counted.
 
-| Area | Coverage | Meaning |
-| --- | ---: | --- |
-| Git `2.32` command names | `145/145` | every tracked command name is present |
-| Git `2.47` command names | `151/151` | every tracked command name is present |
-| Audited behavior variants | `88/88` | tested option or workflow variants that currently match stock Git |
-| Global option/workflow parity | not published | still being counted; do not treat command-name coverage as full Git compatibility |
+| Counted set | Counted from | Total | Supported | Coverage |
+| --- | --- | ---: | ---: | ---: |
+| Git `2.32` command names | tracked Git command list | `145` | `145` | `100%` |
+| Git `2.47` command names | tracked Git command list | `151` | `151` | `100%` |
+| Git `2.47` baseline argument entries | Zmin CLI schema for baseline commands | `1264` | `1264` | `100%` |
+| Git `2.47` baseline option/positional spellings | Zmin CLI schema for baseline commands | `1506` | `1506` | `100%` |
+| Full Zmin command surface | Zmin CLI schema | `203` | `203` | `100%` |
+| Full Zmin argument entries | Zmin CLI schema | `1393` | `1393` | `100%` |
+| Full Zmin option/positional spellings | Zmin CLI schema | `1652` | `1652` | `100%` |
+| Audited behavior variants | tested option/workflow variants | `100` | `100` | `100%` |
+| Global upstream Git option/workflow parity | upstream Git behavior audit | not published | not published | not published |
 
 Command-name coverage by reference group:
 

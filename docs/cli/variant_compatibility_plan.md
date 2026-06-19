@@ -44,8 +44,9 @@ Examples:
 | `notes remove` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `stash list` reflog/signature format atoms | `6` | `0` | `%gN`, `%gE`, `%gn`, `%ge`, `%GS`, `%GG` |
+| `stash list` literal-preserved format atoms | `12` | `0` | `%r`, `%R`, `%q`, `%Q`, `%z`, `%gL`, `%gI`, `%gq`, `%gZ`, `%aZ`, `%cZ`, `%GZ` |
 
-Tracked closed blocks in this table: `88/88` variants.
+Tracked closed blocks in this table: `100/100` variants.
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.

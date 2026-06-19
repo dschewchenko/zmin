@@ -68,6 +68,9 @@ Recently closed replacement gaps:
   `%%`, `%n`, and `%xNN`
 - `stash list --format` also supports reflog identity atoms `%gN`, `%gE`,
   `%gn`, `%ge`, plus unsigned signature text atoms `%GS` and `%GG`
+- `stash list --format` preserves simple unknown atoms as literals like stock
+  Git for `%r`, `%R`, `%q`, `%Q`, `%z`, `%gL`, `%gI`, `%gq`, `%gZ`, `%aZ`,
+  `%cZ`, and `%GZ`
 - `notes copy --for-rewrite=<command>` follows the configured rewrite gate for
   exact `notes.rewriteRef` refs and implies stdin pair input
 - `notes add --allow-empty` opens the configured editor and writes the edited

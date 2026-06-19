@@ -6736,11 +6736,7 @@ fn render_stash_list_format(
                     'N' | 'n' => out.push_str(&signature_name(entry.reflog_identity.as_bytes())),
                     'E' | 'e' => out.push_str(&signature_email(entry.reflog_identity.as_bytes())),
                     'K' => out.push_str("%gK"),
-                    _ => {
-                        return Err(unsupported_stash_list_format_atom(&format!(
-                            "%g{reflog_atom}"
-                        )));
-                    }
+                    _ => stash_format_literal_atom(&mut out, "g", reflog_atom),
                 }
             }
             'x' => {
@@ -6772,7 +6768,7 @@ fn render_stash_list_format(
                     'i' => out.push_str(&signature_blame_date(&commit.author)?),
                     'I' => out.push_str(&signature_strict_iso_date(&commit.author)?),
                     's' => out.push_str(&signature_short_date(&commit.author)?),
-                    _ => return Err(unsupported_stash_list_format_atom(&format!("%a{next}"))),
+                    _ => stash_format_literal_atom(&mut out, "a", next),
                 }
             }
             'c' => {
@@ -6795,7 +6791,7 @@ fn render_stash_list_format(
                     'i' => out.push_str(&signature_blame_date(&commit.committer)?),
                     'I' => out.push_str(&signature_strict_iso_date(&commit.committer)?),
                     's' => out.push_str(&signature_short_date(&commit.committer)?),
-                    _ => return Err(unsupported_stash_list_format_atom(&format!("%c{next}"))),
+                    _ => stash_format_literal_atom(&mut out, "c", next),
                 }
             }
             'G' => {
@@ -6806,13 +6802,22 @@ fn render_stash_list_format(
                     '?' => out.push('N'),
                     'K' | 'F' | 'P' | 'S' | 'G' => {}
                     'T' => out.push_str("undefined"),
-                    _ => return Err(unsupported_stash_list_format_atom(&format!("%G{next}"))),
+                    _ => stash_format_literal_atom(&mut out, "G", next),
                 }
             }
-            _ => return Err(unsupported_stash_list_format_atom(&format!("%{atom}"))),
+            'C' | 'w' | '<' | '>' => {
+                return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+            }
+            _ => stash_format_literal_atom(&mut out, "", atom),
         }
     }
     Ok(out)
+}
+
+fn stash_format_literal_atom(out: &mut String, prefix: &str, atom: char) {
+    out.push('%');
+    out.push_str(prefix);
+    out.push(atom);
 }
 
 fn stash_format_body(message: &[u8]) -> String {
