@@ -415,7 +415,10 @@ pub(crate) fn set_submodule_branch(args: &[String]) -> Result<()> {
     let modules = selected_gitmodules(&repo, &paths)?;
     let module = modules.first().ok_or_else(|| CliError::Fatal {
         code: 128,
-        message: format!("no submodule mapping found in .gitmodules for path '{}'", paths[0]),
+        message: format!(
+            "no submodule mapping found in .gitmodules for path '{}'",
+            paths[0]
+        ),
     })?;
     let gitmodules = repo.root.join(".gitmodules");
     let key = format!("submodule.{}.branch", module.name);
@@ -439,7 +442,10 @@ pub(crate) fn set_submodule_url(args: &[String]) -> Result<()> {
     let modules = selected_gitmodules(&repo, &[values[0].clone()])?;
     let module = modules.first().ok_or_else(|| CliError::Fatal {
         code: 128,
-        message: format!("no submodule mapping found in .gitmodules for path '{}'", values[0]),
+        message: format!(
+            "no submodule mapping found in .gitmodules for path '{}'",
+            values[0]
+        ),
     })?;
     let resolved_url = resolve_submodule_set_url(&repo, &values[1])?;
     set_config_value_in_file(
@@ -468,24 +474,31 @@ enum SubmoduleSummaryMode {
 struct SubmoduleSummaryOptions {
     mode: SubmoduleSummaryMode,
     summary_limit: usize,
+    positionals: Vec<String>,
     paths: Vec<String>,
 }
 
 pub(crate) fn summary_submodules(args: &[String]) -> Result<()> {
     let options = parse_submodule_summary_options(args)?;
     let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let (commit, paths) = submodule_summary_commit_and_paths(&repo, &store, &options)?;
     let index = read_repo_index(&repo)?;
-    let head_index = if options.mode != SubmoduleSummaryMode::Files {
-        Some(read_head_index(&repo)?)
+    let base_index = if options.mode != SubmoduleSummaryMode::Files {
+        Some(submodule_summary_base_index(
+            &repo,
+            &store,
+            commit.as_deref(),
+        )?)
     } else {
         None
     };
-    let modules = selected_gitmodules(&repo, &options.paths)?;
+    let modules = selected_gitmodules(&repo, &paths)?;
     for module in modules {
         let path = repo.root.join(&module.path);
         let path_bytes = module.path.as_bytes();
-        let old_id = if let Some(head_index) = head_index.as_ref() {
-            find_index_entry(head_index, path_bytes)
+        let old_id = if let Some(base_index) = base_index.as_ref() {
+            find_index_entry(base_index, path_bytes)
                 .map(|entry| entry.id.clone())
                 .unwrap_or_else(zero_object_id)
         } else {
@@ -512,9 +525,50 @@ pub(crate) fn summary_submodules(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn submodule_summary_commit_and_paths(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    options: &SubmoduleSummaryOptions,
+) -> Result<(Option<String>, Vec<String>)> {
+    let Some(first) = options.positionals.first() else {
+        return Ok((None, options.paths.clone()));
+    };
+    if submodule_summary_resolves_treeish(repo, store, first) {
+        let mut paths = options.positionals[1..].to_vec();
+        paths.extend(options.paths.iter().cloned());
+        Ok((Some(first.clone()), paths))
+    } else {
+        let mut paths = options.positionals.clone();
+        paths.extend(options.paths.iter().cloned());
+        Ok((None, paths))
+    }
+}
+
+fn submodule_summary_resolves_treeish(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    value: &str,
+) -> bool {
+    let tree_cache = TreeObjectCache::new(store);
+    read_treeish_index_cached(repo, store, &tree_cache, value).is_ok()
+}
+
+fn submodule_summary_base_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: Option<&str>,
+) -> Result<GitIndex> {
+    let Some(commit) = commit else {
+        return read_head_index(repo);
+    };
+    let tree_cache = TreeObjectCache::new(store);
+    read_treeish_index_cached(repo, store, &tree_cache, commit)
+}
+
 fn parse_submodule_summary_options(args: &[String]) -> Result<SubmoduleSummaryOptions> {
     let mut mode = SubmoduleSummaryMode::Worktree;
     let mut summary_limit = 10usize;
+    let mut positionals = Vec::new();
     let mut paths = Vec::new();
     let mut path_args = false;
     let mut cursor = 0usize;
@@ -543,14 +597,17 @@ fn parse_submodule_summary_options(args: &[String]) -> Result<SubmoduleSummaryOp
                 code: 129,
                 message: format!("unsupported submodule summary option '{arg}'"),
             });
-        } else {
+        } else if path_args {
             paths.push(arg.clone());
+        } else {
+            positionals.push(arg.clone());
         }
         cursor += 1;
     }
     Ok(SubmoduleSummaryOptions {
         mode,
         summary_limit,
+        positionals,
         paths,
     })
 }
@@ -579,7 +636,7 @@ fn print_submodule_summary(
         commits.len()
     );
     let commit_cache = CommitObjectCache::new(&store);
-    for id in commits.iter().take(summary_limit) {
+    for id in commits.iter().rev().take(summary_limit) {
         let commit = commit_cache.read_commit(id)?;
         println!("  > {}", commit_subject(&commit.message));
     }
@@ -787,7 +844,10 @@ fn update_submodule_remote_head(
             });
         };
         let source = local_clone_source(&remote_path)?;
-        copy_dir_contents(&source.common_dir.join("objects"), &submodule_repo.objects_dir)?;
+        copy_dir_contents(
+            &source.common_dir.join("objects"),
+            &submodule_repo.objects_dir,
+        )?;
         source_refs = Some(RefStore::new(&source.git_dir, GitHashAlgorithm::Sha1));
     }
     let branch = match configured_submodule_remote_branch(repo, module)? {
@@ -890,10 +950,7 @@ fn default_submodule_remote_tracking_branch(refs: &RefStore) -> Result<String> {
         Ok(RefTarget::Direct(id)) => {
             let mut branch = None;
             refs.for_each_resolved_ref("refs/remotes/origin/", |ref_name, ref_id| {
-                if branch.is_none()
-                    && ref_name != "refs/remotes/origin/HEAD"
-                    && ref_id == &id
-                {
+                if branch.is_none() && ref_name != "refs/remotes/origin/HEAD" && ref_id == &id {
                     branch = ref_name
                         .strip_prefix("refs/remotes/origin/")
                         .map(str::to_owned);

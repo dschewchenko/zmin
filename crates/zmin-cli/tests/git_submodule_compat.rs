@@ -519,12 +519,12 @@ fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
         "git submodule update --remote failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    run_zmin(
-        &zmin_clone,
-        ["submodule", "update", "--remote", "deps/sub"],
-    );
+    run_zmin(&zmin_clone, ["submodule", "update", "--remote", "deps/sub"]);
 
-    assert_eq!(git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]), remote_head);
+    assert_eq!(
+        git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
+        remote_head
+    );
     assert_eq!(
         git(&zmin_clone, ["status", "--short"]),
         git(&git_clone, ["status", "--short"])
@@ -605,7 +605,10 @@ fn submodule_set_branch_and_set_url_match_stock_git() {
         );
     }
 
-    git(&git_repo, ["submodule", "set-branch", "--branch", "dev", "deps/sub"]);
+    git(
+        &git_repo,
+        ["submodule", "set-branch", "--branch", "dev", "deps/sub"],
+    );
     run_zmin(
         &zmin_repo,
         ["submodule", "set-branch", "--branch", "dev", "deps/sub"],
@@ -615,7 +618,10 @@ fn submodule_set_branch_and_set_url_match_stock_git() {
         fs::read_to_string(git_repo.join(".gitmodules")).expect("read git gitmodules")
     );
 
-    git(&git_repo, ["submodule", "set-branch", "--default", "deps/sub"]);
+    git(
+        &git_repo,
+        ["submodule", "set-branch", "--default", "deps/sub"],
+    );
     run_zmin(
         &zmin_repo,
         ["submodule", "set-branch", "--default", "deps/sub"],
@@ -665,10 +671,16 @@ fn submodule_summary_modes_match_stock_git() {
     git(&submodule, ["add", "-A"]);
     git_with_env(&submodule, ["commit", "-m", "two"]);
     let second = git(&submodule, ["rev-parse", "HEAD"]);
+    write_file(&submodule, "sub.txt", "three\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "three"]);
+    let third = git(&submodule, ["rev-parse", "HEAD"]);
     git(&submodule, ["checkout", &first]);
 
     let git_repo = dir.path().join("git-super");
     let zmin_repo = dir.path().join("zmin-super");
+    let mut git_base_commit = String::new();
+    let mut zmin_base_commit = String::new();
     for repo in [&git_repo, &zmin_repo] {
         git(
             dir.path(),
@@ -693,6 +705,12 @@ fn submodule_summary_modes_match_stock_git() {
             String::from_utf8_lossy(&output.stderr)
         );
         git_with_env(repo, ["commit", "-m", "submodule"]);
+        let base_commit = git(repo, ["rev-parse", "HEAD"]);
+        if repo == &git_repo {
+            git_base_commit = base_commit;
+        } else {
+            zmin_base_commit = base_commit;
+        }
     }
     git(&git_repo.join("deps/sub"), ["checkout", &second]);
     git(&zmin_repo.join("deps/sub"), ["checkout", &second]);
@@ -727,6 +745,50 @@ fn submodule_summary_modes_match_stock_git() {
     assert_eq!(
         run_zmin(&zmin_repo, ["submodule", "summary", "--files"]),
         git(&git_repo, ["submodule", "summary", "--files"])
+    );
+
+    git_with_env(&git_repo, ["commit", "-m", "bump-submodule"]);
+    git_with_env(&zmin_repo, ["commit", "-m", "bump-submodule"]);
+    git(&git_repo.join("deps/sub"), ["checkout", &third]);
+    git(&zmin_repo.join("deps/sub"), ["checkout", &third]);
+    assert_eq!(
+        run_zmin_args(
+            &zmin_repo,
+            &["submodule", "summary", zmin_base_commit.as_str()]
+        ),
+        git_args(
+            &git_repo,
+            &["submodule", "summary", git_base_commit.as_str()]
+        )
+    );
+    assert_eq!(
+        run_zmin_args(
+            &zmin_repo,
+            &[
+                "submodule",
+                "summary",
+                "--cached",
+                zmin_base_commit.as_str(),
+            ],
+        ),
+        git_args(
+            &git_repo,
+            &["submodule", "summary", "--cached", git_base_commit.as_str(),],
+        )
+    );
+    assert_eq!(
+        run_zmin_args(
+            &zmin_repo,
+            &["submodule", "summary", "--files", zmin_base_commit.as_str()],
+        ),
+        git_args(
+            &git_repo,
+            &["submodule", "summary", "--files", git_base_commit.as_str()],
+        )
+    );
+    assert_eq!(
+        run_zmin(&zmin_repo, ["submodule", "summary", "deps/sub"]),
+        git(&git_repo, ["submodule", "summary", "deps/sub"])
     );
 }
 
