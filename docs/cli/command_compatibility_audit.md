@@ -66,6 +66,9 @@ Recently closed replacement gaps:
 - `ls-files --recurse-submodules --ignored --cached --exclude-standard`
   follows stock Git's supported cached-ignored mode instead of rejecting all
   ignored recurse-submodule combinations
+- `for-each-ref` supports stock date atoms for `committerdate` and
+  `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`,
+  `rfc2822`, and `short` formats
 - `stash list --format` and `stash list --pretty=format:` support common
   stash reflog atoms used by clients: `%H`, `%h`, `%gd`, `%gD`, `%gs`, `%s`,
   `%%`, `%n`, and `%xNN`

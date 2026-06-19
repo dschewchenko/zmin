@@ -2,7 +2,9 @@ mod common;
 
 use std::fs;
 
-use common::{configure_identity, git, git_with_env, run_zmin, write_file};
+use common::{
+    command_output_with_env, configure_identity, git, git_with_env, run_zmin, write_file,
+};
 
 #[test]
 fn for_each_ref_matches_stock_git_for_common_formats() {
@@ -116,4 +118,55 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
             ],
         )
     );
+}
+
+#[test]
+fn for_each_ref_date_atoms_match_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "tag.gpgSign", "false"]);
+    write_file(repo.path(), "dated.txt", "dated\n");
+    git(repo.path(), ["add", "-A"]);
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["commit", "-m", "dated"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000100 +0230"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000200 +0230"),
+        ],
+        "git",
+    );
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["tag", "-a", "dated-tag", "-m", "dated tag"],
+        &[
+            ("GIT_COMMITTER_NAME", "Tagger"),
+            ("GIT_COMMITTER_EMAIL", "tagger@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000300 -0500"),
+        ],
+        "git",
+    );
+
+    for (pattern, format) in [
+        (
+            "refs/heads",
+            "%(refname:short)|%(committerdate)|%(committerdate:unix)|%(committerdate:raw)|%(committerdate:iso)|%(committerdate:iso-strict)|%(committerdate:rfc)|%(committerdate:rfc2822)|%(committerdate:short)",
+        ),
+        (
+            "refs/tags",
+            "%(refname:short)|%(taggerdate)|%(taggerdate:unix)|%(taggerdate:raw)|%(taggerdate:iso)|%(taggerdate:iso-strict)|%(taggerdate:rfc)|%(taggerdate:rfc2822)|%(taggerdate:short)",
+        ),
+    ] {
+        assert_eq!(
+            run_zmin(repo.path(), ["for-each-ref", "--format", format, pattern]),
+            git(repo.path(), ["for-each-ref", "--format", format, pattern]),
+            "for-each-ref date atoms should match for {pattern}"
+        );
+    }
 }

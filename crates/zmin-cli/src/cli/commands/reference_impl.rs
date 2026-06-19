@@ -1972,7 +1972,9 @@ pub(crate) struct ForEachRefRow {
     pub(crate) tagger_name: String,
     pub(crate) tagger_email: String,
     pub(crate) tagger_timestamp: Option<i64>,
+    pub(crate) tagger_timezone: Option<String>,
     pub(crate) committer_timestamp: Option<i64>,
+    pub(crate) committer_timezone: Option<String>,
     pub(crate) is_head: bool,
     pub(crate) upstream_ref: String,
     pub(crate) upstream_short: String,
@@ -2178,7 +2180,9 @@ fn build_for_each_ref_row(
         tagger_name: metadata.tagger_name,
         tagger_email: metadata.tagger_email,
         tagger_timestamp: metadata.tagger_timestamp,
+        tagger_timezone: metadata.tagger_timezone,
         committer_timestamp: metadata.committer_timestamp,
+        committer_timezone: metadata.committer_timezone,
         is_head: current_head_ref == Some(ref_name),
         upstream_ref: upstream.ref_name,
         upstream_short: upstream.short_name,
@@ -2299,11 +2303,15 @@ fn apply_for_each_ref_atom_requirements(
             requirements.need_object_kind = true;
             requirements.need_subject = true;
         }
-        "taggername" | "taggeremail" | "taggerdate" | "taggerdate:unix" => {
+        "taggername" | "taggeremail" => {
             requirements.need_object_kind = true;
             requirements.need_tagger = true;
         }
-        "committerdate:unix" => {
+        atom if for_each_ref_date_atom_base(atom) == Some("taggerdate") => {
+            requirements.need_object_kind = true;
+            requirements.need_tagger = true;
+        }
+        atom if for_each_ref_date_atom_base(atom) == Some("committerdate") => {
             requirements.need_object_kind = true;
             requirements.need_committer = true;
         }
@@ -2361,11 +2369,12 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             "subject" => left.subject.cmp(&right.subject),
             "contents:subject" => left.subject.cmp(&right.subject),
             "taggerdate" => left.tagger_timestamp.cmp(&right.tagger_timestamp),
+            "committerdate" => left.committer_timestamp.cmp(&right.committer_timestamp),
             _ => std::cmp::Ordering::Equal,
         };
         match key {
             "refname" | "objectname" | "objecttype" | "subject" | "contents:subject"
-            | "taggerdate" => {
+            | "taggerdate" | "committerdate" => {
                 if descending {
                     rows.sort_by(|left, right| compare(right, left));
                 } else {
@@ -2457,18 +2466,85 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
                 Ok(format!("<{}>", row.tagger_email))
             }
         }
-        "taggerdate:unix" => Ok(row
-            .tagger_timestamp
-            .map(|timestamp| timestamp.to_string())
-            .unwrap_or_default()),
-        "committerdate:unix" => Ok(row
-            .committer_timestamp
-            .map(|timestamp| timestamp.to_string())
-            .unwrap_or_default()),
+        atom if for_each_ref_date_atom_base(atom) == Some("taggerdate") => {
+            format_for_each_ref_date_atom(
+                atom,
+                row.tagger_timestamp,
+                row.tagger_timezone.as_deref(),
+            )
+        }
+        atom if for_each_ref_date_atom_base(atom) == Some("committerdate") => {
+            format_for_each_ref_date_atom(
+                atom,
+                row.committer_timestamp,
+                row.committer_timezone.as_deref(),
+            )
+        }
         _ => Err(CliError::Fatal {
             code: 128,
             message: format!("unknown field name: {atom}"),
         }),
+    }
+}
+
+fn for_each_ref_date_atom_base(atom: &str) -> Option<&str> {
+    match atom.split_once(':').map_or(atom, |(base, _)| base) {
+        "taggerdate" => Some("taggerdate"),
+        "committerdate" => Some("committerdate"),
+        _ => None,
+    }
+}
+
+fn format_for_each_ref_date_atom(
+    atom: &str,
+    timestamp: Option<i64>,
+    timezone: Option<&str>,
+) -> Result<String> {
+    let Some(timestamp) = timestamp else {
+        return Ok(String::new());
+    };
+    let timezone = timezone.unwrap_or("+0000");
+    let mode = atom
+        .split_once(':')
+        .map(|(_, mode)| mode)
+        .unwrap_or("default");
+    match mode {
+        "default" => {
+            format_for_each_ref_offset_date(timestamp, timezone, "%a %b %-d %H:%M:%S %Y %z")
+        }
+        "unix" => Ok(timestamp.to_string()),
+        "raw" => Ok(format!("{timestamp} {timezone}")),
+        "iso" => format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%d %H:%M:%S %z"),
+        "iso-strict" => for_each_ref_strict_iso_date(timestamp, timezone),
+        "rfc" | "rfc2822" => {
+            format_for_each_ref_offset_date(timestamp, timezone, "%a, %d %b %Y %H:%M:%S %z")
+        }
+        "short" => format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%d"),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unknown field name: {atom}"),
+        }),
+    }
+}
+
+fn format_for_each_ref_offset_date(timestamp: i64, timezone: &str, format: &str) -> Result<String> {
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "for-each-ref object has invalid timezone".into(),
+    })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "for-each-ref object timestamp is out of range".into(),
+    })?;
+    Ok(utc.with_timezone(&offset).format(format).to_string())
+}
+
+fn for_each_ref_strict_iso_date(timestamp: i64, timezone: &str) -> Result<String> {
+    let formatted = format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%dT%H:%M:%S%:z")?;
+    if let Some(prefix) = formatted.strip_suffix("+00:00") {
+        Ok(format!("{prefix}Z"))
+    } else {
+        Ok(formatted)
     }
 }
 
@@ -2483,7 +2559,9 @@ pub(crate) struct RefObjectMetadata {
     pub(crate) tagger_name: String,
     pub(crate) tagger_email: String,
     pub(crate) tagger_timestamp: Option<i64>,
+    pub(crate) tagger_timezone: Option<String>,
     pub(crate) committer_timestamp: Option<i64>,
+    pub(crate) committer_timezone: Option<String>,
 }
 
 fn parse_primitive_object_id(value: &str) -> Result<ObjectId> {
@@ -2526,22 +2604,30 @@ fn object_ref_metadata_parts(
     match object_kind {
         GitObjectKind::Commit => {
             let commit = decode_commit(algorithm, content)?;
+            let committer_date = signature_timestamp_timezone(&commit.committer)
+                .map(|(timestamp, timezone)| (timestamp, timezone.to_owned()));
             Ok(RefObjectMetadata {
                 subject: commit_subject(&commit.message),
                 tagger_name: String::new(),
                 tagger_email: String::new(),
                 tagger_timestamp: None,
-                committer_timestamp: signature_timestamp(&commit.committer),
+                tagger_timezone: None,
+                committer_timestamp: committer_date.as_ref().map(|(timestamp, _)| *timestamp),
+                committer_timezone: committer_date.map(|(_, timezone)| timezone),
             })
         }
         GitObjectKind::Tag => {
             let tag = decode_tag(algorithm, content)?;
+            let tagger_date = signature_timestamp_timezone(&tag.tagger)
+                .map(|(timestamp, timezone)| (timestamp, timezone.to_owned()));
             Ok(RefObjectMetadata {
                 subject: tag_subject(&tag.message),
                 tagger_name: signature_name(&tag.tagger),
                 tagger_email: signature_email(&tag.tagger),
-                tagger_timestamp: signature_timestamp(&tag.tagger),
+                tagger_timestamp: tagger_date.as_ref().map(|(timestamp, _)| *timestamp),
+                tagger_timezone: tagger_date.map(|(_, timezone)| timezone),
                 committer_timestamp: None,
+                committer_timezone: None,
             })
         }
         GitObjectKind::Tree | GitObjectKind::Blob => Ok(RefObjectMetadata {
@@ -2549,7 +2635,9 @@ fn object_ref_metadata_parts(
             tagger_name: String::new(),
             tagger_email: String::new(),
             tagger_timestamp: None,
+            tagger_timezone: None,
             committer_timestamp: None,
+            committer_timezone: None,
         }),
     }
 }
@@ -5817,7 +5905,9 @@ fn tag(options: TagOptions) -> Result<()> {
                     tagger_name: metadata.tagger_name,
                     tagger_email: metadata.tagger_email,
                     tagger_timestamp: metadata.tagger_timestamp,
+                    tagger_timezone: metadata.tagger_timezone,
                     committer_timestamp: metadata.committer_timestamp,
+                    committer_timezone: metadata.committer_timezone,
                     is_head: false,
                     upstream_ref: String::new(),
                     upstream_short: String::new(),

@@ -58,6 +58,12 @@ transports or platforms.
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
 
+Additional closed behavior blocks without a full command matrix yet:
+
+| Command | Closed variants | Evidence |
+| --- | ---: | --- |
+| `for-each-ref` | `16` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
+
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also
 promotes five parser-supported rows to closed evidence: `--null`, `--short`,
