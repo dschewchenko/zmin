@@ -30,6 +30,7 @@ Examples:
 | `blame --date` stock modes | `11` | `0` | `git_history_query_compat` |
 | `blame --date` newly closed modes | `2` | `0` | `relative`, `human` |
 | `blame` normal display flags | `4` | `0` | `-s`, `-t`, `-b`, `-c` |
+| `blame` no-toggle/reset forms | `15` | `0` | standalone `--no-*` plus positive-then-no forms, excluding nuanced `--root --no-root` |
 | `init` quiet forms | `2` | `0` | `-q`, `--quiet` |
 | `notes add` empty editor forms | `2` | `0` | `--allow-empty`, `--allow-empty --no-edit` |
 | `notes copy` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |

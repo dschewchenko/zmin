@@ -41,6 +41,8 @@ Recently closed replacement gaps:
   the supported blame surface
 - normal blame display flags `-s`, `-t`, `-b`, and `-c` match stock Git for
   the supported blame surface
+- common blame `--no-*` toggles reset/default output like stock Git for the
+  supported blame surface; `--root --no-root` remains a separate nuanced case
 - `init -q` and `init --quiet` suppress initialization output like stock Git
 - `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
   accepted and render the matching combined diff form

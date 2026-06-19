@@ -1663,20 +1663,34 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         if !after_separator && arg.starts_with('-') {
             match arg.as_str() {
                 "-p" | "--porcelain" => porcelain = true,
+                "--no-porcelain" => {
+                    porcelain = false;
+                    line_porcelain = false;
+                }
                 "--incremental" => incremental = true,
+                "--no-incremental" => incremental = false,
                 "--line-porcelain" => {
                     porcelain = true;
                     line_porcelain = true;
                 }
+                "--no-line-porcelain" => {
+                    porcelain = false;
+                    line_porcelain = false;
+                }
                 "-f" | "--show-name" => show_filename = true,
+                "--no-show-name" => show_filename = false,
                 "-n" | "--show-number" => show_number = true,
+                "--no-show-number" => show_number = false,
                 "-e" | "--show-email" => show_email = true,
+                "--no-show-email" => show_email = false,
                 "--root" => root = true,
+                "--no-root" => root = false,
                 "-b" => blank_boundary = true,
                 "-c" => annotate_output = true,
                 "-s" => suppress_author = true,
                 "-t" => date_mode = BlameDateMode::Raw,
                 "--show-stats" => show_stats = true,
+                "--no-show-stats" => show_stats = false,
                 "-w" => ignore_whitespace = true,
                 "-M" | "-C" | "--find-renames" | "--find-copies" => {}
                 "--contents" => {
