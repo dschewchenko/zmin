@@ -4050,3 +4050,27 @@ at parity and paired median favors Zmin, while aggregate median is slower.
 Future runtime work should target remaining fresh-checkout materialization only
 when new balanced evidence shows a stable external gap, not from fixed-order or
 trace-only artifacts.
+
+Windows balanced `clone` plus `clone-large` 5-repeat refresh:
+
+- balanced combined 5-repeat output:
+  `C:\Users\skron\zmin-bench-20260619T081351Z-47593-out`
+
+The combined balanced run rebuilt the current release binary and measured
+`clone` and `clone-large` together after guest cleanup. Correctness stayed
+green with all `20` HEAD/tree checks `ok`. Post-run cleanup reported no active
+benchmark scheduled tasks or processes.
+
+Summary ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix mean | Zmin vs Gix median | Zmin vs Gix paired median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `clone` | `1.179949` | `0.804009` | `0.770573` | `1.239306` | `0.985925` | `0.823274` |
+| `clone-large` | `1.522958` | `1.692979` | `2.266864` | `1.064369` | `1.545188` | `0.966347` |
+
+Treat default `clone` as green by aggregate and paired medians in the combined
+run, with noisy mean still affected by outliers. Treat `clone-large` as
+unclosed against stock Git in this combined run and mixed against Gitoxide. The
+latest evidence is not stable enough to claim large Windows clone closure; keep
+the next work focused on balanced evidence before making another materialization
+experiment.
