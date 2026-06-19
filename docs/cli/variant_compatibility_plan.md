@@ -59,7 +59,7 @@ Raw scan from 2026-06-19:
 
 `rg -n "unsupported|not supported yet|not implemented yet" crates/zmin-cli/src crates/zmin-git-core/src --glob '*.rs'`
 
-This found `134` code hits. This is not the variant denominator. Each hit must
+This found `132` code hits. This is not the variant denominator. Each hit must
 be classified as one of:
 
 - Git-supported user variant to implement and test

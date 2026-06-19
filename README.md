@@ -149,22 +149,23 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 Use commands as `zmin <command>`.
 
 The command-name inventory is complete for the tracked Git baselines. Argument
-counts below come from the live Zmin CLI schema, so they prove parser coverage
-for that schema, not full behavior parity. Full Git compatibility also requires
-option combinations, modes, repository states and transports to match stock Git;
-that upstream denominator is still being counted.
+counts below are split from behavior counts because accepting an option in the
+parser is not the same thing as matching Git's behavior.
 
-| Counted set | Counted from | Total | Supported | Coverage |
-| --- | --- | ---: | ---: | ---: |
-| Git `2.32` command names | tracked Git command list | `145` | `145` | `100%` |
-| Git `2.47` command names | tracked Git command list | `151` | `151` | `100%` |
-| Git `2.47` baseline argument entries | Zmin CLI schema for baseline commands | `1264` | `1264` | `100%` |
-| Git `2.47` baseline option/positional spellings | Zmin CLI schema for baseline commands | `1506` | `1506` | `100%` |
-| Full Zmin command surface | Zmin CLI schema | `203` | `203` | `100%` |
-| Full Zmin argument entries | Zmin CLI schema | `1393` | `1393` | `100%` |
-| Full Zmin option/positional spellings | Zmin CLI schema | `1652` | `1652` | `100%` |
-| Audited behavior variants | tested option/workflow variants | `114` | `114` | `100%` |
-| Global upstream Git option/workflow parity | upstream Git behavior audit | not published | not published | not published |
+| Counted set | Counted from | Total counted | Accepted or verified | Open / not counted | Status |
+| --- | --- | ---: | ---: | ---: | --- |
+| Git `2.32` command names | tracked Git command list | `145` | `145` | `0` | `100%` present |
+| Git `2.47` command names | tracked Git command list | `151` | `151` | `0` | `100%` present |
+| Full Zmin command surface | live CLI schema | `203` | `203` | `0` | `100%` present |
+| Git `2.47` baseline argument entries | live CLI schema for baseline commands | `1264` | `1264` | `0` | `100%` parser coverage |
+| Git `2.47` baseline option/positional spellings | live CLI schema for baseline commands | `1506` | `1506` | `0` | `100%` parser coverage |
+| Full Zmin argument entries | live CLI schema | `1393` | `1393` | `0` | `100%` parser coverage |
+| Full Zmin option/positional spellings | live CLI schema | `1652` | `1652` | `0` | `100%` parser coverage |
+| Audited behavior variants | focused parity tests and dogfood fixes | `114` | `114` | `0` | `100%` of audited variants |
+| Hard-fail branches to classify | current source scan | `132` | `0` | `132` | global denominator still open |
+
+Global Git behavior parity is still being counted. It must include command
+names, options, option combinations, modes, repository states and transports.
 
 Command-name coverage by reference group:
 
