@@ -342,6 +342,7 @@ pub(crate) fn status(
     porcelain: Option<&str>,
     branch: bool,
     ahead_behind: bool,
+    show_stash: bool,
     short: bool,
     null: bool,
     ignored: Option<&str>,
@@ -374,6 +375,11 @@ pub(crate) fn status(
         });
     }
     let machine_readable = porcelain.is_some() || short || null;
+    let stash_count = if show_stash {
+        Some(status_stash_count(&repo)?)
+    } else {
+        None
+    };
     if machine_readable && branch {
         let _trace = phase_trace("status.branch_header");
         if porcelain_version == PorcelainVersion::V2 {
@@ -462,7 +468,14 @@ pub(crate) fn status(
     };
     if !machine_readable {
         let _trace = phase_trace("status.render_human");
-        return print_human_status(&repo, &paths, &untracked, &ignored, untracked_mode);
+        return print_human_status(
+            &repo,
+            &paths,
+            &untracked,
+            &ignored,
+            untracked_mode,
+            stash_count.unwrap_or(0),
+        );
     }
 
     {
@@ -476,6 +489,7 @@ pub(crate) fn status(
                 &untracked,
                 &ignored,
                 &pathspecs,
+                stash_count.unwrap_or(0),
                 null,
             );
         }
@@ -528,8 +542,12 @@ fn print_porcelain_v2_status(
     untracked: &[Vec<u8>],
     ignored: &[Vec<u8>],
     pathspecs: &[Vec<u8>],
+    stash_count: usize,
     null: bool,
 ) -> Result<()> {
+    if stash_count > 0 {
+        write_status_record(&format!("# stash {stash_count}"), null)?;
+    }
     let mut rows = paths
         .iter()
         .filter(|(path, _)| pathspecs.is_empty() || pathspec_matches(path, pathspecs))
@@ -704,6 +722,22 @@ fn status_excludes(repo: &GitRepo) -> Result<GitIgnore> {
     append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
     append_per_directory_excludes(&repo.root, &repo.root, ".gitignore", &mut ignore)?;
     Ok(ignore)
+}
+
+fn status_stash_count(repo: &GitRepo) -> Result<usize> {
+    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+    let path = common_git_dir.join("logs").join(stash_ref_name());
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(content.lines().count()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
+            match refs.resolve(stash_ref_name()) {
+                Ok(_) => Ok(1),
+                Err(_) => Ok(0),
+            }
+        }
+        Err(error) => Err(CliError::Io(error)),
+    }
 }
 
 fn status_head_index_diff<S>(
@@ -893,6 +927,7 @@ fn print_human_status(
     untracked: &[Vec<u8>],
     ignored: &[Vec<u8>],
     untracked_mode: UntrackedMode,
+    stash_count: usize,
 ) -> Result<()> {
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
@@ -1007,6 +1042,12 @@ fn print_human_status(
         }
     } else if worktree.is_empty() && untracked.is_empty() {
         println!();
+    }
+    if stash_count > 0 {
+        println!(
+            "Your stash currently has {stash_count} {}",
+            plural(stash_count, "entry", "entries")
+        );
     }
     Ok(())
 }
@@ -7865,7 +7906,17 @@ fn stash_apply(
         restore_index,
     )?;
     if !quiet {
-        status(None, false, true, false, false, None, None, Vec::new())?;
+        status(
+            None,
+            false,
+            true,
+            false,
+            false,
+            false,
+            None,
+            None,
+            Vec::new(),
+        )?;
     }
     if let Some(index) = drop_index {
         drop_stash_entry(&repo, index, quiet)?;

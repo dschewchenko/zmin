@@ -56,16 +56,17 @@ transports or platforms.
 
 | Command | Matrix | Total rows | Closed | Partial | Open |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `25` | `2` | `21` |
+| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `27` | `2` | `19` |
 
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also
 promotes five parser-supported rows to closed evidence: `--null`, `--short`,
 `-unormal`, bare `--untracked-files`, and `--ignored=traditional`. Existing
 closed rows in that matrix are evidence import from current parity tests, not a
-new support claim. The next slice closed `--ahead-behind` and
+new support claim. The next slices closed `--ahead-behind` and
 `--no-ahead-behind` for porcelain v1/v2 branch output with equal and different
-upstream refs.
+upstream refs, then `--show-stash` and `--no-show-stash` for human output,
+porcelain v2 output and order-sensitive toggle forms.
 
 ## Required Matrix Columns
 

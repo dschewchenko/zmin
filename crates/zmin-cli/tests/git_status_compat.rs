@@ -352,6 +352,33 @@ fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
     );
 }
 
+#[test]
+fn status_show_stash_matches_stock_git() {
+    let repo = committed_repo();
+    fs::write(repo.path().join("a.txt"), b"stash one\n").expect("modify first stash");
+    run_zmin(repo.path(), ["stash", "push", "-m", "one"]);
+    fs::write(repo.path().join("a.txt"), b"stash two\n").expect("modify second stash");
+    run_zmin(repo.path(), ["stash", "push", "-m", "two"]);
+
+    for args in [
+        ["status", "--show-stash"].as_slice(),
+        ["status", "--no-show-stash"].as_slice(),
+        ["status", "--show-stash", "--no-show-stash"].as_slice(),
+        ["status", "--no-show-stash", "--show-stash"].as_slice(),
+        ["status", "--porcelain=v2", "--show-stash"].as_slice(),
+        ["status", "--porcelain=v2", "--branch", "--show-stash"].as_slice(),
+        ["status", "--porcelain=v1", "--branch", "--show-stash"].as_slice(),
+        ["status", "--short", "--show-stash"].as_slice(),
+        ["status", "-z", "--show-stash"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
 fn committed_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());

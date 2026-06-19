@@ -847,6 +847,10 @@ pub enum Command {
         ahead_behind: bool,
         #[arg(long = "no-ahead-behind", overrides_with = "ahead_behind", action = ArgAction::SetTrue)]
         no_ahead_behind: bool,
+        #[arg(long = "show-stash", overrides_with = "no_show_stash", action = ArgAction::SetTrue)]
+        show_stash: bool,
+        #[arg(long = "no-show-stash", overrides_with = "show_stash", action = ArgAction::SetTrue)]
+        no_show_stash: bool,
         #[arg(short = 's', long = "short", action = ArgAction::SetTrue)]
         short: bool,
         #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]

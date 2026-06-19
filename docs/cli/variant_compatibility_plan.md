@@ -54,10 +54,11 @@ Examples:
 | `status -z` implicit porcelain form | `1` | `0` | `git status -z` matches stock Git's NUL-terminated porcelain v1 output |
 | `status` option evidence forms | `5` | `0` | `--null`, `--short`, `-unormal`, bare `--untracked-files`, `--ignored=traditional` |
 | `status` ahead-behind toggles | `2` | `0` | `--ahead-behind`, `--no-ahead-behind` with porcelain v1/v2 and equal/different upstream refs |
+| `status` stash display toggles | `2` | `0` | `--show-stash`, `--no-show-stash` with human, porcelain v2 and toggle order |
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `146` verified variants.
+Tracked closed blocks in this table: `148` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
