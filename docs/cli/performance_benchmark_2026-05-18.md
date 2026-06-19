@@ -4015,3 +4015,38 @@ stock Git, with better aggregate Gitoxide comparison but mixed paired evidence
 because the third Gitoxide row was an outlier (`8.512475s`). Future Windows
 clone work should use balanced-order artifacts when judging Git/Gitoxide
 comparisons.
+
+Windows balanced `clone-large` 5-repeat refresh:
+
+- balanced 5-repeat output:
+  `C:\Users\skron\zmin-bench-20260619T074456Z-7419-out`
+
+The stronger balanced `clone-large` run narrows the current interpretation of
+the Windows large-clone gap. Correctness remained green (`10` HEAD/tree checks
+`ok`) and the post-run process probe returned no `git`, `gix`, `cargo`,
+`rustc`, or `zmin` processes.
+
+Summary ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix mean | Zmin vs Gix median | Zmin vs Gix paired median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `clone-large` | `1.097463` | `1.138710` | `0.936113` | `0.996572` | `1.126623` | `0.850111` |
+
+Raw balanced rows:
+
+| Repeat | Git | Gix | Zmin |
+| --- | ---: | ---: | ---: |
+| 1 | `1.025198s` | `2.967985s` | `2.523116s` |
+| 2 | `2.997299s` | `2.411252s` | `1.808740s` |
+| 3 | `2.134825s` | `2.157729s` | `1.604448s` |
+| 4 | `0.991854s` | `1.913653s` | `2.430947s` |
+| 5 | `3.230858s` | `1.980261s` | `3.024447s` |
+
+Treat Windows `clone-large` as near-parity/mixed on this fixture under balanced
+ordering, not as the earlier fixed-order 2x+ regression. It is still not a
+clean closure against stock Git because aggregate mean and median remain above
+`1.00`, but the paired median favors Zmin. Against Gitoxide, aggregate mean is
+at parity and paired median favors Zmin, while aggregate median is slower.
+Future runtime work should target remaining fresh-checkout materialization only
+when new balanced evidence shows a stable external gap, not from fixed-order or
+trace-only artifacts.
