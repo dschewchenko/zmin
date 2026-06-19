@@ -274,10 +274,13 @@ pub(crate) fn foreach_submodules(args: &[String]) -> Result<()> {
 pub(crate) fn deinit_submodules(args: &[String]) -> Result<()> {
     let mut force = false;
     let mut all = false;
+    let mut quiet = false;
     let mut paths = Vec::new();
     for arg in args {
         match arg.as_str() {
             "-f" | "--force" => force = true,
+            "-q" | "--quiet" => quiet = true,
+            "--no-quiet" => quiet = false,
             "--all" => all = true,
             option if option.starts_with('-') => {
                 return Err(CliError::Fatal {
@@ -314,14 +317,18 @@ pub(crate) fn deinit_submodules(args: &[String]) -> Result<()> {
             }
             fs::remove_dir_all(&path)?;
             fs::create_dir_all(&path)?;
-            println!("Cleared directory '{}'", module.path);
+            if !quiet {
+                println!("Cleared directory '{}'", module.path);
+            }
         }
         let _ = unset_config_value(&repo, &format!("submodule.{}.url", module.name));
         let _ = unset_config_value(&repo, &format!("submodule.{}.active", module.name));
-        println!(
-            "Submodule '{}' ({}) unregistered for path '{}'",
-            module.name, module.url, module.path
-        );
+        if !quiet {
+            println!(
+                "Submodule '{}' ({}) unregistered for path '{}'",
+                module.name, module.url, module.path
+            );
+        }
     }
     Ok(())
 }

@@ -2192,6 +2192,68 @@ fn fetch_depth_explicit_file_url_refspec_updates_ref_like_stock_git() {
 }
 
 #[test]
+fn fetch_depth_explicit_file_url_multiple_refspecs_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main base\n").expect("write main base");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main base"]);
+    let main_parent = git(&source, ["rev-parse", "HEAD"]);
+    fs::write(source.join("main.txt"), b"main tip\n").expect("write main tip");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main tip"]);
+    git(&source, ["switch", "-c", "feature", &main_parent]);
+    fs::write(source.join("feature.txt"), b"feature base\n").expect("write feature base");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "feature base"]);
+    let feature_parent = git(&source, ["rev-parse", "HEAD"]);
+    fs::write(source.join("feature.txt"), b"feature tip\n").expect("write feature tip");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "feature tip"]);
+
+    git(dir.path(), ["init", "-b", "main", "git-client"]);
+    run_zmin(dir.path(), ["init", "-b", "main", "zmin-client"]);
+
+    let source_url = format!("file://{}", source.display());
+    let args = [
+        "fetch",
+        "--depth=1",
+        &source_url,
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+    git(&git_client, args);
+    run_zmin(&zmin_client, args);
+
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+        fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow")
+    );
+    for parent in [main_parent, feature_parent] {
+        assert_eq!(
+            git_status_args(&zmin_client, &["cat-file", "-e", &parent]),
+            git_status_args(&git_client, &["cat-file", "-e", &parent])
+        );
+    }
+}
+
+#[test]
 fn fetch_explicit_head_to_branch_backfills_tags_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
@@ -4558,11 +4620,7 @@ fn push_local_remote_updates_bare_refs_like_stock_git() {
     );
     git(
         dir.path(),
-        [
-            "init",
-            "--bare",
-            zmin_remote.to_str().expect("zmin remote"),
-        ],
+        ["init", "--bare", zmin_remote.to_str().expect("zmin remote")],
     );
     git(
         dir.path(),
@@ -4570,12 +4628,7 @@ fn push_local_remote_updates_bare_refs_like_stock_git() {
     );
     run_zmin(
         dir.path(),
-        [
-            "init",
-            "-b",
-            "main",
-            zmin_work.to_str().expect("zmin work"),
-        ],
+        ["init", "-b", "main", zmin_work.to_str().expect("zmin work")],
     );
     configure_identity(&git_work);
     configure_identity(&zmin_work);

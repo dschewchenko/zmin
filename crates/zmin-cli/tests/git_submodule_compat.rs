@@ -992,8 +992,14 @@ fn submodule_update_init_sync_foreach_deinit_match_stock_git_state() {
         git_args(&git_clone, &["submodule", "foreach", foreach])
     );
 
-    git(&git_clone, ["submodule", "deinit", "-f", "deps/sub"]);
-    run_zmin(&zmin_clone, ["submodule", "deinit", "-f", "deps/sub"]);
+    git(
+        &git_clone,
+        ["submodule", "deinit", "--quiet", "-f", "deps/sub"],
+    );
+    run_zmin(
+        &zmin_clone,
+        ["submodule", "deinit", "--quiet", "-f", "deps/sub"],
+    );
     assert_eq!(
         visible_worktree_files(&zmin_clone),
         visible_worktree_files(&git_clone)

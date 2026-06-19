@@ -9314,6 +9314,10 @@ fn fetch_multiple_refspecs_from_location(
         )?;
     }
     {
+        let _trace = phase_trace("fetch.local.write_fetch_head");
+        write_explicit_location_refspec_fetch_head_file(repo, &source_refs, location, refspecs)?;
+    }
+    {
         let _trace = phase_trace("fetch.local.render");
         print_fetch_update_rows(location, &fetch_update_rows);
     }
@@ -12368,6 +12372,57 @@ fn write_configured_fetch_head_file(
     }
     merge_rows.extend(rows);
     fs::write(repo.git_dir.join("FETCH_HEAD"), merge_rows.concat()).map_err(CliError::Io)
+}
+
+fn write_explicit_location_refspec_fetch_head_file(
+    repo: &GitRepo,
+    source_refs: &RefStore,
+    location: &str,
+    refspecs: &[String],
+) -> Result<()> {
+    let mut rows = Vec::new();
+    for refspec in refspecs {
+        let refspec = refspec.trim_start_matches('+');
+        let Some((source, destination)) = refspec.split_once(':') else {
+            continue;
+        };
+        if let Some((source_prefix, source_suffix, _, _)) =
+            wildcard_fetch_parts(source, destination)
+        {
+            source_refs.for_each_resolved_ref(source_prefix, |source_ref, id| {
+                if source_ref
+                    .strip_prefix(source_prefix)
+                    .and_then(|rest| rest.strip_suffix(source_suffix))
+                    .is_none()
+                {
+                    return Ok::<(), CliError>(());
+                }
+                let branch = source_ref.strip_prefix("refs/heads/").unwrap_or(source_ref);
+                rows.push(format!(
+                    "{}\t\tbranch '{}' of {}\n",
+                    id.to_hex(),
+                    branch,
+                    fetch_head_url_display(location)
+                ));
+                Ok::<(), CliError>(())
+            })?;
+            continue;
+        }
+        if source.contains('*') || destination.contains('*') {
+            continue;
+        }
+        let Ok(id) = source_refs.resolve(source) else {
+            continue;
+        };
+        let branch = source.strip_prefix("refs/heads/").unwrap_or(source);
+        rows.push(format!(
+            "{}\t\tbranch '{}' of {}\n",
+            id.to_hex(),
+            branch,
+            fetch_head_url_display(location)
+        ));
+    }
+    fs::write(repo.git_dir.join("FETCH_HEAD"), rows.concat()).map_err(CliError::Io)
 }
 
 fn fetch_head_url_display(url: &str) -> String {
