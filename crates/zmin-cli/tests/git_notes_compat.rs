@@ -791,6 +791,80 @@ fn notes_copy_stdin_matches_stock_git_for_pair_stream() {
 }
 
 #[test]
+fn notes_copy_stdin_no_stdin_toggles_match_stock_git_order() {
+    let git_repo = notes_base_repo();
+    let zmin_repo = notes_base_repo();
+    git_with_env(git_repo.path(), ["notes", "add", "-m", "note", "HEAD"]);
+    run_zmin_with_env(zmin_repo.path(), ["notes", "add", "-m", "note", "HEAD"]);
+
+    write_file(git_repo.path(), "b.txt", "two\n");
+    write_file(zmin_repo.path(), "b.txt", "two\n");
+    git(git_repo.path(), ["add", "-A"]);
+    run_zmin(zmin_repo.path(), ["add", "-A"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "second"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "second"]);
+
+    let git_from = git(git_repo.path(), ["rev-parse", "HEAD~1"]);
+    let git_to = git(git_repo.path(), ["rev-parse", "HEAD"]);
+    let zmin_from = git(zmin_repo.path(), ["rev-parse", "HEAD~1"]);
+    let zmin_to = git(zmin_repo.path(), ["rev-parse", "HEAD"]);
+    assert_eq!(zmin_from, git_from);
+    assert_eq!(zmin_to, git_to);
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "notes",
+                "copy",
+                "--stdin",
+                "--no-stdin",
+                &zmin_from,
+                &zmin_to,
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "notes",
+                "copy",
+                "--stdin",
+                "--no-stdin",
+                &git_from,
+                &git_to,
+            ],
+            "git",
+        )
+    );
+    assert_eq!(
+        command_stdout_bytes(zmin_bin(), zmin_repo.path(), &["notes", "show", "HEAD"]),
+        command_stdout_bytes("git", git_repo.path(), &["notes", "show", "HEAD"])
+    );
+
+    git_with_env(git_repo.path(), ["notes", "remove", "HEAD"]);
+    run_zmin_with_env(zmin_repo.path(), ["notes", "remove", "HEAD"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            zmin_repo.path(),
+            &["notes", "copy", "--no-stdin", "--stdin"],
+            &format!("{zmin_from} {zmin_to}\n"),
+        ),
+        git_with_stdin_args(
+            git_repo.path(),
+            &["notes", "copy", "--no-stdin", "--stdin"],
+            &format!("{git_from} {git_to}\n"),
+        )
+    );
+    assert_eq!(
+        command_stdout_bytes(zmin_bin(), zmin_repo.path(), &["notes", "show", "HEAD"]),
+        command_stdout_bytes("git", git_repo.path(), &["notes", "show", "HEAD"])
+    );
+}
+
+#[test]
 fn notes_copy_for_rewrite_matches_stock_git_config_gate() {
     let git_repo = notes_base_repo();
     let zmin_repo = notes_base_repo();

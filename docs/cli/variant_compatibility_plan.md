@@ -32,6 +32,7 @@ Examples:
 | `blame` normal display flags | `4` | `0` | `-s`, `-t`, `-b`, `-c` |
 | `init` quiet forms | `2` | `0` | `-q`, `--quiet` |
 | `notes add` empty editor forms | `2` | `0` | `--allow-empty`, `--allow-empty --no-edit` |
+| `notes copy` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |
 | `notes edit` message-source forms | `8` | `0` | `-m`, `--message=`, `-F`, `--file=`, `-C`, `--reuse-message=`, `-c`, `--reedit-message=` |
 | `notes edit` compact short source forms | `4` | `0` | `-mmsg`, `-Ffile`, `-C<object>`, `-c<object>` |
 | `notes merge` no-strategy toggle forms | `7` | `0` | merge order variants plus `--commit`/`--abort` state variants |
