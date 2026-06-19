@@ -75,6 +75,8 @@ Recently closed replacement gaps:
   annotated tag refs
 - `for-each-ref` supports stock `objectname:short=<n>` abbreviation lengths
   for positive values covered by the matrix
+- `for-each-ref` rejects non-positive and non-numeric `objectname:short=<n>`
+  values with stock Git's fatal diagnostic
 - `stash list --format` and `stash list --pretty=format:` support common
   stash reflog atoms used by clients: `%H`, `%h`, `%gd`, `%gD`, `%gs`, `%s`,
   `%%`, `%n`, and `%xNN`

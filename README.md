@@ -166,9 +166,9 @@ option, value, option combination, repository state, transport and platform.
 | External Systems | `2` | `2` | `95` | `0` |
 | Administration | `8` | `8` | `134` | `17` |
 | Server Admin | `2` | `2` | `28` | `0` |
-| Plumbing Commands | `20` | `20` | `332` | `47` |
+| Plumbing Commands | `20` | `20` | `332` | `51` |
 | Other Git `2.47` commands | `71` | `71` | `600` | `4` |
-| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`224`** |
+| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`228`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and

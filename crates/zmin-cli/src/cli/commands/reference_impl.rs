@@ -2326,6 +2326,9 @@ fn apply_for_each_ref_atom_requirements(
     match atom {
         "refname" | "refname:short" | "objectname" | "HEAD" => {}
         atom if for_each_ref_objectname_short_len(atom).is_some() => {}
+        atom if for_each_ref_objectname_short_invalid_value(atom).is_some() => {
+            return Err(for_each_ref_objectname_short_value_error(atom));
+        }
         "upstream" | "upstream:short" | "upstream:track" | "upstream:trackshort" => {}
         "objecttype" => requirements.need_object_kind = true,
         "subject" | "contents:subject" => {
@@ -2500,6 +2503,9 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
             &row.object_id,
             for_each_ref_objectname_short_len(atom).unwrap_or(7),
         )),
+        atom if for_each_ref_objectname_short_invalid_value(atom).is_some() => {
+            Err(for_each_ref_objectname_short_value_error(atom))
+        }
         "HEAD" => Ok(if row.is_head { "*" } else { " " }.to_owned()),
         "upstream" => Ok(row.upstream_ref.clone()),
         "upstream:short" => Ok(row.upstream_short.clone()),
@@ -2569,6 +2575,22 @@ fn for_each_ref_objectname_short_len(atom: &str) -> Option<usize> {
         .parse::<usize>()
         .ok()?;
     (len > 0).then_some(len)
+}
+
+fn for_each_ref_objectname_short_invalid_value(atom: &str) -> Option<&str> {
+    let value = atom.strip_prefix("objectname:short=")?;
+    match value.parse::<usize>() {
+        Ok(len) if len > 0 => None,
+        _ => Some(value),
+    }
+}
+
+fn for_each_ref_objectname_short_value_error(atom: &str) -> CliError {
+    let value = for_each_ref_objectname_short_invalid_value(atom).unwrap_or_default();
+    CliError::Fatal {
+        code: 128,
+        message: format!("positive value expected '{value}' in %({atom})"),
+    }
 }
 
 fn for_each_ref_date_atom_base(atom: &str) -> Option<&str> {

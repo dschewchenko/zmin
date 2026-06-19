@@ -3,7 +3,8 @@ mod common;
 use std::fs;
 
 use common::{
-    command_output_with_env, configure_identity, git, git_with_env, run_zmin, write_file,
+    command_output_with_env, configure_identity, git, git_failure_output, git_with_env, run_zmin,
+    run_zmin_failure_output, write_file,
 };
 
 #[test]
@@ -127,6 +128,29 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
             common::run_zmin_args(repo.path(), &["for-each-ref", "--format", format]),
             common::git_args(repo.path(), &["for-each-ref", "--format", format]),
             "for-each-ref objectname length should match for {format}"
+        );
+    }
+}
+
+#[test]
+fn for_each_ref_objectname_short_invalid_lengths_match_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial subject"]);
+
+    for format in [
+        "%(objectname:short=0)",
+        "%(objectname:short=abc)",
+        "%(objectname:short=-1)",
+        "%(objectname:short=)",
+    ] {
+        let args = ["for-each-ref", "--format", format, "refs/heads"];
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), &args),
+            git_failure_output(repo.path(), &args),
+            "for-each-ref invalid objectname length should match for {format}"
         );
     }
 }
