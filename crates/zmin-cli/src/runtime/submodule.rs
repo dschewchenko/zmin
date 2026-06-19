@@ -458,6 +458,135 @@ pub(crate) fn set_submodule_url(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubmoduleSummaryMode {
+    Worktree,
+    Cached,
+    Files,
+}
+
+struct SubmoduleSummaryOptions {
+    mode: SubmoduleSummaryMode,
+    summary_limit: usize,
+    paths: Vec<String>,
+}
+
+pub(crate) fn summary_submodules(args: &[String]) -> Result<()> {
+    let options = parse_submodule_summary_options(args)?;
+    let repo = find_repo()?;
+    let index = read_repo_index(&repo)?;
+    let head_index = if options.mode != SubmoduleSummaryMode::Files {
+        Some(read_head_index(&repo)?)
+    } else {
+        None
+    };
+    let modules = selected_gitmodules(&repo, &options.paths)?;
+    for module in modules {
+        let path = repo.root.join(&module.path);
+        let path_bytes = module.path.as_bytes();
+        let old_id = if let Some(head_index) = head_index.as_ref() {
+            find_index_entry(head_index, path_bytes)
+                .map(|entry| entry.id.clone())
+                .unwrap_or_else(zero_object_id)
+        } else {
+            let Some(entry) = submodule_gitlink_entry(&index, &module.path) else {
+                continue;
+            };
+            entry.id
+        };
+        let new_id = if options.mode == SubmoduleSummaryMode::Cached {
+            find_index_entry(&index, path_bytes)
+                .map(|entry| entry.id.clone())
+                .unwrap_or_else(zero_object_id)
+        } else {
+            let Some(state) = submodule_head_state(&path, &old_id, false) else {
+                continue;
+            };
+            state.id
+        };
+        if old_id == new_id {
+            continue;
+        }
+        print_submodule_summary(&path, &module.path, &old_id, &new_id, options.summary_limit)?;
+    }
+    Ok(())
+}
+
+fn parse_submodule_summary_options(args: &[String]) -> Result<SubmoduleSummaryOptions> {
+    let mut mode = SubmoduleSummaryMode::Worktree;
+    let mut summary_limit = 10usize;
+    let mut paths = Vec::new();
+    let mut path_args = false;
+    let mut cursor = 0usize;
+    while cursor < args.len() {
+        let arg = &args[cursor];
+        if !path_args && arg == "--" {
+            path_args = true;
+        } else if !path_args && (arg == "-q" || arg == "--quiet" || arg == "--no-quiet") {
+        } else if !path_args && arg == "--cached" {
+            mode = SubmoduleSummaryMode::Cached;
+        } else if !path_args && arg == "--files" {
+            mode = SubmoduleSummaryMode::Files;
+        } else if !path_args && arg == "--summary-limit" {
+            cursor += 1;
+            let Some(value) = args.get(cursor) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "--summary-limit requires a value".into(),
+                });
+            };
+            summary_limit = parse_submodule_summary_limit(value)?;
+        } else if !path_args && arg.starts_with("--summary-limit=") {
+            summary_limit = parse_submodule_summary_limit(&arg["--summary-limit=".len()..])?;
+        } else if !path_args && arg.starts_with('-') {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: format!("unsupported submodule summary option '{arg}'"),
+            });
+        } else {
+            paths.push(arg.clone());
+        }
+        cursor += 1;
+    }
+    Ok(SubmoduleSummaryOptions {
+        mode,
+        summary_limit,
+        paths,
+    })
+}
+
+fn parse_submodule_summary_limit(value: &str) -> Result<usize> {
+    value.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 129,
+        message: format!("invalid summary-limit '{value}'"),
+    })
+}
+
+fn print_submodule_summary(
+    path: &std::path::Path,
+    display_path: &str,
+    old_id: &ObjectId,
+    new_id: &ObjectId,
+    summary_limit: usize,
+) -> Result<()> {
+    let submodule_repo = find_repo_at(path)?;
+    let store = LooseObjectStore::new(submodule_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commits = submodule_commit_range(&submodule_repo, &store, old_id, new_id)?;
+    println!(
+        "* {display_path} {}...{} ({}):",
+        old_id.short_hex(7),
+        new_id.short_hex(7),
+        commits.len()
+    );
+    let commit_cache = CommitObjectCache::new(&store);
+    for id in commits.iter().take(summary_limit) {
+        let commit = commit_cache.read_commit(id)?;
+        println!("  > {}", commit_subject(&commit.message));
+    }
+    println!();
+    Ok(())
+}
+
 fn resolve_submodule_set_url(repo: &GitRepo, url: &str) -> Result<String> {
     if !(url.starts_with("./") || url.starts_with("../")) {
         return Ok(url.to_owned());

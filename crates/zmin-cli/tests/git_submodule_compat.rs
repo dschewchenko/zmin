@@ -644,6 +644,93 @@ fn submodule_set_branch_and_set_url_match_stock_git() {
 }
 
 #[test]
+fn submodule_summary_modes_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = dir.path().join("submodule");
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    write_file(&submodule, "sub.txt", "one\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "one"]);
+    let first = git(&submodule, ["rev-parse", "HEAD"]);
+    write_file(&submodule, "sub.txt", "two\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "two"]);
+    let second = git(&submodule, ["rev-parse", "HEAD"]);
+    git(&submodule, ["checkout", &first]);
+
+    let git_repo = dir.path().join("git-super");
+    let zmin_repo = dir.path().join("zmin-super");
+    for repo in [&git_repo, &zmin_repo] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", repo.to_str().expect("repo path")],
+        );
+        configure_identity(repo);
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                submodule.to_str().expect("submodule path"),
+                "deps/sub",
+            ])
+            .current_dir(repo)
+            .output()
+            .expect("git submodule add");
+        assert!(
+            output.status.success(),
+            "git submodule add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        git_with_env(repo, ["commit", "-m", "submodule"]);
+    }
+    git(&git_repo.join("deps/sub"), ["checkout", &second]);
+    git(&zmin_repo.join("deps/sub"), ["checkout", &second]);
+
+    for args in [
+        ["submodule", "summary"].as_slice(),
+        ["submodule", "summary", "--files"].as_slice(),
+        ["submodule", "summary", "--summary-limit", "1"].as_slice(),
+        ["submodule", "--quiet", "summary"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(&zmin_repo, args),
+            git_args(&git_repo, args),
+            "submodule summary mismatch for {args:?}"
+        );
+    }
+    assert_eq!(
+        run_zmin(&zmin_repo, ["submodule", "summary", "--cached"]),
+        git(&git_repo, ["submodule", "summary", "--cached"])
+    );
+
+    git(&git_repo, ["add", "deps/sub"]);
+    git(&zmin_repo, ["add", "deps/sub"]);
+    assert_eq!(
+        run_zmin(&zmin_repo, ["submodule", "summary"]),
+        git(&git_repo, ["submodule", "summary"])
+    );
+    assert_eq!(
+        run_zmin(&zmin_repo, ["submodule", "summary", "--cached"]),
+        git(&git_repo, ["submodule", "summary", "--cached"])
+    );
+    assert_eq!(
+        run_zmin(&zmin_repo, ["submodule", "summary", "--files"]),
+        git(&git_repo, ["submodule", "summary", "--files"])
+    );
+}
+
+#[test]
 fn clone_shallow_submodules_matches_stock_git_for_file_urls() {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");

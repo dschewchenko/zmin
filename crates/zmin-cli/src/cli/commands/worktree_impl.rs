@@ -3657,6 +3657,7 @@ pub(crate) fn submodule(args: Vec<String>) -> Result<()> {
         "deinit" => deinit_submodules(&prefixed_args(&args[1..])),
         "set-branch" => set_submodule_branch(&prefixed_args(&args[1..])),
         "set-url" => set_submodule_url(&prefixed_args(&args[1..])),
+        "summary" => summary_submodules(&prefixed_args(&args[1..])),
         "absorbgitdirs" => absorb_submodule_gitdirs(&prefixed_args(&args[1..])),
         "--cached" | "--quiet" => submodule_status(&args),
         _ => Err(CliError::Fatal {
