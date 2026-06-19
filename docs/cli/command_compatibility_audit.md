@@ -40,13 +40,17 @@ Recently closed replacement gaps:
 - `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
   accepted and render the matching combined diff form
 - `log --decorate=true` is accepted as enabled short decoration
+- `cat-file --filters` applies checkout EOL conversion and smudge filters for
+  both `REV:path` and `--path=<path> <blob>` forms
+- `cat-file --textconv` runs configured diff-driver textconv commands and
+  falls back to raw blob output when no textconv driver applies
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
-- Core Git behavior: `cat-file` filter/textconv modes, selected `notes`,
-  `stash`, `submodule`, `ls-files`, and history-format options.
+- Core Git behavior: selected `notes`, `stash`, `submodule`, `ls-files`, and
+  history-format options.
 - Repository/transport formats: reftable, non-core remote helpers, bundle edge
   cases, and rare archive/pack variants.
 - External legacy integrations: `p4`, `svn`, `archimport`, `git gui`, and

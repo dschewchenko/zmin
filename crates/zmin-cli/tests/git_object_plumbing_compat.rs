@@ -5,9 +5,9 @@ use std::{collections::BTreeSet, fs};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, configure_identity, git, git_args, git_init, git_status, git_with_env,
-    git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_status,
-    run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes,
+    clone_repo_fixture, command_stdout_bytes, configure_identity, git, git_args, git_init,
+    git_status, git_with_env, git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args,
+    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
 };
 
 fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
@@ -400,6 +400,122 @@ fn filter_attribute_add_and_checkout_match_stock_git() {
     assert_eq!(
         fs::read_to_string(zmin_repo.path().join("message.t")).expect("read zmin filtered file"),
         fs::read_to_string(git_repo.path().join("message.t")).expect("read git filtered file")
+    );
+}
+
+#[test]
+fn cat_file_filters_match_stock_git_for_eol_and_smudge_attributes() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "filter.rot13.clean", "cat"]);
+    git(
+        repo.path(),
+        [
+            "config",
+            "filter.rot13.smudge",
+            "tr 'A-Za-z' 'N-ZA-Mn-za-m'",
+        ],
+    );
+    fs::write(
+        repo.path().join(".gitattributes"),
+        b"*.txt text eol=crlf\n*.rot filter=rot13\n",
+    )
+    .expect("write attributes");
+    fs::write(repo.path().join("line.txt"), b"one\ntwo\n").expect("write eol file");
+    fs::write(repo.path().join("message.rot"), b"hello abc xyz\n").expect("write filtered file");
+    git(repo.path(), ["add", "."]);
+    git_with_env(repo.path(), ["commit", "-m", "filters"]);
+
+    let text_blob = git(repo.path(), ["rev-parse", "HEAD:line.txt"]);
+    assert_eq!(
+        command_stdout_bytes(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--filters", "HEAD:line.txt"]
+        ),
+        command_stdout_bytes(
+            "git",
+            repo.path(),
+            &["cat-file", "--filters", "HEAD:line.txt"]
+        )
+    );
+    assert_eq!(
+        command_stdout_bytes(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--filters", "--path=line.txt", &text_blob],
+        ),
+        command_stdout_bytes(
+            "git",
+            repo.path(),
+            &["cat-file", "--filters", "--path=line.txt", &text_blob],
+        )
+    );
+
+    assert_eq!(
+        command_stdout_bytes(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--filters", "HEAD:message.rot"],
+        ),
+        command_stdout_bytes(
+            "git",
+            repo.path(),
+            &["cat-file", "--filters", "HEAD:message.rot"],
+        )
+    );
+}
+
+#[test]
+fn cat_file_textconv_matches_stock_git_for_diff_driver_attributes() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(
+        repo.path(),
+        ["config", "diff.upper.textconv", "tr 'a-z' 'A-Z' <"],
+    );
+    fs::write(repo.path().join(".gitattributes"), b"*.bin diff=upper\n").expect("write attributes");
+    fs::write(repo.path().join("payload.bin"), b"hello abc\n").expect("write payload");
+    fs::write(repo.path().join("plain.txt"), b"plain\n").expect("write plain");
+    git(repo.path(), ["add", "."]);
+    git_with_env(repo.path(), ["commit", "-m", "textconv"]);
+
+    let blob = git(repo.path(), ["rev-parse", "HEAD:payload.bin"]);
+    assert_eq!(
+        command_stdout_bytes(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--textconv", "HEAD:payload.bin"],
+        ),
+        command_stdout_bytes(
+            "git",
+            repo.path(),
+            &["cat-file", "--textconv", "HEAD:payload.bin"],
+        )
+    );
+    assert_eq!(
+        command_stdout_bytes(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--textconv", "--path=payload.bin", &blob],
+        ),
+        command_stdout_bytes(
+            "git",
+            repo.path(),
+            &["cat-file", "--textconv", "--path=payload.bin", &blob],
+        )
+    );
+    assert_eq!(
+        command_stdout_bytes(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--textconv", "HEAD:plain.txt"],
+        ),
+        command_stdout_bytes(
+            "git",
+            repo.path(),
+            &["cat-file", "--textconv", "HEAD:plain.txt"],
+        )
     );
 }
 

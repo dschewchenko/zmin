@@ -1816,6 +1816,34 @@ pub(crate) fn smudge_worktree_filter_content(
     }
 }
 
+pub(crate) fn smudge_worktree_content(
+    repo: &GitRepo,
+    relative: &[u8],
+    blob_id: &ObjectId,
+    checkout_metadata: &WorktreeCheckoutMetadata,
+    content: Vec<u8>,
+) -> Result<Vec<u8>> {
+    let rules = WorktreeContentRules::load(repo)?;
+    let content = rules
+        .smudge_checkout_content(relative, &content)
+        .unwrap_or(content);
+    match smudge_worktree_filter_content_result_with_attributes(
+        repo,
+        &rules.attributes,
+        relative,
+        blob_id,
+        checkout_metadata,
+        content,
+        false,
+    )? {
+        WorktreeFilterResult::Content(content) => Ok(content),
+        WorktreeFilterResult::Delayed { .. } => Err(CliError::Fatal {
+            code: 128,
+            message: "filter process delayed response is not supported here".to_owned(),
+        }),
+    }
+}
+
 fn smudge_worktree_filter_content_result(
     repo: &GitRepo,
     relative: &[u8],

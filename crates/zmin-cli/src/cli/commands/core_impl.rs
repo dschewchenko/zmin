@@ -261,11 +261,11 @@ pub(crate) fn cat_file(
         }
     };
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    if textconv || filters {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "textconv/filter cat-file modes are not implemented yet".into(),
-        });
+    if filters {
+        return cat_file_filters(&repo, &store, objectish, &id, path.as_deref());
+    }
+    if textconv {
+        return cat_file_textconv(&repo, &store, objectish, &id, path.as_deref());
     }
     if exists {
         return if store.contains_object(&id)? {
@@ -324,6 +324,142 @@ pub(crate) fn cat_file(
         }
     }
     Ok(())
+}
+
+fn cat_file_filters(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    objectish: &str,
+    id: &ObjectId,
+    path: Option<&str>,
+) -> Result<()> {
+    let relative = cat_file_filter_path(objectish, path)?;
+    let object = match cat_file_read_object(repo, store, id) {
+        Ok(object) => object,
+        Err(error) => return Err(cat_file_object_read_error(error, objectish, false)),
+    };
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("object {objectish} is not a blob"),
+        });
+    }
+    let content = smudge_worktree_content(
+        repo,
+        &relative,
+        id,
+        &WorktreeCheckoutMetadata::default(),
+        object.content,
+    )?;
+    io::stdout().write_all(&content)?;
+    Ok(())
+}
+
+fn cat_file_textconv(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    objectish: &str,
+    id: &ObjectId,
+    path: Option<&str>,
+) -> Result<()> {
+    let relative = cat_file_filter_path(objectish, path)?;
+    let object = match cat_file_read_object(repo, store, id) {
+        Ok(object) => object,
+        Err(error) => return Err(cat_file_object_read_error(error, objectish, false)),
+    };
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("object {objectish} is not a blob"),
+        });
+    }
+    let Some(command) = cat_file_textconv_command(repo, &relative)? else {
+        io::stdout().write_all(&object.content)?;
+        return Ok(());
+    };
+    let output = run_cat_file_textconv(repo, &command, &object.content)?;
+    io::stdout().write_all(&output)?;
+    Ok(())
+}
+
+fn cat_file_filter_path(objectish: &str, path: Option<&str>) -> Result<Vec<u8>> {
+    match path {
+        Some(path) => normalize_git_path(path)
+            .map(|path| path.into_bytes())
+            .map_err(CliError::Io),
+        None => objectish_path_component(objectish)
+            .map_err(CliError::Io)?
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("<object>:<path> required, only <object> '{objectish}' given"),
+            }),
+    }
+}
+
+fn cat_file_textconv_command(repo: &GitRepo, relative: &[u8]) -> Result<Option<String>> {
+    let attributes = GitAttributes::load_from_root(&repo.root)?;
+    let driver = attributes
+        .check(relative, &["diff".to_owned()])
+        .into_iter()
+        .find_map(|(_, value)| match value {
+            AttributeValue::Value(driver) if !driver.is_empty() => Some(driver),
+            _ => None,
+        });
+    let Some(driver) = driver else {
+        return Ok(None);
+    };
+    Ok(read_config_value(repo, &format!("diff.{driver}.textconv"))?)
+}
+
+fn run_cat_file_textconv(repo: &GitRepo, command: &str, content: &[u8]) -> Result<Vec<u8>> {
+    let temp_path = create_cat_file_textconv_temp(repo, content)?;
+    let output = ProcessCommand::new(git_shell_command_path())
+        .arg("-c")
+        .arg(format!("{command} \"$1\""))
+        .arg("zmin-textconv")
+        .arg(&temp_path)
+        .current_dir(&repo.root)
+        .output();
+    let _ = fs::remove_file(&temp_path);
+    let output = output.map_err(CliError::Io)?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(CliError::Stderr {
+            code: output.status.code().unwrap_or(1),
+            text: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
+
+fn create_cat_file_textconv_temp(repo: &GitRepo, content: &[u8]) -> Result<PathBuf> {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    for attempt in 0..100u32 {
+        let path = repo
+            .git_dir
+            .join(format!("zmin-textconv-{pid}-{nanos}-{attempt}.tmp"));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(content)?;
+                file.flush()?;
+                return Ok(path);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Err(CliError::Io(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not create textconv temporary file",
+    )))
 }
 
 fn cat_file_read_object(
