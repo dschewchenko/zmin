@@ -1533,6 +1533,12 @@ struct BlameOptions {
     path: String,
     porcelain: bool,
     line_porcelain: bool,
+    show_filename: bool,
+    show_number: bool,
+    show_email: bool,
+    abbrev_width: Option<usize>,
+    ignore_whitespace: bool,
+    line_range: Option<(usize, usize)>,
 }
 
 pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -> Result<()> {
@@ -1540,10 +1546,19 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
-    let rev = options.rev.unwrap_or_else(|| "HEAD".to_owned());
+    let rev = options.rev.as_deref().unwrap_or("HEAD");
     let head = resolve_commitish(&repo, &store, &rev)?;
     let path_bytes = normalize_git_path(&options.path)?.into_bytes();
-    let lines = blame_lines(&store, &commit_cache, &head, &path_bytes)?;
+    let mut lines = blame_lines(
+        &store,
+        &commit_cache,
+        &head,
+        &path_bytes,
+        options.ignore_whitespace,
+    )?;
+    if let Some((start, end)) = options.line_range {
+        lines.retain(|line| (start..=end).contains(&line.line_no));
+    }
     if options.porcelain || options.line_porcelain {
         print_porcelain_blame_lines(
             &commit_cache,
@@ -1555,7 +1570,14 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
     } else if annotate {
         print_annotate_lines(&commit_cache, &lines)
     } else {
-        print_blame_lines(&commit_cache, &lines, long, root)
+        print_blame_lines(
+            &commit_cache,
+            &lines,
+            &path_bytes,
+            long,
+            root,
+            &options,
+        )
     }
 }
 
@@ -1563,11 +1585,20 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut rev = None;
     let mut porcelain = false;
     let mut line_porcelain = false;
+    let mut show_filename = false;
+    let mut show_number = false;
+    let mut show_email = false;
+    let mut abbrev_width = None;
+    let mut ignore_whitespace = false;
+    let mut line_range = None;
     let mut positionals = Vec::new();
     let mut after_separator = false;
-    for arg in args {
+    let mut cursor = 0;
+    while cursor < args.len() {
+        let arg = &args[cursor];
         if !after_separator && arg == "--" {
             after_separator = true;
+            cursor += 1;
             continue;
         }
         if !after_separator && arg.starts_with('-') {
@@ -1577,16 +1608,71 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                     porcelain = true;
                     line_porcelain = true;
                 }
+                "-f" | "--show-name" => show_filename = true,
+                "-n" | "--show-number" => show_number = true,
+                "-e" | "--show-email" => show_email = true,
+                "-w" => ignore_whitespace = true,
+                "-L" => {
+                    cursor += 1;
+                    let Some(value) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame -L requires a range".into(),
+                        });
+                    };
+                    line_range = Some(parse_blame_line_range(value)?);
+                }
                 _ => {
+                    if let Some(value) = arg.strip_prefix("-L") {
+                        line_range = Some(parse_blame_line_range(value)?);
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(value) = arg.strip_prefix("--abbrev=") {
+                        abbrev_width = Some(parse_blame_abbrev(value)?);
+                        cursor += 1;
+                        continue;
+                    }
+                    if arg == "--abbrev" {
+                        cursor += 1;
+                        let Some(value) = args.get(cursor) else {
+                            return Err(CliError::Fatal {
+                                code: 129,
+                                message: "blame --abbrev requires a value".into(),
+                            });
+                        };
+                        abbrev_width = Some(parse_blame_abbrev(value)?);
+                        cursor += 1;
+                        continue;
+                    }
+                    if arg == "--date=iso" {
+                        cursor += 1;
+                        continue;
+                    }
+                    if arg == "--date" {
+                        cursor += 1;
+                        let Some(value) = args.get(cursor) else {
+                            return Err(CliError::Fatal {
+                                code: 129,
+                                message: "blame --date requires a value".into(),
+                            });
+                        };
+                        if value == "iso" {
+                            cursor += 1;
+                            continue;
+                        }
+                    }
                     return Err(CliError::Fatal {
                         code: 129,
                         message: format!("unsupported blame option '{arg}'"),
                     });
                 }
             }
+            cursor += 1;
             continue;
         }
-        positionals.push(arg);
+        positionals.push(arg.clone());
+        cursor += 1;
     }
     let path = match positionals.as_slice() {
         [path] => path.clone(),
@@ -1606,7 +1692,45 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         path,
         porcelain,
         line_porcelain,
+        show_filename,
+        show_number,
+        show_email,
+        abbrev_width,
+        ignore_whitespace,
+        line_range,
     })
+}
+
+fn parse_blame_abbrev(value: &str) -> Result<usize> {
+    let abbrev = value.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 129,
+        message: format!("invalid blame abbrev '{value}'"),
+    })?;
+    Ok(abbrev.saturating_add(1).clamp(5, 40))
+}
+
+fn parse_blame_line_range(value: &str) -> Result<(usize, usize)> {
+    let Some((start, end)) = value.split_once(',') else {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: format!("unsupported blame line range '{value}'"),
+        });
+    };
+    let start = start.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 129,
+        message: format!("unsupported blame line range '{value}'"),
+    })?;
+    let end = end.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 129,
+        message: format!("unsupported blame line range '{value}'"),
+    })?;
+    if start == 0 || end < start {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: format!("unsupported blame line range '{value}'"),
+        });
+    }
+    Ok((start, end))
 }
 
 fn blame_lines(
@@ -1614,6 +1738,7 @@ fn blame_lines(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     head: &ObjectId,
     path: &[u8],
+    ignore_whitespace: bool,
 ) -> Result<Vec<BlameLine>> {
     let final_lines = commit_file_lines_cached(store, commit_cache, head, path)?;
     let mut out = Vec::with_capacity(final_lines.len());
@@ -1625,7 +1750,10 @@ fn blame_lines(
                 break;
             };
             let parent_lines = commit_file_lines_cached(store, commit_cache, parent, path)?;
-            if parent_lines.get(idx) == Some(&content) {
+            if parent_lines
+                .get(idx)
+                .is_some_and(|parent| blame_line_matches(parent, &content, ignore_whitespace))
+            {
                 owner = parent.clone();
             } else {
                 break;
@@ -1640,6 +1768,20 @@ fn blame_lines(
         });
     }
     Ok(out)
+}
+
+fn blame_line_matches(parent: &[u8], current: &[u8], ignore_whitespace: bool) -> bool {
+    if !ignore_whitespace {
+        return parent == current;
+    }
+    parent
+        .iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .eq(current
+            .iter()
+            .copied()
+            .filter(|byte| !byte.is_ascii_whitespace()))
 }
 
 fn commit_file_lines_cached(
@@ -1672,15 +1814,33 @@ fn commit_file_lines_cached(
 fn print_blame_lines(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     lines: &[BlameLine],
+    path: &[u8],
     long: bool,
     root: bool,
+    options: &BlameOptions,
 ) -> Result<()> {
     for line in lines {
         let commit = commit_cache.read_commit(&line.commit)?;
-        let display_id = blame_display_id(&line.commit, line.boundary && !root, long);
-        let author = signature_name(&commit.author);
+        let display_id = blame_display_id(
+            &line.commit,
+            line.boundary && !root,
+            long,
+            options.abbrev_width,
+        );
+        let author = if options.show_email {
+            format!("<{}>", signature_email(&commit.author))
+        } else {
+            signature_name(&commit.author)
+        };
         let date = signature_blame_date(&commit.author)?;
-        print!("{display_id} ({author} {date} {}) ", line.line_no);
+        print!("{display_id}");
+        if options.show_filename {
+            print!(" {}", String::from_utf8_lossy(path));
+        }
+        if options.show_number {
+            print!(" {}", line.line_no);
+        }
+        print!(" ({author} {date} {}) ", line.line_no);
         io::stdout().write_all(&line.content)?;
         if !line.content.ends_with(b"\n") {
             println!();
@@ -1799,7 +1959,12 @@ fn print_blame_porcelain_commit(
     Ok(())
 }
 
-fn blame_display_id(id: &ObjectId, boundary: bool, long: bool) -> String {
+fn blame_display_id(
+    id: &ObjectId,
+    boundary: bool,
+    long: bool,
+    abbrev_width: Option<usize>,
+) -> String {
     if long {
         let hex = id.to_hex();
         if boundary {
@@ -1808,9 +1973,10 @@ fn blame_display_id(id: &ObjectId, boundary: bool, long: bool) -> String {
             hex
         }
     } else if boundary {
-        format!("^{}", short_object_id_len(id, 7))
+        let width = abbrev_width.unwrap_or(8);
+        format!("^{}", short_object_id_len(id, width.saturating_sub(1)))
     } else {
-        short_object_id_len(id, 8)
+        short_object_id_len(id, abbrev_width.unwrap_or(8))
     }
 }
 
@@ -3826,7 +3992,7 @@ fn parse_log_decoration_mode(value: Option<&str>) -> Result<Option<LogDecoration
         return Ok(None);
     };
     match value {
-        "" | "short" | "auto" => Ok(Some(LogDecorationMode::Short)),
+        "" | "short" | "auto" | "true" => Ok(Some(LogDecorationMode::Short)),
         "full" => Ok(Some(LogDecorationMode::Full)),
         "no" | "false" => Ok(None),
         other => Err(CliError::Fatal {
@@ -4069,15 +4235,17 @@ impl<'a> LogFormat<'a> {
                 render_default_log(id, commit, parents, abbrev_len, decorations, notes)
             }
             Self::ShortOneline => Ok(format!(
-                "{}{} {}",
+                "{}{}{} {}",
                 short_object_id_len(id, abbrev_len),
                 short_parent_suffix(commit, parents, abbrev_len),
+                render_oneline_decorations(decorations, id),
                 commit_subject(&commit.message)
             )),
             Self::FullOneline => Ok(format!(
-                "{}{} {}",
+                "{}{}{} {}",
                 id.to_hex(),
                 parent_suffix(commit, parents),
+                render_oneline_decorations(decorations, id),
                 commit_subject(&commit.message)
             )),
             Self::Custom { pattern, .. } => {
@@ -4102,6 +4270,17 @@ impl<'a> LogFormat<'a> {
             }
             _ => self.render_with_context(id, commit, parents, abbrev_len, decorations, notes),
         }
+    }
+}
+
+fn render_oneline_decorations(decorations: &LogDecorations, id: &ObjectId) -> String {
+    let Some(items) = decorations.get(id) else {
+        return String::new();
+    };
+    if items.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", items.join(", "))
     }
 }
 

@@ -34,8 +34,12 @@ Recently closed replacement gaps:
   destination refs like stock Git
 - `blame -p`, `blame --porcelain`, and `blame --line-porcelain` emit
   stock-compatible porcelain output for the supported blame surface
+- common blame client flags `-f`, `-n`, `-e`, `-w`, `--abbrev=N`,
+  `--date=iso`, and simple numeric `-L start,end` ranges match stock Git for
+  the supported blame surface
 - `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
   accepted and render the matching combined diff form
+- `log --decorate=true` is accepted as enabled short decoration
 
 Current high-priority gap classes:
 

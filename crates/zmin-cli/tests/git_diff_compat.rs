@@ -296,6 +296,7 @@ fn log_decorate_and_notes_match_stock_git() {
 
     for args in [
         ["log", "--decorate", "--all"].as_slice(),
+        ["log", "--decorate=true", "--all"].as_slice(),
         ["log", "--decorate=full", "--all"].as_slice(),
         ["log", "--decorate", "--clear-decorations", "--all"].as_slice(),
         ["log", "--decorate=full", "--clear-decorations", "--all"].as_slice(),

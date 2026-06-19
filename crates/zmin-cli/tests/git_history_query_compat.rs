@@ -188,6 +188,13 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
         ["blame", "-l", "a.txt"].as_slice(),
         ["blame", "-p", "a.txt"].as_slice(),
         ["blame", "--line-porcelain", "a.txt"].as_slice(),
+        ["blame", "-f", "a.txt"].as_slice(),
+        ["blame", "-n", "a.txt"].as_slice(),
+        ["blame", "-e", "a.txt"].as_slice(),
+        ["blame", "--abbrev=12", "a.txt"].as_slice(),
+        ["blame", "--date=iso", "a.txt"].as_slice(),
+        ["blame", "-L", "1,1", "a.txt"].as_slice(),
+        ["blame", "-w", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
