@@ -1,11 +1,12 @@
 # Command Compatibility Audit
 
-This file is the compact summary of the current Git command surface.
+This file is the compact summary of the current Git command entry-point
+surface.
 
 ## Baselines
 
-- Git `v2.32.0`: `145/145` tracked commands present
-- Git `v2.47.1`: `151/151` tracked commands present
+- Git `v2.32.0`: `145/145` tracked command entry points present
+- Git `v2.47.1`: `151/151` tracked command entry points present
 
 ## Current state
 
@@ -15,10 +16,12 @@ This file is the compact summary of the current Git command surface.
 - compatibility report is generated from the live CLI schema, not from a hand-maintained list
 - extra commands stay visible in the report as additive surface, not as baseline failures
 - command inventory parity means the command name exists; it is not a claim
-  that every option, mode, repository state or transport workflow matches stock
-  Git
+  that every option, option value, option combination, repository state or
+  transport workflow matches stock Git
 - variant parity is tracked separately in
   `docs/cli/variant_compatibility_plan.md`
+- option inventory starts from `tools/git-compat-option-inventory.sh`, then
+  expands into behavior variants in `docs/cli/git_compatibility_inventory.md`
 
 ## Hard-fail inventory
 

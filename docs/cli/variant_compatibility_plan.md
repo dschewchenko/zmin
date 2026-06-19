@@ -54,7 +54,11 @@ Examples:
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `138/138` variants.
+Tracked closed blocks in this table: `138` verified variants.
+
+This is closed evidence only, not the full Git denominator. A denominator is
+valid only after the matching command group is expanded into command plus option
+plus mode plus repository state plus transport workflow.
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.
@@ -89,15 +93,17 @@ Largest raw clusters:
 ## Audit Order
 
 1. Local git-replacement blockers from IDE/GUI dogfood.
-2. Commands with live `unsupported` branches that stock Git accepts, expanded
+2. Option inventory from Git `v2.47.1` docs using
+   `tools/git-compat-option-inventory.sh`.
+3. Commands with live `unsupported` branches that stock Git accepts, expanded
    into option/mode/state variants before implementation.
-3. High-use porcelain variants: `status`, `add`, `commit`, `diff`, `log`,
+4. High-use porcelain variants: `status`, `add`, `commit`, `diff`, `log`,
    `blame`, `stash`, `branch`, `checkout`, `switch`, `restore`.
-4. Transport variants: local/file, smart HTTP, SSH, git daemon, depth,
+5. Transport variants: local/file, smart HTTP, SSH, git daemon, depth,
    explicit refspecs, tags, prune, proxy/auth.
-5. Plumbing variants used by tools: `cat-file`, `rev-parse`, `for-each-ref`,
+6. Plumbing variants used by tools: `cat-file`, `rev-parse`, `for-each-ref`,
    `ls-files`, `update-index`, `read-tree`, `write-tree`.
-6. Platform variants: macOS, Linux, Windows path/process behavior.
+7. Platform variants: macOS, Linux, Windows path/process behavior.
 
 ## Reporting Format
 
