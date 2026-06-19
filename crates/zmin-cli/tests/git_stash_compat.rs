@@ -5,10 +5,10 @@ use std::{fs, process::Command};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, configure_identity, git, git_args, git_failure_output,
-    git_init, git_status, git_status_with_stdin, git_with_env, git_with_stdin, run_zmin,
-    run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_status_with_stdin,
-    run_zmin_with_env, run_zmin_with_stdin, zmin_bin, write_file,
+    clone_repo_fixture, command_any_output, command_output_with_env, configure_identity, git,
+    git_args, git_failure_output, git_init, git_status, git_status_with_stdin, git_with_env,
+    git_with_stdin, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
+    run_zmin_status_with_stdin, run_zmin_with_env, run_zmin_with_stdin, zmin_bin, write_file,
 };
 
 fn stash_fixture_repo() -> TempDir {
@@ -1302,6 +1302,20 @@ fn stash_list_formats_match_stock_git() {
             "stash list custom format should match for {args:?}",
         );
     }
+    let date_format_args = ["stash", "list", "--format=%ah|%ch|%ar|%cr"];
+    let date_env = [("GIT_TEST_DATE_NOW", "1780000000")];
+    assert_eq!(
+        command_output_with_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            &date_format_args,
+            &date_env,
+            "zmin"
+        )
+        .1,
+        command_output_with_env("git", git_repo.path(), &date_format_args, &date_env, "git").1,
+        "stash list human and relative date atoms should match",
+    );
     assert_eq!(
         run_zmin_failure_output(zmin_repo.path(), &["stash", "list", "--bad"]).0,
         git_failure_output(git_repo.path(), &["stash", "list", "--bad"]).0
