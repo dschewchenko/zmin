@@ -5,7 +5,7 @@ use std::process::Command;
 
 use common::{
     command_any_output, command_output, configure_identity, git, git_args, git_init, git_with_env,
-    run_zmin, run_zmin_args, zmin_bin, visible_worktree_files, write_file,
+    run_zmin, run_zmin_args, visible_worktree_files, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -452,11 +452,7 @@ fn clone_checks_out_uninitialized_submodule_gitlinks_like_stock_git() {
     );
     run_zmin(
         dir.path(),
-        [
-            "clone",
-            source.to_str().expect("source path"),
-            "zmin-clone",
-        ],
+        ["clone", source.to_str().expect("source path"), "zmin-clone"],
     );
     let git_clone = dir.path().join("git-clone");
     let zmin_clone = dir.path().join("zmin-clone");
@@ -929,11 +925,7 @@ fn submodule_update_init_sync_foreach_deinit_match_stock_git_state() {
     );
     run_zmin(
         dir.path(),
-        [
-            "clone",
-            source.to_str().expect("source path"),
-            "zmin-clone",
-        ],
+        ["clone", source.to_str().expect("source path"), "zmin-clone"],
     );
     let git_clone = dir.path().join("git-clone");
     let zmin_clone = dir.path().join("zmin-clone");
@@ -948,13 +940,30 @@ fn submodule_update_init_sync_foreach_deinit_match_stock_git_state() {
                 "submodule",
                 "update",
                 "--init",
+                "--quiet",
+                "--depth",
+                "1",
+                "--single-branch",
+                "--progress",
             ],
             "git",
         )
         .0,
         0
     );
-    run_zmin(&zmin_clone, ["submodule", "update", "--init"]);
+    run_zmin(
+        &zmin_clone,
+        [
+            "submodule",
+            "update",
+            "--init",
+            "--quiet",
+            "--depth",
+            "1",
+            "--single-branch",
+            "--progress",
+        ],
+    );
     assert_eq!(
         visible_worktree_files(&zmin_clone),
         visible_worktree_files(&git_clone)

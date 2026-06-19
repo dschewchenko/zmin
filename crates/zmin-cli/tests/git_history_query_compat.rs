@@ -187,6 +187,7 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
         ["blame", "a.txt"].as_slice(),
         ["blame", "-l", "a.txt"].as_slice(),
         ["blame", "-p", "a.txt"].as_slice(),
+        ["blame", "--incremental", "a.txt"].as_slice(),
         ["blame", "--line-porcelain", "a.txt"].as_slice(),
         ["blame", "-f", "a.txt"].as_slice(),
         ["blame", "-n", "a.txt"].as_slice(),
@@ -195,6 +196,12 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
         ["blame", "--date=iso", "a.txt"].as_slice(),
         ["blame", "-L", "1,1", "a.txt"].as_slice(),
         ["blame", "-w", "a.txt"].as_slice(),
+        ["blame", "--root", "a.txt"].as_slice(),
+        ["blame", "--show-stats", "a.txt"].as_slice(),
+        ["blame", "-M", "a.txt"].as_slice(),
+        ["blame", "-C", "a.txt"].as_slice(),
+        ["blame", "-L", "2", "a.txt"].as_slice(),
+        ["blame", "-L", "2,+1", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
@@ -205,6 +212,23 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
     assert_eq!(
         run_zmin(zmin_repo.path(), ["annotate", "a.txt"]),
         git(git_repo.path(), ["annotate", "a.txt"])
+    );
+
+    write_file(git_repo.path(), "contents.txt", "one\nTWO\n");
+    write_file(zmin_repo.path(), "contents.txt", "one\nTWO\n");
+    let git_contents_path = git_repo.path().join("contents.txt");
+    let zmin_contents_path = zmin_repo.path().join("contents.txt");
+    let git_contents = git_contents_path.to_string_lossy();
+    let zmin_contents = zmin_contents_path.to_string_lossy();
+    assert_eq!(
+        run_zmin_args(
+            zmin_repo.path(),
+            &["blame", "--contents", &zmin_contents, "HEAD", "--", "a.txt"],
+        ),
+        git_args(
+            git_repo.path(),
+            &["blame", "--contents", &git_contents, "HEAD", "--", "a.txt"],
+        )
     );
 }
 

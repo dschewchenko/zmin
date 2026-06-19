@@ -1531,11 +1531,15 @@ struct BlameLine {
 struct BlameOptions {
     rev: Option<String>,
     path: String,
+    contents_path: Option<String>,
     porcelain: bool,
     line_porcelain: bool,
+    incremental: bool,
     show_filename: bool,
     show_number: bool,
     show_email: bool,
+    show_stats: bool,
+    root: bool,
     abbrev_width: Option<usize>,
     ignore_whitespace: bool,
     line_range: Option<(usize, usize)>,
@@ -1549,22 +1553,31 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
     let rev = options.rev.as_deref().unwrap_or("HEAD");
     let head = resolve_commitish(&repo, &store, &rev)?;
     let path_bytes = normalize_git_path(&options.path)?.into_bytes();
+    let final_lines = if let Some(contents_path) = options.contents_path.as_deref() {
+        Some(split_blame_contents(fs::read(contents_path)?))
+    } else {
+        None
+    };
     let mut lines = blame_lines(
         &store,
         &commit_cache,
         &head,
         &path_bytes,
+        final_lines,
         options.ignore_whitespace,
     )?;
     if let Some((start, end)) = options.line_range {
         lines.retain(|line| (start..=end).contains(&line.line_no));
     }
-    if options.porcelain || options.line_porcelain {
+    let effective_root = root || options.root;
+    if options.incremental {
+        print_incremental_blame_lines(&commit_cache, &lines, &path_bytes, effective_root)
+    } else if options.porcelain || options.line_porcelain {
         print_porcelain_blame_lines(
             &commit_cache,
             &lines,
             &path_bytes,
-            root,
+            effective_root,
             options.line_porcelain,
         )
     } else if annotate {
@@ -1575,9 +1588,13 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
             &lines,
             &path_bytes,
             long,
-            root,
+            effective_root,
             &options,
-        )
+        )?;
+        if options.show_stats {
+            print_blame_stats(&lines);
+        }
+        Ok(())
     }
 }
 
@@ -1585,9 +1602,13 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut rev = None;
     let mut porcelain = false;
     let mut line_porcelain = false;
+    let mut incremental = false;
     let mut show_filename = false;
     let mut show_number = false;
     let mut show_email = false;
+    let mut show_stats = false;
+    let mut root = false;
+    let mut contents_path = None;
     let mut abbrev_width = None;
     let mut ignore_whitespace = false;
     let mut line_range = None;
@@ -1604,6 +1625,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         if !after_separator && arg.starts_with('-') {
             match arg.as_str() {
                 "-p" | "--porcelain" => porcelain = true,
+                "--incremental" => incremental = true,
                 "--line-porcelain" => {
                     porcelain = true;
                     line_porcelain = true;
@@ -1611,7 +1633,20 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "-f" | "--show-name" => show_filename = true,
                 "-n" | "--show-number" => show_number = true,
                 "-e" | "--show-email" => show_email = true,
+                "--root" => root = true,
+                "--show-stats" => show_stats = true,
                 "-w" => ignore_whitespace = true,
+                "-M" | "-C" | "--find-renames" | "--find-copies" => {}
+                "--contents" => {
+                    cursor += 1;
+                    let Some(path) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame --contents requires a file".into(),
+                        });
+                    };
+                    contents_path = Some(path.clone());
+                }
                 "-L" => {
                     cursor += 1;
                     let Some(value) = args.get(cursor) else {
@@ -1625,6 +1660,23 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 _ => {
                     if let Some(value) = arg.strip_prefix("-L") {
                         line_range = Some(parse_blame_line_range(value)?);
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(value) = arg.strip_prefix("-M")
+                        && value.chars().all(|ch| ch.is_ascii_digit())
+                    {
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(value) = arg.strip_prefix("-C")
+                        && value.chars().all(|ch| ch.is_ascii_digit())
+                    {
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(path) = arg.strip_prefix("--contents=") {
+                        contents_path = Some(path.to_owned());
                         cursor += 1;
                         continue;
                     }
@@ -1690,11 +1742,15 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     Ok(BlameOptions {
         rev,
         path,
+        contents_path,
         porcelain,
         line_porcelain,
+        incremental,
         show_filename,
         show_number,
         show_email,
+        show_stats,
+        root,
         abbrev_width,
         ignore_whitespace,
         line_range,
@@ -1710,20 +1766,31 @@ fn parse_blame_abbrev(value: &str) -> Result<usize> {
 }
 
 fn parse_blame_line_range(value: &str) -> Result<(usize, usize)> {
-    let Some((start, end)) = value.split_once(',') else {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported blame line range '{value}'"),
-        });
-    };
+    let (start, end) = value.split_once(',').unwrap_or((value, ""));
     let start = start.parse::<usize>().map_err(|_| CliError::Fatal {
         code: 129,
         message: format!("unsupported blame line range '{value}'"),
     })?;
-    let end = end.parse::<usize>().map_err(|_| CliError::Fatal {
-        code: 129,
-        message: format!("unsupported blame line range '{value}'"),
-    })?;
+    let end = if end.is_empty() {
+        usize::MAX
+    } else if let Some(count) = end.strip_prefix('+') {
+        let count = count.parse::<usize>().map_err(|_| CliError::Fatal {
+            code: 129,
+            message: format!("unsupported blame line range '{value}'"),
+        })?;
+        start.saturating_add(count.saturating_sub(1))
+    } else if let Some(count) = end.strip_prefix('-') {
+        let count = count.parse::<usize>().map_err(|_| CliError::Fatal {
+            code: 129,
+            message: format!("unsupported blame line range '{value}'"),
+        })?;
+        start.saturating_sub(count.saturating_sub(1))
+    } else {
+        end.parse::<usize>().map_err(|_| CliError::Fatal {
+            code: 129,
+            message: format!("unsupported blame line range '{value}'"),
+        })?
+    };
     if start == 0 || end < start {
         return Err(CliError::Fatal {
             code: 129,
@@ -1738,9 +1805,13 @@ fn blame_lines(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     head: &ObjectId,
     path: &[u8],
+    final_lines_override: Option<Vec<Vec<u8>>>,
     ignore_whitespace: bool,
 ) -> Result<Vec<BlameLine>> {
-    let final_lines = commit_file_lines_cached(store, commit_cache, head, path)?;
+    let final_lines = match final_lines_override {
+        Some(lines) => lines,
+        None => commit_file_lines_cached(store, commit_cache, head, path)?,
+    };
     let mut out = Vec::with_capacity(final_lines.len());
     for (idx, content) in final_lines.into_iter().enumerate() {
         let mut owner = head.clone();
@@ -1768,6 +1839,29 @@ fn blame_lines(
         });
     }
     Ok(out)
+}
+
+fn split_blame_contents(contents: Vec<u8>) -> Vec<Vec<u8>> {
+    contents
+        .split_inclusive(|byte| *byte == b'\n')
+        .map(|line| line.to_vec())
+        .collect()
+}
+
+fn print_blame_stats(lines: &[BlameLine]) {
+    let unique_commits = lines
+        .iter()
+        .map(|line| line.commit.clone())
+        .collect::<HashSet<_>>();
+    let boundary_commits = lines
+        .iter()
+        .filter(|line| line.boundary)
+        .map(|line| line.commit.clone())
+        .collect::<HashSet<_>>();
+    let commit_count = unique_commits.len().saturating_sub(boundary_commits.len());
+    println!("num read blob: {}", unique_commits.len());
+    println!("num get patch: {commit_count}");
+    println!("num commits: {commit_count}");
 }
 
 fn blame_line_matches(parent: &[u8], current: &[u8], ignore_whitespace: bool) -> bool {
@@ -1900,6 +1994,37 @@ fn print_porcelain_blame_lines(
         if !line.content.ends_with(b"\n") {
             println!();
         }
+    }
+    Ok(())
+}
+
+fn print_incremental_blame_lines(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    lines: &[BlameLine],
+    path: &[u8],
+    root: bool,
+) -> Result<()> {
+    let mut groups = Vec::new();
+    for (index, _) in lines.iter().enumerate() {
+        if blame_starts_group(lines, index) {
+            let commit = commit_cache.read_commit(&lines[index].commit)?;
+            let commit_time = signature_timestamp_timezone(&commit.committer)
+                .map(|(time, _)| time)
+                .unwrap_or(0);
+            groups.push((index, blame_group_len(lines, index), commit_time));
+        }
+    }
+    groups.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)));
+    for (index, group_len, _) in groups {
+        let line = &lines[index];
+        println!(
+            "{} {} {} {group_len}",
+            line.commit.to_hex(),
+            line.line_no,
+            line.line_no
+        );
+        let commit = commit_cache.read_commit(&line.commit)?;
+        print_blame_porcelain_commit(&commit, line.boundary && !root, path)?;
     }
     Ok(())
 }

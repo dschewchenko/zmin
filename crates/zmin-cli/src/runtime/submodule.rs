@@ -112,6 +112,10 @@ pub(crate) fn sync_submodules(args: &[String]) -> Result<()> {
 pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
     let mut init = false;
     let mut recursive = false;
+    let mut quiet = false;
+    let mut depth = None;
+    let mut single_branch = false;
+    let mut no_single_branch = false;
     let mut paths = Vec::new();
     let mut path_args = false;
     let mut cursor = 0usize;
@@ -123,6 +127,28 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
             init = true;
         } else if !path_args && arg == "--recursive" {
             recursive = true;
+        } else if !path_args && (arg == "-q" || arg == "--quiet") {
+            quiet = true;
+        } else if !path_args && arg == "--no-quiet" {
+            quiet = false;
+        } else if !path_args && (arg == "--progress" || arg == "--no-progress") {
+        } else if !path_args && arg == "--single-branch" {
+            single_branch = true;
+            no_single_branch = false;
+        } else if !path_args && arg == "--no-single-branch" {
+            single_branch = false;
+            no_single_branch = true;
+        } else if !path_args && arg == "--depth" {
+            cursor += 1;
+            let Some(value) = args.get(cursor) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "--depth requires a value".into(),
+                });
+            };
+            depth = Some(value.clone());
+        } else if !path_args && arg.starts_with("--depth=") {
+            depth = Some(arg["--depth=".len()..].to_owned());
         } else if !path_args
             && matches!(
                 arg.as_str(),
@@ -164,7 +190,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
             let url = read_config_value(&repo, &format!("submodule.{}.url", module.name))?
                 .unwrap_or_else(|| resolve_submodule_clone_url(&parent_repository, &module.url));
             run_clone_service(CloneOptions {
-                quiet: false,
+                quiet,
                 configs: Vec::new(),
                 template: None,
                 reject_shallow: false,
@@ -179,8 +205,8 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 demand_hydrate: false,
                 remote_name: "origin".to_owned(),
                 no_tags: false,
-                single_branch: false,
-                no_single_branch: false,
+                single_branch,
+                no_single_branch,
                 separate_git_dir: None,
                 references: Vec::new(),
                 reference_if_able: Vec::new(),
@@ -188,7 +214,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 dissociate: false,
                 no_hardlinks: false,
                 no_local: false,
-                depth: None,
+                depth: depth.clone(),
                 branch: None,
                 keep_partial_on_missing_branch: false,
                 repository: url,
@@ -197,11 +223,13 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
         }
         checkout_submodule_gitlink(&path, &entry.id)?;
         absorb_submodule_gitdir(&repo, &module.path)?;
-        println!(
-            "Submodule path '{}': checked out '{}'",
-            module.path,
-            entry.id.to_hex()
-        );
+        if !quiet {
+            println!(
+                "Submodule path '{}': checked out '{}'",
+                module.path,
+                entry.id.to_hex()
+            );
+        }
         if recursive {
             let submodule_repo = find_repo_at(&path)?;
             clone_submodules(
