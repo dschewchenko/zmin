@@ -229,6 +229,16 @@ fn log_merge_diff_modes_match_stock_git() {
         ["log", "-p", "--diff-merges=separate", "-n", "3", "main"].as_slice(),
         ["log", "-p", "--diff-merges=on", "-n", "3", "main"].as_slice(),
         ["log", "-p", "--diff-merges=1", "-n", "3", "main"].as_slice(),
+        ["log", "-p", "--diff-merges=combined", "-n", "3", "main"].as_slice(),
+        [
+            "log",
+            "-p",
+            "--diff-merges=dense-combined",
+            "-n",
+            "3",
+            "main",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),

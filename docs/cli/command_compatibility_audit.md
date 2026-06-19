@@ -24,12 +24,25 @@ This file is the compact public summary of the current Git command surface.
 tracked as behavior gaps unless they are parser validation for corrupt input,
 unsupported repository formats, or intentionally external/legacy integrations.
 
+Recently closed replacement gaps:
+
+- root `--version`, `-v`, `version`, and `version --build-options` emit a
+  Git-compatible version line while keeping the real Zmin version visible
+- depth fetch with multiple explicit refspecs works across local/file, smart
+  HTTP, SSH, and git-daemon remotes
+- explicit local/file fetch forms used by clients update `FETCH_HEAD` and
+  destination refs like stock Git
+- `blame -p`, `blame --porcelain`, and `blame --line-porcelain` emit
+  stock-compatible porcelain output for the supported blame surface
+- `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
+  accepted and render the matching combined diff form
+
 Current high-priority gap classes:
 
-- Git replacement flow: root `--version`, `version --build-options`, `fetch`
-  forms emitted by IDEs, local/file/HTTP/SSH daemon transports.
-- Core Git behavior: `cat-file` filter/textconv modes, selected `blame`,
-  `notes`, `stash`, `submodule`, `ls-files`, and history-format options.
+- Git replacement flow: remaining IDE/GUI command combinations discovered by
+  local dogfood with `/Users/dschewchenko/.local/bin/git`.
+- Core Git behavior: `cat-file` filter/textconv modes, selected `notes`,
+  `stash`, `submodule`, `ls-files`, and history-format options.
 - Repository/transport formats: reftable, non-core remote helpers, bundle edge
   cases, and rare archive/pack variants.
 - External legacy integrations: `p4`, `svn`, `archimport`, `git gui`, and

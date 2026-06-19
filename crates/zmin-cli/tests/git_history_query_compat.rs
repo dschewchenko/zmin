@@ -186,6 +186,8 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
     for args in [
         ["blame", "a.txt"].as_slice(),
         ["blame", "-l", "a.txt"].as_slice(),
+        ["blame", "-p", "a.txt"].as_slice(),
+        ["blame", "--line-porcelain", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

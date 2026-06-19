@@ -1527,24 +1527,42 @@ struct BlameLine {
     boundary: bool,
 }
 
+#[derive(Debug, Clone)]
+struct BlameOptions {
+    rev: Option<String>,
+    path: String,
+    porcelain: bool,
+    line_porcelain: bool,
+}
+
 pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -> Result<()> {
-    let (rev, path) = parse_blame_args(args)?;
+    let options = parse_blame_args(args)?;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
-    let rev = rev.unwrap_or_else(|| "HEAD".to_owned());
+    let rev = options.rev.unwrap_or_else(|| "HEAD".to_owned());
     let head = resolve_commitish(&repo, &store, &rev)?;
-    let path_bytes = normalize_git_path(&path)?.into_bytes();
+    let path_bytes = normalize_git_path(&options.path)?.into_bytes();
     let lines = blame_lines(&store, &commit_cache, &head, &path_bytes)?;
-    if annotate {
+    if options.porcelain || options.line_porcelain {
+        print_porcelain_blame_lines(
+            &commit_cache,
+            &lines,
+            &path_bytes,
+            root,
+            options.line_porcelain,
+        )
+    } else if annotate {
         print_annotate_lines(&commit_cache, &lines)
     } else {
         print_blame_lines(&commit_cache, &lines, long, root)
     }
 }
 
-fn parse_blame_args(args: Vec<String>) -> Result<(Option<String>, String)> {
+fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut rev = None;
+    let mut porcelain = false;
+    let mut line_porcelain = false;
     let mut positionals = Vec::new();
     let mut after_separator = false;
     for arg in args {
@@ -1553,10 +1571,20 @@ fn parse_blame_args(args: Vec<String>) -> Result<(Option<String>, String)> {
             continue;
         }
         if !after_separator && arg.starts_with('-') {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported blame option '{arg}'"),
-            });
+            match arg.as_str() {
+                "-p" | "--porcelain" => porcelain = true,
+                "--line-porcelain" => {
+                    porcelain = true;
+                    line_porcelain = true;
+                }
+                _ => {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("unsupported blame option '{arg}'"),
+                    });
+                }
+            }
+            continue;
         }
         positionals.push(arg);
     }
@@ -1573,7 +1601,12 @@ fn parse_blame_args(args: Vec<String>) -> Result<(Option<String>, String)> {
             });
         }
     };
-    Ok((rev, path))
+    Ok(BlameOptions {
+        rev,
+        path,
+        porcelain,
+        line_porcelain,
+    })
 }
 
 fn blame_lines(
@@ -1674,6 +1707,95 @@ fn print_annotate_lines(
             println!();
         }
     }
+    Ok(())
+}
+
+fn print_porcelain_blame_lines(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    lines: &[BlameLine],
+    path: &[u8],
+    root: bool,
+    repeat_metadata: bool,
+) -> Result<()> {
+    let mut described = HashSet::new();
+    for (index, line) in lines.iter().enumerate() {
+        let group_len = blame_group_len(lines, index);
+        if blame_starts_group(lines, index) {
+            println!(
+                "{} {} {} {group_len}",
+                line.commit.to_hex(),
+                line.line_no,
+                line.line_no
+            );
+        } else {
+            println!("{} {} {}", line.commit.to_hex(), line.line_no, line.line_no);
+        }
+        let describe_commit = repeat_metadata || described.insert(line.commit.clone());
+        if describe_commit {
+            let commit = commit_cache.read_commit(&line.commit)?;
+            print_blame_porcelain_commit(&commit, line.boundary && !root, path)?;
+        }
+        print!("\t");
+        io::stdout().write_all(&line.content)?;
+        if !line.content.ends_with(b"\n") {
+            println!();
+        }
+    }
+    Ok(())
+}
+
+fn blame_starts_group(lines: &[BlameLine], index: usize) -> bool {
+    index == 0 || lines[index - 1].commit != lines[index].commit
+}
+
+fn blame_group_len(lines: &[BlameLine], index: usize) -> usize {
+    if !blame_starts_group(lines, index) {
+        return 1;
+    }
+    let mut len = 1;
+    while lines
+        .get(index + len)
+        .is_some_and(|line| line.commit == lines[index].commit)
+    {
+        len += 1;
+    }
+    len
+}
+
+fn print_blame_porcelain_commit(
+    commit: &zmin_git_core::CommitObject,
+    boundary: bool,
+    path: &[u8],
+) -> Result<()> {
+    let (author_time, author_tz) =
+        signature_timestamp_timezone(&commit.author).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid author date".into(),
+        })?;
+    let (committer_time, committer_tz) = signature_timestamp_timezone(&commit.committer)
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid committer date".into(),
+        })?;
+    println!("author {}", signature_name(&commit.author));
+    println!("author-mail <{}>", signature_email(&commit.author));
+    println!("author-time {author_time}");
+    println!("author-tz {author_tz}");
+    println!("committer {}", signature_name(&commit.committer));
+    println!("committer-mail <{}>", signature_email(&commit.committer));
+    println!("committer-time {committer_time}");
+    println!("committer-tz {committer_tz}");
+    println!("summary {}", commit_subject(&commit.message));
+    if boundary {
+        println!("boundary");
+    } else if let Some(parent) = commit.parents.first() {
+        println!(
+            "previous {} {}",
+            parent.to_hex(),
+            String::from_utf8_lossy(path)
+        );
+    }
+    println!("filename {}", String::from_utf8_lossy(path));
     Ok(())
 }
 
@@ -2658,7 +2780,9 @@ impl LogOptions<'_> {
             LogMergeDiffMode::FirstParent
         } else if self.separate_merges && has_diff_format {
             config_mode.unwrap_or(LogMergeDiffMode::Separate)
-        } else if (self.combined || self.dense_combined) && has_diff_format {
+        } else if self.dense_combined && has_diff_format {
+            LogMergeDiffMode::DenseCombined
+        } else if self.combined && has_diff_format {
             LogMergeDiffMode::Combined
         } else if self.first_parent && has_diff_format {
             LogMergeDiffMode::FirstParent
@@ -2701,6 +2825,8 @@ fn parse_log_diff_merges_value(value: &str, include_on: bool) -> Option<LogMerge
         "off" | "none" => Some(LogMergeDiffMode::Off),
         "first-parent" | "first_parent" | "1" => Some(LogMergeDiffMode::FirstParent),
         "separate" => Some(LogMergeDiffMode::Separate),
+        "combined" | "c" => Some(LogMergeDiffMode::Combined),
+        "dense-combined" | "dense_combined" | "cc" => Some(LogMergeDiffMode::DenseCombined),
         "on" if include_on => Some(LogMergeDiffMode::Separate),
         _ => None,
     }
@@ -2921,8 +3047,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             }
             continue;
         }
-        let combined_merge_diff =
-            commit.parents.len() > 1 && matches!(merge_diff_mode, LogMergeDiffMode::Combined);
+        let combined_merge_diff = commit.parents.len() > 1
+            && matches!(
+                merge_diff_mode,
+                LogMergeDiffMode::Combined | LogMergeDiffMode::DenseCombined
+            );
         let commit_diff_format =
             log_commit_diff_format(commit, show_root, diff_format, merge_diff_mode);
         if options.diff_required && commit_diff_format.is_none() {
@@ -2984,7 +3113,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 commit,
                 diff_format,
                 merge_diff_mode,
-                options.dense_combined,
+                options.dense_combined
+                    || matches!(merge_diff_mode, LogMergeDiffMode::DenseCombined),
                 show_root,
                 pickaxe_options,
                 &ignore_matching_lines,
@@ -4315,6 +4445,7 @@ enum LogMergeDiffMode {
     Off,
     FirstParent,
     Combined,
+    DenseCombined,
     Separate,
 }
 
