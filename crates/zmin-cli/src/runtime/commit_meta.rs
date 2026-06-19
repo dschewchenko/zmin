@@ -172,19 +172,21 @@ pub(crate) fn parse_timezone_offset(timezone: &str) -> Option<chrono::FixedOffse
     }
 }
 
-pub(crate) fn porcelain_branch_header(repo: &GitRepo) -> Result<String> {
+pub(crate) fn porcelain_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<String> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     match refs.read_head()? {
         RefTarget::Symbolic(target) if target.starts_with("refs/heads/") => {
             let branch = target.strip_prefix("refs/heads/").unwrap_or(&target);
             if refs.resolve("HEAD").is_ok() {
                 if let Some(upstream) = read_branch_upstream(repo, branch)? {
-                    let counts = upstream_counts(repo, &upstream.ref_name)?;
-                    Ok(format!(
-                        "## {branch}...{}{}",
-                        upstream.display,
-                        format_upstream_counts(counts)
-                    ))
+                    let marker = if ahead_behind {
+                        format_upstream_counts(upstream_counts(repo, &upstream.ref_name)?)
+                    } else if upstream_differs_from_head(repo, &upstream.ref_name)? {
+                        " [different]".to_owned()
+                    } else {
+                        String::new()
+                    };
+                    Ok(format!("## {branch}...{}{}", upstream.display, marker))
                 } else {
                     Ok(format!("## {branch}"))
                 }
@@ -202,6 +204,13 @@ pub(crate) fn porcelain_branch_header(repo: &GitRepo) -> Result<String> {
                 .unwrap_or(target.as_str())
         )),
     }
+}
+
+pub(crate) fn upstream_differs_from_head(repo: &GitRepo, upstream_ref: &str) -> Result<bool> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head = refs.resolve("HEAD")?;
+    let upstream = refs.resolve(upstream_ref)?;
+    Ok(head != upstream)
 }
 
 #[derive(Debug, Clone)]

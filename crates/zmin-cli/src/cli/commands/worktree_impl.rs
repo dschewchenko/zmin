@@ -341,6 +341,7 @@ fn collect_clean_untracked_files(
 pub(crate) fn status(
     porcelain: Option<&str>,
     branch: bool,
+    ahead_behind: bool,
     short: bool,
     null: bool,
     ignored: Option<&str>,
@@ -376,11 +377,11 @@ pub(crate) fn status(
     if machine_readable && branch {
         let _trace = phase_trace("status.branch_header");
         if porcelain_version == PorcelainVersion::V2 {
-            for row in porcelain_v2_branch_header(&repo)? {
+            for row in porcelain_v2_branch_header(&repo, ahead_behind)? {
                 write_status_record(&row, null)?;
             }
         } else {
-            write_status_record(&porcelain_branch_header(&repo)?, null)?;
+            write_status_record(&porcelain_branch_header(&repo, ahead_behind)?, null)?;
         }
     }
 
@@ -656,7 +657,7 @@ fn status_zero_object_id() -> &'static str {
     "0000000000000000000000000000000000000000"
 }
 
-fn porcelain_v2_branch_header(repo: &GitRepo) -> Result<Vec<String>> {
+fn porcelain_v2_branch_header(repo: &GitRepo, ahead_behind: bool) -> Result<Vec<String>> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head = refs.read_head()?;
     let mut rows = Vec::new();
@@ -671,8 +672,14 @@ fn porcelain_v2_branch_header(repo: &GitRepo) -> Result<Vec<String>> {
             rows.push(format!("# branch.head {branch}"));
             if let Some(upstream) = read_branch_upstream(repo, branch)? {
                 rows.push(format!("# branch.upstream {}", upstream.display));
-                if let Some((ahead, behind)) = upstream_counts(repo, &upstream.ref_name)? {
-                    rows.push(format!("# branch.ab +{ahead} -{behind}"));
+                if ahead_behind {
+                    if let Some((ahead, behind)) = upstream_counts(repo, &upstream.ref_name)? {
+                        rows.push(format!("# branch.ab +{ahead} -{behind}"));
+                    }
+                } else if upstream_differs_from_head(repo, &upstream.ref_name)? {
+                    rows.push("# branch.ab +? -?".to_owned());
+                } else {
+                    rows.push("# branch.ab +0 -0".to_owned());
                 }
             }
         }
@@ -7858,7 +7865,7 @@ fn stash_apply(
         restore_index,
     )?;
     if !quiet {
-        status(None, false, false, false, None, None, Vec::new())?;
+        status(None, false, true, false, false, None, None, Vec::new())?;
     }
     if let Some(index) = drop_index {
         drop_stash_entry(&repo, index, quiet)?;

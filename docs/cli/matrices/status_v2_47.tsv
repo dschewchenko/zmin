@@ -30,8 +30,8 @@ Basic Snapshotting	status	--long	<empty>	<none>	dirty/untracked	local	all	git st
 Basic Snapshotting	status	--no-long	<empty>	<none>	dirty/untracked	local	all	git status --no-long	open	not accepted by schema	final mode should select short/porcelain behavior per stock Git
 Basic Snapshotting	status	--show-stash	<empty>	<none>	stash exists	local	all	git status --show-stash	open	not accepted by schema	important GUI/status summary mode
 Basic Snapshotting	status	--no-show-stash	<empty>	--show-stash	stash exists	local	all	git status --show-stash --no-show-stash	open	not accepted by schema	toggle reset
-Basic Snapshotting	status	--ahead-behind	<empty>	--porcelain=v2 --branch	upstream ahead/behind	local	all	git status --porcelain=v2 --branch --ahead-behind	open	not accepted by schema	default on in many modes
-Basic Snapshotting	status	--no-ahead-behind	<empty>	--porcelain=v2 --branch	upstream ahead/behind	local	all	git status --porcelain=v2 --branch --no-ahead-behind	open	not accepted by schema	should omit full ab values like stock Git
+Basic Snapshotting	status	--ahead-behind	<empty>	--porcelain=v2 --branch	upstream ahead/behind	local	all	git status --porcelain=v2 --branch --ahead-behind	closed	git_status_compat::status_branch_reports_upstream_ahead_count	explicit full counts
+Basic Snapshotting	status	--no-ahead-behind	<empty>	--porcelain=v1/v2 --branch; --short --branch	upstream equal/ahead	local	all	git status --porcelain=v2 --branch --no-ahead-behind	closed	git_status_compat::status_branch_reports_upstream_ahead_count; git_status_compat::status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git	v2 uses +? -? when refs differ; v1/short uses [different]
 Basic Snapshotting	status	--ignore-submodules	<empty>	<none>	submodule dirty	local	all	git status --ignore-submodules	open	not accepted by schema	default all value
 Basic Snapshotting	status	--ignore-submodules	all	<none>	submodule dirty	local	all	git status --ignore-submodules=all	open	not accepted by schema	
 Basic Snapshotting	status	--ignore-submodules	dirty	<none>	submodule dirty/untracked	local	all	git status --ignore-submodules=dirty	open	not accepted by schema	

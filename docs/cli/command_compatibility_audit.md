@@ -109,13 +109,15 @@ Recently closed replacement gaps:
 - `status --null`, `status --short`, `status -unormal`, bare
   `status --untracked-files`, and `status --ignored=traditional` now have exact
   stock-Git parity evidence
+- `status --ahead-behind` and `status --no-ahead-behind` match stock Git branch
+  headers for porcelain v1/v2 with equal and different upstream refs
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
 - Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `48`
-  rows: `23` closed, `2` partial, and `23` open.
+  rows: `25` closed, `2` partial, and `21` open.
 - Variant inventory: the 2026-06-19 raw hard-fail scan has `132`
   `unsupported` / `not supported yet` / `not implemented yet` code hits to
   classify before any global percentage is honest.

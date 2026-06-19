@@ -272,6 +272,84 @@ fn status_branch_reports_upstream_ahead_count() {
         run_zmin(&work, ["status", "--porcelain=v1", "--branch"]),
         git(&work, ["status", "--porcelain=v1", "--branch"])
     );
+    assert_eq!(
+        run_zmin(
+            &work,
+            ["status", "--porcelain=v2", "--branch", "--ahead-behind"]
+        ),
+        git(
+            &work,
+            ["status", "--porcelain=v2", "--branch", "--ahead-behind"]
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            &work,
+            ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"]
+        ),
+        git(
+            &work,
+            ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"]
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            &work,
+            ["status", "--porcelain=v1", "--branch", "--no-ahead-behind"]
+        ),
+        git(
+            &work,
+            ["status", "--porcelain=v1", "--branch", "--no-ahead-behind"]
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            &work,
+            ["status", "--short", "--branch", "--no-ahead-behind"]
+        ),
+        git(
+            &work,
+            ["status", "--short", "--branch", "--no-ahead-behind"]
+        )
+    );
+}
+
+#[test]
+fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(
+        dir.path(),
+        ["clone", remote.to_str().expect("remote path"), "work"],
+    );
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write fixture");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["push", "-u", "origin", "HEAD"]);
+
+    assert_eq!(
+        run_zmin(
+            &work,
+            ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"]
+        ),
+        git(
+            &work,
+            ["status", "--porcelain=v2", "--branch", "--no-ahead-behind"]
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            &work,
+            ["status", "--porcelain=v1", "--branch", "--no-ahead-behind"]
+        ),
+        git(
+            &work,
+            ["status", "--porcelain=v1", "--branch", "--no-ahead-behind"]
+        )
+    );
 }
 
 fn committed_repo() -> TempDir {

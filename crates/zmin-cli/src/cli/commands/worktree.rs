@@ -137,6 +137,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Status {
             porcelain,
             branch,
+            ahead_behind: _,
+            no_ahead_behind,
             short,
             null,
             ignored,
@@ -145,6 +147,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => run_status(
             porcelain,
             branch,
+            !no_ahead_behind,
             short,
             null,
             ignored,
@@ -273,6 +276,7 @@ pub(crate) fn run_mv(
 pub(crate) fn run_status(
     porcelain: Option<String>,
     branch: bool,
+    ahead_behind: bool,
     short: bool,
     null: bool,
     ignored: Option<String>,
@@ -282,6 +286,7 @@ pub(crate) fn run_status(
     super::worktree_commands::status(
         porcelain.as_deref(),
         branch,
+        ahead_behind,
         short,
         null,
         ignored.as_deref(),
