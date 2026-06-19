@@ -1,0 +1,170 @@
+name: Release artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to package and publish"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-artifacts-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  metadata:
+    name: Check release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Check README archive list
+        run: tools/sync-readme-release-assets.sh --check
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: metadata
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: zmin-x86_64-unknown-linux-gnu.tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: zmin-aarch64-unknown-linux-gnu.tar.gz
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: zmin-x86_64-apple-darwin.tar.gz
+          - os: macos-15
+            target: aarch64-apple-darwin
+            artifact: zmin-aarch64-apple-darwin.tar.gz
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            artifact: zmin-x86_64-pc-windows-msvc.zip
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            artifact: zmin-aarch64-pc-windows-msvc.zip
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Show Rust toolchain
+        run: rustup show
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build zmin
+        run: cargo build -p zmin-cli --release --bin zmin --target ${{ matrix.target }}
+
+      - name: Verify zmin on Unix
+        if: runner.os != 'Windows'
+        run: ./target/${{ matrix.target }}/release/zmin --version
+
+      - name: Verify zmin on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\target\${{ matrix.target }}\release\zmin.exe --version
+
+      - name: Package Unix artifact
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p dist/package
+          cp "target/${{ matrix.target }}/release/zmin" dist/package/zmin
+          chmod 0755 dist/package/zmin
+          tar -C dist/package -czf "dist/${{ matrix.artifact }}" zmin
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/package | Out-Null
+          Copy-Item "target\${{ matrix.target }}\release\zmin.exe" dist\package\zmin.exe
+          Compress-Archive -Path dist\package\zmin.exe -DestinationPath "dist\${{ matrix.artifact }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Write checksums
+        run: |
+          cd dist
+          sha256sum zmin-* > SHA256SUMS
+
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          target_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+          notes_file="$(mktemp)"
+          {
+            printf 'Experimental pre-1.0 Zmin artifacts for `%s`.\n\n' "$RELEASE_TAG"
+            printf 'These preview builds are not published through official package stores yet.\n\n'
+            printf 'Artifacts:\n'
+            while IFS= read -r artifact; do
+              printf '%s\n' "- \`$(basename "$artifact")\`"
+            done < <(find dist -maxdepth 1 -type f -name 'zmin-*' | sort)
+          } >"$notes_file"
+
+          prerelease=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --target "$target_sha" \
+              --title "Zmin ${RELEASE_TAG}" \
+              --notes-file "$notes_file" \
+              "${prerelease[@]}"
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --verify-tag \
+              --target "$target_sha" \
+              --title "Zmin ${RELEASE_TAG}" \
+              --notes-file "$notes_file" \
+              "${prerelease[@]}"
+          fi

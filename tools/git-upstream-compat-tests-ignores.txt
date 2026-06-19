@@ -1,0 +1,2 @@
+# mode<TAB>test<TAB>reason
+quick	t0008-ignores.sh	ignore matching and status-adjacent path behavior
