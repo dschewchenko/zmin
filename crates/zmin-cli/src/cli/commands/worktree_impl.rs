@@ -501,6 +501,7 @@ pub(crate) fn status(
             &paths,
             &untracked,
             &ignored,
+            &pathspecs,
             untracked_mode,
             stash_count.unwrap_or(0),
             column_untracked,
@@ -1259,6 +1260,7 @@ fn print_human_status(
     paths: &HashMap<Vec<u8>, StatusPathState>,
     untracked: &[Vec<u8>],
     ignored: &[Vec<u8>],
+    pathspecs: &[Vec<u8>],
     untracked_mode: UntrackedMode,
     stash_count: usize,
     column_untracked: bool,
@@ -1281,7 +1283,9 @@ fn print_human_status(
 
     let mut staged = paths
         .iter()
-        .filter(|(_, state)| state.index_status != ' ')
+        .filter(|(path, state)| {
+            state.index_status != ' ' && (pathspecs.is_empty() || pathspec_matches(path, pathspecs))
+        })
         .map(|(path, state)| {
             (
                 path.clone(),
@@ -1292,8 +1296,21 @@ fn print_human_status(
         .collect::<Vec<_>>();
     let mut worktree = paths
         .iter()
-        .filter(|(_, state)| state.worktree_status != ' ')
+        .filter(|(path, state)| {
+            state.worktree_status != ' '
+                && (pathspecs.is_empty() || pathspec_matches(path, pathspecs))
+        })
         .map(|(path, state)| (path.clone(), state.worktree_status, state.submodule))
+        .collect::<Vec<_>>();
+    let untracked = untracked
+        .iter()
+        .filter(|path| pathspecs.is_empty() || pathspec_matches(path, pathspecs))
+        .cloned()
+        .collect::<Vec<_>>();
+    let ignored = ignored
+        .iter()
+        .filter(|path| pathspecs.is_empty() || pathspec_matches(path, pathspecs))
+        .cloned()
         .collect::<Vec<_>>();
     staged.sort_by(|left, right| left.0.cmp(&right.0));
     worktree.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1358,9 +1375,9 @@ fn print_human_status(
         println!("Untracked files:");
         println!("  (use \"git add <file>...\" to include in what will be committed)");
         if column_untracked {
-            print_status_path_columns(untracked);
+            print_status_path_columns(&untracked);
         } else {
-            for path in untracked {
+            for path in &untracked {
                 println!("\t{}", String::from_utf8_lossy(path));
             }
         }
@@ -1373,7 +1390,7 @@ fn print_human_status(
         }
         println!("Ignored files:");
         println!("  (use \"git add -f <file>...\" to include in what will be committed)");
-        for path in ignored {
+        for path in &ignored {
             println!("\t{}", String::from_utf8_lossy(path));
         }
         printed_body = true;

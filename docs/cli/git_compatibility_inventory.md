@@ -56,7 +56,7 @@ transports or platforms.
 
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `43` | `1` | `0` | `4` |
+| `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
 
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also
@@ -87,7 +87,10 @@ The latest implementation slice closed `--ignore-submodules`, `=all`, `=dirty`
 and `=untracked` for dirty, untracked and new-commit submodule states across
 human, porcelain v1/v2 and short output.
 The latest evidence slice closed standalone human `-b` and `--branch` status
-for dirty, untracked and upstream-ahead states.
+for dirty, untracked and upstream-ahead states. The latest implementation slice
+split the previous partial pathspec row into exact status-specific rows for
+file, directory, default glob, explicit magic, exclude magic, human output and
+global pathspec flags.
 
 ## Required Matrix Columns
 

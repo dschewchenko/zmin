@@ -358,6 +358,80 @@ fn status_human_branch_modes_match_stock_git() {
 }
 
 #[test]
+fn status_pathspec_modes_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::create_dir_all(repo.path().join("other")).expect("create other dir");
+    for (path, content) in [
+        ("a.txt", b"base\n".as_slice()),
+        ("a*b.txt", b"base\n".as_slice()),
+        ("dir/one.txt", b"base\n".as_slice()),
+        ("dir/two.log", b"base\n".as_slice()),
+        ("other/ABC.TXT", b"base\n".as_slice()),
+    ] {
+        fs::write(repo.path().join(path), content).expect("write tracked pathspec fixture");
+    }
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "pathspec base"]);
+
+    for path in [
+        "a.txt",
+        "a*b.txt",
+        "dir/one.txt",
+        "dir/two.log",
+        "other/ABC.TXT",
+    ] {
+        fs::write(repo.path().join(path), b"changed\n").expect("modify pathspec fixture");
+    }
+    fs::write(repo.path().join("dir/new.txt"), b"new\n").expect("write nested untracked");
+    fs::write(repo.path().join("root-new.txt"), b"new\n").expect("write root untracked");
+
+    for args in [
+        ["status", "--porcelain=v1", "--", "a.txt"].as_slice(),
+        ["status", "--porcelain=v1", "--", "dir"].as_slice(),
+        ["status", "--porcelain=v1", "--", "dir/"].as_slice(),
+        ["status", "--porcelain=v1", "--", "*.txt"].as_slice(),
+        ["status", "--porcelain=v1", "--", ":(glob)dir/*.txt"].as_slice(),
+        ["status", "--porcelain=v1", "--", ":(literal)a*b.txt"].as_slice(),
+        ["status", "--porcelain=v1", "--", ":(icase)other/abc.txt"].as_slice(),
+        ["status", "--porcelain=v1", "--", "*.txt", ":(exclude)a.txt"].as_slice(),
+        ["status", "--short", "--", "*.txt", ":(exclude)a.txt"].as_slice(),
+        ["status", "--", "dir"].as_slice(),
+        [
+            "--literal-pathspecs",
+            "status",
+            "--porcelain=v1",
+            "--",
+            "a*b.txt",
+        ]
+        .as_slice(),
+        [
+            "--glob-pathspecs",
+            "status",
+            "--porcelain=v1",
+            "--",
+            "a*.txt",
+        ]
+        .as_slice(),
+        [
+            "--icase-pathspecs",
+            "status",
+            "--porcelain=v1",
+            "--",
+            "other/abc.txt",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "status pathspec args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");

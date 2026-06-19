@@ -134,13 +134,15 @@ Recently closed replacement gaps:
   and new-commit submodule states across human, porcelain v1/v2 and short forms
 - `status -b` and `status --branch` match stock Git for standalone human
   dirty, untracked and upstream-ahead states
+- `status` pathspec rows match stock Git for exact file, directory, default
+  glob, explicit magic, exclude magic, human output and global pathspec flags
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
-- Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `48`
-  rows: `43` closed, `1` partial, `0` open and `4` invalid-input.
+- Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `60`
+  rows: `56` closed, `0` partial, `0` open and `4` invalid-input.
 - Variant inventory: the 2026-06-19 raw hard-fail scan has `132`
   `unsupported` / `not supported yet` / `not implemented yet` code hits to
   classify before any global percentage is honest.
