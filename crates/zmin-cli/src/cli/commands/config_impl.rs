@@ -669,7 +669,7 @@ fn format_config_color(value: &str) -> Result<String> {
     Ok(sequence)
 }
 
-fn parse_config_color(value: &str) -> Option<String> {
+pub(crate) fn parse_config_color(value: &str) -> Option<String> {
     let mut reset_codes = Vec::new();
     let mut attribute_codes = Vec::new();
     let mut foreground_code = None::<String>;

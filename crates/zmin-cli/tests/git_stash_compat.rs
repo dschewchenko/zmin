@@ -1300,6 +1300,24 @@ fn stash_list_formats_match_stock_git() {
         ["stash", "list", "--format=%Cred%h%Creset:%s"].as_slice(),
         ["stash", "list", "--format=%C(red)%h%C(reset):%s"].as_slice(),
         ["stash", "list", "--format=%C(auto,red)%h%Creset:%s"].as_slice(),
+        [
+            "stash",
+            "list",
+            "--format=%C(always,red)%h%C(always,reset):%s",
+        ]
+        .as_slice(),
+        [
+            "stash",
+            "list",
+            "--format=%C(always,bold red)%h%C(always,reset):%s",
+        ]
+        .as_slice(),
+        [
+            "stash",
+            "list",
+            "--format=%C(always,blue)%h%C(always,normal):%s",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

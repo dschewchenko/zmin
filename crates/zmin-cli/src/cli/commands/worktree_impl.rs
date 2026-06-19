@@ -6800,8 +6800,13 @@ fn render_stash_list_format(
                     _ => stash_format_literal_atom(&mut out, "G", next),
                 }
             }
-            'C' if consume_stash_color_atom(&mut chars) => {}
-            'C' | 'w' | '<' | '>' => {
+            'C' => {
+                let Some(sequence) = consume_stash_color_atom(&mut chars) else {
+                    return Err(unsupported_stash_list_format_atom("%C"));
+                };
+                out.push_str(&sequence);
+            }
+            'w' | '<' | '>' => {
                 return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
             }
             _ => stash_format_literal_atom(&mut out, "", atom),
@@ -6810,7 +6815,7 @@ fn render_stash_list_format(
     Ok(out)
 }
 
-fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> bool
+fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> Option<String>
 where
     I: Iterator<Item = char> + Clone,
 {
@@ -6819,13 +6824,19 @@ where
         let mut spec = String::new();
         for ch in chars.by_ref() {
             if ch == ')' {
-                return !spec
-                    .split_once(',')
-                    .is_some_and(|(mode, _)| mode.trim() == "always");
+                return if let Some((mode, color)) = spec.split_once(',') {
+                    if mode.trim() == "always" {
+                        config_commands::parse_config_color(color.trim())
+                    } else {
+                        Some(String::new())
+                    }
+                } else {
+                    Some(String::new())
+                };
             }
             spec.push(ch);
         }
-        return false;
+        return None;
     }
 
     let color_atoms = [
@@ -6842,10 +6853,10 @@ where
         for _ in 0..atom.chars().count() {
             chars.next();
         }
-        return true;
+        return Some(String::new());
     }
 
-    false
+    None
 }
 
 fn stash_format_literal_atom(out: &mut String, prefix: &str, atom: char) {

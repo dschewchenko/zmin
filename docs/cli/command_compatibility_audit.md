@@ -96,6 +96,9 @@ Recently closed replacement gaps:
 - `stash list --format` accepts common non-forced pretty color atoms
   `%Cred`, `%C(red)`, and `%C(auto,red)` with reset forms when output is not
   color-forced
+- `stash list --format` emits stock ANSI sequences for forced pretty color
+  atoms `%C(always,red)`, `%C(always,bold red)`, and `%C(always,blue)` with
+  reset/normal forms
 
 Current high-priority gap classes:
 
