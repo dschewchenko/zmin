@@ -1318,6 +1318,19 @@ fn stash_list_formats_match_stock_git() {
             "--format=%C(always,blue)%h%C(always,normal):%s",
         ]
         .as_slice(),
+        ["stash", "list", "--format=[%<(10)%h]|[%>(10)%h]"].as_slice(),
+        [
+            "stash",
+            "list",
+            "--format=[%<(10,trunc)%s]|[%>(10,trunc)%s]",
+        ]
+        .as_slice(),
+        [
+            "stash",
+            "list",
+            "--format=[%<(8,ltrunc)%s]|[%<(8,mtrunc)%s]",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

@@ -6686,133 +6686,291 @@ fn render_stash_list_format(
             out.push('%');
             break;
         };
-        match atom {
-            '%' => out.push('%'),
-            'n' => out.push('\n'),
-            'H' => out.push_str(&entry.id.to_hex()),
-            'h' => out.push_str(&entry.id.short_hex(7)),
-            's' => out.push_str(&entry.message),
-            'B' => out.push_str(&String::from_utf8_lossy(&commit.message)),
-            'b' => out.push_str(&stash_format_body(&commit.message)),
-            'f' => out.push_str(&stash_format_sanitized_subject(&commit.message)),
-            'D' if index == 0 => out.push_str("refs/stash"),
-            'D' => {}
-            'd' if index == 0 => out.push_str(" (refs/stash)"),
-            'd' => {}
-            'e' | 'N' => {}
-            'm' => out.push('>'),
-            'S' => out.push_str("%S"),
-            'P' => {
-                for (index, parent) in commit.parents.iter().enumerate() {
-                    if index > 0 {
-                        out.push(' ');
-                    }
-                    out.push_str(&parent.to_hex());
-                }
-            }
-            'p' => {
-                for (index, parent) in commit.parents.iter().enumerate() {
-                    if index > 0 {
-                        out.push(' ');
-                    }
-                    out.push_str(&parent.short_hex(7));
-                }
-            }
-            'T' => out.push_str(&commit.tree.to_hex()),
-            't' => out.push_str(&commit.tree.short_hex(7)),
-            'g' => {
-                let Some(reflog_atom) = chars.next() else {
-                    return Err(unsupported_stash_list_format_atom("%g"));
-                };
-                match reflog_atom {
-                    'd' => out.push_str(&format!("stash@{{{index}}}")),
-                    'D' => out.push_str(&format!("refs/stash@{{{index}}}")),
-                    's' => out.push_str(&entry.message),
-                    'N' | 'n' => out.push_str(&signature_name(entry.reflog_identity.as_bytes())),
-                    'E' | 'e' => out.push_str(&signature_email(entry.reflog_identity.as_bytes())),
-                    'K' => out.push_str("%gK"),
-                    _ => stash_format_literal_atom(&mut out, "g", reflog_atom),
-                }
-            }
-            'x' => {
-                let high = chars
-                    .next()
-                    .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
-                let low = chars
-                    .next()
-                    .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
-                let byte = parse_hex_byte(high, low)
-                    .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
-                out.push(byte as char);
-            }
-            'a' => {
-                let Some(next) = chars.next() else {
-                    return Err(unsupported_stash_list_format_atom("%a"));
-                };
-                match next {
-                    'n' => out.push_str(&signature_name(&commit.author)),
-                    'e' => out.push_str(&signature_email(&commit.author)),
-                    'l' | 'L' => out.push_str(&signature_email_local_part(&commit.author)),
-                    't' => {
-                        out.push_str(&signature_timestamp(&commit.author).unwrap_or(0).to_string())
-                    }
-                    'd' => out.push_str(&signature_log_date(&commit.author)?),
-                    'D' => out.push_str(&signature_mail_date(&commit.author)?),
-                    'h' => out.push_str(&signature_human_date(&commit.author)?),
-                    'r' => out.push_str(&signature_relative_date(&commit.author)?),
-                    'i' => out.push_str(&signature_blame_date(&commit.author)?),
-                    'I' => out.push_str(&signature_strict_iso_date(&commit.author)?),
-                    's' => out.push_str(&signature_short_date(&commit.author)?),
-                    _ => stash_format_literal_atom(&mut out, "a", next),
-                }
-            }
-            'c' => {
-                let Some(next) = chars.next() else {
-                    return Err(unsupported_stash_list_format_atom("%c"));
-                };
-                match next {
-                    'n' => out.push_str(&signature_name(&commit.committer)),
-                    'e' => out.push_str(&signature_email(&commit.committer)),
-                    'l' | 'L' => out.push_str(&signature_email_local_part(&commit.committer)),
-                    't' => out.push_str(
-                        &signature_timestamp(&commit.committer)
-                            .unwrap_or(0)
-                            .to_string(),
-                    ),
-                    'd' => out.push_str(&signature_log_date(&commit.committer)?),
-                    'D' => out.push_str(&signature_mail_date(&commit.committer)?),
-                    'h' => out.push_str(&signature_human_date(&commit.committer)?),
-                    'r' => out.push_str(&signature_relative_date(&commit.committer)?),
-                    'i' => out.push_str(&signature_blame_date(&commit.committer)?),
-                    'I' => out.push_str(&signature_strict_iso_date(&commit.committer)?),
-                    's' => out.push_str(&signature_short_date(&commit.committer)?),
-                    _ => stash_format_literal_atom(&mut out, "c", next),
-                }
-            }
-            'G' => {
-                let Some(next) = chars.next() else {
-                    return Err(unsupported_stash_list_format_atom("%G"));
-                };
-                match next {
-                    '?' => out.push('N'),
-                    'K' | 'F' | 'P' | 'S' | 'G' => {}
-                    'T' => out.push_str("undefined"),
-                    _ => stash_format_literal_atom(&mut out, "G", next),
-                }
-            }
-            'C' => {
-                let Some(sequence) = consume_stash_color_atom(&mut chars) else {
-                    return Err(unsupported_stash_list_format_atom("%C"));
-                };
-                out.push_str(&sequence);
-            }
-            'w' | '<' | '>' => {
-                return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
-            }
-            _ => stash_format_literal_atom(&mut out, "", atom),
-        }
+        render_stash_list_format_atom(atom, &mut chars, &mut out, index, entry, &commit)?;
     }
     Ok(out)
+}
+
+fn render_stash_list_format_atom<I>(
+    atom: char,
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+    index: usize,
+    entry: &StashEntry,
+    commit: &zmin_git_core::CommitObject,
+) -> Result<()>
+where
+    I: Iterator<Item = char> + Clone,
+{
+    match atom {
+        '%' => out.push('%'),
+        'n' => out.push('\n'),
+        'H' => out.push_str(&entry.id.to_hex()),
+        'h' => out.push_str(&entry.id.short_hex(7)),
+        's' => out.push_str(&entry.message),
+        'B' => out.push_str(&String::from_utf8_lossy(&commit.message)),
+        'b' => out.push_str(&stash_format_body(&commit.message)),
+        'f' => out.push_str(&stash_format_sanitized_subject(&commit.message)),
+        'D' if index == 0 => out.push_str("refs/stash"),
+        'D' => {}
+        'd' if index == 0 => out.push_str(" (refs/stash)"),
+        'd' => {}
+        'e' | 'N' => {}
+        'm' => out.push('>'),
+        'S' => out.push_str("%S"),
+        'P' => render_stash_parent_list(out, &commit.parents, false),
+        'p' => render_stash_parent_list(out, &commit.parents, true),
+        'T' => out.push_str(&commit.tree.to_hex()),
+        't' => out.push_str(&commit.tree.short_hex(7)),
+        'g' => render_stash_reflog_atom(chars, out, index, entry)?,
+        'x' => render_stash_hex_atom(chars, out)?,
+        'a' => render_stash_signature_atom(chars, out, &commit.author, "a")?,
+        'c' => render_stash_signature_atom(chars, out, &commit.committer, "c")?,
+        'G' => render_stash_gpg_atom(chars, out)?,
+        'C' => {
+            let Some(sequence) = consume_stash_color_atom(chars) else {
+                return Err(unsupported_stash_list_format_atom("%C"));
+            };
+            out.push_str(&sequence);
+        }
+        '<' | '>' => render_stash_width_atom(atom, chars, out, index, entry, commit)?,
+        'w' => return Err(unsupported_stash_list_format_atom("%w")),
+        _ => stash_format_literal_atom(out, "", atom),
+    }
+    Ok(())
+}
+
+fn render_stash_parent_list(out: &mut String, parents: &[ObjectId], short: bool) {
+    for (index, parent) in parents.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        if short {
+            out.push_str(&parent.short_hex(7));
+        } else {
+            out.push_str(&parent.to_hex());
+        }
+    }
+}
+
+fn render_stash_reflog_atom<I>(
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+    index: usize,
+    entry: &StashEntry,
+) -> Result<()>
+where
+    I: Iterator<Item = char>,
+{
+    let Some(reflog_atom) = chars.next() else {
+        return Err(unsupported_stash_list_format_atom("%g"));
+    };
+    match reflog_atom {
+        'd' => out.push_str(&format!("stash@{{{index}}}")),
+        'D' => out.push_str(&format!("refs/stash@{{{index}}}")),
+        's' => out.push_str(&entry.message),
+        'N' | 'n' => out.push_str(&signature_name(entry.reflog_identity.as_bytes())),
+        'E' | 'e' => out.push_str(&signature_email(entry.reflog_identity.as_bytes())),
+        'K' => out.push_str("%gK"),
+        _ => stash_format_literal_atom(out, "g", reflog_atom),
+    }
+    Ok(())
+}
+
+fn render_stash_hex_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String) -> Result<()>
+where
+    I: Iterator<Item = char>,
+{
+    let high = chars
+        .next()
+        .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+    let low = chars
+        .next()
+        .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+    let byte = parse_hex_byte(high, low).ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+    out.push(byte as char);
+    Ok(())
+}
+
+fn render_stash_signature_atom<I>(
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+    signature: &[u8],
+    prefix: &str,
+) -> Result<()>
+where
+    I: Iterator<Item = char>,
+{
+    let Some(next) = chars.next() else {
+        return Err(unsupported_stash_list_format_atom(&format!("%{prefix}")));
+    };
+    match next {
+        'n' => out.push_str(&signature_name(signature)),
+        'e' => out.push_str(&signature_email(signature)),
+        'l' | 'L' => out.push_str(&signature_email_local_part(signature)),
+        't' => out.push_str(&signature_timestamp(signature).unwrap_or(0).to_string()),
+        'd' => out.push_str(&signature_log_date(signature)?),
+        'D' => out.push_str(&signature_mail_date(signature)?),
+        'h' => out.push_str(&signature_human_date(signature)?),
+        'r' => out.push_str(&signature_relative_date(signature)?),
+        'i' => out.push_str(&signature_blame_date(signature)?),
+        'I' => out.push_str(&signature_strict_iso_date(signature)?),
+        's' => out.push_str(&signature_short_date(signature)?),
+        _ => stash_format_literal_atom(out, prefix, next),
+    }
+    Ok(())
+}
+
+fn render_stash_gpg_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String) -> Result<()>
+where
+    I: Iterator<Item = char>,
+{
+    let Some(next) = chars.next() else {
+        return Err(unsupported_stash_list_format_atom("%G"));
+    };
+    match next {
+        '?' => out.push('N'),
+        'K' | 'F' | 'P' | 'S' | 'G' => {}
+        'T' => out.push_str("undefined"),
+        _ => stash_format_literal_atom(out, "G", next),
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum StashWidthAlign {
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy)]
+enum StashWidthTruncation {
+    None,
+    Right,
+    Left,
+    Middle,
+}
+
+struct StashWidthSpec {
+    width: usize,
+    align: StashWidthAlign,
+    truncation: StashWidthTruncation,
+}
+
+fn render_stash_width_atom<I>(
+    atom: char,
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+    index: usize,
+    entry: &StashEntry,
+    commit: &CommitObject,
+) -> Result<()>
+where
+    I: Iterator<Item = char> + Clone,
+{
+    let spec = parse_stash_width_spec(atom, chars)?;
+    let Some('%') = chars.next() else {
+        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+    };
+    let Some(next_atom) = chars.next() else {
+        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+    };
+    let mut rendered = String::new();
+    render_stash_list_format_atom(next_atom, chars, &mut rendered, index, entry, commit)?;
+    out.push_str(&apply_stash_width_spec(&rendered, &spec));
+    Ok(())
+}
+
+fn parse_stash_width_spec<I>(
+    atom: char,
+    chars: &mut std::iter::Peekable<I>,
+) -> Result<StashWidthSpec>
+where
+    I: Iterator<Item = char>,
+{
+    if chars.next() != Some('(') {
+        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+    }
+    let mut raw = String::new();
+    for ch in chars.by_ref() {
+        if ch == ')' {
+            let mut parts = raw.split(',').map(str::trim);
+            let width = parts
+                .next()
+                .and_then(|value| value.parse::<usize>().ok())
+                .ok_or_else(|| unsupported_stash_list_format_atom(&format!("%{atom}")))?;
+            let truncation = match parts.next() {
+                None | Some("") => StashWidthTruncation::None,
+                Some("trunc") => StashWidthTruncation::Right,
+                Some("ltrunc") => StashWidthTruncation::Left,
+                Some("mtrunc") => StashWidthTruncation::Middle,
+                Some(_) => return Err(unsupported_stash_list_format_atom(&format!("%{atom}"))),
+            };
+            if parts.next().is_some() {
+                return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+            }
+            return Ok(StashWidthSpec {
+                width,
+                align: if atom == '<' {
+                    StashWidthAlign::Left
+                } else {
+                    StashWidthAlign::Right
+                },
+                truncation,
+            });
+        }
+        raw.push(ch);
+    }
+    Err(unsupported_stash_list_format_atom(&format!("%{atom}")))
+}
+
+fn apply_stash_width_spec(value: &str, spec: &StashWidthSpec) -> String {
+    let mut value = apply_stash_width_truncation(value, spec.width, spec.truncation);
+    let len = value.chars().count();
+    if len >= spec.width {
+        return value;
+    }
+    let padding = " ".repeat(spec.width - len);
+    match spec.align {
+        StashWidthAlign::Left => value.push_str(&padding),
+        StashWidthAlign::Right => value.insert_str(0, &padding),
+    }
+    value
+}
+
+fn apply_stash_width_truncation(
+    value: &str,
+    width: usize,
+    truncation: StashWidthTruncation,
+) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if matches!(truncation, StashWidthTruncation::None) || chars.len() <= width {
+        return value.to_owned();
+    }
+    if width <= 2 {
+        return ".".repeat(width);
+    }
+    match truncation {
+        StashWidthTruncation::None => value.to_owned(),
+        StashWidthTruncation::Right => {
+            let mut out = chars[..width - 2].iter().collect::<String>();
+            out.push_str("..");
+            out
+        }
+        StashWidthTruncation::Left => {
+            let mut out = String::from("..");
+            out.extend(chars[chars.len() - (width - 2)..].iter());
+            out
+        }
+        StashWidthTruncation::Middle => {
+            let left = (width - 2).div_ceil(2);
+            let right = (width - 2) - left;
+            let mut out = chars[..left].iter().collect::<String>();
+            out.push_str("..");
+            out.extend(chars[chars.len() - right..].iter());
+            out
+        }
+    }
 }
 
 fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> Option<String>

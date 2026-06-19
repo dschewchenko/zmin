@@ -99,6 +99,8 @@ Recently closed replacement gaps:
 - `stash list --format` emits stock ANSI sequences for forced pretty color
   atoms `%C(always,red)`, `%C(always,bold red)`, and `%C(always,blue)` with
   reset/normal forms
+- `stash list --format` supports simple pretty width modifiers for left/right
+  padding and `trunc`/`ltrunc`/`mtrunc` truncation on the next atom
 
 Current high-priority gap classes:
 
