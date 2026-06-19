@@ -6721,6 +6721,7 @@ fn render_stash_list_format(
                     'd' => out.push_str(&format!("stash@{{{index}}}")),
                     'D' => out.push_str(&format!("refs/stash@{{{index}}}")),
                     's' => out.push_str(&entry.message),
+                    'K' => out.push_str("%gK"),
                     _ => {
                         return Err(unsupported_stash_list_format_atom(&format!(
                             "%g{reflog_atom}"
@@ -6746,12 +6747,15 @@ fn render_stash_list_format(
                 match next {
                     'n' => out.push_str(&signature_name(&commit.author)),
                     'e' => out.push_str(&signature_email(&commit.author)),
+                    'l' | 'L' => out.push_str(&signature_email_local_part(&commit.author)),
                     't' => {
                         out.push_str(&signature_timestamp(&commit.author).unwrap_or(0).to_string())
                     }
                     'd' => out.push_str(&signature_log_date(&commit.author)?),
+                    'D' => out.push_str(&signature_mail_date(&commit.author)?),
                     'i' => out.push_str(&signature_blame_date(&commit.author)?),
                     'I' => out.push_str(&signature_strict_iso_date(&commit.author)?),
+                    's' => out.push_str(&signature_short_date(&commit.author)?),
                     _ => return Err(unsupported_stash_list_format_atom(&format!("%a{next}"))),
                 }
             }
@@ -6762,15 +6766,29 @@ fn render_stash_list_format(
                 match next {
                     'n' => out.push_str(&signature_name(&commit.committer)),
                     'e' => out.push_str(&signature_email(&commit.committer)),
+                    'l' | 'L' => out.push_str(&signature_email_local_part(&commit.committer)),
                     't' => out.push_str(
                         &signature_timestamp(&commit.committer)
                             .unwrap_or(0)
                             .to_string(),
                     ),
                     'd' => out.push_str(&signature_log_date(&commit.committer)?),
+                    'D' => out.push_str(&signature_mail_date(&commit.committer)?),
                     'i' => out.push_str(&signature_blame_date(&commit.committer)?),
                     'I' => out.push_str(&signature_strict_iso_date(&commit.committer)?),
+                    's' => out.push_str(&signature_short_date(&commit.committer)?),
                     _ => return Err(unsupported_stash_list_format_atom(&format!("%c{next}"))),
+                }
+            }
+            'G' => {
+                let Some(next) = chars.next() else {
+                    return Err(unsupported_stash_list_format_atom("%G"));
+                };
+                match next {
+                    '?' => out.push('N'),
+                    'K' | 'F' | 'P' => {}
+                    'T' => out.push_str("undefined"),
+                    _ => return Err(unsupported_stash_list_format_atom(&format!("%G{next}"))),
                 }
             }
             _ => return Err(unsupported_stash_list_format_atom(&format!("%{atom}"))),
@@ -6801,6 +6819,30 @@ fn stash_format_sanitized_subject(message: &[u8]) -> String {
         }
     }
     slug.trim_matches('-').to_owned()
+}
+
+fn signature_email_local_part(signature: &[u8]) -> String {
+    let email = signature_email(signature);
+    email.split_once('@')
+        .map_or(email.as_str(), |(local, _)| local)
+        .to_owned()
+}
+
+fn signature_short_date(signature: &[u8]) -> Result<String> {
+    let (timestamp, timezone) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid date".into(),
+        })?;
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid timezone".into(),
+    })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit timestamp is out of range".into(),
+    })?;
+    Ok(utc.with_timezone(&offset).format("%Y-%m-%d").to_string())
 }
 
 fn signature_strict_iso_date(signature: &[u8]) -> Result<String> {
