@@ -1,0 +1,1 @@
+standard	t1006-cat-file.sh	object inspection and batch plumbing

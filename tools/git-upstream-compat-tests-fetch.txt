@@ -1,0 +1,2 @@
+# mode<TAB>test<TAB>reason
+exhaustive	t5510-fetch.sh	fetch transport behavior
