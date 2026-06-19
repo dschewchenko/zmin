@@ -36,8 +36,8 @@ Basic Snapshotting	status	--ignore-submodules	<empty>	<none>	submodule dirty	loc
 Basic Snapshotting	status	--ignore-submodules	all	<none>	submodule dirty	local	all	git status --ignore-submodules=all	open	not accepted by schema	
 Basic Snapshotting	status	--ignore-submodules	dirty	<none>	submodule dirty/untracked	local	all	git status --ignore-submodules=dirty	open	not accepted by schema	
 Basic Snapshotting	status	--ignore-submodules	untracked	<none>	submodule untracked	local	all	git status --ignore-submodules=untracked	open	not accepted by schema	
-Basic Snapshotting	status	--column	<empty>	human untracked	untracked many	local	all	git status --column	open	not accepted by schema	human layout only
-Basic Snapshotting	status	--no-column	<empty>	--column	untracked many	local	all	git status --column --no-column	open	not accepted by schema	toggle reset
+Basic Snapshotting	status	--column	<empty>/always/never	human untracked	untracked many	local	all	git status --column	closed	git_status_compat::status_column_modes_match_stock_git	columnized human untracked output plus column.status=always
+Basic Snapshotting	status	--no-column	<empty>	--column/config	untracked many	local	all	git status --column --no-column	closed	git_status_compat::status_column_modes_match_stock_git	order-sensitive reset form
 Basic Snapshotting	status	--renames	<empty>	--porcelain=v1	rename staged/local	local	all	git status --renames --porcelain=v1	open	not accepted by schema	rename detection control
 Basic Snapshotting	status	--no-renames	<empty>	--porcelain=v1	rename staged/local	local	all	git status --no-renames --porcelain=v1	open	not accepted by schema	rename detection control
 Basic Snapshotting	status	--find-renames	<empty>	--porcelain=v1	rename staged/local	local	all	git status --find-renames --porcelain=v1	open	not accepted by schema	default threshold

@@ -117,13 +117,16 @@ Recently closed replacement gaps:
   order-sensitive interaction with `--short`
 - `status --verbose` and `status --no-verbose` match stock Git for `-v`,
   `-vv`, order-sensitive reset forms and machine-readable combinations
+- `status --column` and `status --no-column` match stock Git for columnized
+  human untracked output, `column.status=always`, reset forms and
+  machine-readable combinations
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
 - Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `48`
-  rows: `31` closed, `2` partial, and `15` open.
+  rows: `33` closed, `2` partial, and `13` open.
 - Variant inventory: the 2026-06-19 raw hard-fail scan has `132`
   `unsupported` / `not supported yet` / `not implemented yet` code hits to
   classify before any global percentage is honest.

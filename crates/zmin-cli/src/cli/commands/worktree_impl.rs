@@ -344,6 +344,8 @@ pub(crate) fn status(
     ahead_behind: bool,
     show_stash: bool,
     verbose: u8,
+    column: Option<&str>,
+    no_column: bool,
     short: bool,
     null: bool,
     ignored: Option<&str>,
@@ -377,6 +379,7 @@ pub(crate) fn status(
         });
     }
     let machine_readable = porcelain.is_some() || short || null;
+    let column_untracked = status_column_untracked(&repo, column, no_column)?;
     let stash_count = if show_stash {
         Some(status_stash_count(&repo)?)
     } else {
@@ -477,6 +480,7 @@ pub(crate) fn status(
             &ignored,
             untracked_mode,
             stash_count.unwrap_or(0),
+            column_untracked,
         )?;
         print_status_verbose_diff(verbose, diff_paths)?;
         return Ok(());
@@ -744,6 +748,42 @@ fn status_stash_count(repo: &GitRepo) -> Result<usize> {
     }
 }
 
+fn status_column_untracked(repo: &GitRepo, column: Option<&str>, no_column: bool) -> Result<bool> {
+    if no_column {
+        return Ok(false);
+    }
+    match column {
+        Some(value) => parse_status_column_value(value),
+        None => read_config_value(repo, "column.status")?
+            .as_deref()
+            .map(parse_status_column_value)
+            .transpose()
+            .map(|value| value.unwrap_or(false)),
+    }
+}
+
+fn parse_status_column_value(value: &str) -> Result<bool> {
+    if value.is_empty() {
+        return Ok(true);
+    }
+    let mut enabled = true;
+    for part in value.split(',') {
+        match part {
+            "always" | "auto" | "column" | "row" | "dense" | "nodense" | "plain" => {
+                enabled = true;
+            }
+            "never" => enabled = false,
+            other => {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: format!("unsupported option '{other}'"),
+                });
+            }
+        }
+    }
+    Ok(enabled)
+}
+
 fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
     if verbose > 0 {
         println!();
@@ -964,6 +1004,7 @@ fn print_human_status(
     ignored: &[Vec<u8>],
     untracked_mode: UntrackedMode,
     stash_count: usize,
+    column_untracked: bool,
 ) -> Result<()> {
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
@@ -1041,8 +1082,12 @@ fn print_human_status(
         }
         println!("Untracked files:");
         println!("  (use \"git add <file>...\" to include in what will be committed)");
-        for path in untracked {
-            println!("\t{}", String::from_utf8_lossy(path));
+        if column_untracked {
+            print_status_path_columns(untracked);
+        } else {
+            for path in untracked {
+                println!("\t{}", String::from_utf8_lossy(path));
+            }
         }
         printed_body = true;
     }
@@ -1086,6 +1131,41 @@ fn print_human_status(
         );
     }
     Ok(())
+}
+
+fn print_status_path_columns(paths: &[Vec<u8>]) {
+    let items = paths
+        .iter()
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect::<Vec<_>>();
+    let width = 72;
+    let padding = 1;
+    let item_width = items
+        .iter()
+        .map(|item| item.len())
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let columns = ((width + padding) / (item_width + padding))
+        .max(1)
+        .min(items.len());
+    let rows = items.len().div_ceil(columns);
+    for row in 0..rows {
+        print!("\t");
+        for column in 0..columns {
+            let index = column * rows + row;
+            let Some(item) = items.get(index) else {
+                continue;
+            };
+            if column + 1 == columns || index + rows >= items.len() {
+                print!("{item}");
+            } else {
+                print!("{item:<item_width$}");
+                print!("{}", " ".repeat(padding));
+            }
+        }
+        println!();
+    }
 }
 
 fn human_status_branch_header(refs: &RefStore) -> Result<String> {
@@ -7948,6 +8028,8 @@ fn stash_apply(
             true,
             false,
             0,
+            None,
+            false,
             false,
             false,
             None,

@@ -429,6 +429,49 @@ fn status_verbose_modes_match_stock_git() {
     }
 }
 
+#[test]
+fn status_column_modes_match_stock_git() {
+    let repo = committed_repo();
+    for index in 1..=12 {
+        fs::write(
+            repo.path().join(format!("untracked-{index:02}.txt")),
+            b"untracked\n",
+        )
+        .expect("write untracked fixture");
+    }
+
+    for args in [
+        ["status", "--column"].as_slice(),
+        ["status", "--no-column"].as_slice(),
+        ["status", "--column", "--no-column"].as_slice(),
+        ["status", "--no-column", "--column"].as_slice(),
+        ["status", "--column=never"].as_slice(),
+        ["status", "--column=always"].as_slice(),
+        ["status", "--short", "--column"].as_slice(),
+        ["status", "--porcelain=v1", "--column"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    git(repo.path(), ["config", "column.status", "always"]);
+    run_zmin(repo.path(), ["config", "column.status", "always"]);
+    for args in [
+        ["status"].as_slice(),
+        ["status", "--no-column"].as_slice(),
+        ["status", "--column=never"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args with column.status=always: {args:?}"
+        );
+    }
+}
+
 fn committed_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());

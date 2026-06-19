@@ -860,6 +860,16 @@ pub enum Command {
         #[arg(long = "no-long", overrides_with = "short", action = ArgAction::SetTrue)]
         no_long: bool,
         #[arg(
+            long = "column",
+            overrides_with = "no_column",
+            num_args = 0..=1,
+            default_missing_value = "always",
+            require_equals = true
+        )]
+        column: Option<String>,
+        #[arg(long = "no-column", overrides_with = "column", action = ArgAction::SetTrue)]
+        no_column: bool,
+        #[arg(
             short = 's',
             long = "short",
             overrides_with_all = ["long", "no_long"],
