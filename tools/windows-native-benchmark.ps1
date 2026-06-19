@@ -2,11 +2,14 @@ param(
   [int]$Repeats = 5,
   [int]$Commits = 60,
   [int]$FilesPerCommit = 20,
+  [int]$CloneLargeCommits = 120,
+  [int]$CloneLargeFilesPerCommit = 80,
   [int]$WriteFiles = 800,
   [int]$DirtyFiles = 100,
   [int]$PushBatchFiles = 2400,
   [string]$OutDir = "",
   [string]$ZminPhaseTraceDir = "",
+  [switch]$SkipCheckoutPhaseTrace,
   [string]$SshTraceDir = "",
   [string]$SshPacketTraceDir = "",
   [string]$Ops = ""
@@ -79,11 +82,13 @@ $KnownOps = [System.Collections.Generic.HashSet[string]]::new([System.StringComp
   "add-dirty",
   "commit-dirty",
   "clone",
+  "clone-large",
   "clone-instant",
   "clone-instant-git-daemon",
   "clone-instant-ssh",
   "fetch-noop",
   "fetch-incremental",
+  "fetch-batch",
   "push-noop",
   "push-incremental",
   "push-batch",
@@ -194,7 +199,11 @@ function Measure-Tool {
     $traceId = [Guid]::NewGuid().ToString("N")
     $traceName = "$Op-$safeExtra-${traceId}.log"
     $env:ZMIN_PHASE_TRACE = "1"
-    $env:ZMIN_CHECKOUT_PHASE_TRACE = "1"
+    if (-not $SkipCheckoutPhaseTrace) {
+      $env:ZMIN_CHECKOUT_PHASE_TRACE = "1"
+    } else {
+      Remove-Item Env:\ZMIN_CHECKOUT_PHASE_TRACE -ErrorAction SilentlyContinue
+    }
     $env:ZMIN_PHASE_TRACE_FILE = Join-Path $ZminPhaseTraceDir $traceName
   }
   if ($Op -eq "clone-instant-ssh" -and $SshTraceDir) {
@@ -575,6 +584,132 @@ function Write-Files {
   }
 }
 
+function Convert-TraceFields {
+  param([string[]]$Fields)
+
+  $values = @{}
+  foreach ($field in $Fields) {
+    $parts = $field.Split("=", 2)
+    if ($parts.Count -eq 2) {
+      $values[$parts[0]] = $parts[1]
+    }
+  }
+  return $values
+}
+
+function Convert-TraceSeconds {
+  param([hashtable]$Values)
+
+  if (-not $Values.ContainsKey("seconds")) {
+    return $null
+  }
+  return [double]::Parse($Values["seconds"], [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Convert-TraceInt64 {
+  param(
+    [hashtable]$Values,
+    [string]$Key
+  )
+
+  if (-not $Values.ContainsKey($Key)) {
+    return $null
+  }
+  return [int64]::Parse($Values[$Key], [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Write-PhaseSummary {
+  param(
+    [string]$TraceDir,
+    [string]$OutputPath
+  )
+
+  if (-not $TraceDir -or -not (Test-Path -LiteralPath $TraceDir)) {
+    return
+  }
+
+  $phaseRows = New-Object System.Collections.Generic.List[object]
+  foreach ($traceFile in Get-ChildItem -LiteralPath $TraceDir -Filter "*.log" | Sort-Object Name) {
+    foreach ($line in Get-Content -LiteralPath $traceFile.FullName) {
+      if (-not $line) {
+        continue
+      }
+      $parts = $line -split "`t"
+      if ($parts.Count -lt 3) {
+        continue
+      }
+      $kind = $parts[0]
+      $label = $parts[1]
+      $values = Convert-TraceFields -Fields $parts[2..($parts.Count - 1)]
+      if ($kind -eq "zmin-phase") {
+        $phaseRows.Add([pscustomobject]@{
+          trace_file = $traceFile.Name
+          kind = "phase"
+          label = $label
+          phase = ""
+          metric = ""
+          seconds = Convert-TraceSeconds -Values $values
+          value = $null
+          entries = $null
+        })
+      } elseif ($kind -eq "zmin-checkout-phase") {
+        $phaseRows.Add([pscustomobject]@{
+          trace_file = $traceFile.Name
+          kind = "checkout_phase"
+          label = $label
+          phase = $values["phase"]
+          metric = ""
+          seconds = Convert-TraceSeconds -Values $values
+          value = $null
+          entries = Convert-TraceInt64 -Values $values -Key "entries"
+        })
+      } elseif ($kind -eq "zmin-checkout-metric") {
+        $phaseRows.Add([pscustomobject]@{
+          trace_file = $traceFile.Name
+          kind = "checkout_metric"
+          label = $label
+          phase = ""
+          metric = $values["metric"]
+          seconds = $null
+          value = Convert-TraceInt64 -Values $values -Key "value"
+          entries = Convert-TraceInt64 -Values $values -Key "entries"
+        })
+      }
+    }
+  }
+
+  if ($phaseRows.Count -gt 0) {
+    $phaseRows | Export-Csv -NoTypeInformation -Path $OutputPath
+  }
+}
+
+function New-BenchmarkSourceRepo {
+  param(
+    [string]$Path,
+    [int]$CommitCount,
+    [int]$FilesPerCommitCount
+  )
+
+  Invoke-Tool -FilePath $GitExe -Arguments @("init", "-q", "-b", "main", $Path)
+  Configure-Repo -Path $Path
+
+  for ($c = 1; $c -le $CommitCount; $c++) {
+    $dir = Join-Path $Path ("dir-" + ($c % 24))
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    for ($f = 1; $f -le $FilesPerCommitCount; $f++) {
+      "commit=$c file=$f payload=$('0' * 1024)" | Set-Content -LiteralPath (Join-Path $dir "file-$f.txt") -Encoding UTF8
+    }
+    Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Path, "add", "-A")
+    $env:GIT_AUTHOR_DATE = (1700000000 + $c).ToString() + " +0000"
+    $env:GIT_COMMITTER_DATE = $env:GIT_AUTHOR_DATE
+    Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Path, "commit", "-qm", "commit $c")
+  }
+  Remove-Item Env:\GIT_AUTHOR_DATE -ErrorAction SilentlyContinue
+  Remove-Item Env:\GIT_COMMITTER_DATE -ErrorAction SilentlyContinue
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Path, "repack", "-adq")
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Path, "fsck", "--strict")
+}
+
 function Invoke-Both {
   param(
     [string]$Op,
@@ -614,24 +749,7 @@ function Invoke-GixRepeated {
 }
 
 $Src = Join-Path $WorkDir "src"
-Invoke-Tool -FilePath $GitExe -Arguments @("init", "-q", "-b", "main", $Src)
-Configure-Repo -Path $Src
-
-for ($c = 1; $c -le $Commits; $c++) {
-  $dir = Join-Path $Src ("dir-" + ($c % 24))
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  for ($f = 1; $f -le $FilesPerCommit; $f++) {
-    "commit=$c file=$f payload=$('0' * 1024)" | Set-Content -LiteralPath (Join-Path $dir "file-$f.txt") -Encoding UTF8
-  }
-  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Src, "add", "-A")
-  $env:GIT_AUTHOR_DATE = (1700000000 + $c).ToString() + " +0000"
-  $env:GIT_COMMITTER_DATE = $env:GIT_AUTHOR_DATE
-  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Src, "commit", "-qm", "commit $c")
-}
-Remove-Item Env:\GIT_AUTHOR_DATE -ErrorAction SilentlyContinue
-Remove-Item Env:\GIT_COMMITTER_DATE -ErrorAction SilentlyContinue
-Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Src, "repack", "-adq")
-Invoke-Tool -FilePath $GitExe -Arguments @("-C", $Src, "fsck", "--strict")
+New-BenchmarkSourceRepo -Path $Src -CommitCount $Commits -FilesPerCommitCount $FilesPerCommit
 
 if (Test-BenchmarkOp "status") {
   $gitStatus = Join-Path $WorkDir "git-status.txt"
@@ -743,7 +861,12 @@ if (Test-BenchmarkOp "clone-instant-ssh") {
 }
 
 try {
-  if (Test-AnyBenchmarkOp @("clone", "clone-instant", "clone-instant-git-daemon", "clone-instant-ssh")) {
+  if (Test-AnyBenchmarkOp @("clone", "clone-large", "clone-instant", "clone-instant-git-daemon", "clone-instant-ssh")) {
+    $LargeSrc = ""
+    if (Test-BenchmarkOp "clone-large") {
+      $LargeSrc = Join-Path $WorkDir "src-clone-large"
+      New-BenchmarkSourceRepo -Path $LargeSrc -CommitCount $CloneLargeCommits -FilesPerCommitCount $CloneLargeFilesPerCommit
+    }
     for ($n = 1; $n -le $Repeats; $n++) {
       if (Test-BenchmarkOp "clone") {
         $gitClone = Join-Path $WorkDir "git-clone-$n"
@@ -756,6 +879,19 @@ try {
         Measure-Tool -Tool "zmin" -Op "clone" -FilePath $ZminGitExe -Arguments @("clone", "-q", $Src, $zminClone) -Extra "$n/local"
         Assert-SameRef -Name "clone-$n" -LeftRepo $gitClone -RightRepo $zminClone -Ref "HEAD"
         Assert-SameRef -Name "clone-$n-tree" -LeftRepo $gitClone -RightRepo $zminClone -Ref "HEAD^{tree}"
+      }
+
+      if (Test-BenchmarkOp "clone-large") {
+        $gitLargeClone = Join-Path $WorkDir "git-clone-large-$n"
+        $zminLargeClone = Join-Path $WorkDir "zmin-clone-large-$n"
+        Measure-Tool -Tool "git" -Op "clone-large" -FilePath $GitExe -Arguments @("clone", "-q", $LargeSrc, $gitLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        if ($GixExe) {
+          $gixLargeClone = Join-Path $WorkDir "gix-clone-large-$n"
+          Measure-Tool -Tool "gix" -Op "clone-large" -FilePath $GixExe -Arguments @("clone", $LargeSrc, $gixLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        }
+        Measure-Tool -Tool "zmin" -Op "clone-large" -FilePath $ZminGitExe -Arguments @("clone", "-q", $LargeSrc, $zminLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        Assert-SameRef -Name "clone-large-$n" -LeftRepo $gitLargeClone -RightRepo $zminLargeClone -Ref "HEAD"
+        Assert-SameRef -Name "clone-large-$n-tree" -LeftRepo $gitLargeClone -RightRepo $zminLargeClone -Ref "HEAD^{tree}"
       }
 
       if (Test-BenchmarkOp "clone-instant") {
@@ -984,6 +1120,63 @@ if (Test-AnyBenchmarkOp @("fetch-noop", "fetch-incremental")) {
   }
 }
 
+if (Test-BenchmarkOp "fetch-batch") {
+  $BatchSrc = Join-Path $WorkDir "batch-src"
+  $BatchRemote = Join-Path $WorkDir "batch-remote.git"
+  Invoke-Tool -FilePath $GitExe -Arguments @("init", "-q", "-b", "main", $BatchSrc)
+  Configure-Repo -Path $BatchSrc
+  New-Item -ItemType Directory -Force -Path (Join-Path $BatchSrc "base") | Out-Null
+  for ($i = 1; $i -le 300; $i++) {
+    "base $i $('0' * 4096)" | Set-Content -LiteralPath (Join-Path $BatchSrc "base\file-$i.txt") -Encoding UTF8
+  }
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "add", "-A")
+  $env:GIT_AUTHOR_DATE = "1700100000 +0000"
+  $env:GIT_COMMITTER_DATE = "1700100000 +0000"
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "commit", "-qm", "base")
+  Remove-Item Env:\GIT_AUTHOR_DATE -ErrorAction SilentlyContinue
+  Remove-Item Env:\GIT_COMMITTER_DATE -ErrorAction SilentlyContinue
+  Invoke-Tool -FilePath $GitExe -Arguments @("init", "-q", "--bare", $BatchRemote)
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "remote", "add", "origin", $BatchRemote)
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "push", "-q", "origin", "main")
+  Invoke-Tool -FilePath $GitExe -Arguments @("--git-dir", $BatchRemote, "symbolic-ref", "HEAD", "refs/heads/main")
+  Invoke-Tool -FilePath $GitExe -Arguments @("clone", "-q", $BatchRemote, (Join-Path $WorkDir "git-fetch-batch-base"))
+  Invoke-Tool -FilePath $ZminGitExe -Arguments @("clone", "-q", $BatchRemote, (Join-Path $WorkDir "zmin-fetch-batch-base"))
+  if ($GixExe) {
+    Invoke-Tool -FilePath $GitExe -Arguments @("clone", "-q", $BatchRemote, (Join-Path $WorkDir "gix-fetch-batch-base"))
+    Configure-Repo -Path (Join-Path $WorkDir "gix-fetch-batch-base")
+  }
+
+  New-Item -ItemType Directory -Force -Path (Join-Path $BatchSrc "batch") | Out-Null
+  for ($i = 1; $i -le $PushBatchFiles; $i++) {
+    "batch $i $('0' * 4096)" | Set-Content -LiteralPath (Join-Path $BatchSrc "batch\file-$i.txt") -Encoding UTF8
+  }
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "add", "-A")
+  $env:GIT_AUTHOR_DATE = "1700100001 +0000"
+  $env:GIT_COMMITTER_DATE = "1700100001 +0000"
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "commit", "-qm", "batch")
+  Invoke-Tool -FilePath $GitExe -Arguments @("-C", $BatchSrc, "push", "-q", "origin", "main")
+  Remove-Item Env:\GIT_AUTHOR_DATE -ErrorAction SilentlyContinue
+  Remove-Item Env:\GIT_COMMITTER_DATE -ErrorAction SilentlyContinue
+
+  for ($n = 1; $n -le $Repeats; $n++) {
+    $gitFetchBatch = Join-Path $WorkDir "git-fetch-batch-$n"
+    $zminFetchBatch = Join-Path $WorkDir "zmin-fetch-batch-$n"
+    Copy-Item -Recurse -LiteralPath (Join-Path $WorkDir "git-fetch-batch-base") -Destination $gitFetchBatch
+    Copy-Item -Recurse -LiteralPath (Join-Path $WorkDir "zmin-fetch-batch-base") -Destination $zminFetchBatch
+    if ($GixExe) {
+      $gixFetchBatch = Join-Path $WorkDir "gix-fetch-batch-$n"
+      Copy-Item -Recurse -LiteralPath (Join-Path $WorkDir "gix-fetch-batch-base") -Destination $gixFetchBatch
+    }
+    Measure-Tool -Tool "git" -Op "fetch-batch" -FilePath $GitExe -Arguments @("-C", $gitFetchBatch, "fetch", "origin") -Extra "$n/$PushBatchFiles files"
+    if ($GixExe) {
+      Measure-Tool -Tool "gix" -Op "fetch-batch" -FilePath $GixExe -Arguments @("-r", $gixFetchBatch, "fetch", "-r", "origin") -Extra "$n/$PushBatchFiles files"
+    }
+    Measure-Tool -Tool "zmin" -Op "fetch-batch" -FilePath $ZminGitExe -Arguments @("-C", $zminFetchBatch, "fetch", "origin") -Extra "$n/$PushBatchFiles files"
+    Invoke-Tool -FilePath $GitExe -Arguments @("-C", $zminFetchBatch, "fsck", "--strict")
+    Assert-SameRef -Name "fetch-batch-$n" -LeftRepo $gitFetchBatch -RightRepo $zminFetchBatch -Ref "refs/remotes/origin/main"
+  }
+}
+
 if ($Rows.Count -eq 0) {
   throw "no benchmark operations were selected"
 }
@@ -992,6 +1185,7 @@ $RowsPath = Join-Path $OutDir "bench.csv"
 $ChecksPath = Join-Path $OutDir "checks.csv"
 $SummaryPath = Join-Path $OutDir "summary.csv"
 $ComparisonPath = Join-Path $OutDir "comparison.csv"
+$PhaseSummaryPath = Join-Path $OutDir "phase_summary.csv"
 $Rows | Export-Csv -NoTypeInformation -Path $RowsPath
 $Checks | Export-Csv -NoTypeInformation -Path $ChecksPath
 
@@ -1082,6 +1276,9 @@ $Comparison = $Rows |
   Sort-Object op
 
 $Comparison | Export-Csv -NoTypeInformation -Path $ComparisonPath
+if ($ZminPhaseTraceDir) {
+  Write-PhaseSummary -TraceDir $ZminPhaseTraceDir -OutputPath $PhaseSummaryPath
+}
 
 Write-Host "Windows native benchmark complete"
 Write-Host "rows=$RowsPath"
@@ -1090,6 +1287,9 @@ Write-Host "summary=$SummaryPath"
 Write-Host "comparison=$ComparisonPath"
 if ($ZminPhaseTraceDir) {
   Write-Host "phase_traces=$ZminPhaseTraceDir"
+  if (Test-Path -LiteralPath $PhaseSummaryPath) {
+    Write-Host "phase_summary=$PhaseSummaryPath"
+  }
 }
 $Summary | Format-Table -AutoSize
 $Comparison | Format-Table -AutoSize

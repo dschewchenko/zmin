@@ -7,6 +7,8 @@ zmin_bin="${ZMIN_BIN:-$repo_root/target/release/zmin}"
 gix_bin="${GIX_BIN:-$(command -v gix 2>/dev/null || true)}"
 commits="${ZMIN_BENCH_COMMITS:-90}"
 files_per_commit="${ZMIN_BENCH_FILES_PER_COMMIT:-25}"
+clone_large_commits="${ZMIN_BENCH_CLONE_LARGE_COMMITS:-120}"
+clone_large_files_per_commit="${ZMIN_BENCH_CLONE_LARGE_FILES_PER_COMMIT:-80}"
 write_files="${ZMIN_BENCH_WRITE_FILES:-1800}"
 dirty_files="${ZMIN_BENCH_DIRTY_FILES:-200}"
 fetch_batch_files="${ZMIN_BENCH_FETCH_BATCH_FILES:-2400}"
@@ -32,6 +34,7 @@ known_ops=(
   add-dirty
   commit-dirty
   clone
+  clone-large
   clone-instant
   clone-instant-git-daemon
   clone-instant-ssh
@@ -467,23 +470,29 @@ configure_repo() {
   "$git_bin" -C "$repo" config commit.gpgsign false
 }
 
-"$git_bin" init -q -b main "$src"
-configure_repo "$src"
+create_source_repo() {
+  local repo="$1" commit_count="$2" files_per_commit_count="$3"
 
-for c in $(seq 1 "$commits"); do
-  mkdir -p "$src/dir-$((c % 24))"
-  for f in $(seq 1 "$files_per_commit"); do
-    printf 'commit=%03d file=%03d payload=%04096d\n' "$c" "$f" 0 \
-      >"$src/dir-$((c % 24))/file-$f.txt"
+  "$git_bin" init -q -b main "$repo"
+  configure_repo "$repo"
+
+  for c in $(seq 1 "$commit_count"); do
+    mkdir -p "$repo/dir-$((c % 24))"
+    for f in $(seq 1 "$files_per_commit_count"); do
+      printf 'commit=%03d file=%03d payload=%04096d\n' "$c" "$f" 0 \
+        >"$repo/dir-$((c % 24))/file-$f.txt"
+    done
+    "$git_bin" -C "$repo" add -A
+    ts=$((1700000000 + c))
+    GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
+      "$git_bin" -C "$repo" commit -qm "commit $c"
   done
-  "$git_bin" -C "$src" add -A
-  ts=$((1700000000 + c))
-  GIT_AUTHOR_DATE="$ts +0000" GIT_COMMITTER_DATE="$ts +0000" \
-    "$git_bin" -C "$src" commit -qm "commit $c"
-done
 
-"$git_bin" -C "$src" repack -adq
-"$git_bin" -C "$src" fsck --strict >/dev/null
+  "$git_bin" -C "$repo" repack -adq
+  "$git_bin" -C "$repo" fsck --strict >/dev/null
+}
+
+create_source_repo "$src" "$commits" "$files_per_commit"
 "$git_bin" -C "$src" rev-list --objects --all --no-object-names >"$tmp_dir/objects.txt"
 object_count="$(wc -l <"$tmp_dir/objects.txt" | tr -d ' ')"
 if any_benchmark_op_enabled status log rev-list merge-base; then
@@ -616,30 +625,49 @@ for n in $(seq 1 "$repeats"); do
 done
 fi
 
-if any_benchmark_op_enabled clone clone-instant; then
-for n in $(seq 1 "$repeats"); do
-  if benchmark_op_enabled clone; then
-    clone_specs=(
-      $'git\t'"'$git_bin' clone -q '$src' '$tmp_dir/git-clone-$n'"
-      $'zmin\t'"'$zmin_bin' clone -q '$src' '$tmp_dir/zmin-clone-$n'"
-    )
-    if [[ -n "$gix_bin" ]]; then
-      clone_specs+=($'gix\t'"'$gix_bin' clone '$src' '$tmp_dir/gix-clone-$n'")
-    fi
-    run_group clone "$n/local" "$((seed + 1100 + n))" "${clone_specs[@]}"
-    compare_refs "clone-$n" "$tmp_dir/git-clone-$n" "$tmp_dir/zmin-clone-$n" HEAD
-    compare_trees "clone-$n-tree" "$tmp_dir/git-clone-$n" "$tmp_dir/zmin-clone-$n" HEAD
-  fi
+clone_large_src=""
+if benchmark_op_enabled clone-large; then
+  clone_large_src="$tmp_dir/src-clone-large"
+  create_source_repo "$clone_large_src" "$clone_large_commits" "$clone_large_files_per_commit"
+fi
 
-  if benchmark_op_enabled clone-instant; then
-    run_group clone-instant "$n/local" "$((seed + 1150 + n))" \
-      $'git\t'"'$git_bin' clone -q '$src' '$tmp_dir/git-clone-instant-$n'" \
-      $'zmin\t'"'$zmin_bin' clone -q --instant '$src' '$tmp_dir/zmin-clone-instant-$n'"
-    compare_refs "clone-instant-$n" "$tmp_dir/git-clone-instant-$n" "$tmp_dir/zmin-clone-instant-$n" HEAD
-    compare_trees "clone-instant-$n-tree" "$tmp_dir/git-clone-instant-$n" "$tmp_dir/zmin-clone-instant-$n" HEAD
-    check_worktree_first_marker "clone-instant-$n-marker" "$tmp_dir/zmin-clone-instant-$n"
-  fi
-done
+if any_benchmark_op_enabled clone clone-large clone-instant; then
+  for n in $(seq 1 "$repeats"); do
+    if benchmark_op_enabled clone; then
+      clone_specs=(
+        $'git\t'"'$git_bin' clone -q '$src' '$tmp_dir/git-clone-$n'"
+        $'zmin\t'"'$zmin_bin' clone -q '$src' '$tmp_dir/zmin-clone-$n'"
+      )
+      if [[ -n "$gix_bin" ]]; then
+        clone_specs+=($'gix\t'"'$gix_bin' clone '$src' '$tmp_dir/gix-clone-$n'")
+      fi
+      run_group clone "$n/local" "$((seed + 1100 + n))" "${clone_specs[@]}"
+      compare_refs "clone-$n" "$tmp_dir/git-clone-$n" "$tmp_dir/zmin-clone-$n" HEAD
+      compare_trees "clone-$n-tree" "$tmp_dir/git-clone-$n" "$tmp_dir/zmin-clone-$n" HEAD
+    fi
+
+    if benchmark_op_enabled clone-large; then
+      clone_large_specs=(
+        $'git\t'"'$git_bin' clone -q '$clone_large_src' '$tmp_dir/git-clone-large-$n'"
+        $'zmin\t'"'$zmin_bin' clone -q '$clone_large_src' '$tmp_dir/zmin-clone-large-$n'"
+      )
+      if [[ -n "$gix_bin" ]]; then
+        clone_large_specs+=($'gix\t'"'$gix_bin' clone '$clone_large_src' '$tmp_dir/gix-clone-large-$n'")
+      fi
+      run_group clone-large "$n/$clone_large_commits commits/$clone_large_files_per_commit files" "$((seed + 1125 + n))" "${clone_large_specs[@]}"
+      compare_refs "clone-large-$n" "$tmp_dir/git-clone-large-$n" "$tmp_dir/zmin-clone-large-$n" HEAD
+      compare_trees "clone-large-$n-tree" "$tmp_dir/git-clone-large-$n" "$tmp_dir/zmin-clone-large-$n" HEAD
+    fi
+
+    if benchmark_op_enabled clone-instant; then
+      run_group clone-instant "$n/local" "$((seed + 1150 + n))" \
+        $'git\t'"'$git_bin' clone -q '$src' '$tmp_dir/git-clone-instant-$n'" \
+        $'zmin\t'"'$zmin_bin' clone -q --instant '$src' '$tmp_dir/zmin-clone-instant-$n'"
+      compare_refs "clone-instant-$n" "$tmp_dir/git-clone-instant-$n" "$tmp_dir/zmin-clone-instant-$n" HEAD
+      compare_trees "clone-instant-$n-tree" "$tmp_dir/git-clone-instant-$n" "$tmp_dir/zmin-clone-instant-$n" HEAD
+      check_worktree_first_marker "clone-instant-$n-marker" "$tmp_dir/zmin-clone-instant-$n"
+    fi
+  done
 fi
 
 if any_benchmark_op_enabled clone-instant-git-daemon clone-instant-ssh; then

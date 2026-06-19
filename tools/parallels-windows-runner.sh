@@ -67,6 +67,7 @@ Environment:
   ZMIN_WINDOWS_BENCH_OPS
   ZMIN_WINDOWS_BENCH_SSH_TRACE
   ZMIN_WINDOWS_BENCH_SSH_PACKET_TRACE
+  ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY
   ZMIN_PARALLELS_UPSTREAM_DETACH
   ZMIN_PARALLELS_UPSTREAM_REUSE_BINARY
   ZMIN_PARALLELS_UPSTREAM_SKIP_PREFLIGHT
@@ -494,6 +495,9 @@ benchmark_guest() {
   local ops_arg=""
   if [[ "${ZMIN_WINDOWS_BENCH_PHASE_TRACE:-0}" == "1" ]]; then
     trace_arg=" -ZminPhaseTraceDir $(ps_quote "$out_dir\\phase-traces")"
+    if [[ "${ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY:-0}" == "1" ]]; then
+      trace_arg+=" -SkipCheckoutPhaseTrace"
+    fi
   fi
   if [[ "${ZMIN_WINDOWS_BENCH_SSH_TRACE:-0}" == "1" ]]; then
     ssh_trace_arg=" -SshTraceDir $(ps_quote "$out_dir\\ssh-traces")"

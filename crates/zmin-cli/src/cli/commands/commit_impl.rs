@@ -64,138 +64,156 @@ pub(crate) fn mktree_command(nul_terminated: bool, missing: bool, batch: bool) -
 }
 
 fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
-    let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let mut index = read_repo_index(&repo)?;
-    if options.all && (!options.paths.is_empty() || options.only) {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "paths cannot be used with -a".into(),
-        });
-    }
-    if options.reuse_message.is_some() && !options.messages.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-m' and '-C' cannot be used together".into(),
-        });
-    }
-    if options.reedit_message.is_some() && !options.messages.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-m' and '-c' cannot be used together".into(),
-        });
-    }
-    if options.reuse_message.is_some() && options.reedit_message.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-C' and '-c' cannot be used together".into(),
-        });
-    }
-    let fixup_options = options.fixup.map(parse_commit_fixup_option).transpose()?;
-    if fixup_options.is_some() && options.reuse_message.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '--fixup' and '-C' cannot be used together".into(),
-        });
-    }
-    if fixup_options.is_some() && options.reedit_message.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-c' and '--fixup' cannot be used together".into(),
-        });
-    }
-    if let Some(fixup) = fixup_options.as_ref()
-        && !options.messages.is_empty()
-        && matches!(fixup.mode, CommitFixupMode::Amend | CommitFixupMode::Reword)
-    {
-        let mode = match fixup.mode {
-            CommitFixupMode::Amend => "amend",
-            CommitFixupMode::Reword => "reword",
-            CommitFixupMode::Fixup => "fixup",
-        };
-        return Err(CliError::Fatal {
-            code: 128,
-            message: format!("options '-m' and '--fixup:{mode}' cannot be used together"),
-        });
-    }
-    if fixup_options.is_some() && options.squash.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '--squash' and '--fixup' cannot be used together".into(),
-        });
-    }
-    if options.message_file.is_some() && !options.messages.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-m' and '-F' cannot be used together".into(),
-        });
-    }
-    if options.reuse_message.is_some() && options.message_file.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-C' and '-F' cannot be used together".into(),
-        });
-    }
-    if options.reedit_message.is_some() && options.message_file.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '-c' and '-F' cannot be used together".into(),
-        });
-    }
-    if options.reset_author && options.author_override.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '--reset-author' and '--author' cannot be used together".into(),
-        });
-    }
-    if options.reset_author
-        && !options.amend
-        && options.reuse_message.is_none()
-        && options.reedit_message.is_none()
-    {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "--reset-author can be used only with -C, -c or --amend.".into(),
-        });
-    }
+    let _trace = phase_trace("commit.total");
+    let (repo, store, mut index) = {
+        let _trace = phase_trace("commit.setup");
+        let repo = find_repo()?;
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let index = read_repo_index(&repo)?;
+        (repo, store, index)
+    };
+    let fixup_options = {
+        let _trace = phase_trace("commit.validate_options");
+        if options.all && (!options.paths.is_empty() || options.only) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "paths cannot be used with -a".into(),
+            });
+        }
+        if options.reuse_message.is_some() && !options.messages.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-m' and '-C' cannot be used together".into(),
+            });
+        }
+        if options.reedit_message.is_some() && !options.messages.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-m' and '-c' cannot be used together".into(),
+            });
+        }
+        if options.reuse_message.is_some() && options.reedit_message.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-C' and '-c' cannot be used together".into(),
+            });
+        }
+        let fixup_options = options.fixup.map(parse_commit_fixup_option).transpose()?;
+        if fixup_options.is_some() && options.reuse_message.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '--fixup' and '-C' cannot be used together".into(),
+            });
+        }
+        if fixup_options.is_some() && options.reedit_message.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-c' and '--fixup' cannot be used together".into(),
+            });
+        }
+        if let Some(fixup) = fixup_options.as_ref()
+            && !options.messages.is_empty()
+            && matches!(fixup.mode, CommitFixupMode::Amend | CommitFixupMode::Reword)
+        {
+            let mode = match fixup.mode {
+                CommitFixupMode::Amend => "amend",
+                CommitFixupMode::Reword => "reword",
+                CommitFixupMode::Fixup => "fixup",
+            };
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("options '-m' and '--fixup:{mode}' cannot be used together"),
+            });
+        }
+        if fixup_options.is_some() && options.squash.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '--squash' and '--fixup' cannot be used together".into(),
+            });
+        }
+        if options.message_file.is_some() && !options.messages.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-m' and '-F' cannot be used together".into(),
+            });
+        }
+        if options.reuse_message.is_some() && options.message_file.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-C' and '-F' cannot be used together".into(),
+            });
+        }
+        if options.reedit_message.is_some() && options.message_file.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '-c' and '-F' cannot be used together".into(),
+            });
+        }
+        if options.reset_author && options.author_override.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "options '--reset-author' and '--author' cannot be used together".into(),
+            });
+        }
+        if options.reset_author
+            && !options.amend
+            && options.reuse_message.is_none()
+            && options.reedit_message.is_none()
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "--reset-author can be used only with -C, -c or --amend.".into(),
+            });
+        }
+        fixup_options
+    };
     if options.all {
+        let _trace = phase_trace("commit.stage_all");
         stage_tracked_worktree_changes(&repo, &store, &mut index)?;
         index.write_to_path(&repo.index_path)?;
     }
-    let common_git_dir = read_common_git_dir(&repo.git_dir)?;
-    let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
-    let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let commit_cache = CommitObjectCache::new(&store);
-    let reused_commit = match options.reuse_message.or(options.reedit_message) {
-        Some(rev) => {
-            let id = resolve_commitish(&repo, &store, rev).map_err(|_| CliError::Fatal {
-                code: 128,
-                message: format!("could not lookup commit '{rev}'"),
-            })?;
-            Some(commit_cache.read_commit(&id)?)
-        }
-        None => None,
+    let (refs, head_refs, commit_cache) = {
+        let _trace = phase_trace("commit.refs");
+        let common_git_dir = read_common_git_dir(&repo.git_dir)?;
+        let refs = RefStore::new(&common_git_dir, GitHashAlgorithm::Sha1);
+        let head_refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+        let commit_cache = CommitObjectCache::new(&store);
+        (refs, head_refs, commit_cache)
     };
-    let squashed_commit = match options.squash {
-        Some(rev) => {
-            let id = resolve_commitish(&repo, &store, rev).map_err(|_| CliError::Fatal {
-                code: 128,
-                message: format!("could not lookup commit '{rev}'"),
-            })?;
-            Some(commit_cache.read_commit(&id)?)
-        }
-        None => None,
-    };
-    let fixup_commit = match fixup_options.as_ref() {
-        Some(fixup) => {
-            let rev = fixup.rev;
-            let id = resolve_commitish(&repo, &store, rev).map_err(|_| CliError::Fatal {
-                code: 128,
-                message: format!("could not lookup commit '{rev}'"),
-            })?;
-            Some(commit_cache.read_commit(&id)?)
-        }
-        None => None,
+    let (reused_commit, squashed_commit, fixup_commit) = {
+        let _trace = phase_trace("commit.resolve_message_sources");
+        let reused_commit = match options.reuse_message.or(options.reedit_message) {
+            Some(rev) => {
+                let id = resolve_commitish(&repo, &store, rev).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: format!("could not lookup commit '{rev}'"),
+                })?;
+                Some(commit_cache.read_commit(&id)?)
+            }
+            None => None,
+        };
+        let squashed_commit = match options.squash {
+            Some(rev) => {
+                let id = resolve_commitish(&repo, &store, rev).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: format!("could not lookup commit '{rev}'"),
+                })?;
+                Some(commit_cache.read_commit(&id)?)
+            }
+            None => None,
+        };
+        let fixup_commit = match fixup_options.as_ref() {
+            Some(fixup) => {
+                let rev = fixup.rev;
+                let id = resolve_commitish(&repo, &store, rev).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: format!("could not lookup commit '{rev}'"),
+                })?;
+                Some(commit_cache.read_commit(&id)?)
+            }
+            None => None,
+        };
+        (reused_commit, squashed_commit, fixup_commit)
     };
     let pathspec_commit = (!options.paths.is_empty())
         .then(|| commit_pathspec_indexes(&repo, &store, &index, &options.paths))
@@ -213,11 +231,17 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
             .map(|indexes| &indexes.commit_index)
             .unwrap_or(&index)
     };
-    let tree = write_tree_from_index(&store, commit_index)?;
-    let reused_author = reused_commit
-        .as_ref()
-        .map(|commit| signature_from_commit_bytes(&commit.author))
-        .transpose()?;
+    let tree = {
+        let _trace = phase_trace("commit.write_tree");
+        write_tree_from_index(&store, commit_index)?
+    };
+    let reused_author = {
+        let _trace = phase_trace("commit.reused_author");
+        reused_commit
+            .as_ref()
+            .map(|commit| signature_from_commit_bytes(&commit.author))
+            .transpose()?
+    };
     let explicit_reused_message = options
         .reuse_message
         .and_then(|_| reused_commit.as_ref().map(|commit| commit.message.clone()));
@@ -228,228 +252,242 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
     let mut summary_parent_tree = None;
     let mut amended_head = None;
     let mut reused_message = None;
-    let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
-    let author = if options.amend {
-        let head = resolve_commitish(&repo, &store, "HEAD").map_err(|_| CliError::Fatal {
-            code: 128,
-            message: "You have nothing to amend.".into(),
-        })?;
-        let head_commit = commit_cache.read_commit(&head)?;
-        amended_head = Some(head);
-        summary_parent_tree = head_commit
-            .parents
-            .first()
-            .cloned()
-            .map(|parent_id| {
-                commit_cache
-                    .read_commit(&parent_id)
-                    .map(|parent| parent.tree.clone())
-            })
-            .transpose()?;
-        if (options.no_edit || !options.edit)
-            && options.messages.is_empty()
-            && options.message_file.is_none()
-            && options.reuse_message.is_none()
-            && options.reedit_message.is_none()
-            && fixup_options.is_none()
-            && options.squash.is_none()
-            && options.template.is_none()
-        {
-            reused_message = Some(head_commit.message.clone());
-        }
-        parents = head_commit.parents.clone();
-        let previous_author = signature_from_commit_bytes(&head_commit.author)?;
-        let base_author = if options.reset_author {
-            None
-        } else {
-            Some(reused_author.as_ref().unwrap_or(&previous_author))
-        };
-        if options.reset_author
-            || options.author_override.is_some()
-            || options.date_override.is_some()
-        {
+    let (committer, author) = {
+        let _trace = phase_trace("commit.resolve_author_parent");
+        let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
+        let author = if options.amend {
+            let head = resolve_commitish(&repo, &store, "HEAD").map_err(|_| CliError::Fatal {
+                code: 128,
+                message: "You have nothing to amend.".into(),
+            })?;
+            let head_commit = commit_cache.read_commit(&head)?;
+            amended_head = Some(head);
+            summary_parent_tree = head_commit
+                .parents
+                .first()
+                .cloned()
+                .map(|parent_id| {
+                    commit_cache
+                        .read_commit(&parent_id)
+                        .map(|parent| parent.tree.clone())
+                })
+                .transpose()?;
+            if (options.no_edit || !options.edit)
+                && options.messages.is_empty()
+                && options.message_file.is_none()
+                && options.reuse_message.is_none()
+                && options.reedit_message.is_none()
+                && fixup_options.is_none()
+                && options.squash.is_none()
+                && options.template.is_none()
+            {
+                reused_message = Some(head_commit.message.clone());
+            }
+            parents = head_commit.parents.clone();
+            let previous_author = signature_from_commit_bytes(&head_commit.author)?;
+            let base_author = if options.reset_author {
+                None
+            } else {
+                Some(reused_author.as_ref().unwrap_or(&previous_author))
+            };
+            if options.reset_author
+                || options.author_override.is_some()
+                || options.date_override.is_some()
+            {
+                signature_from_author_options(
+                    &repo,
+                    base_author,
+                    options.author_override,
+                    options.date_override,
+                )?
+            } else if let Some(author) = reused_author {
+                author
+            } else {
+                previous_author
+            }
+        } else if let Ok(parent) = resolve_commitish(&repo, &store, "HEAD") {
+            let parent_commit = commit_cache.read_commit(&parent)?;
+            summary_parent_tree = Some(parent_commit.tree.clone());
+            if parent_commit.tree == tree
+                && !options.allow_empty
+                && !matches!(
+                    fixup_options.as_ref().map(|fixup| fixup.mode),
+                    Some(CommitFixupMode::Reword)
+                )
+            {
+                return Err(CliError::Message(
+                    "nothing to commit, working tree clean".into(),
+                ));
+            }
+            parents.push(parent);
+            let base_author = if options.reset_author {
+                None
+            } else {
+                reused_author.as_ref()
+            };
             signature_from_author_options(
                 &repo,
                 base_author,
                 options.author_override,
                 options.date_override,
             )?
-        } else if let Some(author) = reused_author {
-            author
+        } else if index.entries().is_empty() && !options.allow_empty {
+            return Err(CliError::Message("nothing to commit".into()));
         } else {
-            previous_author
-        }
-    } else if let Ok(parent) = resolve_commitish(&repo, &store, "HEAD") {
-        let parent_commit = commit_cache.read_commit(&parent)?;
-        summary_parent_tree = Some(parent_commit.tree.clone());
-        if parent_commit.tree == tree
-            && !options.allow_empty
-            && !matches!(
-                fixup_options.as_ref().map(|fixup| fixup.mode),
-                Some(CommitFixupMode::Reword)
-            )
-        {
-            return Err(CliError::Message(
-                "nothing to commit, working tree clean".into(),
-            ));
-        }
-        parents.push(parent);
-        let base_author = if options.reset_author {
-            None
-        } else {
-            reused_author.as_ref()
+            let base_author = if options.reset_author {
+                None
+            } else {
+                reused_author.as_ref()
+            };
+            signature_from_author_options(
+                &repo,
+                base_author,
+                options.author_override,
+                options.date_override,
+            )?
         };
-        signature_from_author_options(
-            &repo,
-            base_author,
-            options.author_override,
-            options.date_override,
-        )?
-    } else if index.entries().is_empty() && !options.allow_empty {
-        return Err(CliError::Message("nothing to commit".into()));
-    } else {
-        let base_author = if options.reset_author {
-            None
-        } else {
-            reused_author.as_ref()
-        };
-        signature_from_author_options(
-            &repo,
-            base_author,
-            options.author_override,
-            options.date_override,
-        )?
+        (committer, author)
     };
     let cleanup_mode = commit_cleanup_mode(options.cleanup, options.no_cleanup)?;
-    let template_message = if let Some(path) = options.template {
-        Some(read_commit_message_file(path)?)
-    } else {
-        read_commit_template_config(&repo)?
-    };
-    let force_edit = options.edit || (options.reedit_message.is_some() && !options.no_edit);
-    let has_direct_message = !options.messages.is_empty()
-        || options.message_file.is_some()
-        || explicit_reused_message.is_some()
-        || reused_message.is_some()
-        || (fixup_commit.is_some()
-            && !matches!(
-                fixup_options.as_ref().map(|fixup| fixup.mode),
-                Some(CommitFixupMode::Amend | CommitFixupMode::Reword)
-            ));
-    let uses_editor = force_edit
-        || (!options.no_edit
-            && !has_direct_message
-            && (template_message.is_some() || !options.allow_empty_message));
-    let editor_date = if options.reedit_message.is_some()
-        || (options.edit && options.reuse_message.is_some())
-        || options.date_override.is_some()
-        || (options.amend && !options.reset_author)
-    {
-        Some(&author)
-    } else {
-        None
-    };
-    let editor_status = commit_status_enabled(&repo, options.status, options.no_status)?;
-    let editor_status_index = if matches!(
-        fixup_options.as_ref().map(|fixup| fixup.mode),
-        Some(CommitFixupMode::Reword)
-    ) {
-        commit_index
-    } else {
-        &index
-    };
-    let editor_message = if uses_editor {
-        Some(if editor_status {
-            commit_editor_message(
-                &repo,
-                &store,
-                summary_parent_tree.as_ref(),
-                commit_index,
-                editor_status_index,
-                options.verbose,
-                editor_date,
-            )?
+    let (mut message, uses_editor) = {
+        let _trace = phase_trace("commit.prepare_message");
+        let template_message = if let Some(path) = options.template {
+            Some(read_commit_message_file(path)?)
         } else {
-            Vec::new()
-        })
-    } else {
-        None
-    };
-    let fixup_direct_message = fixup_commit.as_ref().and_then(|commit| {
-        fixup_options
-            .as_ref()
-            .and_then(|fixup| fixup_direct_message(commit, fixup.mode, &options.messages))
-    });
-    let commit_messages = if fixup_direct_message.is_some() {
-        Vec::new()
-    } else {
-        options.messages
-    };
-    let mut message = commit_message_bytes(CommitMessageInput {
-        repo: &repo,
-        messages: commit_messages,
-        file_message: options
-            .message_file
-            .map(read_commit_message_file)
-            .transpose()?,
-        reused_message: explicit_reused_message
-            .or(reused_message)
-            .or(fixup_direct_message),
-        reedit_message: fixup_commit
-            .as_ref()
-            .and_then(|commit| {
-                fixup_options
-                    .as_ref()
-                    .and_then(|fixup| fixup_reedit_message(commit, fixup.mode))
+            read_commit_template_config(&repo)?
+        };
+        let force_edit = options.edit || (options.reedit_message.is_some() && !options.no_edit);
+        let has_direct_message = !options.messages.is_empty()
+            || options.message_file.is_some()
+            || explicit_reused_message.is_some()
+            || reused_message.is_some()
+            || (fixup_commit.is_some()
+                && !matches!(
+                    fixup_options.as_ref().map(|fixup| fixup.mode),
+                    Some(CommitFixupMode::Amend | CommitFixupMode::Reword)
+                ));
+        let uses_editor = force_edit
+            || (!options.no_edit
+                && !has_direct_message
+                && (template_message.is_some() || !options.allow_empty_message));
+        let editor_date = if options.reedit_message.is_some()
+            || (options.edit && options.reuse_message.is_some())
+            || options.date_override.is_some()
+            || (options.amend && !options.reset_author)
+        {
+            Some(&author)
+        } else {
+            None
+        };
+        let editor_status = commit_status_enabled(&repo, options.status, options.no_status)?;
+        let editor_status_index = if matches!(
+            fixup_options.as_ref().map(|fixup| fixup.mode),
+            Some(CommitFixupMode::Reword)
+        ) {
+            commit_index
+        } else {
+            &index
+        };
+        let editor_message = if uses_editor {
+            Some(if editor_status {
+                commit_editor_message(
+                    &repo,
+                    &store,
+                    summary_parent_tree.as_ref(),
+                    commit_index,
+                    editor_status_index,
+                    options.verbose,
+                    editor_date,
+                )?
+            } else {
+                Vec::new()
             })
-            .or(reedit_message),
-        template_message,
-        trailers: &options.trailers,
-        editor_message,
-        force_edit,
-        allow_empty_message: options.allow_empty_message,
-        cleanup: cleanup_mode,
-    })?;
-    if let Some(squashed) = squashed_commit.as_ref() {
-        message = squash_commit_message(&commit_subject(&squashed.message), message);
-    }
-    if options.signoff {
-        append_commit_signoff(&mut message, &committer)?;
-    }
-    if !options.trailers.is_empty() && !uses_editor {
-        message = append_commit_trailers(message, &options.trailers)?;
-    }
-    if !options.no_verify {
-        run_commit_hook(&repo, "pre-commit", &[], None, false)?;
-    }
-    write_commit_editmsg(&repo, &message)?;
-    run_commit_hook(
-        &repo,
-        "prepare-commit-msg",
-        &[".git/COMMIT_EDITMSG", "message"],
-        None,
-        false,
-    )?;
-    if !options.no_verify {
-        run_commit_hook(&repo, "commit-msg", &[".git/COMMIT_EDITMSG"], None, false)?;
-    }
-    message = fs::read(repo.git_dir.join("COMMIT_EDITMSG"))?;
-    if !message.ends_with(b"\n") {
-        message.push(b'\n');
-    }
-    message = if uses_editor {
-        let has_scissors = editor_message_has_scissors(&message);
-        cleanup_edited_commit_message(message, cleanup_mode, has_scissors)
-    } else {
-        cleanup_commit_message(message, cleanup_mode)
+        } else {
+            None
+        };
+        let fixup_direct_message = fixup_commit.as_ref().and_then(|commit| {
+            fixup_options
+                .as_ref()
+                .and_then(|fixup| fixup_direct_message(commit, fixup.mode, &options.messages))
+        });
+        let commit_messages = if fixup_direct_message.is_some() {
+            Vec::new()
+        } else {
+            options.messages
+        };
+        let mut message = commit_message_bytes(CommitMessageInput {
+            repo: &repo,
+            messages: commit_messages,
+            file_message: options
+                .message_file
+                .map(read_commit_message_file)
+                .transpose()?,
+            reused_message: explicit_reused_message
+                .or(reused_message)
+                .or(fixup_direct_message),
+            reedit_message: fixup_commit
+                .as_ref()
+                .and_then(|commit| {
+                    fixup_options
+                        .as_ref()
+                        .and_then(|fixup| fixup_reedit_message(commit, fixup.mode))
+                })
+                .or(reedit_message),
+            template_message,
+            trailers: &options.trailers,
+            editor_message,
+            force_edit,
+            allow_empty_message: options.allow_empty_message,
+            cleanup: cleanup_mode,
+        })?;
+        if let Some(squashed) = squashed_commit.as_ref() {
+            message = squash_commit_message(&commit_subject(&squashed.message), message);
+        }
+        if options.signoff {
+            append_commit_signoff(&mut message, &committer)?;
+        }
+        if !options.trailers.is_empty() && !uses_editor {
+            message = append_commit_trailers(message, &options.trailers)?;
+        }
+        (message, uses_editor)
     };
-    let is_initial_commit = parents.is_empty();
-    let mut builder = CommitBuilder::new(tree.clone(), author.clone(), committer);
-    for parent in parents {
-        builder = builder.parent(parent);
+    {
+        let _trace = phase_trace("commit.hooks_and_editmsg");
+        if !options.no_verify {
+            run_commit_hook(&repo, "pre-commit", &[], None, false)?;
+        }
+        write_commit_editmsg(&repo, &message)?;
+        run_commit_hook(
+            &repo,
+            "prepare-commit-msg",
+            &[".git/COMMIT_EDITMSG", "message"],
+            None,
+            false,
+        )?;
+        if !options.no_verify {
+            run_commit_hook(&repo, "commit-msg", &[".git/COMMIT_EDITMSG"], None, false)?;
+        }
+        message = fs::read(repo.git_dir.join("COMMIT_EDITMSG"))?;
+        if !message.ends_with(b"\n") {
+            message.push(b'\n');
+        }
+        message = if uses_editor {
+            let has_scissors = editor_message_has_scissors(&message);
+            cleanup_edited_commit_message(message, cleanup_mode, has_scissors)
+        } else {
+            cleanup_commit_message(message, cleanup_mode)
+        };
     }
-    let commit = builder.message(message.clone())?.encode()?;
-    let id = store.write_object(GitObjectKind::Commit, &commit)?;
+    let is_initial_commit = parents.is_empty();
+    let id = {
+        let _trace = phase_trace("commit.write_commit_object");
+        let mut builder = CommitBuilder::new(tree.clone(), author.clone(), committer);
+        for parent in parents {
+            builder = builder.parent(parent);
+        }
+        let commit = builder.message(message.clone())?.encode()?;
+        store.write_object(GitObjectKind::Commit, &commit)?
+    };
     if amended_head.as_ref() == Some(&id) && !options.allow_empty {
         return Err(CliError::Fatal {
             code: 128,
@@ -464,27 +502,35 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
     } else {
         format!("commit: {reflog_subject}")
     };
-    update_commit_head_ref(&repo, &head_refs, &refs, &id, &reflog_message)?;
+    {
+        let _trace = phase_trace("commit.update_ref");
+        update_commit_head_ref(&repo, &head_refs, &refs, &id, &reflog_message)?;
+    }
     if let Some(pathspec_commit) = pathspec_commit
         && !matches!(
             fixup_options.as_ref().map(|fixup| fixup.mode),
             Some(CommitFixupMode::Reword)
         )
     {
+        let _trace = phase_trace("commit.write_pathspec_index");
         pathspec_commit.real_index.write_to_path(&repo.index_path)?;
     }
-    let use_hook_worktree_summary = use_hook_worktree_summary(&repo)?;
-    run_commit_hook(&repo, "post-commit", &[], None, true)?;
-    if let Some(old_id) = amended_head {
-        let post_rewrite_stdin = format!("{} {}\n", old_id.to_hex(), id.to_hex());
-        run_commit_hook(
-            &repo,
-            "post-rewrite",
-            &["amend"],
-            Some(post_rewrite_stdin.as_bytes()),
-            true,
-        )?;
-    }
+    let use_hook_worktree_summary = {
+        let _trace = phase_trace("commit.post_hooks");
+        let use_hook_worktree_summary = use_hook_worktree_summary(&repo)?;
+        run_commit_hook(&repo, "post-commit", &[], None, true)?;
+        if let Some(old_id) = amended_head {
+            let post_rewrite_stdin = format!("{} {}\n", old_id.to_hex(), id.to_hex());
+            run_commit_hook(
+                &repo,
+                "post-rewrite",
+                &["amend"],
+                Some(post_rewrite_stdin.as_bytes()),
+                true,
+            )?;
+        }
+        use_hook_worktree_summary
+    };
     let summary_date_author = if options.amend
         || options.reuse_message.is_some()
         || options.reedit_message.is_some()
@@ -495,6 +541,7 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         None
     };
     if !options.quiet {
+        let _trace = phase_trace("commit.summary");
         print_commit_summary(
             &repo,
             &store,
@@ -862,22 +909,41 @@ fn update_commit_head_ref(
     id: &ObjectId,
     reflog_message: &str,
 ) -> Result<()> {
-    match head_refs.read_head()? {
+    let head = {
+        let _trace = phase_trace("commit.update_ref.read_head");
+        head_refs.read_head()?
+    };
+    match head {
         RefTarget::Symbolic(target) => {
-            let old_id = common_refs
-                .resolve(&target)
-                .unwrap_or_else(|_| zero_object_id());
+            let old_id = {
+                let _trace = phase_trace("commit.update_ref.resolve_old");
+                common_refs
+                    .resolve(&target)
+                    .unwrap_or_else(|_| zero_object_id())
+            };
             let common_repo = GitRepo {
                 root: repo.root.clone(),
                 git_dir: common_refs.git_dir().to_path_buf(),
                 objects_dir: repo.objects_dir.clone(),
                 index_path: repo.index_path.clone(),
             };
-            common_refs.write_ref(&target, id)?;
-            append_reflog(&common_repo, &target, &old_id, id, reflog_message)?;
-            append_reflog(repo, "HEAD", &old_id, id, reflog_message)
+            {
+                let _trace = phase_trace("commit.update_ref.write_ref");
+                common_refs.write_ref(&target, id)?;
+            }
+            {
+                let _trace = phase_trace("commit.update_ref.branch_reflog");
+                append_reflog(&common_repo, &target, &old_id, id, reflog_message)?;
+            }
+            {
+                let _trace = phase_trace("commit.update_ref.head_reflog");
+                append_reflog(repo, "HEAD", &old_id, id, reflog_message)
+            }
         }
-        RefTarget::Direct(_) => write_head_direct_with_reflog(repo, head_refs, id, reflog_message),
+        RefTarget::Direct(_) => {
+            let _trace = phase_trace("commit.update_ref.write_head_direct");
+            write_head_direct_with_reflog(repo, head_refs, id, reflog_message)
+        }
     }
 }
 

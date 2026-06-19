@@ -2659,3 +2659,1280 @@ the full gate but is superseded for the scoped SSH preservation check by
 paired mean, and paired median all favor Zmin. Do not claim all performance
 work is complete until the remaining non-SSH gaps are either improved or
 explicitly accepted as out of scope for the current release.
+
+MacOS fetch/push gap rerun and fetch telemetry:
+The explicit macOS gaps from the full gate were rerun with a scoped 7-repeat
+benchmark to separate stable gaps from 3-repeat noise. All checks were `ok`.
+
+- scoped fair rerun:
+  `/tmp/zmin-macos-fetch-push-gaps-20260619T223845Z`
+- phase trace before fetch-detail labels:
+  `/tmp/zmin-macos-fetch-push-trace-20260619T224020Z`
+- phase trace after fetch-detail labels:
+  `/tmp/zmin-macos-fetch-trace-detail-20260619T224530Z`
+
+| Operation | Aggregate mean | Aggregate median | Paired mean | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fetch-incremental` | `1.459156` | `1.227862` | `1.440862` | `1.249049` | `0.393288` |
+| `fetch-batch` | `1.187526` | `1.146005` | `1.186970` | `1.141461` | `0.425308` |
+| `push-batch` | `1.190289` | `1.168394` | `1.191435` | `1.162718` | n/a |
+
+The new local fetch phase labels keep behavior unchanged and split the local
+configured-fetch path into source/setup, root collection, reachable-object
+copying, ref updates, `FETCH_HEAD`, and tag copying. One-repeat trace evidence
+shows the current fetch time is mostly reachable-object copy plus ref update:
+
+| Operation | `copy_reachable_objects` | `apply_refspecs` | `fetch.total` |
+| --- | ---: | ---: | ---: |
+| `fetch-incremental` | `0.045428s` | `0.015859s` | `0.066502s` |
+| `fetch-batch` | `0.059083s` | `0.018920s` | `0.083179s` |
+
+For `push-batch`, the prior trace in
+`/tmp/zmin-macos-fetch-push-trace-20260619T224020Z` showed
+`push.local.copy_reachable_objects=0.314928s` out of `push.total=0.321103s`.
+The next performance slice should target the shared reachable-object copy path
+and local ref update path before retesting the macOS fetch/push gate.
+
+MacOS local-fetch destination-have exclusion:
+The next scoped slice made local fetch use destination refs as `have` roots for
+the local object graph walk, matching the already-existing push-side idea of
+excluding objects reachable from the other side before collecting pack ids. This
+keeps the same object-store validation and missing-object copy rules, but avoids
+walking the full old history for incremental local fetch.
+
+- scoped fair rerun:
+  `/tmp/zmin-macos-fetch-exclude-have-20260618T225748Z`
+- phase trace:
+  `/tmp/zmin-macos-fetch-exclude-have-trace-20260618T230048Z`
+- validation:
+  all benchmark checks were `ok`; `git_transport_local_compat` passed `88/88`.
+
+| Operation | Aggregate mean | Aggregate median | Paired mean | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fetch-incremental` | `0.787816` | `0.752560` | `0.775390` | `0.759823` | `0.234301` |
+| `fetch-batch` | `1.181593` | `1.173324` | `1.183456` | `1.177318` | `0.417504` |
+| `push-batch` | `1.191205` | `1.193044` | `1.191399` | `1.197094` | n/a |
+
+The `fetch-incremental` scoped macOS gap is closed for this fixture: median
+Zmin time moved from `0.081296s` before the exclusion slice to `0.048422s`,
+and phase trace shows `fetch.local.copy_reachable_objects` moving from
+`0.045428s` to `0.011425s` with one destination excluded root. `fetch-batch`
+still has a material gap on the same gate, with trace time mostly in copying
+the new batch objects (`fetch.local.copy_reachable_objects=0.055430s`) and
+ref updates (`fetch.local.apply_refspecs=0.013499s`). `push-batch` remains
+unchanged by this fetch-side slice and should stay on the open macOS
+performance list.
+
+MacOS local-fetch pack-sized missing-object filtering:
+The next fetch-batch slice split the local multi-root copy trace and found the
+remaining batch time was dominated by checking every new tree/blob id against
+the destination object database before writing a pack. For pack-sized local
+fetches, graph exclusion already removes objects reachable from destination
+refs and an indexed pack may safely contain an object id that is already present
+elsewhere in the object database. The implementation now keeps per-object
+destination checks for the small loose-copy path, but extends the missing list
+directly when the operation is already going to write a pack.
+
+- scoped fair rerun:
+  `/tmp/zmin-macos-fetch-pack-skip-contains-20260618T230628Z`
+- phase trace:
+  `/tmp/zmin-macos-fetch-pack-skip-contains-trace-20260618T230837Z`
+- validation:
+  all benchmark checks were `ok`; `git_transport_local_compat` passed `88/88`.
+
+| Operation | Aggregate mean | Aggregate median | Paired mean | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fetch-incremental` | `0.684219` | `0.754282` | `0.693591` | `0.684217` | `0.229391` |
+| `fetch-batch` | `0.649863` | `0.637276` | `0.650488` | `0.633885` | `0.229342` |
+
+Both scoped macOS fetch gaps are now closed for this fixture. The batch trace
+shows `fetch.local.copy.record_tree_objects` dropping from `0.034992s` to
+`0.000016s`, `fetch.local.copy_reachable_objects` dropping from `0.055881s` to
+`0.020765s`, and `fetch.total=0.035314s` on the one-repeat diagnostic trace.
+`push-batch` remains the explicit open macOS local-transport gap.
+
+MacOS local-push undeltified pack write:
+The push-batch trace showed the remaining local push gap was not pack-id
+collection. It was local pack writing: `push.local.copy.write_missing_objects`
+was `0.307829s` out of `push.total=0.327097s` in
+`/tmp/zmin-macos-push-batch-detail-20260618T231149Z`. Local `send-pack`
+already uses undeltified packs, so the local filesystem porcelain push path now
+uses the same pack option. Network push paths are unchanged.
+
+- scoped fair rerun:
+  `/tmp/zmin-macos-push-undeltified-20260618T231429Z`
+- phase trace:
+  `/tmp/zmin-macos-push-undeltified-trace-20260618T231700Z`
+- combined fetch/push confirmation:
+  `/tmp/zmin-macos-fetch-push-closed-20260618T231739Z`
+- validation:
+  all benchmark checks were `ok`; `git_transport_local_compat` passed `88/88`.
+
+| Operation | Aggregate mean | Aggregate median | Paired mean | Paired median |
+| --- | ---: | ---: | ---: | ---: |
+| `push-batch` | `0.883090` | `0.843625` | `0.881934` | `0.849670` |
+
+The push trace after the change shows
+`push.local.copy.write_missing_objects=0.200639s`,
+`push.local.copy_reachable_objects=0.210805s`, and `push.total=0.219258s`.
+The combined 7-repeat confirmation kept every validation check `ok` and had
+median ratios favoring Zmin for all three scoped local-transport rows:
+`fetch-incremental=0.627965`, `fetch-batch=0.959612`, and
+`push-batch=0.831581`. The combined `fetch-batch` mean stayed noisy
+(`1.039550`) because of two early Zmin outliers; the dedicated fetch-only gate
+above remains the cleaner fetch-batch timing evidence (`0.649863` mean,
+`0.637276` median).
+
+Windows scoped fetch/push preservation after local-transport changes:
+The Windows-native benchmark now includes a `fetch-batch` operation matching the
+macOS local batch fixture shape: a separate bare remote, a base clone for each
+tool, a 2400-file batch commit, repeated cloned fetch worktrees, `fsck` for
+Zmin, and remote-tracking ref checks. The first Windows `fetch-batch` smoke
+found a benchmark fixture bug: the new bare batch remote did not point `HEAD`
+at `refs/heads/main`, so Zmin's base clone had no local branch and `fetch
+origin` failed with `error: ref not found`. The benchmark fixture now sets the
+bare remote HEAD before cloning, matching the other Windows local-remote
+fixtures; the failed artifact is not timing evidence.
+
+- failed fixture-diagnosis run:
+  `C:\Users\skron\zmin-bench-20260618T232145Z-40835-out`
+- fixed one-repeat `fetch-batch` smoke:
+  `C:\Users\skron\zmin-bench-20260618T233019Z-41897-out`
+- fixed three-repeat scoped gate:
+  `C:\Users\skron\zmin-bench-20260618T233157Z-42084-out`
+- validation:
+  `10` checks, no non-`ok` rows; post-run guest process probe `process_count=0`.
+
+| Operation | Mean ratio | Median ratio | Paired mean | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fetch-incremental` | `0.158460` | `0.131595` | `0.168698` | `0.232668` | `0.244922` |
+| `fetch-batch` | `0.151639` | `0.126801` | `0.158933` | `0.194469` | `0.243275` |
+| `push-batch` | `0.037337` | `0.032621` | `0.038090` | `0.041526` | n/a |
+
+This preserves the local fetch/push performance work on Windows/Git-for-Windows
+for the scoped fixture and adds the missing Windows `fetch-batch` coverage. It
+does not close the broader Windows performance goal from the full gate; older
+full-gate gaps such as `add`, default `clone`, `clone-instant`, and
+`clone-instant-git-daemon` still need their own current evidence or follow-up
+work.
+
+Cross-platform full-gate refresh after local-transport changes:
+After the local fetch/push slices, both full local performance gates were rerun
+to replace the older open-gap list with current evidence.
+
+- macOS 3-repeat full gate:
+  `/tmp/zmin-macos-current-full-gate-20260619T001`
+- Windows/Git-for-Windows 3-repeat full gate:
+  `C:\Users\skron\zmin-bench-20260618T234709Z-71238-out`
+- validation:
+  macOS had no non-`ok` rows in `checks.tsv`; Windows had no non-`ok` rows in
+  `checks.csv`. A post-run Windows `tasklist` probe showed no lingering
+  benchmark `git`, `git-daemon`, `cargo`, `rustc`, or `zmin` processes; only
+  the probe's own `cmd.exe` / `tasklist.exe` were present.
+
+Current macOS ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `commit` | `1.122916` | `1.143321` | `1.144384` | n/a |
+| `clone-instant-ssh` | `0.459977` | `1.038870` | `0.947099` | n/a |
+| `push-batch` | `1.052396` | `0.827278` | `0.827278` | n/a |
+| `fetch-incremental` | `0.708960` | `0.706985` | `0.709188` | `0.229131` |
+| `fetch-batch` | `0.665497` | `0.663059` | `0.689810` | `0.249595` |
+
+The macOS local-transport gaps are closed in the full gate as well as the
+scoped gates. `push-batch` has one cold Zmin outlier on mean (`0.466829s`) but
+the aggregate and paired medians favor Zmin. The clearest remaining macOS
+full-gate gap is `commit`; `clone-instant-ssh` is mixed/noisy because aggregate
+median is slightly slower while paired median and mean favor Zmin.
+
+Current Windows/Git-for-Windows ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `2.298324` | `3.755054` | `4.687418` | `2.639025` |
+| `clone-instant` | `1.136215` | `1.021717` | `1.252733` | n/a |
+| `clone-instant-git-daemon` | `1.345728` | `1.149305` | `1.501317` | n/a |
+| `clone-instant-ssh` | `0.925775` | `0.798440` | `1.042287` | n/a |
+| `add` | `0.682281` | `0.551357` | `0.904493` | n/a |
+| `fetch-incremental` | `0.201034` | `0.186062` | `0.212325` | `0.314815` |
+| `fetch-batch` | `0.224081` | `0.221841` | `0.246636` | `0.286218` |
+| `push-batch` | `0.054304` | `0.062775` | `0.073006` | n/a |
+
+This supersedes the older Windows open-gap list: `add` and the local
+fetch/push rows are now faster than Git on the full gate. The current stable
+Windows performance work is clone-focused: default `clone` is slower than both
+Git and Gitoxide, while `clone-instant` and `clone-instant-git-daemon` remain
+behind Git. `clone-instant-ssh` is mixed but much closer; it should be preserved
+while targeting the default/local and git-daemon clone paths.
+
+Windows fresh-clone no-smudge fast path:
+The next Windows trace slice targeted the remaining clone gaps. A scoped
+phase-traced diagnostic run showed the fresh clone path was spending hundreds
+of milliseconds in a post-checkout smudge scan even for benchmark repositories
+with no root attributes and no checkout CRLF conversion:
+
+- before trace:
+  `C:\Users\skron\zmin-bench-20260618T235808Z-76515-out`
+- after trace:
+  `C:\Users\skron\zmin-bench-20260619T000315Z-79379-out`
+- fair Windows 3-repeat scoped rerun:
+  `C:\Users\skron\zmin-bench-20260619T000715Z-79879-out`
+- macOS preservation scoped rerun:
+  `/tmp/zmin-macos-clone-smudge-skip-20260619T001`
+- validation:
+  `cargo check -p zmin-cli --bin zmin --profile compat`;
+  focused unit guard for `may_smudge_checkout_entries`;
+  `git_worktree_state_compat checkout_core_autocrlf` (`3/3`);
+  local `git_clone_compat clone_instant` (`2/2`);
+  remote `git_transport_http_compat clone_instant_` (`9/9`);
+  touched-file rustfmt; `git diff --check`.
+
+The implementation now uses loaded `WorktreeStageOptions` / `WorktreeContentRules`
+to skip the full post-checkout smudge pass only when the content rules prove
+that checkout cannot rewrite content: no root attributes and `core.autocrlf`
+does not output CRLF. Repositories with attributes or `core.autocrlf=true`
+keep the existing smudge/filter behavior.
+
+Trace deltas:
+
+| Operation | Before `smudge_filters` | After `smudge_filters` | Before `clone.total` | After `clone.total` |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `0.290217s` | `0.001640s` | `0.671065s` | `0.353670s` |
+| `clone-instant` | `0.241594s` | `0.001683s` | `0.407266s` | `0.279059s` |
+| `clone-instant-git-daemon` | `0.260921s` | `0.001331s` | `0.708242s` | `0.532808s` |
+
+Fair Windows scoped ratios after the change:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `1.121092` | `1.160308` | `1.524839` | `0.525196` |
+| `clone-instant` | `0.747176` | `1.116850` | `1.147372` | n/a |
+| `clone-instant-git-daemon` | `1.156264` | `1.184291` | `1.227312` | n/a |
+
+The default Windows clone gap is much smaller and Zmin is now faster than
+Gitoxide on the scoped local clone fixture, but default `clone` is still behind
+Git. `clone-instant` is faster on mean but still slower on aggregate/paired
+median, so it remains near-parity rather than closed. `clone-instant-git-daemon`
+remains a clear Windows gap.
+
+macOS preservation ratios after the same change:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `2.219934` | `0.834371` | `0.825621` | `0.361715` |
+| `clone-instant` | `0.831471` | `0.842320` | `0.813188` | n/a |
+| `clone-instant-git-daemon` | `0.652645` | `0.841330` | `0.937316` | n/a |
+
+The macOS scoped rerun had one cold Zmin `clone` outlier (`0.611844s`) that
+only affects the mean; medians and paired medians preserve the clone rows.
+Next Windows clone work should target fresh checkout materialization, especially
+file open/write/metadata behavior, while preserving CRLF/attribute semantics and
+the already-good macOS medians.
+
+Windows fresh-checkout metadata syscall skip:
+The follow-up Windows materialization slice removed one more avoidable fresh
+checkout syscall. On non-Unix platforms, checkout metadata currently records
+only the file size in the index, so freshly written regular files can update
+`IndexEntry::size` from the final checkout content length instead of reopening
+the path with `symlink_metadata`. Unix keeps the existing metadata path because
+ctime, mtime, device, inode, uid, and gid are still recorded there.
+
+- phase-traced Windows diagnostic:
+  `C:\Users\skron\zmin-bench-20260619T001426Z-88032-out`
+- fair Windows 3-repeat scoped rerun:
+  `C:\Users\skron\zmin-bench-20260619T001757Z-88483-out`
+- macOS preservation scoped rerun:
+  `/tmp/zmin-macos-clone-metadata-skip-20260619T001`
+- validation:
+  `cargo test -p zmin-git-core checkout -- --nocapture` (`10/10`);
+  `cargo check -p zmin-cli --bin zmin --profile compat`;
+  `git_worktree_state_compat checkout_core_autocrlf` (`3/3`);
+  `git_clone_compat clone_instant` (`2/2`);
+  `git_transport_http_compat clone_instant_` (`9/9`);
+  touched-file rustfmt; `git diff --check`.
+
+Trace result:
+
+| Operation | `metadata` | `checkout_index` | `clone.total` |
+| --- | ---: | ---: | ---: |
+| `clone` | `0.000000s` | `0.158755s` | `0.202451s` |
+| `clone-instant` | `0.000000s` | `0.127807s` | `0.157194s` |
+| `clone-instant-git-daemon` | `0.000000s` | `0.122158s` | `0.249098s` |
+
+Fair Windows scoped ratios after the metadata skip:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `0.993263` | `1.286148` | `1.650266` | `0.517605` |
+| `clone-instant` | `0.656808` | `0.830552` | `0.831308` | n/a |
+| `clone-instant-git-daemon` | `0.765858` | `0.732455` | `0.913540` | n/a |
+
+This closes the scoped Windows `clone-instant` and `clone-instant-git-daemon`
+rows for this fixture. Default Windows `clone` is now mean parity/faster and
+still faster than Gitoxide, but aggregate and paired medians remain behind Git
+because one Zmin row was still slower; keep default clone open and target the
+remaining fresh checkout file open/write variance rather than metadata.
+
+macOS preservation after the same code change:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `2.194284` | `0.846192` | `0.846192` | `0.355775` |
+| `clone-instant` | `0.598572` | `0.667473` | `0.671085` | n/a |
+| `clone-instant-git-daemon` | `0.803564` | `0.779869` | `0.759583` | n/a |
+
+The macOS rerun again had one cold local clone mean outlier, but medians and
+paired medians preserve the clone rows.
+
+Windows clone 7-repeat follow-up:
+A stronger Windows/Git-for-Windows scoped rerun after the metadata syscall skip
+replaced the noisy 3-repeat clone judgment with a 7-repeat gate:
+
+- scoped Windows 7-repeat:
+  `C:\Users\skron\zmin-bench-20260619T002430Z-94637-out`
+- phase-traced default clone diagnostic:
+  `C:\Users\skron\zmin-bench-20260619T002656Z-95010-out`
+- validation:
+  all `HEAD`, `HEAD^{tree}`, and `zmin.worktreeFirst=true` checks were `ok`
+  for every repeat. A post-run process probe found no lingering benchmark
+  `git`, `git-daemon`, `cargo`, `rustc`, or `zmin` processes.
+
+Seven-repeat ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `1.110021` | `1.083673` | `1.333045` | `0.854759` |
+| `clone-instant` | `0.522979` | `0.552358` | `0.556192` | n/a |
+| `clone-instant-git-daemon` | `0.791166` | `0.904394` | `0.834051` | n/a |
+
+This confirms the scoped Windows `clone-instant` and
+`clone-instant-git-daemon` rows remain closed. Default Windows `clone` is now
+close to Git and faster than Gitoxide, but aggregate and paired medians are
+still behind Git, so default clone remains the active Windows clone gap.
+
+The clone-only trace showed `cli.process=0.352082s` while the external
+stopwatch row was `0.478133s`; inside Zmin, the remaining time is dominated by
+fresh checkout materialization for 480 entries:
+
+| Phase | Seconds |
+| --- | ---: |
+| `checkout_fresh.checkout_index` | `0.263257` |
+| `materialize_file_open` | `0.143172` |
+| `materialize_file_bytes` | `0.074171` |
+| `materialize_file_close` | `0.026391` |
+| `metadata` | `0.000000` |
+
+The stream path did not write any file in this fixture (`stream_attempts=128`,
+`stream_written=0`, `stream_skipped_after_disable=352`), because the remaining
+files are small enough to fall below the streaming threshold. The next accepted
+default-clone experiment should therefore target Windows fresh-checkout file
+open/write variance or object-read-to-write flow, not metadata.
+
+A trial that raised the non-Unix fresh-checkout worker cap from 2 to 4 was
+rejected and reverted. Its scoped Windows run
+`C:\Users\skron\zmin-bench-20260619T002859Z-95491-out` kept checks ok and
+preserved instant rows, but worsened default `clone` mean ratio to `1.455604`
+and median ratio to `1.152745` due to a large Zmin outlier. Do not retry a
+broad worker-count increase without new evidence that the bottleneck is worker
+starvation rather than Windows file creation variance.
+
+A later trial that lowered the non-Unix stream threshold for fresh checkout
+small blobs and let `PackedFirstObjectStore` stream loose blobs directly to the
+worktree path was also rejected and reverted. Diagnostic run
+`C:\Users\skron\zmin-bench-20260619T003755Z-1656-out` kept the clone checks ok
+but made default `clone` much slower (`4.297091` mean ratio vs Git and
+`1.570534` vs Gix). The trace showed why: the experiment wrote all 480 files
+through the stream path (`stream_attempts=480`, `stream_written=480`) and
+eliminated `object_read` / `materialize`, but `stream_write` alone took
+`0.871846s` and `checkout_fresh.checkout_index` rose to `0.451276s`. Do not
+retry small loose direct streaming without a different implementation that
+avoids per-file loose-object hash verification and proves a lower `stream_write`
+phase than the read-object path.
+
+Windows stream-probe miss cutoff:
+The accepted follow-up keeps the existing streaming implementation and 1 MiB
+blob threshold, but reduces the non-Unix fresh-checkout stream miss cutoff from
+128 to 16. Unix keeps the previous 128-miss cutoff. This targets the wasted
+small-blob probe path from the default Windows clone trace without changing
+checkout content rules or CRLF/filter behavior.
+
+- phase-traced Windows diagnostic:
+  `C:\Users\skron\zmin-bench-20260619T004435Z-7311-out`
+- scoped Windows 7-repeat:
+  `C:\Users\skron\zmin-bench-20260619T004758Z-7636-out`
+- validation:
+  `cargo test -p zmin-git-core checkout -- --nocapture` (`10/10`);
+  `cargo check -p zmin-cli --bin zmin --profile compat`;
+  touched-file rustfmt; Windows clone checks had no non-`ok` rows; the post-run
+  process probe found no lingering benchmark `git`, `git-daemon`, `cargo`,
+  `rustc`, or `zmin` processes.
+
+Trace movement:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| `stream_attempts` | `128` | `16` |
+| `stream_skipped_after_disable` | `352` | `464` |
+| `stream_write` | `0.052893s` | `0.006718s` |
+| `checkout_fresh.checkout_index` | `0.263257s` | `0.174360s` |
+| `metadata` | `0.000000s` | `0.000000s` |
+
+Seven-repeat Windows ratios after the cutoff:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `0.640274` | `0.773980` | `0.810366` | `0.549127` |
+| `clone-instant` | `0.576865` | `0.505314` | `0.595544` | n/a |
+| `clone-instant-git-daemon` | `0.757973` | `0.822713` | `0.821221` | n/a |
+
+This closes the scoped Windows default `clone` gap for this fixture while
+preserving the already-green instant clone rows. Broader clone performance still
+needs full-gate refreshes and larger/real repository fixtures.
+
+Windows full-gate refresh after clone fixes:
+The full Windows/Git-for-Windows 3-repeat gate was rerun after the stream-probe
+cutoff:
+
+- full Windows 3-repeat:
+  `C:\Users\skron\zmin-bench-20260619T005143Z-12449-out`
+- validation:
+  `checks.csv` had no non-`ok` rows; the post-run process probe found no
+  lingering benchmark `git`, `git-daemon`, `cargo`, `rustc`, or `zmin`
+  processes.
+
+The full gate confirms the non-clone rows are green: `add`, `add-dirty`,
+`commit`, `commit-dirty`, `status`, `rev-list`, `merge-base`, pulls, local
+fetches, and local pushes all favor Zmin against Git on mean, median, and paired
+median. `log` remains faster than Git but slower than Gix in this CLI-adjacent
+comparison.
+
+Selected full-gate ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `add` | `0.806096` | `0.793515` | `0.820090` | n/a |
+| `add-dirty` | `0.594674` | `0.494559` | `0.806009` | n/a |
+| `status` | `0.586979` | `0.573781` | `0.596218` | `0.208959` |
+| `fetch-batch` | `0.225013` | `0.225632` | `0.310967` | `0.313763` |
+| `push-batch` | `0.052701` | `0.060649` | `0.060649` | n/a |
+| `clone-instant` | `0.626157` | `0.663972` | `0.834046` | n/a |
+| `clone-instant-git-daemon` | `0.591135` | `0.506673` | `0.782324` | n/a |
+| `clone-instant-ssh` | `0.565773` | `0.506528` | `0.697860` | n/a |
+
+Default `clone` remains noisy in the broader full gate despite the clean scoped
+7-repeat closure. The full-gate row was slower than Git and Gix because repeat
+`1/local` hit a Zmin outlier (`git=0.454510s`, `gix=0.675368s`,
+`zmin=1.130403s`), while repeats `2/local` and `3/local` were much closer
+(`zmin=0.442741s` and `0.414866s`). Full-gate default `clone` ratios were
+mean `1.721274`, median `2.487081`, paired median `2.487081`, and Gix median
+`1.673759`. Keep the scoped 7-repeat gate as the cleaner default-clone timing
+proof for this fixture, but leave broader default clone performance open until
+a full-gate rerun is stable without the local-clone outlier and larger/real
+repository fixtures are covered.
+
+macOS full-gate refresh after clone fixes:
+The macOS 3-repeat full gate was rerun after the Windows-only stream-probe
+cutoff to confirm the Unix checkout path was preserved:
+
+- full macOS 3-repeat:
+  `/tmp/zmin-macos-current-full-gate-20260619T006`
+- validation:
+  `checks.tsv` had no non-`ok` rows.
+
+The run keeps clone and local-transport rows green on macOS. The stream-probe
+cutoff remains Windows-only, so this serves as a current Unix preservation gate
+after the clone-focused Windows changes.
+
+Selected full-gate ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `0.810820` | `0.791332` | `0.797377` | `2.203258` |
+| `clone-instant` | `0.807407` | `0.796202` | `0.796202` | n/a |
+| `clone-instant-git-daemon` | `0.886479` | `0.925952` | `0.891929` | n/a |
+| `clone-instant-ssh` | `0.437521` | `0.741846` | `0.701449` | n/a |
+| `fetch-incremental` | `0.666965` | `0.675218` | `0.666543` | n/a |
+| `fetch-batch` | `0.936461` | `0.962664` | `0.952645` | `2.599574` |
+| `push-batch` | `0.811725` | `0.806676` | `0.804909` | n/a |
+| `status` | `0.761898` | `0.738272` | `0.738272` | `1.019519` |
+
+The only notable macOS median gap left in this full gate is `commit`
+(`1.143562` median ratio, paired median `1.015880`). `status` is still faster
+than Git by median but effectively parity with Gix in this comparison. Keep the
+macOS commit row as the next local CLI gap; do not reopen the Windows-only
+stream cutoff unless new Unix evidence shows a regression.
+
+macOS commit ref-write gap:
+A scoped 7-repeat macOS `commit` rerun with phase tracing confirmed the full
+gate `commit` gap was mostly loose-ref durability overhead rather than tree or
+commit-object construction:
+
+- baseline scoped run:
+  `/tmp/zmin-macos-commit-scope-20260619T-next`
+- detailed update-ref trace:
+  `/tmp/zmin-macos-commit-update-ref-trace-20260619T-next3`
+- accepted no-loose-ref-fsync scoped run:
+  `/tmp/zmin-macos-commit-no-ref-fsync-20260619T-next4`
+
+Before the change, scoped `commit` was stable slower than Git (`1.161869` mean
+ratio, `1.132603` median ratio, `1.159314` paired median). Trace showed
+`commit.update_ref` dominated the command (`0.036735s` median), with
+`commit.update_ref.write_ref` taking `0.022843s` median. `write_tree` was the
+next largest phase at about `0.016813s` median.
+
+The accepted change removes `sync_all()` from the generic loose-ref lock-file
+write path while keeping create-new lock semantics and rename replacement.
+This matches the benchmark's stock Git behavior more closely for ordinary loose
+ref updates; packed-refs writer behavior was left unchanged.
+
+Post-change scoped ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median |
+| --- | ---: | ---: | ---: |
+| `commit` | `0.671556` | `0.636282` | `0.650646` |
+
+Post-change trace shows `commit.update_ref` down to `0.001850s` median and
+`commit.update_ref.write_ref` down to `0.000173s` median. The remaining
+largest commit phase is `commit.write_tree` at `0.017007s` median.
+
+Validation:
+
+- `cargo test -p zmin-git-core refs -- --nocapture` (`18/18`)
+- `cargo test -p zmin-cli --test git_commit_compat -- --nocapture` (`26/26`)
+- `cargo test -p zmin-cli --test git_refs_compat -- --nocapture` (`15/15`)
+- `cargo test -p zmin-cli --test git_reflog_compat -- --nocapture` (`11/11`)
+- `cargo test -p zmin-cli --test git_ref_resolution_compat -- --nocapture`
+  (`6/6`)
+- `cargo check -p zmin-cli --bin zmin --profile compat`
+
+The refs validation also exposed and fixed an adjacent parity bug: default
+`update-ref HEAD <oid>` treated `HEAD` as a pseudoref before the deref path and
+wrote a direct `.git/HEAD`, while stock Git updates the symbolic branch unless
+`--no-deref` is used. The fix leaves `HEAD` out of the generic pseudoref branch
+for update/ref-log old-id handling, preserving stock behavior for both default
+deref and explicit `--no-deref` modes.
+
+macOS full-gate refresh after ref-write fix:
+The full macOS 3-repeat gate was rerun after the loose-ref write change:
+
+- full macOS 3-repeat:
+  `/tmp/zmin-macos-full-gate-refwrite-20260619T-next`
+- validation:
+  `checks.tsv` had no non-`ok` rows.
+
+The full gate confirms the scoped `commit` improvement carries through the
+broader local matrix. `commit` and `commit-dirty` are now green in the full gate,
+and clone/local-transport rows remain green against Git by median.
+
+Selected full-gate ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `add` | `0.734858` | `0.719517` | `0.724928` | n/a |
+| `add-dirty` | `0.841213` | `0.817494` | `0.804452` | n/a |
+| `commit` | `0.592748` | `0.585314` | `0.591651` | n/a |
+| `commit-dirty` | `0.563509` | `0.598578` | `0.600885` | n/a |
+| `status` | `0.776831` | `0.783520` | `0.778239` | `0.801335` |
+| `clone` | `0.477180` | `0.477040` | `0.519513` | `0.211477` |
+| `clone-instant` | `0.586160` | `0.579312` | `0.579312` | n/a |
+| `clone-instant-git-daemon` | `0.813067` | `0.743024` | `0.720249` | n/a |
+| `clone-instant-ssh` | `0.344639` | `0.544331` | `0.544331` | n/a |
+| `fetch-incremental` | `0.460137` | `0.460095` | `0.460095` | `0.155077` |
+| `fetch-batch` | `0.528423` | `0.474976` | `0.495487` | `0.186758` |
+| `push-batch` | `0.785267` | `0.746822` | `0.771364` | n/a |
+
+`index-pack` had a noisy mean (`1.114553`) from one Zmin outlier but stayed
+green by median (`0.986697`) and paired median (`0.960930`). `rev-list` remains
+near parity (`0.922157` median, `0.955336` paired median). The next
+cross-platform risk for the ref-write change is Windows preservation, especially
+commit/ref/reflog behavior and the Windows full-gate rows.
+
+Windows focused commit/ref preservation after ref-write fix:
+The focused Windows/Git-for-Windows commit rows were rerun after the loose-ref
+write and `update-ref HEAD` deref changes:
+
+- focused Windows 3-repeat:
+  `C:\Users\skron\zmin-bench-20260619T013144Z-69118-out`
+- rows:
+  `bench.csv`
+- comparison:
+  `comparison.csv`
+- validation:
+  `checks.csv` had `commit-dirty` tree checks for all three repeats; this
+  selected operation set does not emit separate plain `commit` tree rows, so
+  the plain `commit` benchmark row is timing/process-exit evidence and parity
+  is covered by the focused tests below.
+- post-run process probe:
+  no `git`, `git-daemon`, `cargo`, `rustc`, or `zmin` processes were returned.
+
+Focused benchmark ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median |
+| --- | ---: | ---: | ---: |
+| `commit` | `0.024351` | `0.021210` | `0.032325` |
+| `commit-dirty` | `0.505536` | `0.543572` | `0.543572` |
+
+The raw rows had Git plain-commit times of `5.445789s`, `3.359833s`, and
+`5.981778s`, while Zmin was `0.126872s`, `0.108605s`, and `0.124608s`. That is
+a Windows/Git-for-Windows process-timing artifact in stock Git's plain commit
+path for this fixture, not a reason to generalize the ratio beyond this gate.
+The `commit-dirty` row is the cleaner Windows timing comparison and is still
+green.
+
+Focused Windows parity tests were also run from the same copied snapshot with
+the GNU Windows toolchain:
+
+- `cargo test -p zmin-cli --test git_refs_compat
+  update_ref_no_deref_modes_match_stock_git_head_storage -- --nocapture`
+  (`1/1`)
+- `cargo test -p zmin-cli --test git_reflog_compat
+  commit_records_branch_and_head_reflog -- --nocapture` (`1/1`)
+- `cargo test -p zmin-cli --test git_commit_compat
+  commit_messages_match_stock_git_object -- --nocapture` (`1/1`)
+
+This preserves the ref-write change on Windows for the affected ref, reflog,
+and commit-object behavior. The broader Windows performance work remains the
+default `clone` full-gate stability and larger/real repository evidence, not
+the commit/ref path.
+
+Windows clone full-gate and larger-fixture follow-up:
+The full Windows/Git-for-Windows 3-repeat gate was rerun after the ref-write
+fixes:
+
+- full Windows 3-repeat:
+  `C:\Users\skron\zmin-bench-20260619T014310Z-74670-out`
+- validation:
+  `checks.csv` had no non-`ok` rows; the post-run process probe returned no
+  `git`, `git-daemon`, `cargo`, `rustc`, or `zmin` processes.
+
+The non-clone rows remained green, and instant clone rows were mostly green or
+near parity. Default local `clone` remains open in the broader full gate:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `1.302746` | `1.611725` | `1.611725` | `0.986275` |
+| `clone-instant` | `0.739518` | `1.035247` | `1.035247` | n/a |
+| `clone-instant-git-daemon` | `0.890358` | `0.866720` | `1.179618` | n/a |
+| `clone-instant-ssh` | `0.441035` | `0.505479` | `0.589863` | n/a |
+
+Raw default clone rows were Zmin `0.660040s`, `0.351822s`, `0.555803s` vs Git
+`0.409524s`, `0.390924s`, `0.402906s`. A focused traced 3-repeat clone run:
+
+- focused trace:
+  `C:\Users\skron\zmin-bench-20260619T015029Z-75569-out`
+
+had no failed checks and showed mixed timing (`0.943575` mean ratio,
+`1.097100` median ratio, `1.556261` paired median). The trace localized slow
+Zmin rows to fresh checkout materialization and object reads, with the slowest
+row showing `checkout_fresh.checkout_index=0.448311s`, `object_read=0.140409s`,
+`materialize_file_open=0.362468s`, `materialize_file_bytes=0.163204s`, and
+`materialize_file_close=0.060619s` for 480 entries. Treat the trace as
+diagnostic only because trace mode uses the split writer path for phase
+measurement.
+
+A larger clone-only Windows fixture was added as ad hoc evidence by invoking
+`tools/windows-native-benchmark.ps1` directly from the copied guest snapshot
+with `-Commits 120 -FilesPerCommit 80 -Ops clone` (about 1920 final worktree
+files):
+
+- larger clone baseline:
+  `C:\Users\skron\zmin-bench-20260619T-large-clone-out`
+- larger clone trace:
+  `C:\Users\skron\zmin-bench-20260619T-large-clone-trace-out`
+
+The larger 3-repeat fixture passed checks but showed a real open gap:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix median |
+| --- | ---: | ---: | ---: | ---: |
+| `clone` | `1.848973` | `1.752087` | `2.313287` | `1.033359` |
+
+Raw larger rows were Zmin `2.548632s`, `2.827041s`, `2.457708s` vs Git
+`1.101736s`, `1.613528s`, `1.521348s`. The one-repeat larger trace reproduced
+the gap (`2.400961` vs Git, `0.942203` vs Gix) and localized it to checkout:
+`checkout_fresh.checkout_index=2.129546s`, `object_read=0.536086s`, and
+aggregate worker materialization time `3.568772s` for 1920 entries. The largest
+aggregate subphase was file close (`2.456853s`), followed by file open
+(`0.823042s`) and file bytes (`0.287522s`); aggregate worker timings can exceed
+wall time because checkout is parallel.
+
+A conditional non-Unix 4-worker checkout experiment for larger checkouts was
+tested and reverted. It did not improve the larger fixture:
+
+- rejected worker experiment:
+  `C:\Users\skron\zmin-bench-20260619T-large-clone-workers4-out`
+- ratios:
+  mean `2.020522`, median `2.110726`, paired median `2.252501`, and Zmin vs Gix
+  median `1.166641`
+
+It also produced an unacceptable small-fixture scoped outlier in
+`C:\Users\skron\zmin-bench-20260619T020038Z-76895-out` (`zmin=1.955448s` for
+repeat `1/local`). Do not retry broader worker-count increases or conditional
+worker caps without new evidence that avoids both the 480-entry regression and
+the 1920-entry file close/open bottleneck. The next Windows default clone work
+should target checkout materialization/file close/open behavior or object
+read-to-write flow with a traced larger fixture, then rerun both the default
+scoped gate and the larger clone fixture before any full-gate claim.
+
+A source-store checkout experiment was also tested and reverted. Local clone
+already builds a `source_store` for target resolution, so the experiment changed
+local clone checkout to read through that existing source object store instead
+of creating a fresh destination object store after hardlink/copy. It preserved
+local macOS clone compatibility tests, but the Windows scoped default clone gate
+was not acceptable:
+
+- rejected source-store checkout experiment:
+  `C:\Users\skron\zmin-bench-20260619T021224Z-83938-out`
+- ratios:
+  mean `2.251246`, median `3.457229`, paired median `3.457229`, and Zmin vs Gix
+  median `2.857743`
+- raw rows:
+  Zmin `1.870876s`, `0.475994s`, `0.502301s` vs Git `0.541149s`,
+  `0.360187s`, `0.364261s`
+
+The experiment reproduced the same unacceptable first-row Zmin outlier pattern
+without enough later-row improvement to justify keeping it. Do not retry
+source-store-vs-destination-store checkout cache reuse as the Windows default
+clone fix unless new trace data shows destination object-store initialization,
+not materialization/file close/open, is the bottleneck.
+
+A fresh-checkout `create_new` writer experiment was also tested and reverted.
+The hypothesis was that fresh checkout can avoid overwrite/truncate semantics
+because target regular files should not exist. Local validation stayed green,
+but the Windows scoped default clone gate was worse than the accepted baseline:
+
+- rejected fresh writer experiment:
+  `C:\Users\skron\zmin-bench-20260619T022026Z-92107-out`
+- ratios and summary:
+  mean ratio `2.088477` vs Git and `1.493963` vs Gix; Git median
+  `0.432925s`, Gix median `0.621198s`, Zmin median `1.550569s`
+
+The experiment was reverted. Do not retry replacing the normal fresh checkout
+write path with `create_new`/manual writes unless new trace evidence shows the
+existing `fs::write` path is the measured bottleneck rather than Windows file
+creation/close variance or object-read-to-write flow.
+
+A non-Unix thread-local pack-file cache experiment was tested and reverted. The
+hypothesis was that parallel checkout workers were serializing packed object
+reads through the shared cached pack-file mutex. The experiment kept Unix on the
+old shared cache and moved non-Unix pack-file reads to a thread-local cached
+handle, but Windows scoped default clone was still worse than the accepted
+baseline and the branch also introduced a non-Unix unused-field warning:
+
+- rejected thread-local pack cache experiment:
+  `C:\Users\skron\zmin-bench-20260619T022935Z-98831-out`
+- ratios and summary:
+  mean ratio `1.979965` vs Git and `1.209705` vs Gix; Git median
+  `0.428126s`, Gix median `0.657105s`, Zmin median `1.613190s`
+
+The experiment was reverted. Do not retry per-thread pack-file cache handles as
+the Windows default clone fix without trace data showing the shared pack-file
+mutex is the bottleneck and without preserving warning-free non-Unix builds.
+
+Checkout object storage telemetry:
+The next accepted diagnostic slice added checkout trace-only object storage
+classification. `GitObjectStore::object_storage_hint` reports `loose`,
+`packed`, or `unknown`; fresh checkout calls it only when
+`ZMIN_CHECKOUT_PHASE_TRACE` is enabled and emits `object_locate`,
+`object_read_loose`, `object_read_packed`, `object_read_unknown`, and matching
+count metrics. The non-trace checkout path does not call the hint. The
+diagnostic was later extended with trace-only materialization size metrics:
+`materialized_regular_files`, `materialized_executable_files`,
+`materialized_file_bytes`, and `materialized_file_max_bytes`.
+
+Validation:
+
+- `rustfmt --edition 2024 --check` on touched core files
+- `cargo test -p zmin-git-core checkout -- --nocapture` (`10/10`)
+- `cargo test -p zmin-git-core pack::tests:: -- --nocapture` (`109/109`)
+- `cargo check -p zmin-cli --bin zmin --profile compat`
+- `cargo test -p zmin-cli --test git_clone_compat clone_ -- --nocapture`
+  (`10/10`)
+- `git diff --check`
+- Windows process probe after traced runs: `process_count=0`
+- size-metric follow-up validation:
+  `cargo test -p zmin-git-core checkout -- --nocapture` (`10/10`),
+  `cargo check -p zmin-cli --bin zmin --profile compat`,
+  `cargo test -p zmin-cli --test git_clone_compat clone_ -- --nocapture`
+  (`10/10`), and touched-file rustfmt
+
+Windows trace evidence:
+
+- default 480-entry clone trace:
+  `C:\Users\skron\zmin-bench-20260619T023952Z-6776-out`
+- larger 1920-entry clone trace:
+  `C:\Users\skron\zmin-bench-20260619T-large-clone-storage-trace-out`
+- default 480-entry size-metric trace:
+  `C:\Users\skron\zmin-bench-20260619T030459Z-21829-out`
+- larger 1920-entry size-metric trace:
+  `C:\Users\skron\zmin-bench-20260619T-large-size-metrics-out`
+
+Both traces passed clone checks. The default fixture had 480 packed reads and no
+loose/unknown reads: `object_read_packed=480`, `object_read=0.055091s`, and
+`object_locate=0.023424s`. Its dominant checkout work was still materialization:
+`materialize_write=0.178536s`, mostly file open (`0.130252s`).
+
+The larger fixture had the same shape at scale: `object_read_packed=1920`,
+`object_read=0.333212s`, `object_locate=0.143202s`, and no loose/unknown reads.
+The reproduced gap remained dominated by materialization, especially file close:
+`materialize_write=3.301539s`, `materialize_file_close=2.181284s`,
+`materialize_file_open=0.630518s`, and `materialize_file_bytes=0.489104s`
+while external timing was Zmin `2.556621s` vs Git `0.956642s`.
+
+The size-metric follow-up confirmed this is a tiny-file materialization
+problem, not a data-throughput problem. The default trace wrote 480 regular
+files, `506184` bytes total, and a max file size of `1055` bytes; in-process
+`clone.total` was `0.144189s` even though the traced external stopwatch row was
+noisy (`1.360853s`). The larger trace wrote 1920 regular files, `2027064` bytes
+total, and a max file size of `1056` bytes; `checkout_fresh.checkout_index` was
+`2.542155s`, with aggregate worker timing `materialize_file_close=2.681224s`,
+`materialize_file_open=1.206953s`, and `materialize_file_bytes=0.332118s`.
+
+Parallel checkout trace completeness follow-up:
+
+- default 480-entry path-prep trace:
+  `C:\Users\skron\zmin-bench-20260619T031330Z-28596-out`
+
+The parallel fresh-checkout worker loops now account for target path
+construction in `path_prep`, matching the serial trace shape. The Windows
+default clone trace passed checks and showed path construction is not the
+remaining bottleneck: `path_prep=0.000798s` for 480 entries, while
+`materialize_file_open=0.152694s`, `materialize_file_bytes=0.037029s`, and
+`materialize_file_close=0.021956s`.
+
+Windows `clone-large` benchmark op:
+
+- first-class `clone-large` validation:
+  `C:\Users\skron\zmin-bench-20260619T031928Z-33885-out`
+- first-class `clone-large` 3-repeat baseline:
+  `C:\Users\skron\zmin-bench-20260619T032455Z-38782-out`
+- first-class `clone-large` phase trace:
+  `C:\Users\skron\zmin-bench-20260619T033732Z-56852-out`
+- default clone refactor smoke:
+  `C:\Users\skron\zmin-bench-20260619T-clone-op-refactor-smoke-out`
+
+`tools/windows-native-benchmark.ps1` now has a first-class `clone-large`
+operation using a separate larger source fixture (`CloneLargeCommits=120`,
+`CloneLargeFilesPerCommit=80` by default). The script now builds benchmark
+source repositories through one helper so the default and larger clone fixtures
+use the same setup rules. The `clone-large` smoke passed `HEAD` and tree checks
+and reproduced the larger-fixture gap without the previous ad hoc direct
+PowerShell invocation: Git `0.971349s`, Gix `2.356681s`, Zmin `2.916709s`
+(`3.002741` vs Git, `1.237634` vs Gix). The default `clone` operation was
+rerun from the same copied snapshot after the fixture-builder refactor and
+also passed checks, with Zmin faster in that one-repeat smoke (`0.901862` vs
+Git and `0.821960` vs Gix).
+
+The 3-repeat `clone-large` baseline passed all six HEAD/tree checks and had no
+lingering benchmark process rows after completion. It is the current
+first-class larger-clone comparison point: mean ratio `2.396071`, median ratio
+`2.390069`, paired median `3.148522` vs Git; and mean ratio `1.163089`,
+median ratio `1.038241`, paired median `1.499950` vs Gix. Raw rows were Git
+`0.872730s`, `1.251959s`, `1.248083s`; Gix `2.882055s`, `2.071250s`,
+`1.994913s`; and Zmin `2.747810s`, `2.341322s`, `2.992269s`.
+
+The first-class `clone-large` phase trace passed clone checks and confirmed the
+same root-cause profile under the standardized op. It wrote 1920 regular files,
+`2027064` bytes total, max file `1056` bytes, all from packed objects
+(`object_read_packed=1920`). `path_prep` was only `0.004262s`; checkout time
+was dominated by Windows file materialization with `materialize_file_close`
+`3.646950s`, `materialize_file_open=0.945190s`, and
+`materialize_file_bytes=0.174350s`, while `checkout_fresh.checkout_index` was
+`2.715903s`. Treat the traced external stopwatch row as diagnostic only.
+
+macOS `clone-large` benchmark op:
+
+- first-class `clone-large` smoke:
+  `/tmp/zmin-macos-clone-large-smoke-20260619Tnext`
+- first-class `clone-large` 3-repeat baseline:
+  `/tmp/zmin-macos-clone-large-3x-20260619Tnext`
+- default clone refactor smoke:
+  `/tmp/zmin-macos-clone-op-refactor-smoke-20260619Tnext`
+
+`tools/git-performance-bench.sh` now mirrors the Windows benchmark with a
+first-class `clone-large` operation and default knobs
+`ZMIN_BENCH_CLONE_LARGE_COMMITS=120` and
+`ZMIN_BENCH_CLONE_LARGE_FILES_PER_COMMIT=80`. Source fixture creation now uses
+one helper for both the default and larger clone fixtures. The macOS
+`clone-large` smoke passed `HEAD` and tree checks and showed a larger-fixture
+gap vs Git in the one-repeat row: Git `0.308667s`, Zmin `0.647097s`
+(`2.096424`), while Zmin stayed faster than Gix `0.802181s` (`0.806672`).
+The default `clone` refactor smoke also passed checks and kept Zmin faster in
+that one-repeat row (`0.652178` vs Git, `0.217018` vs Gix).
+
+The 3-repeat macOS `clone-large` baseline supersedes the one-repeat smoke for
+timing. It passed all six HEAD/tree checks and favored Zmin against both
+comparators: mean ratio `0.620689`, median ratio `0.546510`, paired median
+`0.643759` vs Git; and mean ratio `0.320103`, median ratio `0.313390`, paired
+median `0.313390` vs Gix. Raw rows were Git `0.221128s`, `0.293400s`,
+`0.288260s`; Gix `0.567794s`, `0.502686s`, `0.486148s`; and Zmin
+`0.155175s`, `0.157537s`, `0.185570s`. This means the larger clone gap is
+currently Windows-specific for this fixture.
+
+Windows default gate after adding `clone-large`:
+
+- full default Windows/Git-for-Windows one-repeat gate:
+  `C:\Users\skron\zmin-bench-20260619T034410Z-61834-out`
+
+The default Windows benchmark operation set now includes `clone-large`. The
+one-repeat full gate passed all validation checks (`28 ok`) and the post-run
+process probe found no lingering `git`, `git-daemon`, `cargo`, `rustc`, or
+`zmin` processes. This is a tooling/gate validation point, not a performance
+closure: most non-clone rows favored Zmin against Git, including `add`
+(`0.702141`), `add-dirty` (`0.684878`), `status` (`0.473731`), fetch/push
+rows, pull rows, `commit`, and `commit-dirty`; `log` was effectively parity
+with Gix (`1.020809`) while faster than Git. The open Windows clone rows
+remained visible in the same default gate: default `clone` was `1.906781` vs
+Git and `1.314845` vs Gix, and `clone-large` was `2.855882` vs Git and
+`1.207647` vs Gix. Keep using focused 3-repeat/trace runs for optimization
+decisions, and treat this full one-repeat as proof that the broader gate now
+carries the larger clone fixture.
+
+Windows checkout materialization max-latency telemetry:
+
+- traced `clone-large` with file-operation max timings:
+  `C:\Users\skron\zmin-bench-20260619T035330Z-67254-out`
+- traced default `clone` with file-operation max timings:
+  `C:\Users\skron\zmin-bench-20260619T040103Z-68101-out`
+
+Fresh checkout trace now emits max per-file timing for the traced regular-file
+open, byte write, and close phases (`materialize_file_open_max`,
+`materialize_file_bytes_max`, and `materialize_file_close_max`) in addition to
+the existing aggregate phase sums. This is trace-only and does not change the
+non-traced checkout path. Validation: focused `zmin-git-core` checkout tests
+(`10/10`), `cargo check -p zmin-cli --bin zmin --profile compat`, focused
+`git_clone_compat clone_` tests (`10/10`), and both Windows traced clone
+checks were `ok` with no lingering benchmark processes.
+
+The larger trace wrote 1920 packed regular files (`2027064` bytes, max file
+`1056` bytes). Its in-process `clone.total` was `1.389107s` and
+`cli.process=1.412011s`, while the traced external stopwatch row was much
+noisier (`3.892600s`); keep treating traced external stopwatch rows as
+diagnostic. Within checkout, `checkout_fresh.checkout_index=1.326700s`,
+`materialize_file_open=0.721807s` with max `0.044375s`,
+`materialize_file_bytes=0.219779s` with max `0.012700s`, and
+`materialize_file_close=1.077711s` with max `0.060952s`.
+
+The default 480-entry trace wrote 480 packed regular files (`506184` bytes, max
+file `1055` bytes). It had `clone.total=0.410515s`,
+`cli.process=0.504815s`, and external stopwatch `0.691106s`. Its checkout
+shape is smaller and less close-heavy:
+`checkout_fresh.checkout_index=0.373311s`,
+`materialize_file_open=0.199644s` with max `0.020486s`,
+`materialize_file_bytes=0.044406s` with max `0.002144s`, and
+`materialize_file_close=0.023294s` with max `0.001322s`.
+
+The new max metrics show the 1920-entry fixture is not dominated by one single
+giant close stall. It has both many small per-file costs and a modest Windows
+close/open long tail compared with the 480-entry fixture. The next experiment
+should therefore avoid another writer API swap and instead target the schedule
+and batching shape of packed blob materialization, while continuing to compare
+both the default and larger clone fixtures.
+
+Windows checkout parallel-worker scheduling telemetry:
+
+- traced `clone-large` with worker scheduling metrics:
+  `C:\Users\skron\zmin-bench-20260619T040727Z-81008-out`
+- traced default `clone` with worker scheduling metrics:
+  `C:\Users\skron\zmin-bench-20260619T041249Z-81555-out`
+
+Fresh checkout trace now also emits `parallel_worker_elapsed`,
+`parallel_worker_elapsed_max`, `parallel_worker_count`,
+`parallel_worker_entries_min`, and `parallel_worker_entries_max` for parallel
+fresh checkout. This is trace-only and is intended to distinguish chunk skew
+from per-worker file materialization cost. Validation: focused checkout tests
+(`10/10`), compat build, focused clone compatibility tests (`10/10`), and both
+Windows traced clone checks were `ok` with no lingering benchmark processes.
+
+The larger 1920-entry trace used two equal workers (`960` entries each).
+`checkout_fresh.checkout_index=1.603724s`, `parallel_worker_elapsed=2.979145s`,
+and `parallel_worker_elapsed_max=1.592949s`, so checkout wall time is almost
+exactly the slow worker time, not a scheduling gap after workers join. The
+same trace had `materialize_file_open=0.789918s` with max `0.055172s`,
+`materialize_file_bytes=0.244469s` with max `0.025761s`, and
+`materialize_file_close=1.554152s` with max `0.184151s`; close still has a
+larger long tail than the 480-entry fixture, but the chunks are balanced.
+
+The default 480-entry trace also used two equal workers (`240` entries each).
+`checkout_fresh.checkout_index=0.155039s`, `parallel_worker_elapsed=0.260296s`,
+and `parallel_worker_elapsed_max=0.136489s`. Its file timing stayed much
+smaller: `materialize_file_open=0.115267s` with max `0.018105s`,
+`materialize_file_bytes=0.025204s` with max `0.000522s`, and
+`materialize_file_close=0.023100s` with max `0.004738s`.
+
+This rules out uneven chunk assignment as the Windows larger-clone root cause.
+The next checkout experiment should target the per-worker materialization loop
+or object-read-to-write sequencing inside each equal chunk, and must keep both
+the 480-entry and 1920-entry fixtures in the evidence set.
+
+Windows scoped non-trace clone preservation after checkout telemetry:
+
+- scoped non-trace 3-repeat `clone,clone-large` gate:
+  `C:\Users\skron\zmin-bench-20260619T041628Z-86310-out`
+
+The trace-only checkout telemetry did not introduce validation failures in the
+normal benchmark path. The scoped Windows run passed all `12` clone checks and
+left no lingering benchmark processes. Default `clone` was green in this run:
+mean ratio `0.869693`, median ratio `0.668421`, paired mean `0.927449`, and
+paired median `1.176243` vs Git; it also favored Gix by aggregate mean and
+median (`0.946600` and `0.907374`), with paired median mixed at `1.108087`.
+Raw Zmin default clone rows were `0.743321s`, `0.808469s`, and `0.685740s`.
+
+`clone-large` remains the current Windows clone performance gap against stock
+Git: mean ratio `2.374197`, median ratio `2.299196`, paired mean `2.385995`,
+and paired median `2.619137`. Against Gix it is near parity by aggregate mean
+(`0.991462`) and slightly slower by aggregate median (`1.053992`) and paired
+median (`1.200877`). Raw larger rows were Git `1.239143s`, `1.046534s`,
+`0.954273s`; Gix `2.372460s`, `2.703089s`, `2.682970s`; and Zmin
+`2.849033s`, `2.343871s`, `2.499372s`.
+
+Windows checkout per-worker phase attribution:
+
+- traced `clone-large` with per-worker phase max timings:
+  `C:\Users\skron\zmin-bench-20260619T042330Z-93039-out`
+
+Fresh checkout trace now emits per-worker max phase sums for object read,
+materialization, file open, byte write, and file close. This remains trace-only
+and is meant to distinguish object-read-to-write sequencing from the actual
+file materialization loop. Validation: focused checkout tests (`10/10`),
+compat build, focused clone compatibility tests (`10/10`), and the Windows
+traced `clone-large` checks were `2 ok` with no lingering benchmark processes.
+
+The traced larger clone again used two equal 960-entry workers. Its internal
+timing was much lower than the traced external stopwatch:
+`clone.total=1.148525s`, `cli.process=1.176366s`, and
+`checkout_fresh.checkout_index=1.091618s` versus external stopwatch
+`3.876761s`. The worker attribution shows the slow worker is dominated by
+materialization rather than object reads:
+`parallel_worker_elapsed_max=1.082258s`,
+`parallel_worker_materialize_max=0.914644s`, and
+`parallel_worker_object_read_max=0.087000s`. Inside materialization, the slow
+worker's file phases were `parallel_worker_file_close_max=0.571424s`,
+`parallel_worker_file_open_max=0.314260s`, and
+`parallel_worker_file_bytes_max=0.111057s`.
+
+The aggregate rows agree with that attribution: `object_read=0.172266s` for
+all 1920 packed reads, while `materialize_file_close=0.981926s`,
+`materialize_file_open=0.599073s`, and `materialize_file_bytes=0.168906s`.
+This narrows the next Windows larger-clone optimization to the per-worker
+regular-file materialization loop, especially close/open behavior. It argues
+against spending the next experiment on packed object-read ordering for this
+fixture.
+
+Windows `clone-large` stronger non-trace baseline:
+
+- scoped non-trace 5-repeat `clone-large` gate:
+  `C:\Users\skron\zmin-bench-20260619T043028Z-98012-out`
+
+The current dirty-worktree larger clone baseline passed all `10` validation
+checks and left no lingering benchmark processes. This is the stronger current
+timing point for the active Windows larger-clone gap: Zmin vs Git mean ratio
+`1.789324`, median ratio `1.744893`, paired mean `1.829943`, and paired median
+`1.671520`. Against Gix, Zmin is closer but still slower on this 5-repeat run:
+mean ratio `1.104400`, median ratio `1.073279`, and paired median `1.080916`.
+
+Raw rows were Git `1.095111s`, `1.259703s`, `1.231634s`, `1.213959s`,
+`1.566662s`; Gix `2.425740s`, `2.002340s`, `2.156841s`, `1.742672s`,
+`1.988194s`; and Zmin `2.777927s`, `2.023586s`, `2.058701s`, `2.383468s`,
+`2.149070s`. Use this 5-repeat gate as the current non-trace acceptance
+baseline for the next materialization-loop experiment.
+
+Rejected large-checkout serialization experiment:
+
+- default 480-entry preservation check:
+  `C:\Users\skron\zmin-bench-20260619T-default-serial-cutoff-3x-out`
+- larger 1920-entry trace:
+  `C:\Users\skron\zmin-bench-20260619T-large-serial-cutoff-out`
+- larger 1920-entry 3-repeat:
+  `C:\Users\skron\zmin-bench-20260619T-large-serial-cutoff-3x-out`
+
+The experiment disabled parallel fresh checkout on non-Unix once the entry
+count reached 1024, based on the file-close-heavy larger trace. It did reduce
+the traced larger aggregate file-close time from `2.181284s` to `0.436327s`
+and `checkout_fresh.checkout_index` from `2.129546s` to `1.732048s`, but the
+external large clone gate did not improve: mean ratio `1.917402`, median ratio
+`1.675712`, paired median `2.962980`, and Zmin vs Gix median `1.305230`.
+The 480-entry default fixture was only preserved, not improved (`1.070937`
+mean, `1.189643` median, `1.189643` paired median, faster than Gix by mean).
+The cutoff was reverted. Do not retry serializing large non-Unix fresh checkout
+without new evidence that improves the external large fixture while preserving
+the default fixture.
+
+This evidence narrows the next Windows default/larger clone work: do not chase
+loose-object checkout paths or shared pack-file mutex behavior for these
+fixtures. Focus on packed-blob-to-worktree materialization and Windows file
+close/open behavior, with both default and larger fixtures rerun before any
+broader clone claim.
+
+Windows phase-only clone checkout trace:
+
+- phase-only larger `clone-large` trace:
+  `C:\Users\skron\zmin-bench-20260619T044115Z-3734-out`
+- phase-only default `clone` trace:
+  `C:\Users\skron\zmin-bench-20260619T044447Z-4224-out`
+
+`tools/windows-native-benchmark.ps1` now accepts
+`-SkipCheckoutPhaseTrace`, and `tools/parallels-windows-runner.sh` exposes it
+through `ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY=1` when
+`ZMIN_WINDOWS_BENCH_PHASE_TRACE=1` is set. This keeps the CLI phase log
+enabled but does not set `ZMIN_CHECKOUT_PHASE_TRACE`, so fresh checkout uses the
+normal non-trace `fs::write` path instead of the split diagnostic writer used
+for open/write/close subphase attribution. The default remains unchanged:
+normal Windows phase trace still includes checkout subphase rows unless the
+phase-only env var is set.
+
+Validation:
+
+- `bash -n tools/parallels-windows-runner.sh`
+- `git diff --check -- tools/windows-native-benchmark.ps1 tools/parallels-windows-runner.sh`
+- Windows/Git-for-Windows phase-only `clone-large`:
+  `ZMIN_WINDOWS_BENCH_PHASE_TRACE=1 ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY=1 tools/parallels-windows-runner.sh benchmark 1 clone-large`
+- Windows/Git-for-Windows phase-only default `clone`:
+  `ZMIN_WINDOWS_BENCH_PHASE_TRACE=1 ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY=1 tools/parallels-windows-runner.sh benchmark 1 clone`
+- Both runs had `ok` HEAD/tree checks and no lingering `git`, `git-daemon`,
+  `cargo`, `rustc`, or `zmin` process rows.
+
+The larger phase-only run had external Zmin `3.665274s` versus Git `1.052089s`
+and Gix `2.516289s`, with in-process `clone.total=2.659736s`,
+`cli.process=2.791816s`, and `checkout_fresh.checkout_index=2.580531s`.
+The default phase-only run was green externally (Zmin `0.336018s` versus Git
+`0.513372s` and Gix `1.011193s`), with `clone.total=0.238613s`,
+`cli.process=0.260839s`, and `checkout_fresh.checkout_index=0.133663s`.
+
+This corrects the interpretation of the split checkout traces: the open/bytes/
+close subphase rows are still useful for directional attribution, but they are
+not exact acceptance timing for the runtime writer path because enabling
+`ZMIN_CHECKOUT_PHASE_TRACE` changes fresh regular-file writes from `fs::write`
+to a split `File::create`/`write_all`/drop sequence. The next larger-clone
+experiment should be judged against phase-only or non-trace runs, and should
+target the real `fs::write` materialization path at 1920 tiny files while
+preserving the green 480-entry default fixture.
+
+Direct-write checkout trace correction:
+
+- direct-write checkout trace:
+  `C:\Users\skron\zmin-bench-20260619T044943Z-10783-out`
+- non-trace sanity run:
+  `C:\Users\skron\zmin-bench-20260619T045602Z-11433-out`
+
+Fresh checkout tracing now keeps the normal `fs::write` regular-file path even
+when `ZMIN_CHECKOUT_PHASE_TRACE=1`. The old split
+`File::create`/`write_all`/drop measurement was removed from the traced writer
+path, and checkout trace now emits direct write timing through
+`materialize_file_write_direct`, `materialize_file_write_direct_max`, and
+`parallel_worker_file_write_direct_max`. The previous open/bytes/close rows are
+left in the trace schema but are zero for regular files on this direct path.
+
+Validation:
+
+- `rustfmt --edition 2024 --check crates/zmin-git-core/src/checkout.rs`
+- `cargo test -p zmin-git-core checkout -- --nocapture` (`10/10`)
+- `cargo check -p zmin-cli --bin zmin --profile compat`
+- `cargo test -p zmin-cli --test git_clone_compat clone_ -- --nocapture`
+  (`10/10`)
+- `git diff --check`
+- Windows/Git-for-Windows direct-write trace:
+  `ZMIN_WINDOWS_BENCH_PHASE_TRACE=1 tools/parallels-windows-runner.sh benchmark 1 clone,clone-large`
+- Windows/Git-for-Windows non-trace sanity:
+  `tools/parallels-windows-runner.sh benchmark 1 clone,clone-large`
+- Both Windows runs had `ok` HEAD/tree checks and no lingering `git`,
+  `git-daemon`, `cargo`, `rustc`, or `zmin` process rows.
+
+The direct-write trace confirms the large-fixture checkout gap is on the actual
+`fs::write` materialization path, not an artifact of the old split writer. The
+480-entry default trace had `checkout_fresh.checkout_index=0.186804s`,
+`materialize_file_write_direct=0.226393s`, direct-write max `0.004781s`,
+`parallel_worker_file_write_direct_max=0.126995s`, and 480 packed regular
+files totalling `506184` bytes. The 1920-entry larger trace had
+`checkout_fresh.checkout_index=3.077314s`,
+`materialize_file_write_direct=4.413223s`, direct-write max `0.146295s`,
+`parallel_worker_file_write_direct_max=2.552462s`, and 1920 packed regular
+files totalling `2027064` bytes.
+
+The same run had noisy external stopwatch rows, especially default `clone`
+(external Zmin `2.806436s` while in-process `clone.total=0.237501s`), so the
+direct-write run is diagnostic rather than a clean performance gate. The
+non-trace sanity run preserved correctness and showed `clone-large` near Gix
+(Zmin `3.165417s`, Git `1.122614s`, Gix `3.044979s`), but default `clone`
+again had an external outlier (`1.258814s` vs Git `0.503080s`). Treat the next
+runtime experiment as targeting the 1920-entry `fs::write` materialization
+shape while guarding against default-fixture regressions with non-trace
+multi-repeat evidence.
+
+Windows phase summary CSV:
+
+- parser smoke output:
+  `C:\Users\skron\zmin-bench-20260619T050344Z-16774-out`
+
+When `-ZminPhaseTraceDir` is enabled, `tools/windows-native-benchmark.ps1` now
+parses Zmin phase logs client-side and writes `phase_summary.csv` beside
+`bench.csv`, `checks.csv`, `summary.csv`, and `comparison.csv`. The CSV has one
+row per parsed `zmin-phase`, `zmin-checkout-phase`, and
+`zmin-checkout-metric` record with normalized columns for trace file, row kind,
+label, phase, metric, seconds, value, and entries. The Parallels runner prints
+the path as `phase_summary=...` when the file is produced.
+
+Validation:
+
+- `git diff --check -- tools/windows-native-benchmark.ps1`
+- `bash -n tools/parallels-windows-runner.sh`
+- Windows/Git-for-Windows parser smoke:
+  `ZMIN_WINDOWS_BENCH_PHASE_TRACE=1 tools/parallels-windows-runner.sh benchmark 1 clone`
+- Smoke checks were `ok`; post-run process probe had no lingering benchmark
+  processes.
+
+The smoke proved the summary includes the new direct-write checkout rows without
+manual log scraping: `checkout_fresh.checkout_index=0.222962s` and
+`materialize_file_write_direct=0.215288s` for the 480-entry default clone trace.
+Use `phase_summary.csv` as the first evidence artifact for future Windows phase
+runs before reading raw trace logs.
+
+Windows `clone-large` phase-summary baseline:
+
+- phase-summary 3-repeat output:
+  `C:\Users\skron\zmin-bench-20260619T050653Z-21519-out`
+
+The first multi-run `phase_summary.csv` pass on `clone-large` kept the
+correctness checks green (`6 ok`) and left no lingering benchmark processes.
+External timing remains open against stock Git and close-but-slower against
+Gix: Zmin/Git mean `1.920558`, median `1.999008`, paired median `2.372220`;
+Zmin/Gix mean `1.123697`, median `1.140302`, paired median `1.227454`.
+
+Parsed checkout evidence from `phase_summary.csv`:
+
+| Repeat | `checkout_index` | `object_read` | `direct_write` | slow worker direct write |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | `2.486245s` | `0.304164s` | `3.902865s` | `2.124110s` |
+| 2 | `1.760553s` | `0.262276s` | `2.536619s` | `1.355050s` |
+| 3 | `1.990851s` | `0.187964s` | `3.427560s` | `1.802575s` |
+
+Every repeat materialized 1920 regular files, `2027064` total bytes, max file
+`1056` bytes, with two equal checkout workers. This reinforces the current
+runtime target: the Windows larger-clone gap is stable in the tiny-file
+`fs::write` materialization path, while packed object read remains a smaller
+secondary cost. The next code experiment should reduce this direct-write
+materialization shape and must be accepted only with both larger `clone-large`
+and default 480-entry clone evidence.
+
+Rejected striped-worker checkout experiment:
+
+- rejected striped run:
+  `C:\Users\skron\zmin-bench-20260619T051429Z-28328-out`
+
+A non-Unix experiment assigned large fresh-checkout entries round-robin across
+the existing two workers instead of using two contiguous path-sorted chunks.
+The hypothesis was that the direct-write slow-worker tail in `phase_summary.csv`
+could be reduced without changing the writer API or worker count. Local
+validation stayed green (`zmin-git-core checkout` `10/10`, compat build, and
+`git_clone_compat clone_` `10/10`), and the Windows run kept all `6` clone
+checks `ok`.
+
+The internal phase rows improved, but the external acceptance gate got worse:
+Zmin/Git mean `3.024027`, median `3.929956`, paired median `4.255828`; Zmin/Gix
+mean `1.216979`, median `1.682570`, paired median `1.690022`. Parsed checkout
+rows showed lower internal checkout times (`checkout_index` `1.240050s`,
+`1.421786s`, `1.656919s`; direct write `1.852338s`, `2.072916s`, `2.468782s`),
+but those did not translate to end-to-end clone performance. The experiment was
+reverted. Do not retry striped/non-contiguous worker assignment unless new
+evidence explains the external stopwatch regression and preserves both
+`clone-large` and the 480-entry default clone.

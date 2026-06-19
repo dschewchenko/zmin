@@ -12,7 +12,7 @@ use flate2::write::ZlibEncoder;
 
 use crate::loose::{LooseObject, record_prefix_candidate, validate_hex_prefix};
 use crate::object::{GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_object};
-use crate::object_store::{GitObjectSink, GitObjectStore};
+use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint};
 
 const IDX_MAGIC: &[u8; 4] = b"\xfftOc";
 const RIDX_MAGIC: &[u8; 4] = b"RIDX";
@@ -4324,6 +4324,13 @@ impl GitObjectStore for PackedObjectStore {
         }
 
         Ok(self.lookup_pack_index_for(id)?.is_some())
+    }
+
+    fn object_storage_hint(&self, id: &ObjectId) -> io::Result<ObjectStorageHint> {
+        if self.contains_object(id)? {
+            return Ok(ObjectStorageHint::Packed);
+        }
+        Ok(ObjectStorageHint::Unknown)
     }
 
     fn object_count(&self) -> io::Result<usize> {

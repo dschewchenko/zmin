@@ -1264,7 +1264,7 @@ fn update_ref_write(
         update_ref_record_reflogs(repo, refs, name, &old_id, id, create_reflog, message)?;
         return Ok(());
     }
-    if update_ref_name_is_pseudoref(name) {
+    if name != "HEAD" && update_ref_name_is_pseudoref(name) {
         let old_id = update_ref_reflog_old_id(refs, name, true)?;
         write_pseudoref(repo, name, id)?;
         update_ref_record_reflogs(repo, refs, name, &old_id, id, create_reflog, message)?;
@@ -1334,7 +1334,7 @@ fn update_ref_reflog_old_id(refs: &RefStore, name: &str, no_deref: bool) -> Resu
             Err(error) => Err(CliError::Io(error)),
         };
     }
-    if update_ref_name_is_pseudoref(name) {
+    if name != "HEAD" && update_ref_name_is_pseudoref(name) {
         return match fs::read_to_string(refs.git_dir().join(name)) {
             Ok(raw) => {
                 let Some(hex) = raw.split_whitespace().next() else {

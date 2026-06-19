@@ -10,7 +10,7 @@ use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 
 use crate::object::{GitHashAlgorithm, GitObjectHash, GitObjectKind, ObjectId, hash_object};
-use crate::object_store::{GitObjectSink, GitObjectStore};
+use crate::object_store::{GitObjectSink, GitObjectStore, ObjectStorageHint};
 use crate::pack::PackedObjectStore;
 use crate::tree::{TreeObjectRef, decode_tree_object_refs};
 
@@ -1248,6 +1248,16 @@ impl GitObjectStore for LooseObjectStore {
         }
     }
 
+    fn object_storage_hint(&self, id: &ObjectId) -> io::Result<ObjectStorageHint> {
+        if self.object_path(id)?.is_file() {
+            return Ok(ObjectStorageHint::Loose);
+        }
+        if self.packed_store.contains_object(id)? {
+            return Ok(ObjectStorageHint::Packed);
+        }
+        Ok(ObjectStorageHint::Unknown)
+    }
+
     fn read_tree_refs(&self, id: &ObjectId) -> io::Result<Vec<TreeObjectRef>> {
         Self::read_tree_refs(self, id)
     }
@@ -1394,6 +1404,16 @@ impl GitObjectStore for PackedFirstObjectStore<'_> {
             Some(header) => Ok(Some(header)),
             None => self.inner.object_header_hint(id),
         }
+    }
+
+    fn object_storage_hint(&self, id: &ObjectId) -> io::Result<ObjectStorageHint> {
+        if self.inner.packed_store.contains_object(id)? {
+            return Ok(ObjectStorageHint::Packed);
+        }
+        if self.inner.object_path(id)?.is_file() {
+            return Ok(ObjectStorageHint::Loose);
+        }
+        Ok(ObjectStorageHint::Unknown)
     }
 
     fn try_write_reusable_pack_object(

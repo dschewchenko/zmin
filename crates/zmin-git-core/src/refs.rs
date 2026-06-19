@@ -712,8 +712,7 @@ fn write_lock_file(lock_path: &Path, bytes: &[u8]) -> io::Result<()> {
         .write(true)
         .create_new(true)
         .open(lock_path)?;
-    lock.write_all(bytes)?;
-    lock.sync_all()
+    lock.write_all(bytes)
 }
 
 fn lock_path(path: &Path) -> PathBuf {
@@ -1085,13 +1084,8 @@ mod tests {
         let blob = store
             .write_object(GitObjectKind::Blob, b"tag target\n")
             .expect("write blob");
-        let tagger = Signature::new(
-            "Zmin Test",
-            "zmin@example.invalid",
-            1_700_000_002,
-            "+0000",
-        )
-        .expect("signature");
+        let tagger = Signature::new("Zmin Test", "zmin@example.invalid", 1_700_000_002, "+0000")
+            .expect("signature");
         let first_tag = TagBuilder::new(blob.clone(), GitObjectKind::Blob, "v1", tagger.clone())
             .expect("first tag")
             .message(b"first\n".to_vec())

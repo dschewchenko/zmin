@@ -5707,6 +5707,129 @@ fn copy_reachable_objects_into_undeltified_pack(
     )
 }
 
+fn copy_reachable_objects_into_many(
+    repo: &GitRepo,
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    roots: &[ObjectId],
+    excluded_roots: &[ObjectId],
+    seen: &mut HashSet<ObjectId>,
+    pack_options: PackEncodeOptions,
+    pack_missing_threshold: usize,
+) -> Result<()> {
+    let mut missing = Vec::new();
+    let mut commit_roots = Vec::with_capacity(transport_ref_collection_capacity(roots.len()));
+    {
+        let _trace = phase_trace("fetch.local.copy.scan_roots");
+        for root in roots {
+            let mut current = root.clone();
+            loop {
+                if !record_object_if_missing(destination, &current, seen, &mut missing)? {
+                    break;
+                }
+                let kind = object_kind_hint_or_read(source, &current)?;
+                if kind == GitObjectKind::Tag {
+                    let object = source.read_object(&current)?;
+                    let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+                    current = tag.target;
+                    continue;
+                }
+                if kind == GitObjectKind::Commit {
+                    commit_roots.push(current);
+                }
+                break;
+            }
+        }
+    }
+    if !commit_roots.is_empty() {
+        let commit_cache = CommitObjectCache::new(source);
+        let excluded_commits = {
+            let _trace = phase_trace("fetch.local.copy.collect_excluded_commits");
+            let available_excluded_roots =
+                available_push_pack_excluded_roots(source, excluded_roots)?;
+            collect_rev_list_excluded_commits_from_ids_cached(
+                repo,
+                source,
+                &commit_cache,
+                &available_excluded_roots,
+                &[],
+            )?
+        };
+        let commits = {
+            let _trace = phase_trace("fetch.local.copy.collect_commits");
+            let mut excluded = HashSet::with_capacity(transport_history_collection_capacity(
+                excluded_commits.len(),
+            ));
+            excluded.extend(excluded_commits.iter().cloned());
+            collect_commits_from_ids_cached_with_excluded(
+                repo,
+                &commit_cache,
+                &commit_roots,
+                None,
+                &excluded,
+            )?
+        };
+        {
+            let _trace = phase_trace("fetch.local.copy.record_commits");
+            reserve_transport_history_set(seen, commits.len());
+            for commit in &commits {
+                let _ = record_object_if_missing(destination, commit, seen, &mut missing)?;
+            }
+        }
+        let mut object_ids =
+            Vec::with_capacity(transport_history_collection_capacity(commits.len()));
+        {
+            let _trace = phase_trace("fetch.local.copy.collect_tree_objects");
+            collect_rev_list_object_ids_into_cached(
+                source,
+                &commit_cache,
+                &commits,
+                &[],
+                &excluded_commits,
+                seen,
+                &mut object_ids,
+            )?;
+        }
+        {
+            let _trace = phase_trace("fetch.local.copy.record_tree_objects");
+            record_pack_sized_missing_objects(
+                destination,
+                &object_ids,
+                &mut missing,
+                pack_missing_threshold,
+            )?;
+        }
+    }
+    phase_trace_emit(
+        "fetch.local.copy.missing_objects",
+        0.0,
+        &[("count", missing.len().to_string())],
+    );
+    {
+        let _trace = phase_trace("fetch.local.copy.write_missing_objects");
+        copy_or_pack_missing_objects_with_threshold(
+            source,
+            destination,
+            &missing,
+            pack_options,
+            pack_missing_threshold,
+        )
+    }
+}
+
+fn record_pack_sized_missing_objects(
+    destination: &LooseObjectStore,
+    ids: &[ObjectId],
+    missing: &mut Vec<ObjectId>,
+    pack_missing_threshold: usize,
+) -> Result<()> {
+    if missing.len().saturating_add(ids.len()) >= pack_missing_threshold {
+        missing.extend_from_slice(ids);
+        return Ok(());
+    }
+    record_missing_objects(destination, ids, missing)
+}
+
 fn copy_reachable_objects_inner(
     repo: &GitRepo,
     source: &LooseObjectStore,
@@ -8308,6 +8431,7 @@ pub(crate) fn run_fetch(
     remote: Option<String>,
     refspecs: Vec<String>,
 ) -> Result<()> {
+    let _trace = phase_trace("fetch.total");
     ensure_packet_trace_path_exists()?;
     write_fetch_hidden_refs_trace_if_needed()?;
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
@@ -8649,39 +8773,61 @@ fn fetch_multiple_refspecs(
     let Some(source_path) = local_repository_path_from_location(&url)? else {
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
-    let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    copy_local_fetch_objects(
-        &source,
-        &repo,
-        &source_refs,
-        &destination_refs,
-        &remote,
-        None,
-        &refspecs,
-        128,
-    )?;
+    let source = {
+        let _trace = phase_trace("fetch.local.resolve_source");
+        local_clone_source(&source_path)?
+    };
+    let (source_refs, destination_refs, destination_store) = {
+        let _trace = phase_trace("fetch.local.setup_stores");
+        (
+            refs_adapter_from_git_dir(&source.git_dir),
+            refs_adapter_from_git_dir(&repo.git_dir),
+            object_adapter_from_objects_dir(repo.objects_dir.clone()),
+        )
+    };
+    {
+        let _trace = phase_trace("fetch.local.copy_objects");
+        copy_local_fetch_objects(
+            &source,
+            &repo,
+            &source_refs,
+            &destination_refs,
+            &remote,
+            None,
+            &refspecs,
+            128,
+        )?;
+    }
     let fetch_update_rows = if quiet {
         Vec::new()
     } else {
+        let _trace = phase_trace("fetch.local.collect_update_rows");
         collect_configured_fetch_update_rows(&source_refs, &destination_refs, &refspecs, true)?
     };
-    apply_configured_fetch_refspecs(
-        &repo,
-        &source_refs,
-        &destination_refs,
-        &destination_store,
-        &refspecs,
-        false,
-        Some(&remote),
-    )?;
-    print_fetch_update_rows(&url, &fetch_update_rows);
+    {
+        let _trace = phase_trace("fetch.local.apply_refspecs");
+        apply_configured_fetch_refspecs(
+            &repo,
+            &source_refs,
+            &destination_refs,
+            &destination_store,
+            &refspecs,
+            false,
+            Some(&remote),
+        )?;
+    }
+    {
+        let _trace = phase_trace("fetch.local.render");
+        print_fetch_update_rows(&url, &fetch_update_rows);
+    }
     if prune {
+        let _trace = phase_trace("fetch.local.prune");
         prune_fetch_refspecs(&source_refs, &destination_refs, &refspecs)?;
     }
-    copy_configured_fetch_tags(&source_refs, &destination_refs)
+    {
+        let _trace = phase_trace("fetch.local.copy_tags");
+        copy_configured_fetch_tags(&source_refs, &destination_refs)
+    }
 }
 
 fn fetch_multiple_refspecs_from_http_remote(
@@ -8861,39 +9007,61 @@ fn fetch_multiple_refspecs_from_location(
     let Some(source_path) = local_repository_path_from_location(location)? else {
         return Err(unsupported_remote_helper_error(location, String::new()));
     };
-    let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
-    copy_local_fetch_objects(
-        &source,
-        repo,
-        &source_refs,
-        &destination_refs,
-        "FETCH_HEAD",
-        None,
-        refspecs,
-        128,
-    )?;
+    let source = {
+        let _trace = phase_trace("fetch.local.resolve_source");
+        local_clone_source(&source_path)?
+    };
+    let (source_refs, destination_refs, destination_store) = {
+        let _trace = phase_trace("fetch.local.setup_stores");
+        (
+            refs_adapter_from_git_dir(&source.git_dir),
+            refs_adapter_from_git_dir(&repo.git_dir),
+            object_adapter_from_objects_dir(repo.objects_dir.clone()),
+        )
+    };
+    {
+        let _trace = phase_trace("fetch.local.copy_objects");
+        copy_local_fetch_objects(
+            &source,
+            repo,
+            &source_refs,
+            &destination_refs,
+            "FETCH_HEAD",
+            None,
+            refspecs,
+            128,
+        )?;
+    }
     let fetch_update_rows = if quiet {
         Vec::new()
     } else {
+        let _trace = phase_trace("fetch.local.collect_update_rows");
         collect_configured_fetch_update_rows(&source_refs, &destination_refs, refspecs, true)?
     };
-    apply_configured_fetch_refspecs(
-        repo,
-        &source_refs,
-        &destination_refs,
-        &destination_store,
-        refspecs,
-        false,
-        None,
-    )?;
-    print_fetch_update_rows(location, &fetch_update_rows);
+    {
+        let _trace = phase_trace("fetch.local.apply_refspecs");
+        apply_configured_fetch_refspecs(
+            repo,
+            &source_refs,
+            &destination_refs,
+            &destination_store,
+            refspecs,
+            false,
+            None,
+        )?;
+    }
+    {
+        let _trace = phase_trace("fetch.local.render");
+        print_fetch_update_rows(location, &fetch_update_rows);
+    }
     if prune {
+        let _trace = phase_trace("fetch.local.prune");
         prune_fetch_refspecs(&source_refs, &destination_refs, refspecs)?;
     }
-    copy_configured_fetch_tags(&source_refs, &destination_refs)
+    {
+        let _trace = phase_trace("fetch.local.copy_tags");
+        copy_configured_fetch_tags(&source_refs, &destination_refs)
+    }
 }
 
 fn effective_fetch_prune(
@@ -9189,12 +9357,20 @@ pub(crate) fn run_push(
                     &mut object_ids,
                     &mut copied_objects,
                 )?;
-                copy_or_pack_missing_objects(
-                    &source_store,
-                    &destination_store,
-                    &object_ids,
-                    PackEncodeOptions::delta(10, 50),
-                )?;
+                phase_trace_emit(
+                    "push.local.copy.object_ids",
+                    0.0,
+                    &[("count", object_ids.len().to_string())],
+                );
+                {
+                    let _trace = phase_trace("push.local.copy.write_missing_objects");
+                    copy_or_pack_missing_objects(
+                        &source_store,
+                        &destination_store,
+                        &object_ids,
+                        PackEncodeOptions::UNDELTIFIED,
+                    )?;
+                }
                 object_ids.clear();
             }
             {
@@ -9552,66 +9728,87 @@ fn collect_push_pack_ids(
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
-    let available_excluded_roots = available_push_pack_excluded_roots(store, excluded_roots)?;
-    let excluded_root_set = push_pack_excluded_root_set(&available_excluded_roots);
+    let available_excluded_roots = {
+        let _trace = phase_trace("push.local.copy.available_excluded_roots");
+        available_push_pack_excluded_roots(store, excluded_roots)?
+    };
+    let excluded_root_set = {
+        let _trace = phase_trace("push.local.copy.excluded_root_set");
+        push_pack_excluded_root_set(&available_excluded_roots)
+    };
     if excluded_root_set.contains(id) {
         return Ok(());
     }
     let mut current = id.clone();
-    loop {
-        let kind = object_kind_hint_or_read(store, &current)?;
-        if kind == GitObjectKind::Commit && excluded_root_set.contains(&current) {
-            return Ok(());
-        }
-        if !seen.insert(current.clone()) {
-            return Ok(());
-        }
-        out.push(current.clone());
-        if kind == GitObjectKind::Tag {
-            let object = store.read_object(&current)?;
-            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
-            current = tag.target;
-            continue;
-        }
-        if kind != GitObjectKind::Commit {
-            return Ok(());
-        }
-        break;
-    }
-    let excluded_commits = collect_rev_list_excluded_commits_from_ids_cached(
-        repo,
-        store,
-        commit_cache,
-        &available_excluded_roots,
-        &[],
-    )?;
-    let mut excluded = HashSet::with_capacity(transport_history_collection_capacity(
-        excluded_commits.len(),
-    ));
-    excluded.extend(excluded_commits.iter().cloned());
-    let commits = collect_commits_from_ids_cached_with_excluded(
-        repo,
-        commit_cache,
-        std::slice::from_ref(&current),
-        None,
-        &excluded,
-    )?;
-    reserve_transport_history_vec(out, commits.len());
-    reserve_transport_history_set(seen, commits.len());
-    for commit in &commits {
-        if seen.insert(commit.clone()) {
-            out.push(commit.clone());
+    {
+        let _trace = phase_trace("push.local.copy.scan_root");
+        loop {
+            let kind = object_kind_hint_or_read(store, &current)?;
+            if kind == GitObjectKind::Commit && excluded_root_set.contains(&current) {
+                return Ok(());
+            }
+            if !seen.insert(current.clone()) {
+                return Ok(());
+            }
+            out.push(current.clone());
+            if kind == GitObjectKind::Tag {
+                let object = store.read_object(&current)?;
+                let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+                current = tag.target;
+                continue;
+            }
+            if kind != GitObjectKind::Commit {
+                return Ok(());
+            }
+            break;
         }
     }
-    collect_rev_list_object_ids_into_cached(
-        store,
-        commit_cache,
-        &commits,
-        &[],
-        &excluded_commits,
-        seen,
-        out,
-    )?;
+    let excluded_commits = {
+        let _trace = phase_trace("push.local.copy.collect_excluded_commits");
+        collect_rev_list_excluded_commits_from_ids_cached(
+            repo,
+            store,
+            commit_cache,
+            &available_excluded_roots,
+            &[],
+        )?
+    };
+    let commits = {
+        let _trace = phase_trace("push.local.copy.collect_commits");
+        let mut excluded = HashSet::with_capacity(transport_history_collection_capacity(
+            excluded_commits.len(),
+        ));
+        excluded.extend(excluded_commits.iter().cloned());
+        collect_commits_from_ids_cached_with_excluded(
+            repo,
+            commit_cache,
+            std::slice::from_ref(&current),
+            None,
+            &excluded,
+        )?
+    };
+    {
+        let _trace = phase_trace("push.local.copy.record_commits");
+        reserve_transport_history_vec(out, commits.len());
+        reserve_transport_history_set(seen, commits.len());
+        for commit in &commits {
+            if seen.insert(commit.clone()) {
+                out.push(commit.clone());
+            }
+        }
+    }
+    {
+        let _trace = phase_trace("push.local.copy.collect_tree_objects");
+        collect_rev_list_object_ids_into_cached(
+            store,
+            commit_cache,
+            &commits,
+            &[],
+            &excluded_commits,
+            seen,
+            out,
+        )?;
+    }
     Ok(())
 }
 
@@ -9803,10 +10000,18 @@ pub(crate) fn fetch_with_repo_and_remote(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
 
-    let source = local_clone_source(&source_path)?;
-    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
-    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
-    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source = {
+        let _trace = phase_trace("fetch.local.resolve_source");
+        local_clone_source(&source_path)?
+    };
+    let (source_refs, destination_refs, destination_store) = {
+        let _trace = phase_trace("fetch.local.setup_stores");
+        (
+            refs_adapter_from_git_dir(&source.git_dir),
+            refs_adapter_from_git_dir(&repo.git_dir),
+            object_adapter_from_objects_dir(repo.objects_dir.clone()),
+        )
+    };
     if let Some(branch) = branch
         .as_deref()
         .filter(|value| !value.contains(':') && is_empty_fetch_refmap(refmap))
@@ -9826,53 +10031,68 @@ pub(crate) fn fetch_with_repo_and_remote(
             Vec::new()
         };
     let explicit_refspec_fetch = !explicit_refspecs.is_empty();
-    let mut fetch_refspecs = if !explicit_refspecs.is_empty() {
-        explicit_refspecs
-    } else if branch.is_none() {
-        configured_fetch_refspecs(&repo, &remote)?
-    } else {
-        Vec::new()
+    let mut fetch_refspecs = {
+        let _trace = phase_trace("fetch.local.resolve_refspecs");
+        if !explicit_refspecs.is_empty() {
+            explicit_refspecs
+        } else if branch.is_none() {
+            configured_fetch_refspecs(&repo, &remote)?
+        } else {
+            Vec::new()
+        }
     };
     if !explicit_refspec_fetch {
         add_prune_tags_refspec(&mut fetch_refspecs, prune_tags);
     }
-    copy_local_fetch_objects(
-        &source,
-        &repo,
-        &source_refs,
-        &destination_refs,
-        &remote,
-        if explicit_refspec_fetch {
-            None
-        } else {
-            branch.as_deref()
-        },
-        &fetch_refspecs,
-        missing_ref_code,
-    )?;
+    {
+        let _trace = phase_trace("fetch.local.copy_objects");
+        copy_local_fetch_objects(
+            &source,
+            &repo,
+            &source_refs,
+            &destination_refs,
+            &remote,
+            if explicit_refspec_fetch {
+                None
+            } else {
+                branch.as_deref()
+            },
+            &fetch_refspecs,
+            missing_ref_code,
+        )?;
+    }
     if explicit_refspec_fetch {
         if prune && !atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
         }
-        write_configured_fetch_head_file(&repo, &source_refs, &remote, &url, &fetch_refspecs)?;
-        apply_configured_fetch_refspecs(
-            &repo,
-            &source_refs,
-            &destination_refs,
-            &destination_store,
-            &fetch_refspecs,
-            atomic,
-            Some(&remote),
-        )
-        .inspect_err(|_| {
-            if atomic {
-                let _ = fs::write(repo.git_dir.join("FETCH_HEAD"), b"");
-            }
-        })?;
+        {
+            let _trace = phase_trace("fetch.local.write_fetch_head");
+            write_configured_fetch_head_file(&repo, &source_refs, &remote, &url, &fetch_refspecs)?;
+        }
+        {
+            let _trace = phase_trace("fetch.local.apply_refspecs");
+            apply_configured_fetch_refspecs(
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                &fetch_refspecs,
+                atomic,
+                Some(&remote),
+            )
+            .inspect_err(|_| {
+                if atomic {
+                    let _ = fs::write(repo.git_dir.join("FETCH_HEAD"), b"");
+                }
+            })?;
+        }
         if prune && atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
         }
-        copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+        {
+            let _trace = phase_trace("fetch.local.copy_tags");
+            copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+        }
         return Ok(());
     }
     if let Some(ref branch) = branch {
@@ -9911,6 +10131,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         let fetch_update_rows = if quiet {
             Vec::new()
         } else {
+            let _trace = phase_trace("fetch.local.collect_update_rows");
             collect_configured_fetch_update_rows(
                 &source_refs,
                 &destination_refs,
@@ -9930,31 +10151,41 @@ pub(crate) fn fetch_with_repo_and_remote(
                 quiet,
             )?
         {
+            let _trace = phase_trace("fetch.local.write_head_ref");
             write_configured_fetch_head_ref(&destination_refs, &fetch_refspecs, &head_branch)?;
         }
-        apply_configured_fetch_refspecs(
-            &repo,
-            &source_refs,
-            &destination_refs,
-            &destination_store,
-            &fetch_refspecs,
-            atomic,
-            Some(&remote),
-        )
-        .inspect_err(|_| {
-            if atomic {
-                let _ = fs::write(repo.git_dir.join("FETCH_HEAD"), b"");
+        {
+            let _trace = phase_trace("fetch.local.apply_refspecs");
+            apply_configured_fetch_refspecs(
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                &fetch_refspecs,
+                atomic,
+                Some(&remote),
+            )
+            .inspect_err(|_| {
+                if atomic {
+                    let _ = fs::write(repo.git_dir.join("FETCH_HEAD"), b"");
+                }
+            })?;
+        }
+        {
+            let _trace = phase_trace("fetch.local.render");
+            if prune && !quiet && fetch_update_rows.is_empty() {
+                eprintln!("From {}", fetch_head_url_display(&url));
+            } else {
+                print_fetch_update_rows(&url, &fetch_update_rows);
             }
-        })?;
-        if prune && !quiet && fetch_update_rows.is_empty() {
-            eprintln!("From {}", fetch_head_url_display(&url));
-        } else {
-            print_fetch_update_rows(&url, &fetch_update_rows);
         }
         if prune && atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
         }
-        write_configured_fetch_head_file(&repo, &source_refs, &remote, &url, &fetch_refspecs)?;
+        {
+            let _trace = phase_trace("fetch.local.write_fetch_head");
+            write_configured_fetch_head_file(&repo, &source_refs, &remote, &url, &fetch_refspecs)?;
+        }
         let hook_head_branch = if atomic {
             source_head_branch(&source_refs)?
         } else {
@@ -9968,28 +10199,42 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &source_refs,
                 quiet,
             )? {
+                let _trace = phase_trace("fetch.local.write_head_ref");
                 write_configured_fetch_head_ref(&destination_refs, &fetch_refspecs, &head_branch)?;
             }
         }
         if let Some(head_branch) = hook_head_branch {
+            let _trace = phase_trace("fetch.local.reference_transaction_hook");
             run_reference_transaction_hook_for_symbolic_head(&repo, &remote, &head_branch)?;
         }
-        copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+        {
+            let _trace = phase_trace("fetch.local.copy_tags");
+            copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+        }
         return Ok(());
     }
-    let head_branch =
-        fetch_remote_head_branch_to_write(&repo, &destination_refs, &remote, &source_refs, quiet)?;
-    copy_remote_refs(
-        &source_refs,
-        &destination_refs,
-        &remote,
-        head_branch.as_deref(),
-        false,
-    )?;
+    let head_branch = {
+        let _trace = phase_trace("fetch.local.resolve_head_branch");
+        fetch_remote_head_branch_to_write(&repo, &destination_refs, &remote, &source_refs, quiet)?
+    };
+    {
+        let _trace = phase_trace("fetch.local.copy_remote_refs");
+        copy_remote_refs(
+            &source_refs,
+            &destination_refs,
+            &remote,
+            head_branch.as_deref(),
+            false,
+        )?;
+    }
     if prune {
+        let _trace = phase_trace("fetch.local.prune_remote_refs");
         prune_remote_tracking_refs(&source_refs, &destination_refs, &remote)?;
     }
-    copy_configured_fetch_tags(&source_refs, &destination_refs)
+    {
+        let _trace = phase_trace("fetch.local.copy_tags");
+        copy_configured_fetch_tags(&source_refs, &destination_refs)
+    }
 }
 
 fn fetch_with_repo_and_location(
@@ -11598,66 +11843,98 @@ fn copy_local_fetch_objects(
 ) -> Result<()> {
     let source_repo = local_clone_source_repo(source);
     let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
-    validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    {
+        let _trace = phase_trace("fetch.local.validate_destination_store");
+        validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    }
     let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
-    if let Some(branch) = branch {
-        let ref_name = branch_ref_name(branch)?;
-        let id = source_refs
-            .resolve(&ref_name)
-            .map_err(|_| missing_remote_ref_error(branch, missing_ref_code))?;
-        let destination_ref = format!("refs/remotes/{remote}/{branch}");
-        if !destination_ref_has_object(destination_refs, &destination_store, &destination_ref, &id)?
-        {
-            roots.push(id);
-        }
-    } else if !fetch_refspecs.is_empty() {
-        collect_configured_fetch_roots(
-            source_refs,
-            destination_refs,
-            &destination_store,
-            fetch_refspecs,
-            &mut roots,
-        )?;
-    } else {
-        source_refs.for_each_resolved_ref("refs/heads/", |ref_name, id| {
-            let branch = ref_name
-                .strip_prefix("refs/heads/")
-                .ok_or_else(|| CliError::Fatal {
-                    code: 128,
-                    message: format!("invalid source branch ref '{ref_name}'"),
-                })?;
+    let mut excluded_roots = Vec::with_capacity(transport_ref_collection_capacity(32));
+    {
+        let _trace = phase_trace("fetch.local.collect_roots");
+        if let Some(branch) = branch {
+            let ref_name = branch_ref_name(branch)?;
+            let id = source_refs
+                .resolve(&ref_name)
+                .map_err(|_| missing_remote_ref_error(branch, missing_ref_code))?;
             let destination_ref = format!("refs/remotes/{remote}/{branch}");
             if !destination_ref_has_object(
                 destination_refs,
                 &destination_store,
                 &destination_ref,
-                id,
+                &id,
             )? {
-                roots.push(id.clone());
+                roots.push(id);
             }
-            Ok::<(), CliError>(())
-        })?;
-        source_refs.for_each_resolved_ref("refs/tags/", |ref_name, id| {
-            if !destination_ref_has_object(destination_refs, &destination_store, ref_name, id)? {
-                roots.push(id.clone());
-            }
+        } else if !fetch_refspecs.is_empty() {
+            collect_configured_fetch_roots(
+                source_refs,
+                destination_refs,
+                &destination_store,
+                fetch_refspecs,
+                &mut roots,
+            )?;
+        } else {
+            source_refs.for_each_resolved_ref("refs/heads/", |ref_name, id| {
+                let branch =
+                    ref_name
+                        .strip_prefix("refs/heads/")
+                        .ok_or_else(|| CliError::Fatal {
+                            code: 128,
+                            message: format!("invalid source branch ref '{ref_name}'"),
+                        })?;
+                let destination_ref = format!("refs/remotes/{remote}/{branch}");
+                if !destination_ref_has_object(
+                    destination_refs,
+                    &destination_store,
+                    &destination_ref,
+                    id,
+                )? {
+                    roots.push(id.clone());
+                }
+                Ok::<(), CliError>(())
+            })?;
+            source_refs.for_each_resolved_ref("refs/tags/", |ref_name, id| {
+                if !destination_ref_has_object(destination_refs, &destination_store, ref_name, id)?
+                {
+                    roots.push(id.clone());
+                }
+                Ok::<(), CliError>(())
+            })?;
+        }
+        destination_refs.for_each_resolved_ref("refs/", |_, id| {
+            excluded_roots.push(id.clone());
             Ok::<(), CliError>(())
         })?;
     }
     sort_dedup_object_ids(&mut roots);
+    sort_dedup_object_ids(&mut excluded_roots);
+    phase_trace_emit(
+        "fetch.local.roots",
+        0.0,
+        &[("count", roots.len().to_string())],
+    );
+    phase_trace_emit(
+        "fetch.local.excluded_roots",
+        0.0,
+        &[("count", excluded_roots.len().to_string())],
+    );
 
     let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
         source_store.object_id_capacity_hint()?,
         roots.len(),
     ));
-    for id in roots {
-        copy_reachable_objects_into(
+    {
+        let _trace = phase_trace("fetch.local.copy_reachable_objects");
+        copy_reachable_objects_into_many(
             &source_repo,
             &source_store,
             &destination_store,
-            &id,
+            &roots,
+            &excluded_roots,
             &mut seen,
+            PackEncodeOptions::delta(10, 50),
+            PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
         )?;
     }
     Ok(())
@@ -14852,6 +15129,50 @@ mod transport_request_tests {
         assert_eq!(copy_reachable_seen_initial_capacity(usize::MAX, 1), 8192);
         assert_eq!(copy_reachable_seen_initial_capacity(2, 4), 4);
         assert_eq!(copy_reachable_seen_initial_capacity(0, 0), 1);
+    }
+
+    #[test]
+    fn record_pack_sized_missing_objects_keeps_ids_without_destination_lookup() {
+        let destination_dir = tempfile::TempDir::new().expect("destination");
+        let destination = LooseObjectStore::new(destination_dir.path(), GitHashAlgorithm::Sha1);
+        let present_id = destination
+            .write_object(GitObjectKind::Blob, b"present")
+            .expect("write present object");
+        let missing_id = oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let mut missing = vec![oid("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")];
+
+        record_pack_sized_missing_objects(
+            &destination,
+            &[present_id.clone(), missing_id.clone()],
+            &mut missing,
+            3,
+        )
+        .expect("record pack-sized missing objects");
+
+        assert_eq!(missing.len(), 3);
+        assert!(missing.contains(&present_id));
+        assert!(missing.contains(&missing_id));
+    }
+
+    #[test]
+    fn record_pack_sized_missing_objects_filters_small_loose_copy_path() {
+        let destination_dir = tempfile::TempDir::new().expect("destination");
+        let destination = LooseObjectStore::new(destination_dir.path(), GitHashAlgorithm::Sha1);
+        let present_id = destination
+            .write_object(GitObjectKind::Blob, b"present")
+            .expect("write present object");
+        let missing_id = oid("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let mut missing = Vec::new();
+
+        record_pack_sized_missing_objects(
+            &destination,
+            &[present_id.clone(), missing_id.clone()],
+            &mut missing,
+            3,
+        )
+        .expect("record small missing objects");
+
+        assert_eq!(missing, vec![missing_id]);
     }
 
     #[test]

@@ -10,6 +10,13 @@ use crate::{
 const STREAMED_BLOB_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const IN_MEMORY_OBJECT_ID_INITIAL_CAPACITY_LIMIT: usize = 8192;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectStorageHint {
+    Loose,
+    Packed,
+    Unknown,
+}
+
 pub trait GitObjectStore {
     fn read_object(&self, id: &ObjectId) -> io::Result<LooseObject>;
 
@@ -84,6 +91,11 @@ pub trait GitObjectStore {
     fn object_header_hint(&self, id: &ObjectId) -> io::Result<Option<(GitObjectKind, usize)>> {
         let _ = id;
         Ok(None)
+    }
+
+    fn object_storage_hint(&self, id: &ObjectId) -> io::Result<ObjectStorageHint> {
+        let _ = id;
+        Ok(ObjectStorageHint::Unknown)
     }
 
     fn try_write_reusable_pack_object(

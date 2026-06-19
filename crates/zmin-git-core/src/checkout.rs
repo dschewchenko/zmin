@@ -9,11 +9,15 @@ use crate::attributes::{
     AttributeValue, GitAttributes, apply_eol_smudge_to_crlf, apply_ident_smudge,
 };
 use crate::index::{GitIndex, IndexEntry, IndexMode};
-use crate::object::GitObjectKind;
-use crate::object_store::GitObjectStore;
+use crate::loose::LooseObject;
+use crate::object::{GitObjectKind, ObjectId};
+use crate::object_store::{GitObjectStore, ObjectStorageHint};
 
 const STREAM_CHECKOUT_BLOB_MIN_BYTES: usize = 1024 * 1024;
+#[cfg(unix)]
 const STREAM_CHECKOUT_DISABLE_AFTER_MISSES: usize = 128;
+#[cfg(not(unix))]
+const STREAM_CHECKOUT_DISABLE_AFTER_MISSES: usize = 16;
 const PARALLEL_FRESH_CHECKOUT_MIN_ENTRIES: usize = 256;
 const PARALLEL_FRESH_CHECKOUT_MAX_WORKERS: usize = 2;
 const CHECKOUT_METADATA_INITIAL_CAPACITY_LIMIT: usize = 8192;
@@ -23,20 +27,47 @@ struct CheckoutPhaseTotals {
     dir_prep: Duration,
     path_prep: Duration,
     stream_write: Duration,
+    object_locate: Duration,
     object_read: Duration,
+    object_read_loose: Duration,
+    object_read_packed: Duration,
+    object_read_unknown: Duration,
     materialize: Duration,
     materialize_content: Duration,
     materialize_write: Duration,
     materialize_symlink: Duration,
     materialize_file_open: Duration,
+    materialize_file_open_max: Duration,
     materialize_file_bytes: Duration,
+    materialize_file_bytes_max: Duration,
     materialize_file_close: Duration,
+    materialize_file_close_max: Duration,
+    materialize_file_write_direct: Duration,
+    materialize_file_write_direct_max: Duration,
     materialize_chmod: Duration,
+    parallel_worker_elapsed: Duration,
+    parallel_worker_elapsed_max: Duration,
+    parallel_worker_object_read_max: Duration,
+    parallel_worker_materialize_max: Duration,
+    parallel_worker_file_open_max: Duration,
+    parallel_worker_file_bytes_max: Duration,
+    parallel_worker_file_close_max: Duration,
+    parallel_worker_file_write_direct_max: Duration,
     metadata: Duration,
     entries: usize,
     stream_attempts: usize,
     stream_written: usize,
     stream_skipped_after_disable: usize,
+    object_read_loose_count: usize,
+    object_read_packed_count: usize,
+    object_read_unknown_count: usize,
+    materialized_regular_files: usize,
+    materialized_executable_files: usize,
+    materialized_file_bytes: u64,
+    materialized_file_max_bytes: u64,
+    parallel_worker_count: usize,
+    parallel_worker_entries_min: usize,
+    parallel_worker_entries_max: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -83,20 +114,80 @@ impl CheckoutPhaseTotals {
         self.dir_prep += other.dir_prep;
         self.path_prep += other.path_prep;
         self.stream_write += other.stream_write;
+        self.object_locate += other.object_locate;
         self.object_read += other.object_read;
+        self.object_read_loose += other.object_read_loose;
+        self.object_read_packed += other.object_read_packed;
+        self.object_read_unknown += other.object_read_unknown;
         self.materialize += other.materialize;
         self.materialize_content += other.materialize_content;
         self.materialize_write += other.materialize_write;
         self.materialize_symlink += other.materialize_symlink;
         self.materialize_file_open += other.materialize_file_open;
+        self.materialize_file_open_max = self
+            .materialize_file_open_max
+            .max(other.materialize_file_open_max);
         self.materialize_file_bytes += other.materialize_file_bytes;
+        self.materialize_file_bytes_max = self
+            .materialize_file_bytes_max
+            .max(other.materialize_file_bytes_max);
         self.materialize_file_close += other.materialize_file_close;
+        self.materialize_file_close_max = self
+            .materialize_file_close_max
+            .max(other.materialize_file_close_max);
+        self.materialize_file_write_direct += other.materialize_file_write_direct;
+        self.materialize_file_write_direct_max = self
+            .materialize_file_write_direct_max
+            .max(other.materialize_file_write_direct_max);
         self.materialize_chmod += other.materialize_chmod;
+        self.parallel_worker_elapsed += other.parallel_worker_elapsed;
+        self.parallel_worker_elapsed_max = self
+            .parallel_worker_elapsed_max
+            .max(other.parallel_worker_elapsed_max);
+        self.parallel_worker_object_read_max = self
+            .parallel_worker_object_read_max
+            .max(other.parallel_worker_object_read_max);
+        self.parallel_worker_materialize_max = self
+            .parallel_worker_materialize_max
+            .max(other.parallel_worker_materialize_max);
+        self.parallel_worker_file_open_max = self
+            .parallel_worker_file_open_max
+            .max(other.parallel_worker_file_open_max);
+        self.parallel_worker_file_bytes_max = self
+            .parallel_worker_file_bytes_max
+            .max(other.parallel_worker_file_bytes_max);
+        self.parallel_worker_file_close_max = self
+            .parallel_worker_file_close_max
+            .max(other.parallel_worker_file_close_max);
+        self.parallel_worker_file_write_direct_max = self
+            .parallel_worker_file_write_direct_max
+            .max(other.parallel_worker_file_write_direct_max);
         self.metadata += other.metadata;
         self.entries += other.entries;
         self.stream_attempts += other.stream_attempts;
         self.stream_written += other.stream_written;
         self.stream_skipped_after_disable += other.stream_skipped_after_disable;
+        self.object_read_loose_count += other.object_read_loose_count;
+        self.object_read_packed_count += other.object_read_packed_count;
+        self.object_read_unknown_count += other.object_read_unknown_count;
+        self.materialized_regular_files += other.materialized_regular_files;
+        self.materialized_executable_files += other.materialized_executable_files;
+        self.materialized_file_bytes += other.materialized_file_bytes;
+        self.materialized_file_max_bytes = self
+            .materialized_file_max_bytes
+            .max(other.materialized_file_max_bytes);
+        self.parallel_worker_count += other.parallel_worker_count;
+        if other.parallel_worker_entries_min != 0 {
+            self.parallel_worker_entries_min = if self.parallel_worker_entries_min == 0 {
+                other.parallel_worker_entries_min
+            } else {
+                self.parallel_worker_entries_min
+                    .min(other.parallel_worker_entries_min)
+            };
+        }
+        self.parallel_worker_entries_max = self
+            .parallel_worker_entries_max
+            .max(other.parallel_worker_entries_max);
     }
 }
 
@@ -128,8 +219,32 @@ impl CheckoutTraceContext {
         );
         emit_checkout_phase_line(
             self.label,
+            "object_locate",
+            totals.object_locate,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
             "object_read",
             totals.object_read,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "object_read_loose",
+            totals.object_read_loose,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "object_read_packed",
+            totals.object_read_packed,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "object_read_unknown",
+            totals.object_read_unknown,
             totals.entries,
         );
         emit_checkout_phase_line(
@@ -164,8 +279,20 @@ impl CheckoutTraceContext {
         );
         emit_checkout_phase_line(
             self.label,
+            "materialize_file_open_max",
+            totals.materialize_file_open_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
             "materialize_file_bytes",
             totals.materialize_file_bytes,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "materialize_file_bytes_max",
+            totals.materialize_file_bytes_max,
             totals.entries,
         );
         emit_checkout_phase_line(
@@ -176,8 +303,74 @@ impl CheckoutTraceContext {
         );
         emit_checkout_phase_line(
             self.label,
+            "materialize_file_close_max",
+            totals.materialize_file_close_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "materialize_file_write_direct",
+            totals.materialize_file_write_direct,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "materialize_file_write_direct_max",
+            totals.materialize_file_write_direct_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
             "materialize_chmod",
             totals.materialize_chmod,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_elapsed",
+            totals.parallel_worker_elapsed,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_elapsed_max",
+            totals.parallel_worker_elapsed_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_object_read_max",
+            totals.parallel_worker_object_read_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_materialize_max",
+            totals.parallel_worker_materialize_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_file_open_max",
+            totals.parallel_worker_file_open_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_file_bytes_max",
+            totals.parallel_worker_file_bytes_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_file_close_max",
+            totals.parallel_worker_file_close_max,
+            totals.entries,
+        );
+        emit_checkout_phase_line(
+            self.label,
+            "parallel_worker_file_write_direct_max",
+            totals.parallel_worker_file_write_direct_max,
             totals.entries,
         );
         emit_checkout_phase_line(self.label, "metadata", totals.metadata, totals.entries);
@@ -197,6 +390,66 @@ impl CheckoutTraceContext {
             self.label,
             "stream_skipped_after_disable",
             totals.stream_skipped_after_disable,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "object_read_loose",
+            totals.object_read_loose_count,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "object_read_packed",
+            totals.object_read_packed_count,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "object_read_unknown",
+            totals.object_read_unknown_count,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "materialized_regular_files",
+            totals.materialized_regular_files,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "materialized_executable_files",
+            totals.materialized_executable_files,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "materialized_file_bytes",
+            totals.materialized_file_bytes,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "materialized_file_max_bytes",
+            totals.materialized_file_max_bytes,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "parallel_worker_count",
+            totals.parallel_worker_count,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "parallel_worker_entries_min",
+            totals.parallel_worker_entries_min,
+            totals.entries,
+        );
+        emit_checkout_metric_line(
+            self.label,
+            "parallel_worker_entries_max",
+            totals.parallel_worker_entries_max,
             totals.entries,
         );
     }
@@ -387,11 +640,15 @@ fn checkout_index_fresh_parallel<S: GitObjectStore + Sync>(
         for chunk in entries.chunks(chunk_size) {
             handles.push(scope.spawn(
                 move || -> io::Result<(Vec<IndexEntry>, CheckoutPhaseTotals)> {
+                    let worker_start = trace_enabled.then(Instant::now);
+                    let worker_entries = chunk.len();
                     let mut chunk_entries =
                         Vec::with_capacity(checkout_metadata_initial_capacity(chunk.len()));
                     let mut chunk_totals = CheckoutPhaseTotals::default();
                     for entry in chunk {
+                        let path_start = trace_enabled.then(Instant::now);
                         let target = checkout_target_path(worktree_root, &entry.path)?;
+                        record_phase_elapsed(&mut chunk_totals.path_prep, path_start);
                         chunk_entries.push(checkout_entry_fresh_prepared(
                             store,
                             entry,
@@ -402,6 +659,7 @@ fn checkout_index_fresh_parallel<S: GitObjectStore + Sync>(
                             &mut chunk_totals,
                         )?);
                     }
+                    record_parallel_worker(&mut chunk_totals, worker_start, worker_entries);
                     Ok((chunk_entries, chunk_totals))
                 },
             ));
@@ -445,9 +703,13 @@ fn checkout_index_fresh_into_metadata_parallel<S: GitObjectStore + Sync>(
         let mut handles = Vec::with_capacity(workers);
         for chunk in entries.chunks_mut(chunk_size) {
             handles.push(scope.spawn(move || -> io::Result<CheckoutPhaseTotals> {
+                let worker_start = trace_enabled.then(Instant::now);
+                let worker_entries = chunk.len();
                 let mut chunk_totals = CheckoutPhaseTotals::default();
                 for entry in chunk {
+                    let path_start = trace_enabled.then(Instant::now);
                     let target = checkout_target_path(worktree_root, &entry.path)?;
+                    record_phase_elapsed(&mut chunk_totals.path_prep, path_start);
                     checkout_entry_fresh_prepared_in_place(
                         store,
                         entry,
@@ -458,6 +720,7 @@ fn checkout_index_fresh_into_metadata_parallel<S: GitObjectStore + Sync>(
                         &mut chunk_totals,
                     )?;
                 }
+                record_parallel_worker(&mut chunk_totals, worker_start, worker_entries);
                 Ok(chunk_totals)
             }));
         }
@@ -695,8 +958,8 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
             if entry.mode == IndexMode::Executable {
                 set_executable(&target, true)?;
             }
-            let metadata = fs::symlink_metadata(&target)?;
             let mut updated = entry.clone();
+            let metadata = fs::symlink_metadata(&target)?;
             apply_checkout_metadata(&mut updated, &metadata);
             record_phase_elapsed(&mut totals.metadata, metadata_start);
             totals.entries += 1;
@@ -705,9 +968,7 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
     }
     record_phase_elapsed(&mut totals.stream_write, stream_start);
 
-    let read_start = trace_enabled.then(Instant::now);
-    let object = store.read_object(&entry.id)?;
-    record_phase_elapsed(&mut totals.object_read, read_start);
+    let object = read_checkout_object(store, &entry.id, trace_enabled, totals)?;
     if object.kind != GitObjectKind::Blob {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -716,6 +977,7 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
     }
 
     let materialize_start = trace_enabled.then(Instant::now);
+    let mut updated = entry.clone();
     match entry.mode {
         IndexMode::File => {
             let content_start = trace_enabled.then(Instant::now);
@@ -723,7 +985,13 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
             record_phase_elapsed(&mut totals.materialize_content, content_start);
             let write_start = trace_enabled.then(Instant::now);
             write_regular_file_fresh(&target, &content, false, trace_enabled, totals)?;
+            record_materialized_file_output(totals, content.len(), false, trace_enabled);
             record_phase_elapsed(&mut totals.materialize_write, write_start);
+            if apply_fresh_regular_file_metadata(&mut updated, content.len()) {
+                record_phase_elapsed(&mut totals.materialize, materialize_start);
+                totals.entries += 1;
+                return Ok(updated);
+            }
         }
         IndexMode::Executable => {
             let content_start = trace_enabled.then(Instant::now);
@@ -731,7 +999,13 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
             record_phase_elapsed(&mut totals.materialize_content, content_start);
             let write_start = trace_enabled.then(Instant::now);
             write_regular_file_fresh(&target, &content, true, trace_enabled, totals)?;
+            record_materialized_file_output(totals, content.len(), true, trace_enabled);
             record_phase_elapsed(&mut totals.materialize_write, write_start);
+            if apply_fresh_regular_file_metadata(&mut updated, content.len()) {
+                record_phase_elapsed(&mut totals.materialize, materialize_start);
+                totals.entries += 1;
+                return Ok(updated);
+            }
         }
         IndexMode::Symlink => {
             let symlink_start = trace_enabled.then(Instant::now);
@@ -745,7 +1019,6 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
     record_phase_elapsed(&mut totals.materialize, materialize_start);
     let metadata_start = trace_enabled.then(Instant::now);
     let metadata = fs::symlink_metadata(&target)?;
-    let mut updated = entry.clone();
     apply_checkout_metadata(&mut updated, &metadata);
     record_phase_elapsed(&mut totals.metadata, metadata_start);
     totals.entries += 1;
@@ -801,9 +1074,7 @@ fn checkout_entry_fresh_prepared_in_place<S: GitObjectStore>(
     }
     record_phase_elapsed(&mut totals.stream_write, stream_start);
 
-    let read_start = trace_enabled.then(Instant::now);
-    let object = store.read_object(&entry.id)?;
-    record_phase_elapsed(&mut totals.object_read, read_start);
+    let object = read_checkout_object(store, &entry.id, trace_enabled, totals)?;
     if object.kind != GitObjectKind::Blob {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -819,7 +1090,13 @@ fn checkout_entry_fresh_prepared_in_place<S: GitObjectStore>(
             record_phase_elapsed(&mut totals.materialize_content, content_start);
             let write_start = trace_enabled.then(Instant::now);
             write_regular_file_fresh(&target, &content, false, trace_enabled, totals)?;
+            record_materialized_file_output(totals, content.len(), false, trace_enabled);
             record_phase_elapsed(&mut totals.materialize_write, write_start);
+            if apply_fresh_regular_file_metadata(entry, content.len()) {
+                record_phase_elapsed(&mut totals.materialize, materialize_start);
+                totals.entries += 1;
+                return Ok(());
+            }
         }
         IndexMode::Executable => {
             let content_start = trace_enabled.then(Instant::now);
@@ -827,7 +1104,13 @@ fn checkout_entry_fresh_prepared_in_place<S: GitObjectStore>(
             record_phase_elapsed(&mut totals.materialize_content, content_start);
             let write_start = trace_enabled.then(Instant::now);
             write_regular_file_fresh(&target, &content, true, trace_enabled, totals)?;
+            record_materialized_file_output(totals, content.len(), true, trace_enabled);
             record_phase_elapsed(&mut totals.materialize_write, write_start);
+            if apply_fresh_regular_file_metadata(entry, content.len()) {
+                record_phase_elapsed(&mut totals.materialize, materialize_start);
+                totals.entries += 1;
+                return Ok(());
+            }
         }
         IndexMode::Symlink => {
             let symlink_start = trace_enabled.then(Instant::now);
@@ -1021,6 +1304,46 @@ fn write_regular_file(
     set_executable(path, executable)
 }
 
+fn read_checkout_object<S: GitObjectStore>(
+    store: &S,
+    id: &ObjectId,
+    trace_enabled: bool,
+    totals: &mut CheckoutPhaseTotals,
+) -> io::Result<LooseObject> {
+    let storage = if trace_enabled {
+        let locate_start = Some(Instant::now());
+        let storage = store
+            .object_storage_hint(id)
+            .unwrap_or(ObjectStorageHint::Unknown);
+        record_phase_elapsed(&mut totals.object_locate, locate_start);
+        storage
+    } else {
+        ObjectStorageHint::Unknown
+    };
+
+    let read_start = trace_enabled.then(Instant::now);
+    let object = store.read_object(id)?;
+    let elapsed = read_start.map(|start| start.elapsed());
+    if let Some(elapsed) = elapsed {
+        totals.object_read += elapsed;
+        match storage {
+            ObjectStorageHint::Loose => {
+                totals.object_read_loose += elapsed;
+                totals.object_read_loose_count += 1;
+            }
+            ObjectStorageHint::Packed => {
+                totals.object_read_packed += elapsed;
+                totals.object_read_packed_count += 1;
+            }
+            ObjectStorageHint::Unknown => {
+                totals.object_read_unknown += elapsed;
+                totals.object_read_unknown_count += 1;
+            }
+        }
+    }
+    Ok(object)
+}
+
 fn write_regular_file_fresh(
     path: &Path,
     content: &[u8],
@@ -1031,20 +1354,24 @@ fn write_regular_file_fresh(
     use std::io::Write;
 
     if !trace_enabled {
-        return write_regular_file(path, content, executable, false);
+        let mut file = fs::File::create(path)?;
+        file.write_all(content)?;
+        drop(file);
+        if !executable {
+            return Ok(());
+        }
+        return set_executable(path, executable);
     }
 
-    let open_start = trace_enabled.then(Instant::now);
+    let write_start = Some(Instant::now());
     let mut file = fs::File::create(path)?;
-    record_phase_elapsed(&mut totals.materialize_file_open, open_start);
-
-    let bytes_start = trace_enabled.then(Instant::now);
     file.write_all(content)?;
-    record_phase_elapsed(&mut totals.materialize_file_bytes, bytes_start);
-
-    let close_start = trace_enabled.then(Instant::now);
     drop(file);
-    record_phase_elapsed(&mut totals.materialize_file_close, close_start);
+    record_phase_elapsed_with_max(
+        &mut totals.materialize_file_write_direct,
+        &mut totals.materialize_file_write_direct_max,
+        write_start,
+    );
 
     if !executable {
         return Ok(());
@@ -1055,9 +1382,69 @@ fn write_regular_file_fresh(
     Ok(())
 }
 
+fn record_materialized_file_output(
+    totals: &mut CheckoutPhaseTotals,
+    bytes: usize,
+    executable: bool,
+    trace_enabled: bool,
+) {
+    if !trace_enabled {
+        return;
+    }
+    if executable {
+        totals.materialized_executable_files += 1;
+    } else {
+        totals.materialized_regular_files += 1;
+    }
+    let bytes = bytes as u64;
+    totals.materialized_file_bytes += bytes;
+    totals.materialized_file_max_bytes = totals.materialized_file_max_bytes.max(bytes);
+}
+
 fn record_phase_elapsed(total: &mut Duration, start: Option<Instant>) {
     if let Some(start) = start {
         *total += start.elapsed();
+    }
+}
+
+fn record_phase_elapsed_with_max(total: &mut Duration, max: &mut Duration, start: Option<Instant>) {
+    if let Some(start) = start {
+        let elapsed = start.elapsed();
+        *total += elapsed;
+        *max = (*max).max(elapsed);
+    }
+}
+
+fn record_parallel_worker(
+    totals: &mut CheckoutPhaseTotals,
+    start: Option<Instant>,
+    entries: usize,
+) {
+    if let Some(start) = start {
+        let elapsed = start.elapsed();
+        totals.parallel_worker_elapsed += elapsed;
+        totals.parallel_worker_elapsed_max = totals.parallel_worker_elapsed_max.max(elapsed);
+        totals.parallel_worker_object_read_max = totals
+            .parallel_worker_object_read_max
+            .max(totals.object_read);
+        totals.parallel_worker_materialize_max = totals
+            .parallel_worker_materialize_max
+            .max(totals.materialize);
+        totals.parallel_worker_file_open_max = totals
+            .parallel_worker_file_open_max
+            .max(totals.materialize_file_open);
+        totals.parallel_worker_file_bytes_max = totals
+            .parallel_worker_file_bytes_max
+            .max(totals.materialize_file_bytes);
+        totals.parallel_worker_file_close_max = totals
+            .parallel_worker_file_close_max
+            .max(totals.materialize_file_close);
+        totals.parallel_worker_file_write_direct_max = totals
+            .parallel_worker_file_write_direct_max
+            .max(totals.materialize_file_write_direct);
+        totals.parallel_worker_count += 1;
+        totals.parallel_worker_entries_min = entries;
+        totals.parallel_worker_entries_max = entries;
     }
 }
 
@@ -1089,7 +1476,7 @@ fn emit_checkout_phase_line(
 fn emit_checkout_metric_line(
     label: &'static str,
     metric: &'static str,
-    value: usize,
+    value: impl std::fmt::Display,
     entries: usize,
 ) {
     use std::io::Write;
@@ -1187,6 +1574,17 @@ fn apply_checkout_metadata(entry: &mut IndexEntry, metadata: &fs::Metadata) {
 #[cfg(not(unix))]
 fn apply_checkout_metadata(entry: &mut IndexEntry, metadata: &fs::Metadata) {
     entry.size = metadata.len().min(u32::MAX as u64) as u32;
+}
+
+#[cfg(unix)]
+fn apply_fresh_regular_file_metadata(_entry: &mut IndexEntry, _content_len: usize) -> bool {
+    false
+}
+
+#[cfg(not(unix))]
+fn apply_fresh_regular_file_metadata(entry: &mut IndexEntry, content_len: usize) -> bool {
+    entry.size = content_len.min(u32::MAX as usize) as u32;
+    true
 }
 
 #[cfg(unix)]

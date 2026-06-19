@@ -1526,6 +1526,14 @@ impl WorktreeStageOptions {
         self.content_rules
             .smudge_checkout_content(relative, content)
     }
+
+    fn may_smudge_checkout_entries(&self) -> bool {
+        self.content_rules.may_smudge_checkout_entries()
+    }
+
+    fn attributes(&self) -> &GitAttributes {
+        &self.content_rules.attributes
+    }
 }
 
 pub(crate) struct WorktreeContentRules {
@@ -1646,6 +1654,10 @@ impl WorktreeContentRules {
         Some(zmin_git_core::apply_eol_smudge_to_crlf(content))
     }
 
+    fn may_smudge_checkout_entries(&self) -> bool {
+        !self.attributes.is_empty() || self.core_autocrlf == CoreAutoCrlf::True
+    }
+
     fn crlf_action(&self, relative: &[u8]) -> CrlfAction {
         crlf_action_for_path(
             &self.attributes,
@@ -1678,7 +1690,10 @@ pub(crate) fn smudge_worktree_filter_entries_with_metadata(
     metadata: &WorktreeCheckoutMetadata,
 ) -> Result<()> {
     let content_rules = WorktreeStageOptions::load(repo)?;
-    let attributes = GitAttributes::load_from_root(&repo.root)?;
+    if !content_rules.may_smudge_checkout_entries() {
+        return Ok(());
+    }
+    let attributes = content_rules.attributes();
     if attributes.is_empty() {
         for entry in entries.entries().iter().filter(|entry| entry.stage == 0) {
             smudge_checkout_content_entry(repo, &content_rules, entry)?;
@@ -3280,5 +3295,36 @@ mod tests {
         assert_eq!(next_index_position_after_path(&index, b"a.txt"), 1);
         assert_eq!(next_index_position_after_path(&index, b"b.txt"), 3);
         assert_eq!(next_index_position_after_path(&index, b"bb.txt"), 3);
+    }
+
+    #[test]
+    fn content_rules_skip_smudge_only_when_checkout_cannot_rewrite_content() {
+        let empty_binary_rules = WorktreeContentRules {
+            attributes: GitAttributes::default(),
+            core_autocrlf: CoreAutoCrlf::False,
+            core_eol: CoreEol::Unset,
+        };
+        assert!(!empty_binary_rules.may_smudge_checkout_entries());
+
+        let empty_input_rules = WorktreeContentRules {
+            attributes: GitAttributes::default(),
+            core_autocrlf: CoreAutoCrlf::Input,
+            core_eol: CoreEol::Crlf,
+        };
+        assert!(!empty_input_rules.may_smudge_checkout_entries());
+
+        let autocrlf_rules = WorktreeContentRules {
+            attributes: GitAttributes::default(),
+            core_autocrlf: CoreAutoCrlf::True,
+            core_eol: CoreEol::Unset,
+        };
+        assert!(autocrlf_rules.may_smudge_checkout_entries());
+
+        let attribute_rules = WorktreeContentRules {
+            attributes: GitAttributes::parse("*.txt text\n"),
+            core_autocrlf: CoreAutoCrlf::False,
+            core_eol: CoreEol::Unset,
+        };
+        assert!(attribute_rules.may_smudge_checkout_entries());
     }
 }
