@@ -59,6 +59,8 @@ Recently closed replacement gaps:
   exact `notes.rewriteRef` refs and implies stdin pair input
 - `notes add --allow-empty` opens the configured editor and writes the edited
   note content like stock Git, including the `--no-edit` toggle form
+- `notes edit` supports stock Git's deprecated message-source options
+  `-m`, `-F`, `-C`, and `-c` plus their long forms and warning text
 
 Current high-priority gap classes:
 

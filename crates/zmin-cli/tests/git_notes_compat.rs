@@ -8,7 +8,7 @@ use common::{
     command_failure_output_with_env, command_output, command_output_with_env, command_stdout_bytes,
     configure_identity, git, git_failure_output, git_init, git_status, git_with_env,
     git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, run_zmin_with_stdin_args, zmin_bin, write_file,
+    run_zmin_with_env, run_zmin_with_stdin_args, write_file, zmin_bin,
 };
 
 fn notes_base_repo() -> TempDir {
@@ -58,10 +58,7 @@ fn notes_add_list_show_remove_match_stock_git() {
     write_file(git_repo.path(), "note.txt", "from file\nsecond\n");
     write_file(zmin_repo.path(), "note.txt", "from file\nsecond\n");
     git_with_env(git_repo.path(), ["notes", "add", "-F", "note.txt", "HEAD"]);
-    run_zmin_with_env(
-        zmin_repo.path(),
-        ["notes", "add", "-F", "note.txt", "HEAD"],
-    );
+    run_zmin_with_env(zmin_repo.path(), ["notes", "add", "-F", "note.txt", "HEAD"]);
     assert_eq!(
         run_zmin(zmin_repo.path(), ["notes", "show", "HEAD"]),
         git(git_repo.path(), ["notes", "show", "HEAD"])
@@ -173,8 +170,7 @@ fn notes_edit_matches_stock_git_for_update_and_empty_remove() {
     let git_editor = git_repo.path().join("edit-note.sh");
     let zmin_editor = zmin_repo.path().join("edit-note.sh");
     fs::write(&git_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").expect("write git editor");
-    fs::write(&zmin_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n")
-        .expect("write zmin editor");
+    fs::write(&zmin_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").expect("write zmin editor");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -227,6 +223,209 @@ fn notes_edit_matches_stock_git_for_update_and_empty_remove() {
         run_zmin_status(zmin_repo.path(), ["notes", "show", "HEAD"]),
         git_status(git_repo.path(), ["notes", "show", "HEAD"])
     );
+}
+
+#[test]
+fn notes_edit_message_source_options_match_stock_git() {
+    for case in [
+        "short-message",
+        "long-message",
+        "short-file",
+        "long-file",
+        "short-reuse",
+        "long-reuse",
+        "short-reedit",
+        "long-reedit",
+    ] {
+        let git_repo = notes_base_repo();
+        let zmin_repo = notes_base_repo();
+        git_with_env(git_repo.path(), ["notes", "add", "-m", "old", "HEAD"]);
+        run_zmin_with_env(zmin_repo.path(), ["notes", "add", "-m", "old", "HEAD"]);
+        write_file(git_repo.path(), "note.txt", "from file\n");
+        write_file(zmin_repo.path(), "note.txt", "from file\n");
+        let git_blob = git_with_stdin(
+            git_repo.path(),
+            ["hash-object", "-w", "--stdin"],
+            "blob note\n",
+        );
+        let zmin_blob = git_with_stdin(
+            zmin_repo.path(),
+            ["hash-object", "-w", "--stdin"],
+            "blob note\n",
+        );
+        assert_eq!(zmin_blob, git_blob);
+
+        let git_editor = git_repo.path().join("edit-source-note.sh");
+        let zmin_editor = zmin_repo.path().join("edit-source-note.sh");
+        fs::write(
+            &git_editor,
+            "#!/bin/sh\nprintf 'edited-source\\n' > \"$1\"\n",
+        )
+        .expect("write git editor");
+        fs::write(
+            &zmin_editor,
+            "#!/bin/sh\nprintf 'edited-source\\n' > \"$1\"\n",
+        )
+        .expect("write zmin editor");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for editor in [&git_editor, &zmin_editor] {
+                let mut permissions = fs::metadata(editor).expect("editor metadata").permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(editor, permissions).expect("chmod editor");
+            }
+        }
+
+        let (git_args, zmin_args) = match case {
+            "short-message" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-m".to_owned(),
+                    "msg".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-m".to_owned(),
+                    "msg".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "long-message" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "--message=long".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "--message=long".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "short-file" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-F".to_owned(),
+                    "note.txt".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-F".to_owned(),
+                    "note.txt".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "long-file" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "--file=note.txt".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "--file=note.txt".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "short-reuse" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-C".to_owned(),
+                    git_blob.clone(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-C".to_owned(),
+                    zmin_blob.clone(),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "long-reuse" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("--reuse-message={git_blob}"),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("--reuse-message={zmin_blob}"),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "short-reedit" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-c".to_owned(),
+                    git_blob.clone(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-c".to_owned(),
+                    zmin_blob.clone(),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "long-reedit" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("--reedit-message={git_blob}"),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("--reedit-message={zmin_blob}"),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            _ => unreachable!("unknown notes edit message source case"),
+        };
+        let git_args = git_args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin_args = zmin_args.iter().map(String::as_str).collect::<Vec<_>>();
+
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &zmin_args,
+                &[("GIT_EDITOR", zmin_editor.to_str().expect("editor path"))],
+                "zmin",
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &git_args,
+                &[("GIT_EDITOR", git_editor.to_str().expect("editor path"))],
+                "git",
+            ),
+            "notes edit output should match for {case}",
+        );
+        assert_eq!(
+            command_stdout_bytes(zmin_bin(), zmin_repo.path(), &["notes", "show", "HEAD"]),
+            command_stdout_bytes("git", git_repo.path(), &["notes", "show", "HEAD"]),
+            "notes edit content should match for {case}",
+        );
+    }
 }
 
 #[test]
@@ -434,8 +633,7 @@ fn notes_reedit_message_matches_stock_git_for_add_and_append() {
     let git_editor = git_repo.path().join("reedit-note.sh");
     let zmin_editor = zmin_repo.path().join("reedit-note.sh");
     fs::write(&git_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").expect("write git editor");
-    fs::write(&zmin_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n")
-        .expect("write zmin editor");
+    fs::write(&zmin_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").expect("write zmin editor");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -623,8 +821,7 @@ fn notes_edit_flag_matches_stock_git_for_add_and_append() {
     let git_editor = git_repo.path().join("edit-flag-note.sh");
     let zmin_editor = zmin_repo.path().join("edit-flag-note.sh");
     fs::write(&git_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").expect("write git editor");
-    fs::write(&zmin_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n")
-        .expect("write zmin editor");
+    fs::write(&zmin_editor, "#!/bin/sh\nprintf 'edited\\n' > \"$1\"\n").expect("write zmin editor");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -1522,10 +1719,7 @@ fn notes_merge_matches_stock_git_for_clean_and_strategy_merges() {
     let git_left_before = git(git_repo.path(), ["rev-parse", "refs/notes/left"]);
     let zmin_left_before = git(zmin_repo.path(), ["rev-parse", "refs/notes/left"]);
     assert_eq!(
-        run_zmin_failure_output(
-            zmin_repo.path(),
-            &["notes", "--ref=left", "merge", "right"]
-        ),
+        run_zmin_failure_output(zmin_repo.path(), &["notes", "--ref=left", "merge", "right"]),
         git_failure_output(git_repo.path(), &["notes", "--ref=left", "merge", "right"])
     );
     assert_eq!(
@@ -1608,10 +1802,7 @@ fn notes_merge_matches_stock_git_for_clean_and_strategy_merges() {
         ["notes", "--ref=right", "add", "-m", "right", &object],
     );
     let _ = git_failure_output(git_repo.path(), &["notes", "--ref=left", "merge", "right"]);
-    let _ = run_zmin_failure_output(
-        zmin_repo.path(),
-        &["notes", "--ref=left", "merge", "right"],
-    );
+    let _ = run_zmin_failure_output(zmin_repo.path(), &["notes", "--ref=left", "merge", "right"]);
     assert_eq!(
         command_output(
             zmin_bin(),

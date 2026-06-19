@@ -32,6 +32,7 @@ Examples:
 | `blame` normal display flags | `4` | `0` | `-s`, `-t`, `-b`, `-c` |
 | `init` quiet forms | `2` | `0` | `-q`, `--quiet` |
 | `notes add` empty editor forms | `2` | `0` | `--allow-empty`, `--allow-empty --no-edit` |
+| `notes edit` message-source forms | `8` | `0` | `-m`, `--message=`, `-F`, `--file=`, `-C`, `--reuse-message=`, `-c`, `--reedit-message=` |
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.

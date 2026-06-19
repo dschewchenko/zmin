@@ -420,11 +420,7 @@ fn parse_notes_copy_args(args: Vec<String>) -> Result<NotesCopyArgs> {
     })
 }
 
-fn notes_copy_for_rewrite_enabled(
-    repo: &GitRepo,
-    ref_name: &str,
-    command: &str,
-) -> Result<bool> {
+fn notes_copy_for_rewrite_enabled(repo: &GitRepo, ref_name: &str, command: &str) -> Result<bool> {
     if let Some(value) = read_config_value(repo, &format!("notes.rewrite.{command}"))?
         && parse_git_bool(&value) == Some(false)
     {
@@ -480,7 +476,15 @@ fn notes_edit(
     args: Vec<String>,
 ) -> Result<()> {
     ensure_mutable_notes_ref(ref_name, "edit")?;
-    let (allow_empty, object) = parse_notes_edit_args(args)?;
+    let NotesEditArgs {
+        allow_empty,
+        edit,
+        separator,
+        stripspace,
+        sources,
+        object,
+        deprecated_message_sources,
+    } = parse_notes_edit_args(args)?;
     let object = object.as_deref().unwrap_or("HEAD");
     let object_id = resolve_notes_objectish(repo, object, NotesResolveMode::Fatal)?;
     let key = object_id.to_hex();
@@ -499,7 +503,20 @@ fn notes_edit(
         }
         None => Vec::new(),
     };
-    let edited = strip_note_editor_comments(edit_history_message(repo, &initial)?);
+    let edited = if sources.is_empty() {
+        strip_note_editor_comments(edit_history_message(repo, &initial)?)
+    } else {
+        if deprecated_message_sources {
+            eprintln!(
+                "The -m/-F/-c/-C options have been deprecated for the 'edit' subcommand.\nPlease use 'git notes add -f -m/-F/-c/-C' instead."
+            );
+        }
+        let mut message = notes_message_from_sources(repo, store, sources, &separator, stripspace)?;
+        if edit {
+            message = strip_note_editor_comments(edit_history_message(repo, &message)?);
+        }
+        message
+    };
     if edited.is_empty() && !allow_empty {
         eprintln!("Removing note for object {key}");
         if notes.remove(&key).is_some() {
@@ -527,13 +544,145 @@ fn notes_edit(
     Ok(())
 }
 
-fn parse_notes_edit_args(args: Vec<String>) -> Result<(bool, Option<String>)> {
+#[derive(Debug)]
+struct NotesEditArgs {
+    allow_empty: bool,
+    edit: bool,
+    separator: Vec<u8>,
+    stripspace: NotesStripspaceMode,
+    sources: Vec<NotesMessageSource>,
+    object: Option<String>,
+    deprecated_message_sources: bool,
+}
+
+fn parse_notes_edit_args(args: Vec<String>) -> Result<NotesEditArgs> {
     let mut allow_empty = false;
+    let mut edit = false;
+    let mut separator = b"\n\n".to_vec();
+    let mut stripspace = NotesStripspaceMode::Default;
+    let mut sources = Vec::new();
     let mut object = None;
-    for arg in args {
-        match arg.as_str() {
+    let mut deprecated_message_sources = false;
+    let mut cursor = 0usize;
+    while cursor < args.len() {
+        match args[cursor].as_str() {
+            "-e" | "--edit" => edit = true,
+            "--no-edit" => edit = false,
+            "--separator" => separator = b"\n\n".to_vec(),
+            "--no-separator" => separator = b"\n".to_vec(),
+            "--stripspace" => stripspace = NotesStripspaceMode::Strip,
+            "--no-stripspace" => stripspace = NotesStripspaceMode::NoStrip,
+            value if value.starts_with("--separator=") => {
+                let Some(value) = value.strip_prefix("--separator=") else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("notes edit invalid option '{value}'"),
+                    });
+                };
+                separator = format!("\n{value}\n").into_bytes();
+            }
             "--allow-empty" => allow_empty = true,
             "--no-allow-empty" => allow_empty = false,
+            "-m" | "--message" => {
+                cursor += 1;
+                let Some(message) = args.get(cursor) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "notes edit -m requires a message".into(),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Literal(message.clone()));
+            }
+            value if value.starts_with("-m") && value.len() > 2 => {
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Literal(value[2..].to_owned()));
+            }
+            value if value.starts_with("--message=") => {
+                let Some(message) = value.strip_prefix("--message=") else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("notes edit invalid option '{value}'"),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Literal(message.to_owned()));
+            }
+            "-F" | "--file" => {
+                cursor += 1;
+                let Some(path) = args.get(cursor) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "notes edit -F requires a file".into(),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::File(path.clone()));
+            }
+            value if value.starts_with("-F") && value.len() > 2 => {
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::File(value[2..].to_owned()));
+            }
+            value if value.starts_with("--file=") => {
+                let Some(path) = value.strip_prefix("--file=") else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("notes edit invalid option '{value}'"),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::File(path.to_owned()));
+            }
+            "-C" | "--reuse-message" => {
+                cursor += 1;
+                let Some(objectish) = args.get(cursor) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "notes edit -C requires an object".into(),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Reuse(objectish.clone()));
+            }
+            value if value.starts_with("-C") && value.len() > 2 => {
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Reuse(value[2..].to_owned()));
+            }
+            value if value.starts_with("--reuse-message=") => {
+                let Some(objectish) = value.strip_prefix("--reuse-message=") else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("notes edit invalid option '{value}'"),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Reuse(objectish.to_owned()));
+            }
+            "-c" | "--reedit-message" => {
+                cursor += 1;
+                let Some(objectish) = args.get(cursor) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "notes edit -c requires an object".into(),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Reedit(objectish.clone()));
+            }
+            value if value.starts_with("-c") && value.len() > 2 => {
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Reedit(value[2..].to_owned()));
+            }
+            value if value.starts_with("--reedit-message=") => {
+                let Some(objectish) = value.strip_prefix("--reedit-message=") else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("notes edit invalid option '{value}'"),
+                    });
+                };
+                deprecated_message_sources = true;
+                sources.push(NotesMessageSource::Reedit(objectish.to_owned()));
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::Fatal {
                     code: 129,
@@ -549,8 +698,17 @@ fn parse_notes_edit_args(args: Vec<String>) -> Result<(bool, Option<String>)> {
                 }
             }
         }
+        cursor += 1;
     }
-    Ok((allow_empty, object))
+    Ok(NotesEditArgs {
+        allow_empty,
+        edit,
+        separator,
+        stripspace,
+        sources,
+        object,
+        deprecated_message_sources,
+    })
 }
 
 fn strip_note_editor_comments(message: Vec<u8>) -> Vec<u8> {
