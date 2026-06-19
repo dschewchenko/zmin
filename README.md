@@ -18,7 +18,7 @@ official stores yet.
 
 ## Install
 
-Current preview: [`v0.0.1-preview.20260619T144529Z`](https://github.com/dschewchenko/zmin/releases/tag/v0.0.1-preview.20260619T144529Z)
+Current preview: [`v0.0.1-preview.20260619T155645Z`](https://github.com/dschewchenko/zmin/releases/tag/v0.0.1-preview.20260619T155645Z)
 
 Download a preview archive for your platform or build from source.
 
@@ -28,7 +28,7 @@ Apple Silicon:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-aarch64-apple-darwin.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-aarch64-apple-darwin.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -37,7 +37,7 @@ Intel:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-x86_64-apple-darwin.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-x86_64-apple-darwin.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -57,7 +57,7 @@ x86_64:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-x86_64-unknown-linux-gnu.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -66,7 +66,7 @@ aarch64:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-aarch64-unknown-linux-gnu.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-aarch64-unknown-linux-gnu.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -85,7 +85,7 @@ zmin --version
 PowerShell, x86_64:
 
 ```powershell
-$Version = "v0.0.1-preview.20260619T144529Z"
+$Version = "v0.0.1-preview.20260619T155645Z"
 Invoke-WebRequest "https://github.com/dschewchenko/zmin/releases/download/$Version/zmin-x86_64-pc-windows-msvc.zip" -OutFile zmin.zip
 Expand-Archive -Force zmin.zip .
 .\zmin.exe --version
@@ -105,14 +105,14 @@ cargo build -p zmin-cli --release --bin zmin
 Current binary preview archives:
 
 <!-- zmin-release-assets:start -->
-- [`zmin-x86_64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-x86_64-unknown-linux-gnu.tar.gz)
-- [`zmin-aarch64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-aarch64-unknown-linux-gnu.tar.gz)
-- [`zmin-x86_64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-x86_64-apple-darwin.tar.gz)
-- [`zmin-aarch64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-aarch64-apple-darwin.tar.gz)
-- [`zmin-x86_64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-x86_64-pc-windows-msvc.zip)
-- [`zmin-aarch64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/zmin-aarch64-pc-windows-msvc.zip)
+- [`zmin-x86_64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-x86_64-unknown-linux-gnu.tar.gz)
+- [`zmin-aarch64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-aarch64-unknown-linux-gnu.tar.gz)
+- [`zmin-x86_64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-x86_64-apple-darwin.tar.gz)
+- [`zmin-aarch64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-aarch64-apple-darwin.tar.gz)
+- [`zmin-x86_64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-x86_64-pc-windows-msvc.zip)
+- [`zmin-aarch64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/zmin-aarch64-pc-windows-msvc.zip)
 
-Checksums: [`SHA256SUMS`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T144529Z/SHA256SUMS)
+Checksums: [`SHA256SUMS`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T155645Z/SHA256SUMS)
 <!-- zmin-release-assets:end -->
 
 ## Start

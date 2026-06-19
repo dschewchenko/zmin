@@ -33,7 +33,25 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
 
       - name: Check README archive list
-        run: tools/sync-readme-release-assets.sh --check
+        run: |
+          set -euo pipefail
+          readme_tag="$(
+            awk '
+              /^Current preview:[[:space:]]*/ {
+                value = $0
+                if (match(value, /`[^`]+`/)) {
+                  print substr(value, RSTART + 1, RLENGTH - 2)
+                  exit
+                }
+              }
+            ' README.md
+          )"
+          test "$readme_tag" = "$RELEASE_TAG"
+          if grep -Eo 'v0\.0\.1-preview\.[0-9]{8}(T[0-9]{6}Z)?' README.md | grep -vx "$RELEASE_TAG"; then
+            echo "README contains preview tags other than $RELEASE_TAG" >&2
+            exit 1
+          fi
+          ZMIN_RELEASE_TAG="$RELEASE_TAG" tools/sync-readme-release-assets.sh --check
 
   build:
     name: Build ${{ matrix.target }}
