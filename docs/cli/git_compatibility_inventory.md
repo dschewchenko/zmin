@@ -56,7 +56,7 @@ transports or platforms.
 
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `42` | `2` | `0` | `4` |
+| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `43` | `1` | `0` | `4` |
 
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also
@@ -86,6 +86,8 @@ human, porcelain v1/v2, and short forms.
 The latest implementation slice closed `--ignore-submodules`, `=all`, `=dirty`
 and `=untracked` for dirty, untracked and new-commit submodule states across
 human, porcelain v1/v2 and short output.
+The latest evidence slice closed standalone human `-b` and `--branch` status
+for dirty, untracked and upstream-ahead states.
 
 ## Required Matrix Columns
 

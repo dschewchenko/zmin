@@ -156,7 +156,7 @@ option, value, option combination, repository state, transport and platform.
 | --- | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `6` | `76` | `0` |
 | Getting and Creating Projects | `2` | `2` | `57` | `2` |
-| Basic Snapshotting | `9` | `9` | `252` | `50` |
+| Basic Snapshotting | `9` | `9` | `252` | `51` |
 | Branching and Merging | `9` | `9` | `267` | `30` |
 | Sharing and Updating Projects | `5` | `5` | `119` | `0` |
 | Inspection and Comparison | `7` | `7` | `108` | `8` |
@@ -168,7 +168,7 @@ option, value, option combination, repository state, transport and platform.
 | Server Admin | `2` | `2` | `28` | `0` |
 | Plumbing Commands | `20` | `20` | `332` | `0` |
 | Other Git `2.47` commands | `71` | `71` | `600` | `4` |
-| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`163`** |
+| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`164`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -183,7 +183,7 @@ Current command-level matrices:
 
 | Command | Rows | Closed | Partial | Open | Invalid input | Closed rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `status` | `48` | `42` | `2` | `0` | `4` | `87.5%` |
+| `status` | `48` | `43` | `1` | `0` | `4` | `89.6%` |
 
 A global percentage will be published only after every Git `2.47.1` command has
 the same option/value/state matrix.

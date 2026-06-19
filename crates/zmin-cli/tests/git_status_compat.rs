@@ -315,6 +315,49 @@ fn status_branch_reports_upstream_ahead_count() {
 }
 
 #[test]
+fn status_human_branch_modes_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(
+        dir.path(),
+        ["clone", remote.to_str().expect("remote path"), "work"],
+    );
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write fixture");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["push", "-u", "origin", "HEAD"]);
+
+    fs::write(work.join("a.txt"), b"changed\n").expect("modify tracked");
+    fs::write(work.join("b.txt"), b"untracked\n").expect("write untracked");
+    for args in [
+        ["status", "-b"].as_slice(),
+        ["status", "--branch"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(&work, args),
+            git_args(&work, args),
+            "dirty human branch args: {args:?}"
+        );
+    }
+
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "local"]);
+    for args in [
+        ["status", "-b"].as_slice(),
+        ["status", "--branch"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(&work, args),
+            git_args(&work, args),
+            "ahead human branch args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
