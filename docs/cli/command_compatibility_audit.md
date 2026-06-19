@@ -73,6 +73,8 @@ Recently closed replacement gaps:
   `authorname`, `authoremail`, and the same `authordate` formats
 - `for-each-ref` supports `creator` and `creatordate` for commit refs and
   annotated tag refs
+- `for-each-ref` supports stock `objectname:short=<n>` abbreviation lengths
+  for positive values covered by the matrix
 - `stash list --format` and `stash list --pretty=format:` support common
   stash reflog atoms used by clients: `%H`, `%h`, `%gd`, `%gD`, `%gs`, `%s`,
   `%%`, `%n`, and `%xNN`

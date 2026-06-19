@@ -2005,7 +2005,7 @@ enum SimpleForEachRefFormatPart<'a> {
     RefName,
     RefNameShort,
     ObjectName,
-    ObjectNameShort,
+    ObjectNameShort(usize),
 }
 
 fn collect_for_each_ref_rows(
@@ -2129,11 +2129,16 @@ fn simple_for_each_ref_format_parts(format: &str) -> Option<Vec<SimpleForEachRef
         }
         let after_start = &rest[start + 2..];
         let end = after_start.find(')')?;
-        let atom = match &after_start[..end] {
+        let atom_name = &after_start[..end];
+        let atom = match atom_name {
             "refname" => SimpleForEachRefFormatPart::RefName,
             "refname:short" => SimpleForEachRefFormatPart::RefNameShort,
             "objectname" => SimpleForEachRefFormatPart::ObjectName,
-            "objectname:short" => SimpleForEachRefFormatPart::ObjectNameShort,
+            atom if for_each_ref_objectname_short_len(atom).is_some() => {
+                SimpleForEachRefFormatPart::ObjectNameShort(for_each_ref_objectname_short_len(
+                    atom,
+                )?)
+            }
             _ => return None,
         };
         parts.push(atom);
@@ -2159,8 +2164,8 @@ fn write_simple_for_each_ref_row<W: Write>(
                 out.write_all(short_ref_name_str(ref_name).as_bytes())?
             }
             SimpleForEachRefFormatPart::ObjectName => out.write_all(object_id.as_bytes())?,
-            SimpleForEachRefFormatPart::ObjectNameShort => {
-                out.write_all(&object_id.as_bytes()[..object_id.len().min(7)])?
+            SimpleForEachRefFormatPart::ObjectNameShort(len) => {
+                out.write_all(&object_id.as_bytes()[..object_id.len().min(*len)])?
             }
         }
     }
@@ -2319,7 +2324,8 @@ fn apply_for_each_ref_atom_requirements(
     requirements: &mut ForEachRefRequirements,
 ) -> Result<()> {
     match atom {
-        "refname" | "refname:short" | "objectname" | "objectname:short" | "HEAD" => {}
+        "refname" | "refname:short" | "objectname" | "HEAD" => {}
+        atom if for_each_ref_objectname_short_len(atom).is_some() => {}
         "upstream" | "upstream:short" | "upstream:track" | "upstream:trackshort" => {}
         "objecttype" => requirements.need_object_kind = true,
         "subject" | "contents:subject" => {
@@ -2490,7 +2496,10 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
         "refname" => Ok(row.ref_name.clone()),
         "refname:short" => Ok(short_ref_name(&row.ref_name)),
         "objectname" => Ok(row.object_id.to_hex()),
-        "objectname:short" => Ok(short_object_id(&row.object_id)),
+        atom if for_each_ref_objectname_short_len(atom).is_some() => Ok(short_object_id_len(
+            &row.object_id,
+            for_each_ref_objectname_short_len(atom).unwrap_or(7),
+        )),
         "HEAD" => Ok(if row.is_head { "*" } else { " " }.to_owned()),
         "upstream" => Ok(row.upstream_ref.clone()),
         "upstream:short" => Ok(row.upstream_short.clone()),
@@ -2549,6 +2558,17 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
             message: format!("unknown field name: {atom}"),
         }),
     }
+}
+
+fn for_each_ref_objectname_short_len(atom: &str) -> Option<usize> {
+    if atom == "objectname:short" {
+        return Some(7);
+    }
+    let len = atom
+        .strip_prefix("objectname:short=")?
+        .parse::<usize>()
+        .ok()?;
+    (len > 0).then_some(len)
 }
 
 fn for_each_ref_date_atom_base(atom: &str) -> Option<&str> {

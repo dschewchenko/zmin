@@ -118,6 +118,17 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
             ],
         )
     );
+    for format in [
+        "%(objectname:short=4)",
+        "%(refname:short) %(objectname:short=12)",
+        "%(objectname:short=40)",
+    ] {
+        assert_eq!(
+            common::run_zmin_args(repo.path(), &["for-each-ref", "--format", format]),
+            common::git_args(repo.path(), &["for-each-ref", "--format", format]),
+            "for-each-ref objectname length should match for {format}"
+        );
+    }
 }
 
 #[test]
