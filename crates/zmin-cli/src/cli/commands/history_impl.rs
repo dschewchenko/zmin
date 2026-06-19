@@ -1541,8 +1541,18 @@ struct BlameOptions {
     show_stats: bool,
     root: bool,
     abbrev_width: Option<usize>,
+    date_mode: BlameDateMode,
     ignore_whitespace: bool,
     line_range: Option<BlameLineRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlameDateMode {
+    Iso,
+    Default,
+    Short,
+    Raw,
+    Unix,
 }
 
 #[derive(Debug, Clone)]
@@ -1625,6 +1635,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut root = false;
     let mut contents_path = None;
     let mut abbrev_width = None;
+    let mut date_mode = BlameDateMode::Iso;
     let mut ignore_whitespace = false;
     let mut line_range = None;
     let mut positionals = Vec::new();
@@ -1712,7 +1723,8 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                         cursor += 1;
                         continue;
                     }
-                    if arg == "--date=iso" {
+                    if let Some(value) = arg.strip_prefix("--date=") {
+                        date_mode = parse_blame_date_mode(value)?;
                         cursor += 1;
                         continue;
                     }
@@ -1724,10 +1736,9 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                                 message: "blame --date requires a value".into(),
                             });
                         };
-                        if value == "iso" {
-                            cursor += 1;
-                            continue;
-                        }
+                        date_mode = parse_blame_date_mode(value)?;
+                        cursor += 1;
+                        continue;
                     }
                     return Err(CliError::Fatal {
                         code: 129,
@@ -1767,9 +1778,24 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         show_stats,
         root,
         abbrev_width,
+        date_mode,
         ignore_whitespace,
         line_range,
     })
+}
+
+fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
+    match value {
+        "iso" => Ok(BlameDateMode::Iso),
+        "default" => Ok(BlameDateMode::Default),
+        "short" => Ok(BlameDateMode::Short),
+        "raw" => Ok(BlameDateMode::Raw),
+        "unix" => Ok(BlameDateMode::Unix),
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: format!("unsupported blame date mode '{value}'"),
+        }),
+    }
 }
 
 fn parse_blame_abbrev(value: &str) -> Result<usize> {
@@ -2048,7 +2074,7 @@ fn print_blame_lines(
         } else {
             signature_name(&commit.author)
         };
-        let date = signature_blame_date(&commit.author)?;
+        let date = format_blame_date(&commit.author, options.date_mode)?;
         print!("{display_id}");
         if options.show_filename {
             print!(" {}", String::from_utf8_lossy(path));
@@ -2063,6 +2089,46 @@ fn print_blame_lines(
         }
     }
     Ok(())
+}
+
+fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
+    match mode {
+        BlameDateMode::Iso => signature_blame_date(signature),
+        BlameDateMode::Default => signature_log_date(signature),
+        BlameDateMode::Short => {
+            let (timestamp, timezone) =
+                signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "commit has invalid author date".into(),
+                })?;
+            let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "commit has invalid author timezone".into(),
+            })?;
+            let utc =
+                chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "commit author timestamp is out of range".into(),
+                })?;
+            Ok(utc.with_timezone(&offset).format("%Y-%m-%d").to_string())
+        }
+        BlameDateMode::Raw => {
+            let (timestamp, timezone) =
+                signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "commit has invalid author date".into(),
+                })?;
+            Ok(format!("{timestamp} {timezone}"))
+        }
+        BlameDateMode::Unix => {
+            let (timestamp, _) =
+                signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "commit has invalid author date".into(),
+                })?;
+            Ok(timestamp.to_string())
+        }
+    }
 }
 
 fn print_annotate_lines(
