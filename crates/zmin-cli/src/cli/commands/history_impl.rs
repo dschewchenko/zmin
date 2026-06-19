@@ -1741,6 +1741,11 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                         cursor += 1;
                         continue;
                     }
+                    if arg == "--no-abbrev" {
+                        abbrev_width = Some(40);
+                        cursor += 1;
+                        continue;
+                    }
                     if arg == "--abbrev" {
                         cursor += 1;
                         let Some(value) = args.get(cursor) else {
