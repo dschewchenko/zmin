@@ -2129,6 +2129,17 @@ pub(crate) fn apply_root_tree_diff_filter(
     entries: Vec<RootTreeDiffEntry>,
     diff_filter: DiffFilter,
 ) -> Vec<RootTreeDiffEntry> {
+    if diff_filter.all_or_none {
+        return if diff_filter.include_mask != 0
+            && entries.iter().any(|entry| {
+                diff_filter.include_mask & diff_filter_status_bit(entry.status) != 0
+            })
+        {
+            entries
+        } else {
+            Vec::new()
+        };
+    }
     entries
         .into_iter()
         .filter(|entry| diff_filter_matches(diff_filter, entry.status))
@@ -3035,11 +3046,16 @@ pub(crate) fn compile_ignore_matching_lines(patterns: &[String]) -> Result<Vec<R
 pub(crate) struct DiffFilter {
     include_mask: u16,
     exclude_mask: u16,
+    all_or_none: bool,
 }
 
 pub(crate) fn parse_diff_filter(value: &str) -> Result<DiffFilter> {
     let mut filter = DiffFilter::default();
     for byte in value.bytes() {
+        if byte == b'*' {
+            filter.all_or_none = true;
+            continue;
+        }
         let bit = diff_filter_bit(byte.to_ascii_lowercase()).ok_or_else(|| CliError::Fatal {
             code: 129,
             message: format!("unsupported --diff-filter status '{}'", byte as char),
@@ -3074,6 +3090,17 @@ pub(crate) fn apply_diff_filter(
 ) -> Vec<zmin_git_core::IndexDiffEntry> {
     if filter.include_mask == 0 && filter.exclude_mask == 0 {
         return entries;
+    }
+    if filter.all_or_none {
+        return if filter.include_mask != 0
+            && entries
+                .iter()
+                .any(|entry| filter.include_mask & diff_filter_status_bit(entry.status) != 0)
+        {
+            entries
+        } else {
+            Vec::new()
+        };
     }
     entries
         .into_iter()

@@ -915,6 +915,12 @@ fn diff_filter_matches_stock_git_for_cached_formats() {
         ["diff", "--cached", "--patch", "--diff-filter=A"].as_slice(),
         ["diff", "--cached", "--numstat", "--diff-filter=DM"].as_slice(),
         ["diff", "--cached", "--shortstat", "--diff-filter=m"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=D*"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=M*"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=A*"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=DM*"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=d*"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=*D"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
