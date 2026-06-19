@@ -5,6 +5,7 @@ struct GitmodulesEntry {
     name: String,
     path: String,
     url: String,
+    branch: Option<String>,
 }
 
 pub(crate) fn clone_submodules(
@@ -78,8 +79,9 @@ pub(crate) fn clone_submodules(
 }
 
 pub(crate) fn init_submodules(args: &[String]) -> Result<()> {
+    let (quiet, paths) = parse_submodule_quiet_paths(args);
     let repo = find_repo()?;
-    let modules = selected_gitmodules(&repo, args)?;
+    let modules = selected_gitmodules(&repo, &paths)?;
     let parent_repository = submodule_parent_repository(&repo);
     for module in modules {
         let url_key = format!("submodule.{}.url", module.name);
@@ -89,22 +91,27 @@ pub(crate) fn init_submodules(args: &[String]) -> Result<()> {
         let url = resolve_submodule_clone_url(&parent_repository, &module.url);
         set_config_value(&repo, &url_key, &url)?;
         set_config_value(&repo, &format!("submodule.{}.active", module.name), "true")?;
-        eprintln!(
-            "Submodule '{}' ({}) registered for path '{}'",
-            module.name, url, module.path
-        );
+        if !quiet {
+            eprintln!(
+                "Submodule '{}' ({}) registered for path '{}'",
+                module.name, url, module.path
+            );
+        }
     }
     Ok(())
 }
 
 pub(crate) fn sync_submodules(args: &[String]) -> Result<()> {
+    let (quiet, paths) = parse_submodule_quiet_paths(args);
     let repo = find_repo()?;
-    let modules = selected_gitmodules(&repo, args)?;
+    let modules = selected_gitmodules(&repo, &paths)?;
     let parent_repository = submodule_parent_repository(&repo);
     for module in modules {
         let url = resolve_submodule_clone_url(&parent_repository, &module.url);
         set_config_value(&repo, &format!("submodule.{}.url", module.name), &url)?;
-        println!("Synchronizing submodule url for '{}'", module.path);
+        if !quiet {
+            println!("Synchronizing submodule url for '{}'", module.path);
+        }
     }
     Ok(())
 }
@@ -116,6 +123,9 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
     let mut depth = None;
     let mut single_branch = false;
     let mut no_single_branch = false;
+    let mut remote = false;
+    let mut no_fetch = false;
+    let mut references = Vec::new();
     let mut paths = Vec::new();
     let mut path_args = false;
     let mut cursor = 0usize;
@@ -127,6 +137,10 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
             init = true;
         } else if !path_args && arg == "--recursive" {
             recursive = true;
+        } else if !path_args && arg == "--remote" {
+            remote = true;
+        } else if !path_args && (arg == "-N" || arg == "--no-fetch") {
+            no_fetch = true;
         } else if !path_args && (arg == "-q" || arg == "--quiet") {
             quiet = true;
         } else if !path_args && arg == "--no-quiet" {
@@ -155,6 +169,17 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 "--checkout" | "--force" | "-f" | "--recommend-shallow" | "--no-recommend-shallow"
             )
         {
+        } else if !path_args && arg == "--reference" {
+            cursor += 1;
+            let Some(value) = args.get(cursor) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "--reference requires a value".into(),
+                });
+            };
+            references.push(PathBuf::from(value));
+        } else if !path_args && arg.starts_with("--reference=") {
+            references.push(PathBuf::from(arg["--reference=".len()..].to_owned()));
         } else if !path_args && (arg == "--jobs" || arg == "-j") {
             cursor += 1;
             if cursor >= args.len() {
@@ -208,7 +233,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 single_branch,
                 no_single_branch,
                 separate_git_dir: None,
-                references: Vec::new(),
+                references: references.clone(),
                 reference_if_able: Vec::new(),
                 shared: false,
                 dissociate: false,
@@ -221,13 +246,18 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 directory: Some(path.clone()),
             })?;
         }
-        checkout_submodule_gitlink(&path, &entry.id)?;
+        let checkout_id = if remote {
+            update_submodule_remote_head(&repo, &module, &path, &parent_repository, no_fetch)?
+        } else {
+            entry.id.clone()
+        };
+        checkout_submodule_gitlink(&path, &checkout_id)?;
         absorb_submodule_gitdir(&repo, &module.path)?;
         if !quiet {
             println!(
                 "Submodule path '{}': checked out '{}'",
                 module.path,
-                entry.id.to_hex()
+                checkout_id.to_hex()
             );
         }
         if recursive {
@@ -276,13 +306,15 @@ pub(crate) fn deinit_submodules(args: &[String]) -> Result<()> {
     let mut all = false;
     let mut quiet = false;
     let mut paths = Vec::new();
+    let mut path_args = false;
     for arg in args {
         match arg.as_str() {
-            "-f" | "--force" => force = true,
-            "-q" | "--quiet" => quiet = true,
-            "--no-quiet" => quiet = false,
-            "--all" => all = true,
-            option if option.starts_with('-') => {
+            "--" if !path_args => path_args = true,
+            "-f" | "--force" if !path_args => force = true,
+            "-q" | "--quiet" if !path_args => quiet = true,
+            "--no-quiet" if !path_args => quiet = false,
+            "--all" if !path_args => all = true,
+            option if !path_args && option.starts_with('-') => {
                 return Err(CliError::Fatal {
                     code: 129,
                     message: format!("unsupported submodule deinit option '{option}'"),
@@ -333,9 +365,134 @@ pub(crate) fn deinit_submodules(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn set_submodule_branch(args: &[String]) -> Result<()> {
+    let mut default = false;
+    let mut branch = None;
+    let mut paths = Vec::new();
+    let mut path_args = false;
+    let mut cursor = 0usize;
+    while cursor < args.len() {
+        let arg = &args[cursor];
+        if !path_args && arg == "--" {
+            path_args = true;
+        } else if !path_args && (arg == "-q" || arg == "--quiet" || arg == "--no-quiet") {
+        } else if !path_args && arg == "--default" {
+            default = true;
+        } else if !path_args && (arg == "-b" || arg == "--branch") {
+            cursor += 1;
+            let Some(value) = args.get(cursor) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: format!("{arg} requires a value"),
+                });
+            };
+            branch = Some(value.clone());
+        } else if !path_args && arg.starts_with("--branch=") {
+            branch = Some(arg["--branch=".len()..].to_owned());
+        } else if !path_args && arg.starts_with('-') {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: format!("unsupported submodule set-branch option '{arg}'"),
+            });
+        } else {
+            paths.push(arg.clone());
+        }
+        cursor += 1;
+    }
+    if default == branch.is_some() {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "submodule set-branch requires exactly one of --default or --branch".into(),
+        });
+    }
+    if paths.len() != 1 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "submodule set-branch requires a path".into(),
+        });
+    }
+    let repo = find_repo()?;
+    let modules = selected_gitmodules(&repo, &paths)?;
+    let module = modules.first().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("no submodule mapping found in .gitmodules for path '{}'", paths[0]),
+    })?;
+    let gitmodules = repo.root.join(".gitmodules");
+    let key = format!("submodule.{}.branch", module.name);
+    if let Some(branch) = branch {
+        set_config_value_in_file(&gitmodules, &key, &branch)?;
+    } else {
+        let _ = unset_config_value_in_file(&gitmodules, &key);
+    }
+    Ok(())
+}
+
+pub(crate) fn set_submodule_url(args: &[String]) -> Result<()> {
+    let (quiet, values) = parse_submodule_quiet_paths(args);
+    if values.len() != 2 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "submodule set-url requires <path> <newurl>".into(),
+        });
+    }
+    let repo = find_repo()?;
+    let modules = selected_gitmodules(&repo, &[values[0].clone()])?;
+    let module = modules.first().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("no submodule mapping found in .gitmodules for path '{}'", values[0]),
+    })?;
+    let resolved_url = resolve_submodule_set_url(&repo, &values[1])?;
+    set_config_value_in_file(
+        &repo.root.join(".gitmodules"),
+        &format!("submodule.{}.url", module.name),
+        &values[1],
+    )?;
+    set_config_value(
+        &repo,
+        &format!("submodule.{}.url", module.name),
+        &resolved_url,
+    )?;
+    if !quiet {
+        println!("Synchronizing submodule url for '{}'", module.path);
+    }
+    Ok(())
+}
+
+fn resolve_submodule_set_url(repo: &GitRepo, url: &str) -> Result<String> {
+    if !(url.starts_with("./") || url.starts_with("../")) {
+        return Ok(url.to_owned());
+    }
+    let resolved = lexical_normalize_path(&repo.root.join(url));
+    #[cfg(windows)]
+    {
+        return Ok(resolved.to_string_lossy().replace('\\', "/"));
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(resolved.display().to_string())
+    }
+}
+
+fn lexical_normalize_path(path: &std::path::Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            std::path::Component::RootDir => normalized.push(component.as_os_str()),
+            std::path::Component::Normal(part) => normalized.push(part),
+        }
+    }
+    normalized
+}
+
 pub(crate) fn absorb_submodule_gitdirs(args: &[String]) -> Result<()> {
     let repo = find_repo()?;
-    for module in selected_gitmodules(&repo, args)? {
+    let (_, paths) = parse_submodule_quiet_paths(args);
+    for module in selected_gitmodules(&repo, &paths)? {
         absorb_submodule_gitdir(&repo, &module.path)?;
     }
     Ok(())
@@ -346,6 +503,24 @@ fn submodule_active_value(active_specs: &[String]) -> String {
         .first()
         .cloned()
         .unwrap_or_else(|| ".".to_owned())
+}
+
+fn parse_submodule_quiet_paths(args: &[String]) -> (bool, Vec<String>) {
+    let mut quiet = false;
+    let mut paths = Vec::new();
+    let mut path_args = false;
+    for arg in args {
+        if !path_args && arg == "--" {
+            path_args = true;
+        } else if !path_args && (arg == "-q" || arg == "--quiet") {
+            quiet = true;
+        } else if !path_args && arg == "--no-quiet" {
+            quiet = false;
+        } else {
+            paths.push(arg.clone());
+        }
+    }
+    (quiet, paths)
 }
 
 fn selected_gitmodules(repo: &GitRepo, paths: &[String]) -> Result<Vec<GitmodulesEntry>> {
@@ -401,7 +576,7 @@ fn nested_submodule_specs(path: &str, active_specs: &[String]) -> Vec<String> {
 
 fn read_gitmodules(repo: &GitRepo) -> Result<Vec<GitmodulesEntry>> {
     let entries = read_config_file(&repo.root.join(".gitmodules"))?;
-    let mut by_name = BTreeMap::<String, (Option<String>, Option<String>)>::new();
+    let mut by_name = BTreeMap::<String, (Option<String>, Option<String>, Option<String>)>::new();
     for entry in entries {
         if entry.section != "submodule" || entry.subsection.is_empty() {
             continue;
@@ -410,16 +585,18 @@ fn read_gitmodules(repo: &GitRepo) -> Result<Vec<GitmodulesEntry>> {
         match entry.key.as_str() {
             "path" => values.0 = Some(entry.value),
             "url" => values.1 = Some(entry.value),
+            "branch" => values.2 = Some(entry.value),
             _ => {}
         }
     }
     Ok(by_name
         .into_iter()
-        .filter_map(|(name, (path, url))| {
+        .filter_map(|(name, (path, url, branch))| {
             Some(GitmodulesEntry {
                 name,
                 path: path?,
                 url: url?,
+                branch,
             })
         })
         .collect())
@@ -458,6 +635,153 @@ fn checkout_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<(
     checkout_worktree(&repo, &store, id)?;
     refs.write_head_direct(id)?;
     Ok(())
+}
+
+fn update_submodule_remote_head(
+    repo: &GitRepo,
+    module: &GitmodulesEntry,
+    path: &std::path::Path,
+    parent_repository: &str,
+    no_fetch: bool,
+) -> Result<ObjectId> {
+    let submodule_repo = find_repo_at(path)?;
+    let submodule_refs = RefStore::new(&submodule_repo.git_dir, GitHashAlgorithm::Sha1);
+    let mut source_refs = None;
+    if !no_fetch {
+        let remote_url = submodule_remote_url(repo, &submodule_repo, module, parent_repository)?;
+        let Some(remote_path) = local_repository_path_from_location(&remote_url)? else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "submodule update --remote cannot fetch non-local remote '{remote_url}' yet"
+                ),
+            });
+        };
+        let source = local_clone_source(&remote_path)?;
+        copy_dir_contents(&source.common_dir.join("objects"), &submodule_repo.objects_dir)?;
+        source_refs = Some(RefStore::new(&source.git_dir, GitHashAlgorithm::Sha1));
+    }
+    let branch = match configured_submodule_remote_branch(repo, module)? {
+        Some(branch) => branch,
+        None => match source_refs.as_ref() {
+            Some(refs) => default_submodule_remote_branch(refs)?,
+            None => default_submodule_remote_tracking_branch(&submodule_refs)?,
+        },
+    };
+    if branch.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "Unable to find current remote branch for submodule path '{}'",
+                module.path
+            ),
+        });
+    }
+    if let Some(source_refs) = source_refs.as_ref() {
+        copy_remote_refs(source_refs, &submodule_refs, "origin", Some(&branch), true)?;
+    }
+    submodule_refs
+        .resolve(&format!("refs/remotes/origin/{branch}"))
+        .map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!(
+                "Unable to find refs/remotes/origin/{branch} revision in submodule path '{}'",
+                module.path
+            ),
+        })
+}
+
+fn submodule_remote_url(
+    repo: &GitRepo,
+    submodule_repo: &GitRepo,
+    module: &GitmodulesEntry,
+    parent_repository: &str,
+) -> Result<String> {
+    let url = read_config_value(submodule_repo, "remote.origin.url")?
+        .or(read_config_value(
+            repo,
+            &format!("submodule.{}.url", module.name),
+        )?)
+        .unwrap_or_else(|| module.url.clone());
+    Ok(resolve_submodule_clone_url(parent_repository, &url))
+}
+
+fn configured_submodule_remote_branch(
+    repo: &GitRepo,
+    module: &GitmodulesEntry,
+) -> Result<Option<String>> {
+    let branch = read_config_value(repo, &format!("submodule.{}.branch", module.name))?
+        .or_else(|| module.branch.clone());
+    match branch.as_deref() {
+        Some(".") => {
+            let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+            current_branch_ref(&refs)?
+                .map(|name| branch_display_name(&name))
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "submodule '{}' uses branch '.' but the superproject HEAD is detached",
+                        module.path
+                    ),
+                })
+                .map(Some)
+        }
+        Some(value) => Ok(Some(value.to_owned())),
+        None => Ok(None),
+    }
+}
+
+fn default_submodule_remote_branch(source_refs: &RefStore) -> Result<String> {
+    if let Some(head) = current_branch_ref(source_refs)? {
+        return Ok(branch_display_name(&head));
+    }
+    let head_id = source_refs.resolve("HEAD").map_err(CliError::Io)?;
+    let mut branch = None;
+    source_refs.for_each_resolved_ref("refs/heads/", |ref_name, id| {
+        if branch.is_none() && id == &head_id {
+            branch = ref_name.strip_prefix("refs/heads/").map(str::to_owned);
+        }
+        Ok::<(), CliError>(())
+    })?;
+    branch.ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "remote HEAD does not point at a branch".into(),
+    })
+}
+
+fn default_submodule_remote_tracking_branch(refs: &RefStore) -> Result<String> {
+    match refs.read_ref("refs/remotes/origin/HEAD") {
+        Ok(RefTarget::Symbolic(target)) => target
+            .strip_prefix("refs/remotes/origin/")
+            .map(str::to_owned)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "origin/HEAD does not point at an origin branch".into(),
+            }),
+        Ok(RefTarget::Direct(id)) => {
+            let mut branch = None;
+            refs.for_each_resolved_ref("refs/remotes/origin/", |ref_name, ref_id| {
+                if branch.is_none()
+                    && ref_name != "refs/remotes/origin/HEAD"
+                    && ref_id == &id
+                {
+                    branch = ref_name
+                        .strip_prefix("refs/remotes/origin/")
+                        .map(str::to_owned);
+                }
+                Ok::<(), CliError>(())
+            })?;
+            branch.ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "origin/HEAD does not match an origin branch".into(),
+            })
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(CliError::Fatal {
+            code: 128,
+            message: "origin/HEAD is not available; run without --no-fetch first".into(),
+        }),
+        Err(error) => Err(CliError::Io(error)),
+    }
 }
 
 fn absorb_submodule_gitdir(repo: &GitRepo, path: &str) -> Result<()> {
@@ -584,10 +908,19 @@ pub(crate) struct SubmoduleHeadState {
     pub(crate) display: String,
 }
 
-pub(crate) fn write_gitmodules_entry(repo: &GitRepo, url: &str, path: &str) -> Result<()> {
+pub(crate) fn write_gitmodules_named_entry(
+    repo: &GitRepo,
+    name: &str,
+    url: &str,
+    path: &str,
+    branch: Option<&str>,
+) -> Result<()> {
     let gitmodules = repo.root.join(".gitmodules");
-    set_config_value_in_file(&gitmodules, &format!("submodule.{path}.path"), path)?;
-    set_config_value_in_file(&gitmodules, &format!("submodule.{path}.url"), url)?;
+    set_config_value_in_file(&gitmodules, &format!("submodule.{name}.path"), path)?;
+    set_config_value_in_file(&gitmodules, &format!("submodule.{name}.url"), url)?;
+    if let Some(branch) = branch {
+        set_config_value_in_file(&gitmodules, &format!("submodule.{name}.branch"), branch)?;
+    }
     Ok(())
 }
 
@@ -624,6 +957,16 @@ fn submodule_head_display(refs: &RefStore, id: &ObjectId) -> String {
     let _ = refs.for_each_resolved_ref("refs/heads/", |branch, branch_id| {
         if display.is_none() && branch_id == id {
             display = Some(branch.strip_prefix("refs/").unwrap_or(branch).to_owned());
+        }
+        Ok::<(), CliError>(())
+    });
+    if let Some(display) = display {
+        return display;
+    }
+    let mut display = None;
+    let _ = refs.for_each_resolved_ref("refs/remotes/", |remote, remote_id| {
+        if display.is_none() && remote_id == id {
+            display = Some(remote.strip_prefix("refs/").unwrap_or(remote).to_owned());
         }
         Ok::<(), CliError>(())
     });

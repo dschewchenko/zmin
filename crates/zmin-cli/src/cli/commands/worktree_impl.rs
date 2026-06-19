@@ -3618,19 +3618,46 @@ pub(crate) fn sparse_checkout(args: Vec<String>) -> Result<()> {
 }
 
 pub(crate) fn submodule(args: Vec<String>) -> Result<()> {
+    let mut args = args;
+    let mut quiet = false;
+    while args
+        .first()
+        .is_some_and(|arg| arg == "--quiet" || arg == "-q")
+    {
+        quiet = true;
+        args.remove(0);
+    }
+    if args.is_empty() {
+        let quiet_args = quiet.then(|| "--quiet".to_owned()).into_iter().collect::<Vec<_>>();
+        return submodule_status(&quiet_args);
+    }
+    let prefixed_args = |args: &[String]| {
+        let mut values = Vec::with_capacity(args.len() + usize::from(quiet));
+        if quiet {
+            values.push("--quiet".to_owned());
+        }
+        values.extend_from_slice(args);
+        values
+    };
+    if args.first().is_some_and(|arg| arg == "--cached") {
+        let values = prefixed_args(&args);
+        return submodule_status(&values);
+    }
     if args.is_empty() {
         return submodule_status(&[]);
     }
     let subcommand = args.first().map(String::as_str).unwrap_or("status");
     match subcommand {
-        "add" => submodule_add(&args[1..]),
-        "status" => submodule_status(&args[1..]),
-        "init" => init_submodules(&args[1..]),
-        "sync" => sync_submodules(&args[1..]),
-        "update" => update_submodules(&args[1..]),
-        "foreach" => foreach_submodules(&args[1..]),
-        "deinit" => deinit_submodules(&args[1..]),
-        "absorbgitdirs" => absorb_submodule_gitdirs(&args[1..]),
+        "add" => submodule_add(&prefixed_args(&args[1..])),
+        "status" => submodule_status(&prefixed_args(&args[1..])),
+        "init" => init_submodules(&prefixed_args(&args[1..])),
+        "sync" => sync_submodules(&prefixed_args(&args[1..])),
+        "update" => update_submodules(&prefixed_args(&args[1..])),
+        "foreach" => foreach_submodules(&prefixed_args(&args[1..])),
+        "deinit" => deinit_submodules(&prefixed_args(&args[1..])),
+        "set-branch" => set_submodule_branch(&prefixed_args(&args[1..])),
+        "set-url" => set_submodule_url(&prefixed_args(&args[1..])),
+        "absorbgitdirs" => absorb_submodule_gitdirs(&prefixed_args(&args[1..])),
         "--cached" | "--quiet" => submodule_status(&args),
         _ => Err(CliError::Fatal {
             code: 129,
@@ -4718,22 +4745,27 @@ pub(crate) fn ensure_sparse_checkout_enabled(repo: &GitRepo, message: &str) -> R
     })
 }
 
+struct SubmoduleAddOptions {
+    quiet: bool,
+    force: bool,
+    name: Option<String>,
+    branch: Option<String>,
+    references: Vec<PathBuf>,
+    repository: String,
+    path: Option<PathBuf>,
+}
+
 fn submodule_add(args: &[String]) -> Result<()> {
-    if args.is_empty() || args.len() > 2 {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "submodule add requires <repository> <path>".into(),
-        });
-    }
+    let options = parse_submodule_add_options(args)?;
     let repo = find_repo()?;
-    let submodule_path = args
-        .get(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default_submodule_path(&args[0]));
+    let submodule_path = options
+        .path
+        .clone()
+        .unwrap_or_else(|| default_submodule_path(&options.repository));
     let absolute_submodule_path = absolute_path_from_arg(&submodule_path)?;
     if exact_repo_at(&absolute_submodule_path).is_none() {
         transport_commands::clone(CloneOptions {
-            quiet: false,
+            quiet: options.quiet,
             configs: Vec::new(),
             template: None,
             reject_shallow: false,
@@ -4751,29 +4783,47 @@ fn submodule_add(args: &[String]) -> Result<()> {
             single_branch: false,
             no_single_branch: false,
             separate_git_dir: None,
-            references: Vec::new(),
+            references: options.references.clone(),
             reference_if_able: Vec::new(),
             shared: false,
             dissociate: false,
             no_hardlinks: false,
             no_local: false,
             depth: None,
-            branch: None,
+            branch: options.branch.clone(),
             keep_partial_on_missing_branch: false,
-            repository: args[0].clone(),
+            repository: options.repository.clone(),
             directory: Some(absolute_submodule_path.clone()),
         })?;
+    } else if !options.force {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "'{}' already exists in the index",
+                submodule_path.display()
+            ),
+        });
     }
     let submodule_path_string = submodule_path.to_string_lossy().replace('\\', "/");
-    write_gitmodules_entry(&repo, &args[0], &submodule_path_string)?;
-    set_config_value(
+    let submodule_name = options
+        .name
+        .clone()
+        .unwrap_or_else(|| submodule_path_string.clone());
+    write_gitmodules_named_entry(
         &repo,
-        &format!("submodule.{submodule_path_string}.url"),
-        &args[0],
+        &submodule_name,
+        &options.repository,
+        &submodule_path_string,
+        options.branch.as_deref(),
     )?;
     set_config_value(
         &repo,
-        &format!("submodule.{submodule_path_string}.active"),
+        &format!("submodule.{submodule_name}.url"),
+        &options.repository,
+    )?;
+    set_config_value(
+        &repo,
+        &format!("submodule.{submodule_name}.active"),
         "true",
     )?;
 
@@ -4792,6 +4842,74 @@ fn submodule_add(args: &[String]) -> Result<()> {
     )?)?;
     index.write_to_path(&repo.index_path)?;
     Ok(())
+}
+
+fn parse_submodule_add_options(args: &[String]) -> Result<SubmoduleAddOptions> {
+    let mut quiet = false;
+    let mut force = false;
+    let mut name = None;
+    let mut branch = None;
+    let mut references = Vec::new();
+    let mut values = Vec::new();
+    let mut path_args = false;
+    let mut cursor = 0usize;
+    while cursor < args.len() {
+        let arg = &args[cursor];
+        if !path_args && arg == "--" {
+            path_args = true;
+        } else if !path_args && (arg == "-q" || arg == "--quiet") {
+            quiet = true;
+        } else if !path_args && (arg == "-f" || arg == "--force") {
+            force = true;
+        } else if !path_args && (arg == "-b" || arg == "--branch") {
+            cursor += 1;
+            branch = Some(required_submodule_option_value(args, cursor, arg)?);
+        } else if !path_args && arg.starts_with("--branch=") {
+            branch = Some(arg["--branch=".len()..].to_owned());
+        } else if !path_args && arg == "--name" {
+            cursor += 1;
+            name = Some(required_submodule_option_value(args, cursor, arg)?);
+        } else if !path_args && arg.starts_with("--name=") {
+            name = Some(arg["--name=".len()..].to_owned());
+        } else if !path_args && arg == "--reference" {
+            cursor += 1;
+            references.push(PathBuf::from(required_submodule_option_value(
+                args, cursor, arg,
+            )?));
+        } else if !path_args && arg.starts_with("--reference=") {
+            references.push(PathBuf::from(arg["--reference=".len()..].to_owned()));
+        } else if !path_args && arg.starts_with('-') {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: format!("unsupported submodule add option '{arg}'"),
+            });
+        } else {
+            values.push(arg.clone());
+        }
+        cursor += 1;
+    }
+    if values.is_empty() || values.len() > 2 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "submodule add requires <repository> <path>".into(),
+        });
+    }
+    Ok(SubmoduleAddOptions {
+        quiet,
+        force,
+        name,
+        branch,
+        references,
+        repository: values[0].clone(),
+        path: values.get(1).map(PathBuf::from),
+    })
+}
+
+fn required_submodule_option_value(args: &[String], cursor: usize, option: &str) -> Result<String> {
+    args.get(cursor).cloned().ok_or_else(|| CliError::Fatal {
+        code: 129,
+        message: format!("{option} requires a value"),
+    })
 }
 
 fn default_submodule_path(repository: &str) -> PathBuf {

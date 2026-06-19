@@ -41,6 +41,113 @@ fn submodule_add_status_creates_stock_readable_gitlink() {
 }
 
 #[test]
+fn submodule_add_branch_name_reference_and_quiet_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = dir.path().join("submodule");
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    write_file(&submodule, "main.txt", "main\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "main"]);
+    git(&submodule, ["checkout", "-b", "feature"]);
+    write_file(&submodule, "feature.txt", "feature\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "feature"]);
+    let feature_head = git(&submodule, ["rev-parse", "HEAD"]);
+
+    let git_repo = dir.path().join("git-super");
+    let zmin_repo = dir.path().join("zmin-super");
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_repo.to_str().expect("git path")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_repo.to_str().expect("zmin path")],
+    );
+    configure_identity(&git_repo);
+    configure_identity(&zmin_repo);
+
+    let git_output = Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "--quiet",
+            "add",
+            "-b",
+            "feature",
+            "--name",
+            "library",
+            "--reference",
+            submodule.to_str().expect("reference path"),
+            submodule.to_str().expect("submodule path"),
+            "deps/lib",
+        ])
+        .current_dir(&git_repo)
+        .output()
+        .expect("git submodule add");
+    assert!(
+        git_output.status.success(),
+        "git submodule add failed: {}",
+        String::from_utf8_lossy(&git_output.stderr)
+    );
+    assert!(
+        git_output.stdout.is_empty(),
+        "git --quiet should suppress stdout"
+    );
+
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_repo,
+        &[
+            "submodule",
+            "--quiet",
+            "add",
+            "-b",
+            "feature",
+            "--name",
+            "library",
+            "--reference",
+            submodule.to_str().expect("reference path"),
+            submodule.to_str().expect("submodule path"),
+            "deps/lib",
+        ],
+        "zmin",
+    );
+    assert!(
+        zmin_output.0 == 0,
+        "zmin submodule add failed: {}",
+        zmin_output.2
+    );
+    assert!(
+        zmin_output.1.is_empty(),
+        "zmin --quiet should suppress stdout"
+    );
+
+    assert_eq!(
+        git(&zmin_repo.join("deps/lib"), ["rev-parse", "HEAD"]),
+        feature_head
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".gitmodules")).expect("read zmin gitmodules"),
+        fs::read_to_string(git_repo.join(".gitmodules")).expect("read git gitmodules")
+    );
+    assert_eq!(
+        run_zmin(&zmin_repo, ["submodule", "--quiet", "status"]),
+        git(&git_repo, ["submodule", "--quiet", "status"])
+    );
+}
+
+#[test]
 fn add_submodule_path_updates_gitlink_without_staging_nested_files() {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
@@ -314,6 +421,225 @@ fn clone_remote_submodules_checks_out_remote_head_like_stock_git() {
     assert_eq!(
         run_zmin(&zmin_clone, ["submodule", "status", "--cached"]),
         git(&git_clone, ["submodule", "status", "--cached"])
+    );
+}
+
+#[test]
+fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = dir.path().join("submodule");
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    write_file(&submodule, "sub.txt", "one\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "one"]);
+    let initial_head = git(&submodule, ["rev-parse", "HEAD"]);
+
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.to_str().expect("submodule path"),
+            "deps/sub",
+        ])
+        .current_dir(&source)
+        .output()
+        .expect("git submodule add");
+    assert!(
+        output.status.success(),
+        "git submodule add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    git_with_env(&source, ["commit", "-m", "submodule"]);
+
+    let git_output = Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "--recurse-submodules",
+            source.to_str().expect("source path"),
+            "git-update-remote",
+        ])
+        .current_dir(dir.path())
+        .output()
+        .expect("git recursive clone");
+    assert!(
+        git_output.status.success(),
+        "git recursive clone failed: {}",
+        String::from_utf8_lossy(&git_output.stderr)
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--recurse-submodules",
+            source.to_str().expect("source path"),
+            "zmin-update-remote",
+        ],
+    );
+
+    write_file(&submodule, "sub.txt", "two\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "two"]);
+    let remote_head = git(&submodule, ["rev-parse", "HEAD"]);
+
+    let git_clone = dir.path().join("git-update-remote");
+    let zmin_clone = dir.path().join("zmin-update-remote");
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--remote",
+            "deps/sub",
+        ])
+        .current_dir(&git_clone)
+        .output()
+        .expect("git submodule update --remote");
+    assert!(
+        output.status.success(),
+        "git submodule update --remote failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    run_zmin(
+        &zmin_clone,
+        ["submodule", "update", "--remote", "deps/sub"],
+    );
+
+    assert_eq!(git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]), remote_head);
+    assert_eq!(
+        git(&zmin_clone, ["status", "--short"]),
+        git(&git_clone, ["status", "--short"])
+    );
+    assert_eq!(
+        run_zmin(&zmin_clone, ["submodule", "status"]),
+        git(&git_clone, ["submodule", "status"])
+    );
+
+    write_file(&submodule, "sub.txt", "three\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "three"]);
+    git(&git_clone.join("deps/sub"), ["checkout", &initial_head]);
+    git(&zmin_clone.join("deps/sub"), ["checkout", &initial_head]);
+
+    let output = Command::new("git")
+        .args([
+            "submodule",
+            "--quiet",
+            "update",
+            "--remote",
+            "--no-fetch",
+            "deps/sub",
+        ])
+        .current_dir(&git_clone)
+        .output()
+        .expect("git submodule update --remote --no-fetch");
+    assert!(
+        output.status.success(),
+        "git submodule update --remote --no-fetch failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    run_zmin(
+        &zmin_clone,
+        [
+            "submodule",
+            "--quiet",
+            "update",
+            "--remote",
+            "--no-fetch",
+            "deps/sub",
+        ],
+    );
+    assert_eq!(
+        git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
+        git(&git_clone.join("deps/sub"), ["rev-parse", "HEAD"])
+    );
+}
+
+#[test]
+fn submodule_set_branch_and_set_url_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = submodule_child_repo();
+    let git_repo = dir.path().join("git-super");
+    let zmin_repo = dir.path().join("zmin-super");
+    for repo in [&git_repo, &zmin_repo] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", repo.to_str().expect("repo path")],
+        );
+        configure_identity(repo);
+        let output = Command::new("git")
+            .args([
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                submodule.path().to_str().expect("submodule path"),
+                "deps/sub",
+            ])
+            .current_dir(repo)
+            .output()
+            .expect("git submodule add");
+        assert!(
+            output.status.success(),
+            "git submodule add failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    git(&git_repo, ["submodule", "set-branch", "--branch", "dev", "deps/sub"]);
+    run_zmin(
+        &zmin_repo,
+        ["submodule", "set-branch", "--branch", "dev", "deps/sub"],
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".gitmodules")).expect("read zmin gitmodules"),
+        fs::read_to_string(git_repo.join(".gitmodules")).expect("read git gitmodules")
+    );
+
+    git(&git_repo, ["submodule", "set-branch", "--default", "deps/sub"]);
+    run_zmin(
+        &zmin_repo,
+        ["submodule", "set-branch", "--default", "deps/sub"],
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".gitmodules")).expect("read zmin gitmodules"),
+        fs::read_to_string(git_repo.join(".gitmodules")).expect("read git gitmodules")
+    );
+
+    git(
+        &git_repo,
+        ["submodule", "--quiet", "set-url", "deps/sub", "../other"],
+    );
+    run_zmin(
+        &zmin_repo,
+        ["submodule", "--quiet", "set-url", "deps/sub", "../other"],
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".gitmodules")).expect("read zmin gitmodules"),
+        fs::read_to_string(git_repo.join(".gitmodules")).expect("read git gitmodules")
+    );
+    assert_eq!(
+        run_zmin(&zmin_repo, ["config", "--get", "submodule.deps/sub.url"]),
+        git(&git_repo, ["config", "--get", "submodule.deps/sub.url"])
     );
 }
 
