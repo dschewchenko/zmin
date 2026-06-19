@@ -309,6 +309,58 @@ fn notes_allow_empty_matches_stock_git_for_add_and_append() {
 }
 
 #[test]
+fn notes_add_allow_empty_edits_empty_message_like_stock_git() {
+    for args in [
+        vec!["notes", "add", "--allow-empty", "HEAD"],
+        vec!["notes", "add", "--allow-empty", "--no-edit", "HEAD"],
+    ] {
+        let git_repo = notes_base_repo();
+        let zmin_repo = notes_base_repo();
+        let git_editor = git_repo.path().join("allow-empty-editor.sh");
+        let zmin_editor = zmin_repo.path().join("allow-empty-editor.sh");
+        fs::write(&git_editor, "#!/bin/sh\nprintf 'edited-note\\n' > \"$1\"\n")
+            .expect("write git editor");
+        fs::write(
+            &zmin_editor,
+            "#!/bin/sh\nprintf 'edited-note\\n' > \"$1\"\n",
+        )
+        .expect("write zmin editor");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for editor in [&git_editor, &zmin_editor] {
+                let mut permissions = fs::metadata(editor).expect("editor metadata").permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(editor, permissions).expect("chmod editor");
+            }
+        }
+
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &args,
+                &[("GIT_EDITOR", zmin_editor.to_str().expect("editor path"))],
+                "zmin",
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &args,
+                &[("GIT_EDITOR", git_editor.to_str().expect("editor path"))],
+                "git",
+            ),
+            "notes add output should match for {args:?}",
+        );
+        assert_eq!(
+            command_stdout_bytes(zmin_bin(), zmin_repo.path(), &["notes", "show", "HEAD"]),
+            command_stdout_bytes("git", git_repo.path(), &["notes", "show", "HEAD"]),
+            "notes add content should match for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn notes_reuse_message_matches_stock_git_for_add_and_append() {
     let git_repo = notes_base_repo();
     let zmin_repo = notes_base_repo();

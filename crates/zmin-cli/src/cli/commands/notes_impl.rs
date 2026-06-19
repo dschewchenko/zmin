@@ -872,7 +872,7 @@ fn parse_notes_add_args(args: Vec<String>) -> Result<NotesAddArgs> {
         if allow_empty || edit {
             return Ok(NotesAddArgs {
                 force,
-                edit,
+                edit: true,
                 separator,
                 stripspace,
                 sources: vec![NotesMessageSource::Empty],

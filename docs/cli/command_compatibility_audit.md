@@ -57,6 +57,8 @@ Recently closed replacement gaps:
   `%%`, `%n`, and `%xNN`
 - `notes copy --for-rewrite=<command>` follows the configured rewrite gate for
   exact `notes.rewriteRef` refs and implies stdin pair input
+- `notes add --allow-empty` opens the configured editor and writes the edited
+  note content like stock Git, including the `--no-edit` toggle form
 
 Current high-priority gap classes:
 
