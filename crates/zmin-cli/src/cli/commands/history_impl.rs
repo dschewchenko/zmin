@@ -4878,9 +4878,9 @@ fn parse_log_decoration_mode(value: Option<&str>) -> Result<Option<LogDecoration
         return Ok(None);
     };
     match value {
-        "" | "short" | "auto" | "true" => Ok(Some(LogDecorationMode::Short)),
+        "" | "short" | "auto" | "true" | "yes" | "on" | "1" => Ok(Some(LogDecorationMode::Short)),
         "full" => Ok(Some(LogDecorationMode::Full)),
-        "no" | "false" => Ok(None),
+        "no" | "false" | "off" | "0" => Ok(None),
         other => Err(CliError::Fatal {
             code: 129,
             message: format!("unsupported --decorate value '{other}'"),

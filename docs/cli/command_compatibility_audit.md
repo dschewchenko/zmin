@@ -88,6 +88,8 @@ Recently closed replacement gaps:
   for dry-run clean flows
 - `column --mode` now matches stock Git dense and nodense layout selection for
   `dense`, `nodense`, `column,dense`, and `row,dense`
+- `log --decorate` accepts stock Git boolean value forms `yes`, `on`, `1`,
+  `off`, and `0`
 
 Current high-priority gap classes:
 

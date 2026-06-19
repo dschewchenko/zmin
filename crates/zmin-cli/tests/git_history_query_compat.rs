@@ -670,6 +670,30 @@ fn log_decoration_order_matches_stock_git() {
 }
 
 #[test]
+fn log_decorate_boolean_values_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["tag", "v1"]);
+
+    for args in [
+        ["log", "--decorate=yes", "--oneline", "-1"].as_slice(),
+        ["log", "--decorate=on", "--oneline", "-1"].as_slice(),
+        ["log", "--decorate=1", "--oneline", "-1"].as_slice(),
+        ["log", "--decorate=off", "--oneline", "-1"].as_slice(),
+        ["log", "--decorate=0", "--oneline", "-1"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_and_show_ide_formats_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
