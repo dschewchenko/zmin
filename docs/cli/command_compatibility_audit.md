@@ -90,6 +90,9 @@ Recently closed replacement gaps:
   `dense`, `nodense`, `column,dense`, and `row,dense`
 - `log --decorate` accepts stock Git boolean value forms `yes`, `on`, `1`,
   `off`, and `0`
+- `log --diff-merges=m` is accepted as the stock alias for separate merge
+  diffs, and separate/on/m stat output skips empty parent diff blocks like
+  stock Git
 
 Current high-priority gap classes:
 

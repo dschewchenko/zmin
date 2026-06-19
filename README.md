@@ -148,42 +148,60 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-The command-name inventory is complete for the tracked Git baselines. Argument
-counts below are split from behavior counts because accepting an option in the
-parser is not the same thing as matching Git's behavior.
+Command-name coverage is complete for Git `2.47`. That does not mean Zmin is
+fully behavior-compatible with Git `2.47` yet: parser coverage and behavior
+parity are separate counts.
 
-| Counted set | Counted from | Total counted | Accepted or verified | Open / not counted | Status |
-| --- | --- | ---: | ---: | ---: | --- |
-| Git `2.32` command names | tracked Git command list | `145` | `145` | `0` | `100%` present |
-| Git `2.47` command names | tracked Git command list | `151` | `151` | `0` | `100%` present |
-| Full Zmin command surface | live CLI schema | `203` | `203` | `0` | `100%` present |
-| Git `2.47` baseline argument entries | live CLI schema for baseline commands | `1264` | `1264` | `0` | `100%` parser coverage |
-| Git `2.47` baseline option/positional spellings | live CLI schema for baseline commands | `1506` | `1506` | `0` | `100%` parser coverage |
-| Full Zmin argument entries | live CLI schema | `1393` | `1393` | `0` | `100%` parser coverage |
-| Full Zmin option/positional spellings | live CLI schema | `1652` | `1652` | `0` | `100%` parser coverage |
-| Audited behavior variants | focused parity tests and dogfood fixes | `123` | `123` | `0` | `100%` of audited variants |
-| Hard-fail branches to classify | current source scan | `132` | `0` | `132` | global denominator still open |
+The table follows the Git reference groups. `Accepted args` and `Accepted
+spellings` are the Git-compatible surface declared by Zmin's CLI schema.
+`Verified behavior` counts option/state/transport variants with focused parity
+evidence. Its full Git `2.47` denominator is still being built.
 
-Global Git behavior parity is still being counted. It must include command
-names, options, option combinations, modes, repository states and transports.
+| Git reference group | Commands | Accepted args | Accepted spellings | Verified behavior |
+| --- | ---: | ---: | ---: | ---: |
+| Setup and Config | `6/6` (`100%`) | `39/39` | `44/44` | `0/TBD` |
+| Getting and Creating Projects | `2/2` (`100%`) | `51/51` | `62/62` | `2/TBD` |
+| Basic Snapshotting | `9/9` (`100%`) | `143/143` | `183/183` | `25/TBD` |
+| Branching and Merging | `9/9` (`100%`) | `112/112` | `139/139` | `18/TBD` |
+| Sharing and Updating Projects | `5/5` (`100%`) | `34/34` | `45/45` | `0/TBD` |
+| Inspection and Comparison | `7/7` (`100%`) | `155/155` | `179/179` | `8/TBD` |
+| Patching | `5/5` (`100%`) | `96/96` | `114/114` | `0/TBD` |
+| Debugging | `3/3` (`100%`) | `10/10` | `13/13` | `52/TBD` |
+| Email | `6/6` (`100%`) | `30/30` | `36/36` | `0/TBD` |
+| External Systems | `2/2` (`100%`) | `2/2` | `2/2` | `0/TBD` |
+| Administration | `8/8` (`100%`) | `63/63` | `73/73` | `17/TBD` |
+| Server Admin | `2/2` (`100%`) | `15/15` | `16/16` | `0/TBD` |
+| Plumbing Commands | `20/20` (`100%`) | `243/243` | `288/288` | `0/TBD` |
+| Other Git `2.47` commands | `71/71` (`100%`) | `464/464` | `534/534` | `4/TBD` |
+| **Git `2.47` total** | **`151/151` (`100%`)** | **`1264/1264`** | **`1506/1506`** | **`126/TBD`** |
 
-Command-name coverage by reference group:
+The `git` reference entry maps to the binary entry point, not a subcommand in
+the Git `2.47` command list. Zmin supports the replacement entry point and
+Git-compatible version output.
 
-| Group | Command names present |
-| --- | ---: |
-| Setup and Config | `8/8` |
-| Getting and Creating Projects | `2/2` |
-| Basic Snapshotting | `10/10` |
-| Branching and Merging | `12/12` |
-| Sharing and Updating Projects | `6/6` |
-| Inspection and Comparison | `12/12` |
-| Patching | `6/6` |
-| Debugging | `3/3` |
-| Email | `8/8` |
-| External Systems | `9/9` |
-| Administration | `20/20` |
-| Server Admin | `11/11` |
-| Plumbing Commands | `54/54` |
+Full Git `2.47` behavior parity is still in progress. The remaining denominator
+must count command plus option plus mode plus repository state plus transport
+workflow before a global percentage is honest.
+
+<details>
+<summary>Commands counted in each group</summary>
+
+- Setup and Config: `config`, `help`, `bugreport`, `credential`, `credential-cache`, `credential-store`
+- Getting and Creating Projects: `init`, `clone`
+- Basic Snapshotting: `add`, `status`, `diff`, `commit`, `notes`, `restore`, `reset`, `rm`, `mv`
+- Branching and Merging: `branch`, `checkout`, `switch`, `merge`, `mergetool`, `log`, `stash`, `tag`, `worktree`
+- Sharing and Updating Projects: `fetch`, `pull`, `push`, `remote`, `submodule`
+- Inspection and Comparison: `show`, `log`, `diff`, `difftool`, `range-diff`, `shortlog`, `describe`
+- Patching: `apply`, `cherry-pick`, `diff`, `rebase`, `revert`
+- Debugging: `bisect`, `blame`, `grep`
+- Email: `am`, `apply`, `imap-send`, `format-patch`, `send-email`, `request-pull`
+- External Systems: `svn`, `fast-import`
+- Administration: `clean`, `gc`, `fsck`, `reflog`, `filter-branch`, `instaweb`, `archive`, `bundle`
+- Server Admin: `daemon`, `update-server-info`
+- Plumbing Commands: `cat-file`, `check-ignore`, `checkout-index`, `commit-tree`, `count-objects`, `diff-index`, `for-each-ref`, `hash-object`, `ls-files`, `ls-tree`, `merge-base`, `read-tree`, `rev-list`, `rev-parse`, `show-ref`, `symbolic-ref`, `update-index`, `update-ref`, `verify-pack`, `write-tree`
+- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fetch-pack`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-backend`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `send-pack`, `sh-i18n`, `sh-setup`, `shell`, `show-branch`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
+
+</details>
 
 ## Preview Limits
 

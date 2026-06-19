@@ -694,6 +694,44 @@ fn log_decorate_boolean_values_match_stock_git() {
 }
 
 #[test]
+fn log_diff_merges_m_alias_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        write_file(repo, "a.txt", "base\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "base"]);
+        git(repo, ["checkout", "-b", "side"]);
+        write_file(repo, "a.txt", "side\n");
+        git(repo, ["commit", "-am", "side"]);
+        git(repo, ["checkout", "main"]);
+        write_file(repo, "a.txt", "main\n");
+        git(repo, ["commit", "-am", "main"]);
+        git(repo, ["merge", "-s", "ours", "side", "-m", "merge"]);
+    }
+
+    for args in [
+        [
+            "log",
+            "-1",
+            "--format=%s",
+            "--diff-merges=separate",
+            "--stat",
+        ]
+        .as_slice(),
+        ["log", "-1", "--format=%s", "--diff-merges=on", "--stat"].as_slice(),
+        ["log", "-1", "--format=%s", "--diff-merges=m", "--stat"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_and_show_ide_formats_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

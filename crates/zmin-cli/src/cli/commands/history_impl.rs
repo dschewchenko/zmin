@@ -3876,7 +3876,7 @@ fn parse_log_diff_merges_value(value: &str, include_on: bool) -> Option<LogMerge
     match value {
         "off" | "none" => Some(LogMergeDiffMode::Off),
         "first-parent" | "first_parent" | "1" => Some(LogMergeDiffMode::FirstParent),
-        "separate" => Some(LogMergeDiffMode::Separate),
+        "separate" | "m" => Some(LogMergeDiffMode::Separate),
         "combined" | "c" => Some(LogMergeDiffMode::Combined),
         "dense-combined" | "dense_combined" | "cc" => Some(LogMergeDiffMode::DenseCombined),
         "on" if include_on => Some(LogMergeDiffMode::Separate),
@@ -4054,7 +4054,27 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             } else {
                 commit.parents.len()
             };
+            let mut visible_parent_indexes = Vec::new();
             for parent_index in 0..parent_count {
+                if diff_format.is_some()
+                    && !commit_diff_against_parent_has_entries(
+                        &repo,
+                        &store,
+                        commit,
+                        parent_index,
+                        pickaxe_options,
+                        &pathspecs,
+                    )?
+                {
+                    continue;
+                }
+                visible_parent_indexes.push(parent_index);
+            }
+            if visible_parent_indexes.is_empty() {
+                continue;
+            }
+            for (visible_index, parent_index) in visible_parent_indexes.iter().copied().enumerate()
+            {
                 let from_parent = if options.first_parent {
                     None
                 } else {
@@ -4076,8 +4096,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                         ShowDiffFormat::PatchWithStat | ShowDiffFormat::PatchWithStatSummary
                     ) {
                         out.write_all(b"---\n")?;
-                    } else if format.separates_patch() || format.terminates_lines() {
+                    } else if rendered.ends_with('\n') {
                         out.write_all(b"\n")?;
+                    } else {
+                        out.write_all(b"\n\n")?;
                     }
                     drop(out);
                     show_commit_diff_against_parent(
@@ -4093,7 +4115,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     )?;
                     out = io::stdout().lock();
                 }
-                if parent_index + 1 < parent_count || idx + 1 < commits.len() {
+                if visible_index + 1 < visible_parent_indexes.len() || idx + 1 < commits.len() {
                     out.write_all(record_terminator)?;
                 }
             }
@@ -4501,6 +4523,63 @@ fn commit_diff_against_parent_matches_pickaxe(
         Some(parent_id),
         pickaxe_options,
     )
+}
+
+fn commit_diff_against_parent_has_entries(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: &zmin_git_core::CommitObject,
+    parent_index: usize,
+    pickaxe_options: PickaxeOptions<'_>,
+    pathspecs: &[Vec<u8>],
+) -> Result<bool> {
+    let parent_id = commit
+        .parents
+        .get(parent_index)
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "merge parent index out of range".into(),
+        })?;
+    commit_diff_against_optional_parent_has_entries(
+        repo,
+        store,
+        commit,
+        Some(parent_id),
+        pickaxe_options,
+        pathspecs,
+    )
+}
+
+fn commit_diff_against_optional_parent_has_entries(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit: &zmin_git_core::CommitObject,
+    parent_id: Option<&ObjectId>,
+    pickaxe_options: PickaxeOptions<'_>,
+    pathspecs: &[Vec<u8>],
+) -> Result<bool> {
+    let commit_cache = CommitObjectCache::new(store);
+    let tree_cache = TreeObjectCache::new(store);
+    let old_index = if let Some(parent_id) = parent_id {
+        let parent = commit_cache.read_commit(parent_id)?;
+        tree_cache.read_tree_to_index(&parent.tree)?
+    } else {
+        GitIndex::new()
+    };
+    let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
+    let entries = diff_indexes(&old_index, &new_index)?
+        .into_iter()
+        .filter(|entry| diff_entry_matches_pathspec(entry, pathspecs))
+        .collect::<Vec<_>>();
+    let context = DiffIndexContext {
+        repo,
+        store,
+        old_index: &old_index,
+        new_index: &new_index,
+        old_source: DiffSideSource::Index,
+        new_source: DiffSideSource::Index,
+    };
+    Ok(!apply_pickaxe_filter(&context, entries, pickaxe_options)?.is_empty())
 }
 
 fn commit_diff_against_optional_parent_matches_pickaxe(
