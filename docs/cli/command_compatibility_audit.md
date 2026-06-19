@@ -71,6 +71,9 @@ Recently closed replacement gaps:
 - `stash list --format` preserves simple unknown atoms as literals like stock
   Git for `%r`, `%R`, `%q`, `%Q`, `%z`, `%gL`, `%gI`, `%gq`, `%gZ`, `%aZ`,
   `%cZ`, and `%GZ`
+- `reflog expire` applies the default `gc.reflogExpire` policy for current
+  explicit refs and matches stock Git for empty args, branch refs, `HEAD`,
+  `--updateref`, `--rewrite`, and `--verbose`
 - `notes copy --for-rewrite=<command>` follows the configured rewrite gate for
   exact `notes.rewriteRef` refs and implies stdin pair input
 - `notes add --allow-empty` opens the configured editor and writes the edited

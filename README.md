@@ -163,7 +163,7 @@ that upstream denominator is still being counted.
 | Full Zmin command surface | Zmin CLI schema | `203` | `203` | `100%` |
 | Full Zmin argument entries | Zmin CLI schema | `1393` | `1393` | `100%` |
 | Full Zmin option/positional spellings | Zmin CLI schema | `1652` | `1652` | `100%` |
-| Audited behavior variants | tested option/workflow variants | `100` | `100` | `100%` |
+| Audited behavior variants | tested option/workflow variants | `106` | `106` | `100%` |
 | Global upstream Git option/workflow parity | upstream Git behavior audit | not published | not published | not published |
 
 Command-name coverage by reference group:

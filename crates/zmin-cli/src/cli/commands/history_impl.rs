@@ -725,10 +725,13 @@ fn reflog_expire(args: Vec<String>) -> Result<()> {
     if args.iter().any(|arg| arg == "--all") {
         return Ok(());
     }
-    Err(CliError::Fatal {
-        code: 129,
-        message: "reflog expire is not supported".into(),
-    })
+    if reflog_expire_refs(&repo, &args)?.is_empty() {
+        return Ok(());
+    }
+    let Some(timestamp) = reflog_expire_default_timestamp(&repo)? else {
+        return reflog_expire_noop(&repo, &args);
+    };
+    reflog_expire_default_by_timestamp(&repo, &args, timestamp)
 }
 
 fn reflog_expire_policy_is_never(repo: &GitRepo, args: &[String]) -> Result<bool> {
@@ -862,11 +865,68 @@ fn reflog_expire_timestamp(args: &[String]) -> Result<Option<i64>> {
     Ok(Some(timestamp))
 }
 
+fn reflog_expire_default_timestamp(repo: &GitRepo) -> Result<Option<i64>> {
+    let value = read_config_value(repo, "gc.reflogexpire")?.unwrap_or_default();
+    if value.is_empty() {
+        return Ok(Some(current_unix_timestamp()? - 90 * 24 * 60 * 60));
+    }
+    if reflog_expire_policy_value_is_never(&value) {
+        return Ok(None);
+    }
+    if reflog_expire_policy_value_is_now(&value) {
+        return Ok(Some(i64::MAX));
+    }
+    if let Some(timestamp) = parse_reflog_expire_relative_ago(&value)? {
+        return Ok(Some(timestamp));
+    }
+    let (timestamp, _) = parse_git_date(&value)?;
+    Ok(Some(timestamp))
+}
+
+fn parse_reflog_expire_relative_ago(value: &str) -> Result<Option<i64>> {
+    let normalized = value.trim().to_ascii_lowercase().replace('.', " ");
+    let parts = normalized.split_whitespace().collect::<Vec<_>>();
+    let [amount, unit, "ago"] = parts.as_slice() else {
+        return Ok(None);
+    };
+    let amount = amount.parse::<i64>().map_err(|error| CliError::Fatal {
+        code: 128,
+        message: format!("invalid reflog expiry value '{value}': {error}"),
+    })?;
+    let seconds = match *unit {
+        "second" | "seconds" => amount,
+        "minute" | "minutes" => amount * 60,
+        "hour" | "hours" => amount * 60 * 60,
+        "day" | "days" => amount * 24 * 60 * 60,
+        "week" | "weeks" => amount * 7 * 24 * 60 * 60,
+        "month" | "months" => amount * 30 * 24 * 60 * 60,
+        "year" | "years" => amount * 365 * 24 * 60 * 60,
+        _ => return Ok(None),
+    };
+    Ok(Some(current_unix_timestamp()? - seconds))
+}
+
 fn reflog_expire_by_timestamp(repo: &GitRepo, args: &[String], timestamp: i64) -> Result<()> {
     let paths = reflog_expire_paths(repo, args)?;
     let verbose = args.iter().any(|arg| arg == "--verbose");
     for path in paths {
         reflog_expire_path_by_timestamp(&path, timestamp, verbose)?;
+    }
+    Ok(())
+}
+
+fn reflog_expire_default_by_timestamp(
+    repo: &GitRepo,
+    args: &[String],
+    timestamp: i64,
+) -> Result<()> {
+    let verbose = args.iter().any(|arg| arg == "--verbose");
+    for ref_name in reflog_expire_refs(repo, args)? {
+        if ref_name == "HEAD" {
+            reflog_expire_keep_ref(repo, &ref_name, false)?;
+            continue;
+        }
+        reflog_expire_path_by_timestamp(&reflog_path(repo, &ref_name)?, timestamp, verbose)?;
     }
     Ok(())
 }
@@ -931,7 +991,7 @@ fn reflog_expire_path_by_timestamp(path: &Path, timestamp: i64, verbose: bool) -
             .unwrap_or(false);
         if expire {
             if verbose {
-                println!("prune {line}");
+                println!("prune {}", reflog_expire_verbose_message(line));
             }
         } else {
             kept.push_str(line);
@@ -972,10 +1032,16 @@ fn reflog_expire_keep_ref(repo: &GitRepo, ref_name: &str, verbose: bool) -> Resu
     })?;
     if verbose {
         for line in content.lines() {
-            println!("keep {line}");
+            println!("keep {}", reflog_expire_verbose_message(line));
         }
     }
     Ok(())
+}
+
+fn reflog_expire_verbose_message(line: &str) -> &str {
+    line.split_once('\t')
+        .map(|(_, message)| message)
+        .unwrap_or(line)
 }
 
 fn reflog_not_found_error(ref_name: &str) -> CliError {

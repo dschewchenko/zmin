@@ -337,6 +337,39 @@ fn reflog_expire_dry_run_does_not_touch_reflog() {
 }
 
 #[test]
+fn reflog_expire_default_current_entries_match_stock_git() {
+    for args in [
+        ["reflog", "expire"].as_slice(),
+        ["reflog", "expire", "main"].as_slice(),
+        ["reflog", "expire", "HEAD"].as_slice(),
+        ["reflog", "expire", "--updateref", "main"].as_slice(),
+        ["reflog", "expire", "--rewrite", "main"].as_slice(),
+        ["reflog", "expire", "--verbose", "main"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        reflog_expire_default_fixture(git_repo.path());
+        reflog_expire_default_fixture(zmin_repo.path());
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), &["reflog", "show", "main"]),
+            git_args(git_repo.path(), &["reflog", "show", "main"]),
+            "main reflog after args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), &["reflog", "show", "HEAD"]),
+            git_args(git_repo.path(), &["reflog", "show", "HEAD"]),
+            "HEAD reflog after args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn reflog_expire_pattern_config_matches_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -368,14 +401,14 @@ fn reflog_expire_pattern_config_matches_stock_git() {
 
     let mut expected: Vec<_> = git_args(
         git_repo.path(),
-        &["log", "-g", "--branches=root*", "--format=%gD"],
+        &["log", "-g", "--format=%gD", "--branches=root*"],
     )
     .lines()
     .map(str::to_owned)
     .collect();
     let mut actual: Vec<_> = run_zmin_args(
         zmin_repo.path(),
-        &["log", "-g", "--branches=root*", "--format=%gD"],
+        &["log", "-g", "--format=%gD", "--branches=root*"],
     )
     .lines()
     .map(str::to_owned)
@@ -385,6 +418,13 @@ fn reflog_expire_pattern_config_matches_stock_git() {
 
     assert_eq!(actual, expected);
     assert_eq!(actual, ["root1/branch1@{0}", "root1/branch2@{0}"]);
+}
+
+fn reflog_expire_default_fixture(repo: &std::path::Path) {
+    configure_identity(repo);
+    git(repo, ["checkout", "-b", "main"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "two"]);
 }
 
 fn reflog_expire_pattern_config_fixture(repo: &std::path::Path) {
