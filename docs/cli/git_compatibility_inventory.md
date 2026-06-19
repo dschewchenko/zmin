@@ -37,6 +37,8 @@ different exit codes or different repository state.
   `v2.47.1` documentation.
 - `docs/cli/variant_compatibility_plan.md` tracks closed behavior blocks and
   open hard-fail clusters.
+- `docs/cli/matrices/status_v2_47.tsv` is the first command-level matrix for
+  Git `status`.
 
 ## Current Seed
 
@@ -49,6 +51,19 @@ The first documentation seed run on 2026-06-19 found:
 This is not the final denominator. It does not yet split option values,
 negations, repeated options, order-sensitive combinations, repository states,
 transports or platforms.
+
+## Command Matrices
+
+| Command | Matrix | Total rows | Closed | Partial | Open |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `23` | `2` | `23` |
+
+The `status` matrix includes one newly closed row from this audit slice:
+`git status -z` now matches stock Git's implicit porcelain v1 output. It also
+promotes five parser-supported rows to closed evidence: `--null`, `--short`,
+`-unormal`, bare `--untracked-files`, and `--ignored=traditional`. Existing
+closed rows in that matrix are evidence import from current parity tests, not a
+new support claim.
 
 ## Required Matrix Columns
 

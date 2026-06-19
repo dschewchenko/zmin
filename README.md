@@ -157,7 +157,7 @@ transport and platform.
 | --- | ---: | ---: | ---: |
 | Setup and Config | `6` | `6` | `0` |
 | Getting and Creating Projects | `2` | `2` | `2` |
-| Basic Snapshotting | `9` | `9` | `25` |
+| Basic Snapshotting | `9` | `9` | `31` |
 | Branching and Merging | `9` | `9` | `30` |
 | Sharing and Updating Projects | `5` | `5` | `0` |
 | Inspection and Comparison | `7` | `7` | `8` |
@@ -169,7 +169,7 @@ transport and platform.
 | Server Admin | `2` | `2` | `0` |
 | Plumbing Commands | `20` | `20` | `0` |
 | Other Git `2.47` commands | `71` | `71` | `4` |
-| **Git `2.47` total** | **`151`** | **`151`** | **`138`** |
+| **Git `2.47` total** | **`151`** | **`151`** | **`144`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and

@@ -3,7 +3,7 @@
 Command-name coverage is not full Git compatibility. A supported item must be
 counted as a variant:
 
-`command + option + mode + repository state + transport/workflow`.
+`command + option + value + option combination + repository state + transport/workflow + platform`.
 
 Examples:
 
@@ -51,14 +51,17 @@ Examples:
 | `stash list` non-forced color format atoms | `3` | `0` | `%Cred`, `%C(red)`, `%C(auto,red)` with reset forms in redirected output |
 | `stash list` forced color format atoms | `3` | `0` | `%C(always,red)`, `%C(always,bold red)`, `%C(always,blue)` with reset/normal forms |
 | `stash list` width format atoms | `6` | `0` | `%<(N)`, `%>(N)`, `%<(N,trunc)`, `%>(N,trunc)`, `%<(N,ltrunc)`, `%<(N,mtrunc)` |
+| `status -z` implicit porcelain form | `1` | `0` | `git status -z` matches stock Git's NUL-terminated porcelain v1 output |
+| `status` option evidence forms | `5` | `0` | `--null`, `--short`, `-unormal`, bare `--untracked-files`, `--ignored=traditional` |
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `138` verified variants.
+Tracked closed blocks in this table: `144` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
-valid only after the matching command group is expanded into command plus option
-plus mode plus repository state plus transport workflow.
+valid only after the matching command group is expanded into command plus
+option plus value plus option combination plus repository state plus transport
+workflow plus platform.
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.

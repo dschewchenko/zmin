@@ -27,8 +27,20 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
         git(repo.path(), ["status", "-sb"])
     );
     assert_eq!(
+        run_zmin(repo.path(), ["status", "--short"]),
+        git(repo.path(), ["status", "--short"])
+    );
+    assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain"]),
         git(repo.path(), ["status", "--porcelain"])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "-z"]),
+        git(repo.path(), ["status", "-z"])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "--null"]),
+        git(repo.path(), ["status", "--null"])
     );
     assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain=v2", "--branch"]),
@@ -50,6 +62,14 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
     assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain=v1", "-z", "--branch"]),
         git(repo.path(), ["status", "--porcelain=v1", "-z", "--branch"])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "-z"]),
+        git(repo.path(), ["status", "-z"])
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["status", "--null"]),
+        git(repo.path(), ["status", "--null"])
     );
     assert_eq!(
         run_zmin(repo.path(), ["status", "--porcelain=v2", "--branch"]),
@@ -85,6 +105,8 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
     );
     for args in [
         ["status", "--porcelain=v1", "-u"].as_slice(),
+        ["status", "--porcelain=v1", "-unormal"].as_slice(),
+        ["status", "--porcelain=v1", "--untracked-files"].as_slice(),
         ["status", "--porcelain=v1", "--untracked-files=normal"].as_slice(),
         ["status", "--porcelain=v1", "--untracked-files=all"].as_slice(),
     ] {
@@ -102,6 +124,7 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
         .expect("write ignored dir file");
     for args in [
         ["status", "--porcelain=v1", "--ignored"].as_slice(),
+        ["status", "--porcelain=v1", "--ignored=traditional"].as_slice(),
         ["status", "--porcelain=v1", "--ignored=matching"].as_slice(),
         ["status", "--porcelain=v1", "--ignored=no"].as_slice(),
     ] {

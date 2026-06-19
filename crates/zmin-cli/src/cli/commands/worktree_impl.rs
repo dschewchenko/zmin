@@ -372,7 +372,7 @@ pub(crate) fn status(
             message: "this operation must be run in a work tree".into(),
         });
     }
-    let machine_readable = porcelain.is_some() || short;
+    let machine_readable = porcelain.is_some() || short || null;
     if machine_readable && branch {
         let _trace = phase_trace("status.branch_header");
         if porcelain_version == PorcelainVersion::V2 {
