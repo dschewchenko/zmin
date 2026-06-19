@@ -75,6 +75,8 @@ Environment:
   ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO
   ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO
   ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO
+  ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO
+  ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO
   ZMIN_PARALLELS_GUEST_EXEC_TIMEOUT_SECONDS
   ZMIN_PARALLELS_UPSTREAM_DETACH
   ZMIN_PARALLELS_UPSTREAM_REUSE_BINARY
@@ -583,13 +585,20 @@ http_benchmark_guest() {
   local job="zmin-http-bench-$(date -u +%Y%m%dT%H%M%SZ)-$$"
   local remote_root="C:\\Users\\${guest_user}\\${job}"
   local out_dir="C:\\Users\\${guest_user}\\${job}-out"
+  local ratio_gate_arg=""
+  if [[ -n "${ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGitMeanRatio ${ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO}"
+  fi
+  if [[ -n "${ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGitMedianRatio ${ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO}"
+  fi
   copy_repo_to_guest "$remote_root"
   run_guest_powershell "\$ErrorActionPreference = 'Stop'
-	Set-Location $(ps_quote "$remote_root")
-	tar -xzf .\\zmin-worktree.tar.gz
-	\$env:CARGO_TARGET_DIR = 'C:\\Users\\${guest_user}\\zmin-target'
-	.\\tools\\windows-native-http-benchmark.ps1 -Repeats ${repeats} -OutDir $(ps_quote "$out_dir")
-	if (\$LASTEXITCODE -ne 0) { throw \"Windows smart HTTP benchmark failed with exit code \$LASTEXITCODE\" }"
+		Set-Location $(ps_quote "$remote_root")
+		tar -xzf .\\zmin-worktree.tar.gz
+		\$env:CARGO_TARGET_DIR = 'C:\\Users\\${guest_user}\\zmin-target'
+		.\\tools\\windows-native-http-benchmark.ps1 -Repeats ${repeats} -OutDir $(ps_quote "$out_dir")${ratio_gate_arg}
+		if (\$LASTEXITCODE -ne 0) { throw \"Windows smart HTTP benchmark failed with exit code \$LASTEXITCODE\" }"
 }
 
 extended_guest() {

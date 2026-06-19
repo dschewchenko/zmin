@@ -194,6 +194,7 @@ PY
 write_summary() {
   python3 - "$rows" "$summary" "$comparison" <<'PY'
 import csv
+import os
 import statistics
 import sys
 from collections import defaultdict
@@ -233,6 +234,7 @@ with open(comparison_path, "w", newline="", encoding="utf-8") as handle:
         "zmin_median_seconds",
         "zmin_vs_git_median_ratio",
     ])
+    comparison_rows = []
     for op in sorted({op for op, _ in groups}):
         git = groups.get((op, "git"))
         zmin = groups.get((op, "zmin"))
@@ -242,7 +244,7 @@ with open(comparison_path, "w", newline="", encoding="utf-8") as handle:
         zmin_mean = statistics.mean(zmin)
         git_median = statistics.median(git)
         zmin_median = statistics.median(zmin)
-        writer.writerow([
+        comparison_row = [
             op,
             min(len(git), len(zmin)),
             f"{git_mean:.6f}",
@@ -251,7 +253,56 @@ with open(comparison_path, "w", newline="", encoding="utf-8") as handle:
             f"{git_median:.6f}",
             f"{zmin_median:.6f}",
             f"{zmin_median / git_median:.6f}",
-        ])
+        ]
+        comparison_rows.append(dict(zip([
+            "op",
+            "runs",
+            "git_mean_seconds",
+            "zmin_mean_seconds",
+            "zmin_vs_git_mean_ratio",
+            "git_median_seconds",
+            "zmin_median_seconds",
+            "zmin_vs_git_median_ratio",
+        ], comparison_row)))
+        writer.writerow(comparison_row)
+
+
+def max_ratio_from_env(name):
+    value = os.environ.get(name, "")
+    if not value:
+        return 0.0
+    try:
+        return float(value)
+    except ValueError:
+        raise SystemExit(f"{name} must be a number")
+
+
+def assert_max_ratio(column, max_ratio, label):
+    if max_ratio <= 0.0:
+        return
+    failures = []
+    for row in comparison_rows:
+        value = row.get(column, "")
+        if value == "":
+            failures.append(f"{row['op']}: missing {label}")
+            continue
+        ratio_value = float(value)
+        if ratio_value > max_ratio:
+            failures.append(f"{row['op']}: {label} {ratio_value:.6f} > {max_ratio:.6f}")
+    if failures:
+        raise SystemExit(f"benchmark ratio gate failed for {label}: {'; '.join(failures)}")
+
+
+assert_max_ratio(
+    "zmin_vs_git_mean_ratio",
+    max_ratio_from_env("ZMIN_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO"),
+    "Zmin/Git mean",
+)
+assert_max_ratio(
+    "zmin_vs_git_median_ratio",
+    max_ratio_from_env("ZMIN_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO"),
+    "Zmin/Git median",
+)
 PY
 }
 

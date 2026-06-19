@@ -3,7 +3,9 @@ param(
   [int]$Commits = 40,
   [int]$FilesPerCommit = 20,
   [int]$BatchFiles = 800,
-  [string]$OutDir = ""
+  [string]$OutDir = "",
+  [double]$MaxZminVsGitMeanRatio = 0.0,
+  [double]$MaxZminVsGitMedianRatio = 0.0
 )
 
 $ErrorActionPreference = "Stop"
@@ -173,6 +175,44 @@ function Get-Ratio {
     return 0.0
   }
   return [Math]::Round($Numerator / $Denominator, 6)
+}
+
+function Assert-ComparisonMaxRatio {
+  param(
+    [Parameter(Mandatory = $true)]
+    [object[]]$ComparisonRows,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Column,
+
+    [Parameter(Mandatory = $true)]
+    [double]$MaxRatio,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  if ($MaxRatio -le 0.0) {
+    return
+  }
+
+  $failures = New-Object System.Collections.Generic.List[string]
+  foreach ($row in $ComparisonRows) {
+    $property = $row.PSObject.Properties[$Column]
+    if ($null -eq $property -or $null -eq $property.Value -or "$($property.Value)" -eq "") {
+      $failures.Add("$($row.op): missing $Label")
+      continue
+    }
+
+    $ratio = [double]$property.Value
+    if ($ratio -gt $MaxRatio) {
+      $failures.Add("$($row.op): $Label $ratio > $MaxRatio")
+    }
+  }
+
+  if ($failures.Count -gt 0) {
+    throw "benchmark ratio gate failed for ${Label}: $($failures -join '; ')"
+  }
 }
 
 function Configure-Repo {
@@ -658,6 +698,8 @@ $Comparison = $Rows |
   Sort-Object op
 
 $Comparison | Export-Csv -NoTypeInformation -Path $ComparisonPath
+Assert-ComparisonMaxRatio -ComparisonRows @($Comparison) -Column "zmin_vs_git_mean_ratio" -MaxRatio $MaxZminVsGitMeanRatio -Label "Zmin/Git mean"
+Assert-ComparisonMaxRatio -ComparisonRows @($Comparison) -Column "zmin_vs_git_median_ratio" -MaxRatio $MaxZminVsGitMedianRatio -Label "Zmin/Git median"
 
 Write-Host "Windows native smart HTTP benchmark complete"
 Write-Host "rows=$RowsPath"

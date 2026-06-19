@@ -4144,3 +4144,45 @@ Validation:
 This smoke proves the macOS gate path only. It is not performance closure
 evidence because it used one repeat, a reduced fixture, and intentionally loose
 thresholds.
+
+Smart HTTP benchmark ratio gates:
+
+`tools/git-http-performance-bench.sh` now has optional max-ratio thresholds for
+the generated `comparison.tsv`. The default remains reporting-only. Set either
+variable to make the benchmark exit non-zero when a selected operation exceeds
+the threshold:
+
+- `ZMIN_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO`
+- `ZMIN_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO`
+
+`tools/windows-native-http-benchmark.ps1` mirrors these gates for
+`comparison.csv` with `MaxZminVsGitMeanRatio` and
+`MaxZminVsGitMedianRatio`. `tools/parallels-windows-runner.sh http-benchmark`
+passes them through from:
+
+- `ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO`
+- `ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO`
+
+Validation:
+
+- `bash -n tools/git-http-performance-bench.sh tools/parallels-windows-runner.sh`
+- `git diff --check`
+- macOS smoke with a small fixture and permissive gates:
+  `ZMIN_HTTP_BENCH_COMMITS=4 ZMIN_HTTP_BENCH_FILES_PER_COMMIT=2
+  ZMIN_HTTP_BENCH_BATCH_FILES=4 ZMIN_HTTP_BENCH_REPEATS=1
+  ZMIN_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO=100
+  ZMIN_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO=100
+  tools/git-http-performance-bench.sh`
+- macOS smoke output:
+  `/tmp/zmin-http-ratio-gate-smoke-20260619T084839`
+- Windows/Git-for-Windows smoke with permissive gates:
+  `ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO=100
+  ZMIN_WINDOWS_HTTP_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO=100
+  tools/parallels-windows-runner.sh http-benchmark 1`
+- Windows smoke output:
+  `C:\Users\skron\zmin-http-bench-20260619T084854Z-82175-out`
+- Windows cleanup after the smoke reported `tasks=0 procs=0 roots=0
+  temp_roots=0`.
+
+This is gate tooling only. Smart HTTP acceptance still depends on repeated
+larger fixtures and real network/auth/proxy coverage.
