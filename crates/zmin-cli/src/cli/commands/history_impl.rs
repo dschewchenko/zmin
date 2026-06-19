@@ -1542,7 +1542,21 @@ struct BlameOptions {
     root: bool,
     abbrev_width: Option<usize>,
     ignore_whitespace: bool,
-    line_range: Option<(usize, usize)>,
+    line_range: Option<BlameLineRange>,
+}
+
+#[derive(Debug, Clone)]
+enum BlameLineRange {
+    Numeric { start: usize, end: usize },
+    Regex { pattern: String, end: BlameRangeEnd },
+    Function(String),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BlameRangeEnd {
+    ToEnd,
+    Absolute(usize),
+    Count(usize),
 }
 
 pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -> Result<()> {
@@ -1566,7 +1580,8 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
         final_lines,
         options.ignore_whitespace,
     )?;
-    if let Some((start, end)) = options.line_range {
+    if let Some(range) = options.line_range.as_ref() {
+        let (start, end) = resolve_blame_line_range(&lines, range)?;
         lines.retain(|line| (start..=end).contains(&line.line_no));
     }
     let effective_root = root || options.root;
@@ -1765,7 +1780,16 @@ fn parse_blame_abbrev(value: &str) -> Result<usize> {
     Ok(abbrev.saturating_add(1).clamp(5, 40))
 }
 
-fn parse_blame_line_range(value: &str) -> Result<(usize, usize)> {
+fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
+    if let Some(function) = value.strip_prefix(':') {
+        if function.is_empty() {
+            return Err(unsupported_blame_line_range(value));
+        }
+        return Ok(BlameLineRange::Function(function.to_owned()));
+    }
+    if value.starts_with('/') {
+        return parse_blame_regex_line_range(value);
+    }
     let (start, end) = value.split_once(',').unwrap_or((value, ""));
     let start = start.parse::<usize>().map_err(|_| CliError::Fatal {
         code: 129,
@@ -1797,7 +1821,105 @@ fn parse_blame_line_range(value: &str) -> Result<(usize, usize)> {
             message: format!("unsupported blame line range '{value}'"),
         });
     }
-    Ok((start, end))
+    Ok(BlameLineRange::Numeric { start, end })
+}
+
+fn parse_blame_regex_line_range(value: &str) -> Result<BlameLineRange> {
+    let Some(pattern_end) = closing_blame_regex_delimiter(value) else {
+        return Err(unsupported_blame_line_range(value));
+    };
+    let pattern = value[1..pattern_end].to_owned();
+    if pattern.is_empty() {
+        return Err(unsupported_blame_line_range(value));
+    }
+    let suffix = &value[pattern_end + 1..];
+    let end = if suffix.is_empty() {
+        BlameRangeEnd::ToEnd
+    } else if let Some(raw) = suffix.strip_prefix(",+") {
+        BlameRangeEnd::Count(
+            raw.parse::<usize>()
+                .map_err(|_| unsupported_blame_line_range(value))?,
+        )
+    } else if let Some(raw) = suffix.strip_prefix(',') {
+        BlameRangeEnd::Absolute(
+            raw.parse::<usize>()
+                .map_err(|_| unsupported_blame_line_range(value))?,
+        )
+    } else {
+        return Err(unsupported_blame_line_range(value));
+    };
+    Ok(BlameLineRange::Regex { pattern, end })
+}
+
+fn closing_blame_regex_delimiter(value: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().enumerate().skip(1) {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if *byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+        if *byte == b'/' {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn resolve_blame_line_range(lines: &[BlameLine], range: &BlameLineRange) -> Result<(usize, usize)> {
+    match range {
+        BlameLineRange::Numeric { start, end } => Ok((*start, *end)),
+        BlameLineRange::Regex { pattern, end } => {
+            let regex = regex::bytes::Regex::new(pattern)
+                .map_err(|_| unsupported_blame_line_range(pattern))?;
+            let start = lines
+                .iter()
+                .find(|line| regex.is_match(&line.content))
+                .map(|line| line.line_no)
+                .ok_or_else(|| unsupported_blame_line_range(pattern))?;
+            Ok((start, blame_range_end(start, *end)))
+        }
+        BlameLineRange::Function(function) => {
+            let start = lines
+                .iter()
+                .find(|line| blame_function_line_matches(&line.content, function.as_bytes()))
+                .map(|line| line.line_no)
+                .ok_or_else(|| unsupported_blame_line_range(function))?;
+            let end = lines
+                .iter()
+                .skip_while(|line| line.line_no <= start)
+                .find(|line| line.content.iter().all(|byte| byte.is_ascii_whitespace()))
+                .map(|line| line.line_no.saturating_sub(1))
+                .unwrap_or_else(|| lines.last().map(|line| line.line_no).unwrap_or(start));
+            Ok((start, end.max(start)))
+        }
+    }
+}
+
+fn blame_range_end(start: usize, end: BlameRangeEnd) -> usize {
+    match end {
+        BlameRangeEnd::ToEnd => usize::MAX,
+        BlameRangeEnd::Absolute(line) => line,
+        BlameRangeEnd::Count(count) => start.saturating_add(count.saturating_sub(1)),
+    }
+}
+
+fn blame_function_line_matches(line: &[u8], function: &[u8]) -> bool {
+    !function.is_empty()
+        && line
+            .windows(function.len())
+            .any(|window| window == function)
+}
+
+fn unsupported_blame_line_range(value: &str) -> CliError {
+    CliError::Fatal {
+        code: 129,
+        message: format!("unsupported blame line range '{value}'"),
+    }
 }
 
 fn blame_lines(

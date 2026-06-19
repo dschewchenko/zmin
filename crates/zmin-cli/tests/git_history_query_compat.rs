@@ -233,6 +233,51 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
 }
 
 #[test]
+fn blame_line_regex_and_function_ranges_match_stock_git() {
+    let git_repo = git_init();
+    configure_identity(git_repo.path());
+    write_file(
+        git_repo.path(),
+        "a.txt",
+        "fn one() {\n    a\n}\n\nfn two() {\n    b\n}\n",
+    );
+    git(git_repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        git_repo.path(),
+        "A",
+        "a@example.test",
+        "1700000000 +0000",
+        "one",
+    );
+    write_file(
+        git_repo.path(),
+        "a.txt",
+        "fn one() {\n    a\n}\n\nfn two() {\n    B\n}\n",
+    );
+    git(git_repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        git_repo.path(),
+        "B",
+        "b@example.test",
+        "1700000100 +0000",
+        "two",
+    );
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    for args in [
+        ["blame", "-L", "/fn two/,+2", "a.txt"].as_slice(),
+        ["blame", "-L", "/^fn two/,6", "a.txt"].as_slice(),
+        ["blame", "-L", ":two", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn cherry_matches_stock_git_for_patch_equivalence_and_upstream_default() {
     let repo = git_init();
     configure_identity(repo.path());
