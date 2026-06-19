@@ -65,6 +65,8 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     Init {
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(long = "bare", action = ArgAction::SetTrue)]
         bare: bool,
         #[arg(

@@ -2745,6 +2745,7 @@ pub(crate) fn init_command(
     initial_branch: Option<String>,
     object_format: Option<String>,
     ref_format: Option<String>,
+    quiet: bool,
 ) -> Result<()> {
     let bare = bare || global_bare_option();
     let cwd = std::env::current_dir()?;
@@ -2803,7 +2804,7 @@ pub(crate) fn init_command(
                 explicit_initial_branch.as_deref(),
             )?;
             hide_dotgit_if_needed(&result.git_dir, false)?;
-            print_init_message(reinit, &result.git_dir);
+            print_init_message_if_needed(quiet, reinit, &result.git_dir);
             return Ok(());
         }
 
@@ -2830,7 +2831,7 @@ pub(crate) fn init_command(
             previous_head,
             explicit_initial_branch.as_deref(),
         )?;
-        print_init_message(reinit, &result.git_dir);
+        print_init_message_if_needed(quiet, reinit, &result.git_dir);
         return Ok(());
     }
 
@@ -2845,7 +2846,7 @@ pub(crate) fn init_command(
             apply_init_repository_format(&git_dir, &object_format, &ref_format, true)?;
             apply_init_template(&git_dir, template.as_ref())?;
             apply_shared_repository(&git_dir, shared.as_deref())?;
-            print_init_message(true, &git_dir);
+            print_init_message_if_needed(quiet, true, &git_dir);
             return Ok(());
         }
         let reinit = is_git_dir(&git_dir);
@@ -2874,7 +2875,7 @@ pub(crate) fn init_command(
             previous_head,
             explicit_initial_branch.as_deref(),
         )?;
-        print_init_message(reinit, &result.git_dir);
+        print_init_message_if_needed(quiet, reinit, &result.git_dir);
         return Ok(());
     }
     let expected_git_dir = if bare {
@@ -2895,7 +2896,7 @@ pub(crate) fn init_command(
         } else {
             restore_default_exclude(&reinit_git_dir)?;
         }
-        print_init_message(true, &reinit_git_dir);
+        print_init_message_if_needed(quiet, true, &reinit_git_dir);
         return Ok(());
     }
     let reinit = is_git_dir(&expected_git_dir);
@@ -2915,7 +2916,7 @@ pub(crate) fn init_command(
             previous_head,
             explicit_initial_branch.as_deref(),
         )?;
-        print_init_message(true, &expected_git_dir);
+        print_init_message_if_needed(quiet, true, &expected_git_dir);
         return Ok(());
     }
     let result = init_repository(
@@ -2935,7 +2936,7 @@ pub(crate) fn init_command(
         previous_head,
         explicit_initial_branch.as_deref(),
     )?;
-    print_init_message(reinit, &result.git_dir);
+    print_init_message_if_needed(quiet, reinit, &result.git_dir);
     Ok(())
 }
 
@@ -3237,6 +3238,12 @@ fn print_init_message(reinit: bool, git_dir: &Path) {
         "Initialized empty"
     };
     println!("{action} Git repository in {}/", git_dir.display());
+}
+
+fn print_init_message_if_needed(quiet: bool, reinit: bool, git_dir: &Path) {
+    if !quiet {
+        print_init_message(reinit, git_dir);
+    }
 }
 
 fn write_non_bare_git_dir_config(git_dir: &Path, work_tree: &Path) -> Result<()> {

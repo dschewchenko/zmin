@@ -357,6 +357,33 @@ fn init_creates_stock_git_readable_repository() {
 }
 
 #[test]
+fn init_quiet_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    for (git_name, zmin_name, args) in [
+        ("git-short", "zmin-short", ["init", "-q", "-b", "main"].as_slice()),
+        (
+            "git-long",
+            "zmin-long",
+            ["init", "--quiet", "-b", "main"].as_slice(),
+        ),
+    ] {
+        let mut git_args = args.to_vec();
+        git_args.push(git_name);
+        let mut zmin_args = args.to_vec();
+        zmin_args.push(zmin_name);
+
+        assert_eq!(
+            command_output("git", dir.path(), &git_args, "git"),
+            command_output(zmin_bin(), dir.path(), &zmin_args, "zmin")
+        );
+        assert_eq!(
+            git(&dir.path().join(git_name), ["branch", "--show-current"]),
+            run_zmin(&dir.path().join(zmin_name), ["branch", "--show-current"])
+        );
+    }
+}
+
+#[test]
 fn rev_parse_discovers_repository_through_gitfile_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let repo = dir.path().join("repo");

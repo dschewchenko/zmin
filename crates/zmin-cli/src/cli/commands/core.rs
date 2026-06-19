@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::Init {
+            quiet,
             bare,
             template,
             separate_git_dir,
@@ -13,6 +14,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             ref_format,
             directory,
         } => run_init(
+            quiet,
             directory,
             bare,
             template,
@@ -118,6 +120,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
 }
 
 pub(crate) fn run_init(
+    quiet: bool,
     directory: Option<PathBuf>,
     bare: bool,
     template: Option<PathBuf>,
@@ -136,6 +139,7 @@ pub(crate) fn run_init(
         initial_branch,
         object_format,
         ref_format,
+        quiet,
     )
 }
 

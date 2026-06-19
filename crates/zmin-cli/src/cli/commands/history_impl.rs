@@ -1541,6 +1541,9 @@ struct BlameOptions {
     show_email: bool,
     show_stats: bool,
     root: bool,
+    blank_boundary: bool,
+    annotate_output: bool,
+    suppress_author: bool,
     abbrev_width: Option<usize>,
     date_mode: BlameDateMode,
     ignore_whitespace: bool,
@@ -1611,7 +1614,7 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
             effective_root,
             options.line_porcelain,
         )
-    } else if annotate {
+    } else if annotate || options.annotate_output {
         print_annotate_lines(&commit_cache, &lines)
     } else {
         print_blame_lines(
@@ -1639,6 +1642,9 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut show_email = false;
     let mut show_stats = false;
     let mut root = false;
+    let mut blank_boundary = false;
+    let mut annotate_output = false;
+    let mut suppress_author = false;
     let mut contents_path = None;
     let mut abbrev_width = None;
     let mut date_mode = BlameDateMode::Iso;
@@ -1666,6 +1672,10 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "-n" | "--show-number" => show_number = true,
                 "-e" | "--show-email" => show_email = true,
                 "--root" => root = true,
+                "-b" => blank_boundary = true,
+                "-c" => annotate_output = true,
+                "-s" => suppress_author = true,
+                "-t" => date_mode = BlameDateMode::Raw,
                 "--show-stats" => show_stats = true,
                 "-w" => ignore_whitespace = true,
                 "-M" | "-C" | "--find-renames" | "--find-copies" => {}
@@ -1783,6 +1793,9 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         show_email,
         show_stats,
         root,
+        blank_boundary,
+        annotate_output,
+        suppress_author,
         abbrev_width,
         date_mode,
         ignore_whitespace,
@@ -2079,6 +2092,7 @@ fn print_blame_lines(
             line.boundary && !root,
             long,
             options.abbrev_width,
+            options.blank_boundary,
         );
         let author = if options.show_email {
             format!("<{}>", signature_email(&commit.author))
@@ -2092,6 +2106,14 @@ fn print_blame_lines(
         }
         if options.show_number {
             print!(" {}", line.line_no);
+        }
+        if options.suppress_author {
+            print!(" {}) ", line.line_no);
+            io::stdout().write_all(&line.content)?;
+            if !line.content.ends_with(b"\n") {
+                println!();
+            }
+            continue;
         }
         match options.date_mode {
             BlameDateMode::IsoStrict => print!(" ({author} {date:<25} {}) ", line.line_no),
@@ -2433,9 +2455,13 @@ fn blame_display_id(
     boundary: bool,
     long: bool,
     abbrev_width: Option<usize>,
+    blank_boundary: bool,
 ) -> String {
     if long {
         let hex = id.to_hex();
+        if boundary && blank_boundary {
+            return " ".repeat(hex.len());
+        }
         if boundary {
             format!("^{}", &hex[..hex.len().saturating_sub(1)])
         } else {
@@ -2443,6 +2469,9 @@ fn blame_display_id(
         }
     } else if boundary {
         let width = abbrev_width.unwrap_or(8);
+        if blank_boundary {
+            return " ".repeat(width);
+        }
         format!("^{}", short_object_id_len(id, width.saturating_sub(1)))
     } else {
         short_object_id_len(id, abbrev_width.unwrap_or(8))

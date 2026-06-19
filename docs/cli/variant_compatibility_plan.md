@@ -29,6 +29,8 @@ Examples:
 | --- | ---: | ---: | --- |
 | `blame --date` stock modes | `11` | `0` | `git_history_query_compat` |
 | `blame --date` newly closed modes | `2` | `0` | `relative`, `human` |
+| `blame` normal display flags | `4` | `0` | `-s`, `-t`, `-b`, `-c` |
+| `init` quiet forms | `2` | `0` | `-q`, `--quiet` |
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.

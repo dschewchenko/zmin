@@ -39,6 +39,9 @@ Recently closed replacement gaps:
 - common blame client flags `-f`, `-n`, `-e`, `-w`, `--abbrev=N`,
   `--date=iso`, and simple numeric `-L start,end` ranges match stock Git for
   the supported blame surface
+- normal blame display flags `-s`, `-t`, `-b`, and `-c` match stock Git for
+  the supported blame surface
+- `init -q` and `init --quiet` suppress initialization output like stock Git
 - `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
   accepted and render the matching combined diff form
 - `log --decorate=true` is accepted as enabled short decoration
