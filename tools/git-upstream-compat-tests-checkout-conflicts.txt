@@ -1,0 +1,2 @@
+# mode<TAB>test<TAB>reason
+standard	t2000-conflict-when-checking-files-out.sh	checkout/index path collision behavior

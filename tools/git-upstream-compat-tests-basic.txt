@@ -1,0 +1,2 @@
+# mode<TAB>test<TAB>reason
+exhaustive	t0000-basic.sh	upstream test harness and basic command assumptions
