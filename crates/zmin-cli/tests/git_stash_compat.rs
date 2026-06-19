@@ -1280,6 +1280,18 @@ fn stash_list_formats_match_stock_git() {
             "zmin stash list should print full hashes for {args:?}: {zmin_hashes:?}",
         );
     }
+    for args in [
+        ["stash", "list", "--format=%gd|%gD|%s|%gs"].as_slice(),
+        ["stash", "list", "--pretty=format:%gd:%h:%gs"].as_slice(),
+        ["stash", "list", "--format=format:%gd%x00%H%x00%gs"].as_slice(),
+        ["stash", "list", "--format=tformat:%%:%gd:%s"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(zmin_repo.path(), args),
+            "stash list custom format should match for {args:?}",
+        );
+    }
     assert_eq!(
         run_zmin_failure_output(zmin_repo.path(), &["stash", "list", "--bad"]).0,
         git_failure_output(git_repo.path(), &["stash", "list", "--bad"]).0

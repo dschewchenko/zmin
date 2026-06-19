@@ -47,6 +47,9 @@ Recently closed replacement gaps:
 - `ls-files --recurse-submodules --ignored --cached --exclude-standard`
   follows stock Git's supported cached-ignored mode instead of rejecting all
   ignored recurse-submodule combinations
+- `stash list --format` and `stash list --pretty=format:` support common
+  stash reflog atoms used by clients: `%H`, `%h`, `%gd`, `%gD`, `%gs`, `%s`,
+  `%%`, `%n`, and `%xNN`
 
 Current high-priority gap classes:
 

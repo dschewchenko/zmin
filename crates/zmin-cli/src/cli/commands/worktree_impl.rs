@@ -6253,8 +6253,9 @@ fn stash_list(args: &[String]) -> Result<()> {
         match arg.as_str() {
             "--oneline" => format = StashListFormat::Oneline,
             "--walk-reflogs" | "--no-walk" => {}
-            "--pretty=%H" | "--format=%H" => format = StashListFormat::FullHash,
-            "--pretty=%gd" | "--format=%gd" => format = StashListFormat::Selector,
+            value if value.starts_with("--pretty=") || value.starts_with("--format=") => {
+                format = StashListFormat::Custom(parse_stash_list_format(value)?);
+            }
             "-p" | "--patch" => show_patch = true,
             "--cc" => combined_diff = true,
             "-n" | "--max-count" => {
@@ -6318,12 +6319,6 @@ fn stash_list(args: &[String]) -> Result<()> {
             {
                 max_count = Some(parse_stash_list_count(&value[1..])?);
             }
-            value if value.starts_with("--pretty=") || value.starts_with("--format=") => {
-                return Err(CliError::Fatal {
-                    code: 1,
-                    message: format!("unsupported stash list format '{value}'"),
-                });
-            }
             value => {
                 return Err(CliError::Fatal {
                     code: 1,
@@ -6343,7 +6338,7 @@ fn stash_list(args: &[String]) -> Result<()> {
         .skip(skip)
         .take(max_count.unwrap_or(usize::MAX))
     {
-        match format {
+        match &format {
             StashListFormat::Default => println!("stash@{{{index}}}: {}", entry.message),
             StashListFormat::Oneline => {
                 println!(
@@ -6352,8 +6347,9 @@ fn stash_list(args: &[String]) -> Result<()> {
                     entry.message
                 );
             }
-            StashListFormat::FullHash => println!("{}", entry.id.to_hex()),
-            StashListFormat::Selector => println!("stash@{{{index}}}"),
+            StashListFormat::Custom(format) => {
+                println!("{}", render_stash_list_format(format, index, entry)?);
+            }
         }
         if show_patch {
             println!();
@@ -6523,12 +6519,86 @@ fn parse_stash_list_count(value: &str) -> Result<usize> {
     })
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum StashListFormat {
     Default,
     Oneline,
-    FullHash,
-    Selector,
+    Custom(String),
+}
+
+fn parse_stash_list_format(option: &str) -> Result<String> {
+    let raw = option
+        .strip_prefix("--pretty=")
+        .or_else(|| option.strip_prefix("--format="))
+        .unwrap_or(option);
+    let format = raw
+        .strip_prefix("format:")
+        .or_else(|| raw.strip_prefix("tformat:"))
+        .unwrap_or(raw);
+    Ok(format.to_owned())
+}
+
+fn render_stash_list_format(format: &str, index: usize, entry: &StashEntry) -> Result<String> {
+    let mut out = String::new();
+    let mut chars = format.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
+        }
+        let Some(atom) = chars.next() else {
+            out.push('%');
+            break;
+        };
+        match atom {
+            '%' => out.push('%'),
+            'n' => out.push('\n'),
+            'H' => out.push_str(&entry.id.to_hex()),
+            'h' => out.push_str(&entry.id.short_hex(7)),
+            's' => out.push_str(&entry.message),
+            'g' => {
+                let Some(reflog_atom) = chars.next() else {
+                    return Err(unsupported_stash_list_format_atom("%g"));
+                };
+                match reflog_atom {
+                    'd' => out.push_str(&format!("stash@{{{index}}}")),
+                    'D' => out.push_str(&format!("refs/stash@{{{index}}}")),
+                    's' => out.push_str(&entry.message),
+                    _ => {
+                        return Err(unsupported_stash_list_format_atom(&format!(
+                            "%g{reflog_atom}"
+                        )));
+                    }
+                }
+            }
+            'x' => {
+                let high = chars
+                    .next()
+                    .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+                let low = chars
+                    .next()
+                    .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+                let byte = parse_hex_byte(high, low)
+                    .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+                out.push(byte as char);
+            }
+            _ => return Err(unsupported_stash_list_format_atom(&format!("%{atom}"))),
+        }
+    }
+    Ok(out)
+}
+
+fn unsupported_stash_list_format_atom(atom: &str) -> CliError {
+    CliError::Fatal {
+        code: 1,
+        message: format!("unsupported stash list format atom '{atom}'"),
+    }
+}
+
+fn parse_hex_byte(high: char, low: char) -> Option<u8> {
+    let high = high.to_digit(16)?;
+    let low = low.to_digit(16)?;
+    Some(((high << 4) | low) as u8)
 }
 
 fn stash_show(args: &[String]) -> Result<()> {
