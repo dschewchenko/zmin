@@ -160,9 +160,20 @@ runtime surface behind the stable crate boundary. Validation passed for
 Cargo time (`0.55s` wall); after touching only
 `crates/zmin-cli-runtime/src/phase_trace.rs`, compat `--bins` rebuilt in
 `4.06s` Cargo time (`4.14s` wall). That keeps the current runtime-helper edit
-loop within the target `<10-20s` macOS range. Windows guest cleanup still needs
-fresh confirmation before using new Windows timing evidence: host process state
-was clean, but the guest cleanup `prlctl exec` command hung and was stopped.
+loop within the target `<10-20s` macOS range.
+
+The Parallels cleanup path is now bounded by
+`ZMIN_PARALLELS_GUEST_EXEC_TIMEOUT_SECONDS` and prints guest cleanup counts
+instead of suppressing output from one monolithic `prlctl exec`. Validation:
+`bash -n tools/parallels-windows-runner.sh`, bounded cleanup with a 45s limit
+returned `guest cleanup complete tasks=0 procs=0 roots=0 temp_roots=0`, and
+`tools/parallels-windows-runner.sh tools` returned the Windows version. A
+detached Windows upstream smoke using `tools/git-upstream-compat-tests-basic.txt`
+with `--run=1 -q` passed `1/1` at
+`C:\Users\skron\zmin-upstream-20260619T081022Z-40917-out`; a post-smoke
+bounded cleanup again returned `tasks=0`, `procs=0`, `roots=0`, and
+`temp_roots=0`. The earlier contended `quick` smoke selected zero tests because
+that test list is marked for `exhaustive` mode only.
 
 ## Current measured baseline
 

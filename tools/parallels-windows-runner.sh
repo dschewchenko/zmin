@@ -17,6 +17,7 @@ memory_mb="${ZMIN_PARALLELS_MEMORY_MB:-8192}"
 num_vcpus="${ZMIN_PARALLELS_NUM_VCPUS:-4}"
 disk_mb="${ZMIN_PARALLELS_DISK_MB:-81920}"
 min_free_gib="${ZMIN_PARALLELS_MIN_FREE_GIB:-35}"
+guest_exec_timeout_seconds="${ZMIN_PARALLELS_GUEST_EXEC_TIMEOUT_SECONDS:-180}"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -68,6 +69,7 @@ Environment:
   ZMIN_WINDOWS_BENCH_SSH_TRACE
   ZMIN_WINDOWS_BENCH_SSH_PACKET_TRACE
   ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY
+  ZMIN_PARALLELS_GUEST_EXEC_TIMEOUT_SECONDS
   ZMIN_PARALLELS_UPSTREAM_DETACH
   ZMIN_PARALLELS_UPSTREAM_REUSE_BINARY
   ZMIN_PARALLELS_UPSTREAM_SKIP_PREFLIGHT
@@ -138,6 +140,40 @@ stop_stale_host_guest_exec_sessions() {
 ps_quote() {
   local value="${1//\'/\'\'}"
   printf "'%s'" "$value"
+}
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  local label="$2"
+  shift 2
+
+  "$@" &
+  local pid="$!"
+  local timeout_marker
+  timeout_marker="$(mktemp "/tmp/zmin-runner-timeout.XXXXXX")"
+  (
+    sleep "$timeout_seconds"
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "${label} timed out after ${timeout_seconds}s" >&2
+      : >"$timeout_marker"
+      kill "$pid" 2>/dev/null || true
+      sleep 2
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+  ) &
+  local watchdog="$!"
+
+  local status=0
+  wait "$pid" || status="$?"
+  kill "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null || true
+
+  if [[ -s "$timeout_marker" ]]; then
+    rm -f "$timeout_marker"
+    return 124
+  fi
+  rm -f "$timeout_marker"
+  return "$status"
 }
 
 make_boot_iso() {
@@ -850,7 +886,25 @@ cleanup_guest_artifacts() {
   fi
 
   stop_stale_host_guest_exec_sessions
-  prlctl exec "$vm_name" -u "$guest_user" --password "$guest_pass" powershell -NoProfile -ExecutionPolicy Bypass -Command "\$ErrorActionPreference = 'SilentlyContinue'; Get-ScheduledTask | Where-Object { \$_.TaskName -like 'ZminUpstream-*' -or \$_.TaskName -like 'ZminDiag*' -or \$_.TaskName -like 'ZminProbe*' } | ForEach-Object { Stop-ScheduledTask -TaskName \$_.TaskName; Unregister-ScheduledTask -TaskName \$_.TaskName -Confirm:\$false }; Get-Process git,git-daemon,bash,sh,expr,uniq,cp,cargo,rustc,zmin,cmd | Stop-Process -Force; Get-ChildItem C:\\Users\\${guest_user} -Directory | Where-Object { \$_.Name -match '^zmin-(20[0-9]{6}T|bench-|bootstrap$)|^daemon-' } | Remove-Item -Recurse -Force; Get-ChildItem \$env:TEMP -Directory -Filter 'zmin-*' | Remove-Item -Recurse -Force; 'guest cleanup complete'" >/dev/null 2>&1 || true
+  local cleanup_script="\$ErrorActionPreference = 'SilentlyContinue'
+\$Tasks = @(Get-ScheduledTask | Where-Object { \$_.TaskName -like 'ZminUpstream-*' -or \$_.TaskName -like 'ZminDiag*' -or \$_.TaskName -like 'ZminProbe*' })
+\$Tasks | ForEach-Object {
+  Stop-ScheduledTask -TaskName \$_.TaskName -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName \$_.TaskName -Confirm:\$false -ErrorAction SilentlyContinue
+}
+\$ProcessNames = @('git','git-daemon','bash','sh','expr','uniq','cp','cargo','rustc','zmin')
+\$Processes = @(Get-Process \$ProcessNames -ErrorAction SilentlyContinue)
+\$Processes | Stop-Process -Force -ErrorAction SilentlyContinue
+\$Roots = @(Get-ChildItem C:\\Users\\${guest_user} -Directory -ErrorAction SilentlyContinue | Where-Object { \$_.Name -match '^zmin-(20[0-9]{6}T|bench-|bootstrap\$)|^daemon-' })
+\$Roots | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+\$TempRoots = @(Get-ChildItem \$env:TEMP -Directory -Filter 'zmin-*' -ErrorAction SilentlyContinue)
+\$TempRoots | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Write-Host ('guest cleanup complete tasks={0} procs={1} roots={2} temp_roots={3}' -f \$Tasks.Count,\$Processes.Count,\$Roots.Count,\$TempRoots.Count)"
+  run_with_timeout "$guest_exec_timeout_seconds" "guest cleanup" \
+    prlctl exec "$vm_name" -u "$guest_user" --password "$guest_pass" \
+      powershell -NoProfile -ExecutionPolicy Bypass -Command "$cleanup_script" || {
+        echo "warning: guest cleanup did not complete; inspect guest state before Windows validation" >&2
+      }
 }
 
 cmd="${1:-}"
