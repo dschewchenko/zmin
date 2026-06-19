@@ -3,6 +3,7 @@ use super::patch_commands::{
 };
 use super::sequencer_commands::apply_tree_delta;
 use super::*;
+use chrono::Datelike;
 use std::io::{Read, Seek};
 
 const REFLOG_REVERSE_READ_CHUNK_SIZE: usize = 16 * 1024;
@@ -1556,6 +1557,8 @@ enum BlameDateMode {
     Unix,
     Rfc2822,
     Local,
+    Relative,
+    Human,
 }
 
 #[derive(Debug, Clone)]
@@ -1797,6 +1800,8 @@ fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
         "unix" => Ok(BlameDateMode::Unix),
         "rfc" | "rfc2822" => Ok(BlameDateMode::Rfc2822),
         "local" => Ok(BlameDateMode::Local),
+        "relative" => Ok(BlameDateMode::Relative),
+        "human" => Ok(BlameDateMode::Human),
         _ => Err(CliError::Fatal {
             code: 129,
             message: format!("unsupported blame date mode '{value}'"),
@@ -2091,6 +2096,10 @@ fn print_blame_lines(
         match options.date_mode {
             BlameDateMode::IsoStrict => print!(" ({author} {date:<25} {}) ", line.line_no),
             BlameDateMode::Local => print!(" ({author} {date:<30} {}) ", line.line_no),
+            BlameDateMode::Relative => print!(" ({author} {date:<22} {}) ", line.line_no),
+            BlameDateMode::Human => {
+                print!(" ({author} {date:<16} {}) ", line.line_no)
+            }
             _ => print!(" ({author} {date} {}) ", line.line_no),
         }
         io::stdout().write_all(&line.content)?;
@@ -2140,6 +2149,8 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
             Ok(timestamp.to_string())
         }
         BlameDateMode::Rfc2822 => signature_mail_date(signature),
+        BlameDateMode::Relative => signature_relative_blame_date(signature),
+        BlameDateMode::Human => signature_human_blame_date(signature),
         BlameDateMode::Local => {
             let (timestamp, _) =
                 signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
@@ -2157,6 +2168,104 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
                 .to_string())
         }
     }
+}
+
+fn signature_human_blame_date(signature: &[u8]) -> Result<String> {
+    let (timestamp, timezone) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid author date".into(),
+        })?;
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid author timezone".into(),
+    })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit author timestamp is out of range".into(),
+    })?;
+    let commit = utc.with_timezone(&offset);
+    let now = git_test_date_now()
+        .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
+        .map(|timestamp| timestamp.with_timezone(&chrono::Local))
+        .unwrap_or_else(chrono::Local::now);
+    if commit.year() == now.year()
+        && commit.month() == now.month()
+        && commit.day() == now.day()
+        && timestamp <= now.timestamp()
+    {
+        return signature_relative_blame_date(signature);
+    }
+    if commit.year() == now.year()
+        && commit.month() == now.month()
+        && commit.day() < now.day()
+        && commit.day() + 5 > now.day()
+    {
+        return Ok(commit.format("%a %H:%M").to_string());
+    }
+    if commit.year() == now.year() {
+        return Ok(commit.format("%b %-d %H:%M").to_string());
+    }
+    Ok(commit.format("%b %-d %Y").to_string())
+}
+
+fn signature_relative_blame_date(signature: &[u8]) -> Result<String> {
+    let timestamp = signature_timestamp(signature).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid author date".into(),
+    })?;
+    let now = git_test_date_now().unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+            .unwrap_or(0)
+    });
+    if now < timestamp {
+        return Ok("in the future".to_owned());
+    }
+    let mut diff = now - timestamp;
+    if diff < 90 {
+        return Ok(plural_blame_date(diff, "second"));
+    }
+    diff = (diff + 30) / 60;
+    if diff < 90 {
+        return Ok(plural_blame_date(diff, "minute"));
+    }
+    diff = (diff + 30) / 60;
+    if diff < 36 {
+        return Ok(plural_blame_date(diff, "hour"));
+    }
+    diff = (diff + 12) / 24;
+    if diff < 14 {
+        return Ok(plural_blame_date(diff, "day"));
+    }
+    if diff < 70 {
+        return Ok(plural_blame_date((diff + 3) / 7, "week"));
+    }
+    if diff < 365 {
+        return Ok(plural_blame_date((diff + 15) / 30, "month"));
+    }
+    if diff < 1825 {
+        let total_months = (diff * 12 * 2 + 365) / (365 * 2);
+        let years = total_months / 12;
+        let months = total_months % 12;
+        if months == 0 {
+            return Ok(plural_blame_date(years, "year"));
+        }
+        let year_unit = if years == 1 { "year" } else { "years" };
+        let month_unit = if months == 1 { "month" } else { "months" };
+        return Ok(format!("{years} {year_unit}, {months} {month_unit} ago"));
+    }
+    Ok(plural_blame_date((diff + 183) / 365, "year"))
+}
+
+fn plural_blame_date(value: i64, unit: &str) -> String {
+    let suffix = if value == 1 { "" } else { "s" };
+    format!("{value} {unit}{suffix} ago")
+}
+
+fn git_test_date_now() -> Option<i64> {
+    std::env::var("GIT_TEST_DATE_NOW").ok()?.parse().ok()
 }
 
 fn signature_strict_blame_date(signature: &[u8]) -> Result<String> {

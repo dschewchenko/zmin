@@ -1,6 +1,6 @@
 # Command Compatibility Audit
 
-This file is the compact public summary of the current Git command surface.
+This file is the compact summary of the current Git command surface.
 
 ## Baselines
 
@@ -14,9 +14,11 @@ This file is the compact public summary of the current Git command surface.
   the selected baseline, `0` missing, and `52` additive Zmin commands
 - compatibility report is generated from the live CLI schema, not from a hand-maintained list
 - extra commands stay visible in the report as additive surface, not as baseline failures
-- command inventory parity means the command surface is present; it is not a
-  claim that every command matches stock Git behavior for every option and edge
-  case
+- command inventory parity means the command name exists; it is not a claim
+  that every option, mode, repository state or transport workflow matches stock
+  Git
+- variant parity is tracked separately in
+  `docs/cli/variant_compatibility_plan.md`
 
 ## Hard-fail inventory
 

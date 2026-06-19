@@ -6,9 +6,9 @@ use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, configure_identity, git, git_args, git_init, git_status, git_with_env,
-    run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
-    write_file,
+    clone_repo_fixture, command_output_with_env, configure_identity, git, git_args, git_init,
+    git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
+    run_zmin_with_env, write_file, zmin_bin,
 };
 
 fn commit_empty_as(cwd: &std::path::Path, name: &str, email: &str, message: &str) {
@@ -214,6 +214,17 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
             git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+    let date_env = [("GIT_TEST_DATE_NOW", "1780000000")];
+    for args in [
+        ["blame", "--date=relative", "a.txt"].as_slice(),
+        ["blame", "--date=human", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &date_env, "zmin").1,
+            command_output_with_env("git", git_repo.path(), args, &date_env, "git").1,
             "args: {args:?}"
         );
     }

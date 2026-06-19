@@ -148,23 +148,26 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-| Group | Covered | Support |
-| --- | ---: | ---: |
-| Setup and Config | `8/8` | `100%` |
-| Getting and Creating Projects | `2/2` | `100%` |
-| Basic Snapshotting | `10/10` | `100%` |
-| Branching and Merging | `12/12` | `100%` |
-| Sharing and Updating Projects | `6/6` | `100%` |
-| Inspection and Comparison | `12/12` | `100%` |
-| Patching | `6/6` | `100%` |
-| Debugging | `3/3` | `100%` |
-| Email | `8/8` | `100%` |
-| External Systems | `9/9` | `100%` |
-| Administration | `20/20` | `100%` |
-| Server Admin | `11/11` | `100%` |
-| Plumbing Commands | `54/54` | `100%` |
-| Zmin Workflow Commands | `14/14` | `100%` |
-| Unique command surface | `168/168` | `100%` |
+This table tracks command names, not every option combination. Preview builds
+still have option and workflow gaps.
+
+| Group | Command names present |
+| --- | ---: |
+| Setup and Config | `8/8` |
+| Getting and Creating Projects | `2/2` |
+| Basic Snapshotting | `10/10` |
+| Branching and Merging | `12/12` |
+| Sharing and Updating Projects | `6/6` |
+| Inspection and Comparison | `12/12` |
+| Patching | `6/6` |
+| Debugging | `3/3` |
+| Email | `8/8` |
+| External Systems | `9/9` |
+| Administration | `20/20` |
+| Server Admin | `11/11` |
+| Plumbing Commands | `54/54` |
+| Zmin Workflow Commands | `14/14` |
+| Unique command surface | `168/168` |
 
 ## Preview Limits
 
