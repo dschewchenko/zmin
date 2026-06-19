@@ -1291,6 +1291,7 @@ fn stash_list_formats_match_stock_git() {
             "--format=%an|%ae|%cn|%ce|%at|%ct|%P|%p|%T|%t",
         ]
         .as_slice(),
+        ["stash", "list", "--format=%ad|%ai|%aI|%cd|%ci|%cI"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

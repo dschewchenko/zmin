@@ -6739,6 +6739,9 @@ fn render_stash_list_format(
                     't' => {
                         out.push_str(&signature_timestamp(&commit.author).unwrap_or(0).to_string())
                     }
+                    'd' => out.push_str(&signature_log_date(&commit.author)?),
+                    'i' => out.push_str(&signature_blame_date(&commit.author)?),
+                    'I' => out.push_str(&signature_strict_iso_date(&commit.author)?),
                     _ => return Err(unsupported_stash_list_format_atom(&format!("%a{next}"))),
                 }
             }
@@ -6754,6 +6757,9 @@ fn render_stash_list_format(
                             .unwrap_or(0)
                             .to_string(),
                     ),
+                    'd' => out.push_str(&signature_log_date(&commit.committer)?),
+                    'i' => out.push_str(&signature_blame_date(&commit.committer)?),
+                    'I' => out.push_str(&signature_strict_iso_date(&commit.committer)?),
                     _ => return Err(unsupported_stash_list_format_atom(&format!("%c{next}"))),
                 }
             }
@@ -6761,6 +6767,25 @@ fn render_stash_list_format(
         }
     }
     Ok(out)
+}
+
+fn signature_strict_iso_date(signature: &[u8]) -> Result<String> {
+    let (timestamp, timezone) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid date".into(),
+        })?;
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid timezone".into(),
+    })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit timestamp is out of range".into(),
+    })?;
+    Ok(utc
+        .with_timezone(&offset)
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
 fn unsupported_stash_list_format_atom(atom: &str) -> CliError {
