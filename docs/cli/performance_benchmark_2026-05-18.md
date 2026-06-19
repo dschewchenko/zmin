@@ -4111,3 +4111,36 @@ Validation:
 This smoke proves the gate path and runner passthrough only. It is not
 performance closure evidence because it used one repeat and intentionally loose
 thresholds.
+
+macOS benchmark ratio gates:
+
+`tools/git-performance-bench.sh` now mirrors the Windows ratio gates for the
+generated `comparison.csv`. The default remains reporting-only. Set any of
+these to make the benchmark exit non-zero when a selected operation exceeds the
+threshold:
+
+- `ZMIN_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO`
+- `ZMIN_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO`
+- `ZMIN_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO`
+- `ZMIN_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO`
+- `ZMIN_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO`
+- `ZMIN_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO`
+
+Validation:
+
+- `bash -n tools/git-performance-bench.sh`
+- `git diff --check`
+- macOS smoke with a small fixture and permissive gates:
+  `ZMIN_BENCH_COMMITS=8 ZMIN_BENCH_FILES_PER_COMMIT=4
+  ZMIN_BENCH_REPEATS=1 ZMIN_BENCH_OPS=merge-base
+  ZMIN_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO=100
+  ZMIN_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO=100
+  ZMIN_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO=100
+  ZMIN_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO=100
+  tools/git-performance-bench.sh`
+- Smoke output:
+  `/tmp/zmin-macos-ratio-gate-smoke-20260619T084023`
+
+This smoke proves the macOS gate path only. It is not performance closure
+evidence because it used one repeat, a reduced fixture, and intentionally loose
+thresholds.

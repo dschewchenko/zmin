@@ -950,6 +950,7 @@ if [[ -n "$out_dir" ]]; then
   cp "$validation_out" "$checks_path"
   python3 - "$rows_path" "$summary_path" "$comparison_path" <<'PY'
 import csv
+import os
 import statistics
 import sys
 from collections import defaultdict
@@ -1104,6 +1105,64 @@ with open(comparison_path, "w", encoding="utf-8", newline="") as handle:
     writer = csv.DictWriter(handle, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(comparison_rows)
+
+
+def max_ratio_from_env(name):
+    value = os.environ.get(name, "")
+    if not value:
+        return 0.0
+    try:
+        return float(value)
+    except ValueError:
+        raise SystemExit(f"{name} must be a number")
+
+
+def assert_max_ratio(column, max_ratio, label):
+    if max_ratio <= 0.0:
+        return
+    failures = []
+    for row in comparison_rows:
+        value = row.get(column, "")
+        if value == "":
+            failures.append(f"{row['op']}: missing {label}")
+            continue
+        ratio_value = float(value)
+        if ratio_value > max_ratio:
+            failures.append(f"{row['op']}: {label} {ratio_value:.6f} > {max_ratio:.6f}")
+    if failures:
+        raise SystemExit(f"benchmark ratio gate failed for {label}: {'; '.join(failures)}")
+
+
+assert_max_ratio(
+    "zmin_vs_git_mean_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO"),
+    "Zmin/Git mean",
+)
+assert_max_ratio(
+    "zmin_vs_git_median_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO"),
+    "Zmin/Git median",
+)
+assert_max_ratio(
+    "zmin_vs_git_pair_median_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO"),
+    "Zmin/Git paired median",
+)
+assert_max_ratio(
+    "zmin_vs_gix_mean_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO"),
+    "Zmin/Gitoxide mean",
+)
+assert_max_ratio(
+    "zmin_vs_gix_median_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO"),
+    "Zmin/Gitoxide median",
+)
+assert_max_ratio(
+    "zmin_vs_gix_pair_median_ratio",
+    max_ratio_from_env("ZMIN_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO"),
+    "Zmin/Gitoxide paired median",
+)
 PY
   printf 'rows=%s\n' "$rows_path" >&2
   printf 'checks=%s\n' "$checks_path" >&2
