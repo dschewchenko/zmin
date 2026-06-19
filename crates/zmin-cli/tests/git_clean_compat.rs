@@ -144,6 +144,9 @@ fn clean_no_option_toggles_match_stock_git_order() {
         vec!["clean", "-f", "-q", "--no-quiet"],
         vec!["clean", "-n", "-q"],
         vec!["clean", "--dry-run", "--quiet", "--no-quiet"],
+        vec!["clean", "--no-interactive", "-n"],
+        vec!["clean", "-n", "--no-interactive"],
+        vec!["clean", "--interactive", "--no-interactive", "-n"],
         vec!["clean", "-fd"],
         vec!["clean", "-fx", "-ekeep.tmp"],
     ] {

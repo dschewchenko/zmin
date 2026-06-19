@@ -22,6 +22,7 @@ struct CleanOptions {
     excludes: Vec<String>,
     ignored: bool,
     ignored_only: bool,
+    interactive: bool,
     paths: Vec<PathBuf>,
 }
 
@@ -100,6 +101,7 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
         excludes: Vec::new(),
         ignored: false,
         ignored_only: false,
+        interactive: false,
         paths: Vec::new(),
     };
     let mut pathspec_mode = false;
@@ -119,6 +121,8 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
             "--no-force" => options.force_count = 0,
             "-q" | "--quiet" => options.quiet = true,
             "--no-quiet" => options.quiet = false,
+            "-i" | "--interactive" => options.interactive = true,
+            "--no-interactive" => options.interactive = false,
             "-d" => options.directories = true,
             "-x" => {
                 options.ignored = true;
@@ -160,6 +164,12 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
         }
         cursor += 1;
     }
+    if options.interactive {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "unsupported clean option '--interactive'".into(),
+        });
+    }
     Ok(options)
 }
 
@@ -183,6 +193,7 @@ fn parse_clean_short_cluster(value: &str, options: &mut CleanOptions) -> Result<
             'n' => options.dry_run = true,
             'f' => options.force_count = options.force_count.saturating_add(1),
             'q' => options.quiet = true,
+            'i' => options.interactive = true,
             'd' => options.directories = true,
             'x' => {
                 options.ignored = true;
