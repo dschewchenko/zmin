@@ -488,6 +488,29 @@ fn status_cache_index_toggles_are_not_stock_git_options() {
     }
 }
 
+#[test]
+fn status_rename_modes_match_stock_git() {
+    let repo = committed_repo();
+    run_zmin(repo.path(), ["mv", "a.txt", "renamed.txt"]);
+
+    for args in [
+        ["status", "--porcelain=v1"].as_slice(),
+        ["status", "--porcelain=v1", "--renames"].as_slice(),
+        ["status", "--porcelain=v1", "--no-renames"].as_slice(),
+        ["status", "--porcelain=v1", "--find-renames"].as_slice(),
+        ["status", "--porcelain=v1", "--find-renames=50%"].as_slice(),
+        ["status", "--porcelain=v2", "--renames"].as_slice(),
+        ["status", "--short", "--renames"].as_slice(),
+        ["status", "--renames"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
 fn committed_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());

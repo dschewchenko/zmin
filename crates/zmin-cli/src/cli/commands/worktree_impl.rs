@@ -346,6 +346,7 @@ pub(crate) fn status(
     verbose: u8,
     column: Option<&str>,
     no_column: bool,
+    detect_renames: bool,
     short: bool,
     null: bool,
     ignored: Option<&str>,
@@ -429,9 +430,18 @@ pub(crate) fn status(
     };
     let status_index = status_index.as_ref();
 
-    let mut paths: HashMap<Vec<u8>, (char, char)> = HashMap::new();
+    let mut paths: HashMap<Vec<u8>, StatusPathState> = HashMap::new();
     for path in &unmerged_paths {
-        paths.insert(path.clone(), status_unmerged_code(&index, path));
+        let (index_status, worktree_status) = status_unmerged_code(&index, path);
+        paths.insert(
+            path.clone(),
+            StatusPathState {
+                index_status,
+                worktree_status,
+                old_path: None,
+                similarity: None,
+            },
+        );
     }
     {
         let _trace = phase_trace("status.head_index_diff");
@@ -439,11 +449,15 @@ pub(crate) fn status(
             runtime.object_store_adapter(),
             head_tree.as_ref(),
             status_index,
+            detect_renames,
         )? {
             if unmerged_paths.contains::<[u8]>(entry.path.as_slice()) {
                 continue;
             }
-            paths.entry(entry.path).or_insert((' ', ' ')).0 = status_code(entry.status);
+            let state = paths.entry(entry.path).or_default();
+            state.index_status = status_code(entry.status);
+            state.old_path = entry.old_path;
+            state.similarity = entry.similarity;
         }
     }
     {
@@ -452,7 +466,7 @@ pub(crate) fn status(
             if unmerged_paths.contains(&path) {
                 continue;
             }
-            paths.entry(path).or_insert((' ', ' ')).1 = code;
+            paths.entry(path).or_default().worktree_status = code;
         }
     }
 
@@ -504,16 +518,34 @@ pub(crate) fn status(
         let mut rows = paths
             .into_iter()
             .filter(|(path, _)| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
-            .map(|(path, (index_status, worktree_status))| {
-                (
-                    path.clone(),
+            .map(|(path, state)| {
+                let row = if let Some(old_path) = state.old_path.as_ref() {
+                    if null {
+                        format!(
+                            "{}{} {}\0{}",
+                            state.index_status,
+                            state.worktree_status,
+                            String::from_utf8_lossy(&path),
+                            String::from_utf8_lossy(old_path)
+                        )
+                    } else {
+                        format!(
+                            "{}{} {} -> {}",
+                            state.index_status,
+                            state.worktree_status,
+                            String::from_utf8_lossy(old_path),
+                            String::from_utf8_lossy(&path)
+                        )
+                    }
+                } else {
                     format!(
                         "{}{} {}",
-                        index_status,
-                        worktree_status,
+                        state.index_status,
+                        state.worktree_status,
                         String::from_utf8_lossy(&path)
-                    ),
-                )
+                    )
+                };
+                (path.clone(), row)
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
@@ -542,8 +574,27 @@ enum PorcelainVersion {
     V2,
 }
 
+#[derive(Debug, Clone)]
+struct StatusPathState {
+    index_status: char,
+    worktree_status: char,
+    old_path: Option<Vec<u8>>,
+    similarity: Option<u8>,
+}
+
+impl Default for StatusPathState {
+    fn default() -> Self {
+        Self {
+            index_status: ' ',
+            worktree_status: ' ',
+            old_path: None,
+            similarity: None,
+        }
+    }
+}
+
 fn print_porcelain_v2_status(
-    paths: &HashMap<Vec<u8>, (char, char)>,
+    paths: &HashMap<Vec<u8>, StatusPathState>,
     index: &GitIndex,
     store: &dyn GitObjectStore,
     head_tree: Option<&ObjectId>,
@@ -559,14 +610,39 @@ fn print_porcelain_v2_status(
     let mut rows = paths
         .iter()
         .filter(|(path, _)| pathspecs.is_empty() || pathspec_matches(path, pathspecs))
-        .map(|(path, (index_status, worktree_status))| {
-            let metadata = status_v2_metadata(store, head_tree, index, path, *worktree_status)?;
+        .map(|(path, state)| {
+            let metadata = status_v2_metadata(
+                store,
+                head_tree,
+                index,
+                path,
+                state.old_path.as_deref(),
+                state.worktree_status,
+            )?;
+            if let Some(old_path) = state.old_path.as_ref() {
+                return Ok((
+                    path.clone(),
+                    format!(
+                        "2 {}{} N... {} {} {} {} {} R{} {}\t{}",
+                        status_v2_code(state.index_status),
+                        status_v2_code(state.worktree_status),
+                        metadata.head_mode,
+                        metadata.index_mode,
+                        metadata.worktree_mode,
+                        metadata.head_id,
+                        metadata.index_id,
+                        state.similarity.unwrap_or(100),
+                        String::from_utf8_lossy(path),
+                        String::from_utf8_lossy(old_path)
+                    ),
+                ));
+            }
             Ok((
                 path.clone(),
                 format!(
                     "1 {}{} N... {} {} {} {} {} {}",
-                    status_v2_code(*index_status),
-                    status_v2_code(*worktree_status),
+                    status_v2_code(state.index_status),
+                    status_v2_code(state.worktree_status),
                     metadata.head_mode,
                     metadata.index_mode,
                     metadata.worktree_mode,
@@ -609,10 +685,11 @@ fn status_v2_metadata(
     head_tree: Option<&ObjectId>,
     index: &GitIndex,
     path: &[u8],
+    old_path: Option<&[u8]>,
     worktree_status: char,
 ) -> Result<StatusV2Metadata> {
     let head = match head_tree {
-        Some(tree) => find_tree_entry(store, tree, path)?,
+        Some(tree) => find_tree_entry(store, tree, old_path.unwrap_or(path))?,
         None => None,
     };
     let entry = status_find_index_entry(index, path);
@@ -820,6 +897,7 @@ fn status_head_index_diff<S>(
     store: &S,
     head_tree: Option<&ObjectId>,
     index: &GitIndex,
+    detect_renames: bool,
 ) -> Result<Vec<IndexDiffEntry>>
 where
     S: GitObjectStore,
@@ -837,6 +915,13 @@ where
             })
             .collect());
     };
+    if detect_renames {
+        let tree_cache = TreeObjectCache::new(store);
+        let head_index = tree_cache.read_tree_to_index(head_tree)?;
+        let mut diff = diff_indexes_with_exact_renames(&head_index, index)?;
+        diff.sort_by(|left, right| left.path.cmp(&right.path));
+        return Ok(diff);
+    }
     let tree_cache = TreeObjectCache::new(store);
     let mut seen = HashSet::new();
     let mut diff = Vec::new();
@@ -999,7 +1084,7 @@ impl IgnoredMode {
 
 fn print_human_status(
     repo: &GitRepo,
-    paths: &HashMap<Vec<u8>, (char, char)>,
+    paths: &HashMap<Vec<u8>, StatusPathState>,
     untracked: &[Vec<u8>],
     ignored: &[Vec<u8>],
     untracked_mode: UntrackedMode,
@@ -1024,13 +1109,19 @@ fn print_human_status(
 
     let mut staged = paths
         .iter()
-        .filter(|(_, (index_status, _))| *index_status != ' ')
-        .map(|(path, (index_status, _))| (path.clone(), *index_status))
+        .filter(|(_, state)| state.index_status != ' ')
+        .map(|(path, state)| {
+            (
+                path.clone(),
+                state.index_status,
+                state.old_path.as_ref().cloned(),
+            )
+        })
         .collect::<Vec<_>>();
     let mut worktree = paths
         .iter()
-        .filter(|(_, (_, worktree_status))| *worktree_status != ' ')
-        .map(|(path, (_, worktree_status))| (path.clone(), *worktree_status))
+        .filter(|(_, state)| state.worktree_status != ' ')
+        .map(|(path, state)| (path.clone(), state.worktree_status))
         .collect::<Vec<_>>();
     staged.sort_by(|left, right| left.0.cmp(&right.0));
     worktree.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1045,12 +1136,17 @@ fn print_human_status(
         } else {
             println!("  (use \"git rm --cached <file>...\" to unstage)");
         }
-        for (path, status) in &staged {
-            println!(
-                "\t{:<12}{}",
-                human_status_label(*status),
-                String::from_utf8_lossy(path)
-            );
+        for (path, status, old_path) in &staged {
+            let display = if let Some(old_path) = old_path {
+                format!(
+                    "{} -> {}",
+                    String::from_utf8_lossy(old_path),
+                    String::from_utf8_lossy(path)
+                )
+            } else {
+                String::from_utf8_lossy(path).into_owned()
+            };
+            println!("\t{:<12}{}", human_status_label(*status), display);
         }
         printed_body = true;
     }
@@ -1246,6 +1342,7 @@ pub(crate) fn human_status_label(status: char) -> &'static str {
         'A' => "new file:",
         'D' => "deleted:",
         'M' => "modified:",
+        'R' => "renamed:",
         _ => "changed:",
     }
 }
@@ -8030,6 +8127,7 @@ fn stash_apply(
             0,
             None,
             false,
+            true,
             false,
             false,
             None,

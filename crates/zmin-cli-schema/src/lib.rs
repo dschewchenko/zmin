@@ -869,6 +869,19 @@ pub enum Command {
         column: Option<String>,
         #[arg(long = "no-column", overrides_with = "column", action = ArgAction::SetTrue)]
         no_column: bool,
+        #[arg(long = "renames", overrides_with = "no_renames", action = ArgAction::SetTrue)]
+        renames: bool,
+        #[arg(long = "no-renames", overrides_with = "renames", action = ArgAction::SetTrue)]
+        no_renames: bool,
+        #[arg(
+            short = 'M',
+            long = "find-renames",
+            overrides_with = "no_renames",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        find_renames: Option<String>,
         #[arg(long = "untracked-cache", hide = true, action = ArgAction::SetTrue)]
         untracked_cache: bool,
         #[arg(long = "no-untracked-cache", hide = true, action = ArgAction::SetTrue)]
