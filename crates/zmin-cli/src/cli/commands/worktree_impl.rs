@@ -6685,6 +6685,16 @@ fn render_stash_list_format(
             'H' => out.push_str(&entry.id.to_hex()),
             'h' => out.push_str(&entry.id.short_hex(7)),
             's' => out.push_str(&entry.message),
+            'B' => out.push_str(&String::from_utf8_lossy(&commit.message)),
+            'b' => out.push_str(&stash_format_body(&commit.message)),
+            'f' => out.push_str(&stash_format_sanitized_subject(&commit.message)),
+            'D' if index == 0 => out.push_str("refs/stash"),
+            'D' => {}
+            'd' if index == 0 => out.push_str(" (refs/stash)"),
+            'd' => {}
+            'e' | 'N' => {}
+            'm' => out.push('>'),
+            'S' => out.push_str("%S"),
             'P' => {
                 for (index, parent) in commit.parents.iter().enumerate() {
                     if index > 0 {
@@ -6767,6 +6777,30 @@ fn render_stash_list_format(
         }
     }
     Ok(out)
+}
+
+fn stash_format_body(message: &[u8]) -> String {
+    let message = message.strip_suffix(b"\n").unwrap_or(message);
+    let Some(blank_line) = message.windows(2).position(|window| window == b"\n\n") else {
+        return String::new();
+    };
+    String::from_utf8_lossy(&message[blank_line + 2..]).into_owned()
+}
+
+fn stash_format_sanitized_subject(message: &[u8]) -> String {
+    let subject = commit_subject(message);
+    let mut slug = String::new();
+    let mut previous_dash = false;
+    for ch in subject.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+            slug.push(ch);
+            previous_dash = false;
+        } else if !previous_dash {
+            slug.push('-');
+            previous_dash = true;
+        }
+    }
+    slug.trim_matches('-').to_owned()
 }
 
 fn signature_strict_iso_date(signature: &[u8]) -> Result<String> {
