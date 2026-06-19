@@ -1196,7 +1196,7 @@ fn version_command_reports_git_compatible_version_shape() {
     let version = command_any_with_git_editor(zmin_bin(), repo.path(), &["version"]);
     assert_eq!(version.0, 0);
     assert!(version.1.starts_with("git version "));
-    assert!(version.1.contains(".zmin"));
+    assert!(version.1.contains("(zmin "));
     assert_eq!(version.2, "");
 
     let build_options =
@@ -1209,6 +1209,7 @@ fn version_command_reports_git_compatible_version_shape() {
         "sizeof-size_t:",
         "shell-path:",
         "default-ref-format:",
+        "zmin-version:",
         "SHA-1:",
         "SHA-256:",
     ] {

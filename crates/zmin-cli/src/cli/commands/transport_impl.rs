@@ -7037,6 +7037,7 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
                     helper,
                     &repo.objects_dir,
                     &roots,
+                    &[],
                     Some(depth),
                 )?
             } else {
@@ -7044,6 +7045,7 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
                     &url,
                     &repo.objects_dir,
                     &roots,
+                    &[],
                     Some(depth),
                 )?
             }
@@ -8762,12 +8764,7 @@ fn fetch_multiple_refspecs(
     _write_fetch_head: bool,
     no_tags: bool,
 ) -> Result<()> {
-    if depth.map(validate_positive_depth).transpose()?.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "depth fetch with multiple explicit refspecs is not supported yet".into(),
-        });
-    }
+    let depth = depth.map(validate_positive_depth).transpose()?;
     if dry_run {
         return Ok(());
     }
@@ -8780,6 +8777,7 @@ fn fetch_multiple_refspecs(
             &repo,
             &remote,
             &refspecs,
+            depth,
             quiet,
             effective_prune,
             no_tags,
@@ -8792,16 +8790,18 @@ fn fetch_multiple_refspecs(
     let url = fetch_remote_url(&repo, &remote)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
-        return fetch_multiple_refspecs_from_http_remote(&repo, &remote, &url, &refspecs, quiet);
+        return fetch_multiple_refspecs_from_http_remote(
+            &repo, &remote, &url, &refspecs, depth, quiet,
+        );
     }
     if is_git_daemon_transport_url(&url) {
         return fetch_multiple_refspecs_from_daemon_remote(
-            &repo, &remote, &url, &refspecs, quiet, prune,
+            &repo, &remote, &url, &refspecs, depth, quiet, prune,
         );
     }
     if is_ssh_transport_url(&url) {
         return fetch_multiple_refspecs_from_ssh_remote(
-            &repo, &remote, &url, &refspecs, quiet, prune,
+            &repo, &remote, &url, &refspecs, depth, quiet, prune,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -8821,16 +8821,27 @@ fn fetch_multiple_refspecs(
     };
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        copy_local_fetch_objects(
-            &source,
-            &repo,
-            &source_refs,
-            &destination_refs,
-            &remote,
-            None,
-            &refspecs,
-            128,
-        )?;
+        if let Some(depth) = depth {
+            copy_local_fetch_objects_for_depth_refspecs(
+                &source,
+                &repo,
+                &source_refs,
+                &refspecs,
+                depth,
+                no_tags,
+            )?;
+        } else {
+            copy_local_fetch_objects(
+                &source,
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &remote,
+                None,
+                &refspecs,
+                128,
+            )?;
+        }
     }
     let fetch_update_rows = if quiet {
         Vec::new()
@@ -8872,6 +8883,7 @@ fn fetch_multiple_refspecs_from_http_remote(
     remote: &str,
     url: &str,
     refspecs: &[String],
+    depth: Option<usize>,
     quiet: bool,
 ) -> Result<()> {
     let parsed_url = parsed_http_url_with_extra_headers(Some(repo), url)?;
@@ -8900,47 +8912,73 @@ fn fetch_multiple_refspecs_from_http_remote(
         .map(|(_, row)| row.id.clone())
         .collect::<Vec<_>>();
     sort_dedup_object_ids(&mut roots);
-    let request_roots = missing_fetch_roots(&store, &roots)?;
-    let pack_fetched = if let Some(helper) = helper.as_mut() {
-        http_fetch_smart_pack_with_helper(
-            &parsed_url,
-            helper,
-            &repo.objects_dir,
-            &request_roots,
-            &haves,
-        )?
+    if let Some(depth) = depth {
+        let shallow_boundaries = if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_with_depth_with_helper(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                Some(depth),
+            )?
+        } else {
+            http_fetch_smart_pack_with_depth_direct(
+                &parsed_url,
+                &repo.objects_dir,
+                &roots,
+                &haves,
+                Some(depth),
+            )?
+        };
+        let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
+        write_shallow_file(
+            repo,
+            boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
+        )?;
     } else {
-        http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &request_roots, &haves)?
-    };
-    if !pack_fetched {
-        let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
-        let fetch_options = HttpFetchOptions {
-            commit: false,
-            tags: false,
-            all: true,
-            verbose: false,
-            recover: false,
-            write_ref: Vec::new(),
-            stdin: false,
-            packfile: None,
-            index_pack_args: Vec::new(),
-            args: Vec::new(),
+        let request_roots = missing_fetch_roots(&store, &roots)?;
+        let pack_fetched = if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_with_helper(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+            )?
+        } else {
+            http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &request_roots, &haves)?
         };
-        let commit_cache = CommitObjectCache::new(&store);
-        let tree_cache = TreeObjectCache::new(&store);
-        let mut seen = HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
-        let mut fetch_context = HttpFetchObjectContext {
-            url: &parsed_url,
-            helper,
-            store: &store,
-            commit_cache: &commit_cache,
-            tree_cache: &tree_cache,
-            options: &fetch_options,
-            seen: &mut seen,
-            suffix_buffer: String::new(),
-        };
-        for id in &request_roots {
-            http_fetch_object_recursive(&mut fetch_context, id)?;
+        if !pack_fetched {
+            let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
+            let fetch_options = HttpFetchOptions {
+                commit: false,
+                tags: false,
+                all: true,
+                verbose: false,
+                recover: false,
+                write_ref: Vec::new(),
+                stdin: false,
+                packfile: None,
+                index_pack_args: Vec::new(),
+                args: Vec::new(),
+            };
+            let commit_cache = CommitObjectCache::new(&store);
+            let tree_cache = TreeObjectCache::new(&store);
+            let mut seen = HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
+            let mut fetch_context = HttpFetchObjectContext {
+                url: &parsed_url,
+                helper,
+                store: &store,
+                commit_cache: &commit_cache,
+                tree_cache: &tree_cache,
+                options: &fetch_options,
+                seen: &mut seen,
+                suffix_buffer: String::new(),
+            };
+            for id in &request_roots {
+                http_fetch_object_recursive(&mut fetch_context, id)?;
+            }
         }
     }
 
@@ -8963,6 +9001,7 @@ fn fetch_multiple_refspecs_from_daemon_remote(
     remote: &str,
     url: &str,
     refspecs: &[String],
+    depth: Option<usize>,
     quiet: bool,
     prune: bool,
 ) -> Result<()> {
@@ -8973,11 +9012,12 @@ fn fetch_multiple_refspecs_from_daemon_remote(
         remote,
         url,
         refspecs,
+        depth,
         quiet,
         prune,
         &rows,
-        |request_roots, haves| {
-            daemon_fetch_pack_with_haves(url, &objects_dir, request_roots, haves)
+        |request_roots, haves, depth| {
+            daemon_fetch_pack_with_depth_and_haves(url, &objects_dir, request_roots, haves, depth)
         },
     )
 }
@@ -8987,6 +9027,7 @@ fn fetch_multiple_refspecs_from_ssh_remote(
     remote: &str,
     url: &str,
     refspecs: &[String],
+    depth: Option<usize>,
     quiet: bool,
     prune: bool,
 ) -> Result<()> {
@@ -8997,10 +9038,13 @@ fn fetch_multiple_refspecs_from_ssh_remote(
         remote,
         url,
         refspecs,
+        depth,
         quiet,
         prune,
         &rows,
-        |request_roots, haves| ssh_fetch_pack_with_haves(url, &objects_dir, request_roots, haves),
+        |request_roots, haves, depth| {
+            ssh_fetch_pack_with_depth_and_haves(url, &objects_dir, request_roots, haves, depth)
+        },
     )
 }
 
@@ -9009,13 +9053,14 @@ fn fetch_multiple_refspecs_from_advertised_remote<F>(
     remote: &str,
     url: &str,
     refspecs: &[String],
+    depth: Option<usize>,
     quiet: bool,
     prune: bool,
     rows: &[LsRemoteRow],
     mut fetch_pack: F,
 ) -> Result<()>
 where
-    F: FnMut(&[ObjectId], &[ObjectId]) -> Result<()>,
+    F: FnMut(&[ObjectId], &[ObjectId], Option<usize>) -> Result<Vec<ObjectId>>,
 {
     let mut resolved = Vec::with_capacity(refspecs.len());
     for refspec in refspecs {
@@ -9029,8 +9074,19 @@ where
         .map(|(_, row)| row.id.clone())
         .collect::<Vec<_>>();
     sort_dedup_object_ids(&mut roots);
-    let request_roots = missing_fetch_roots(&store, &roots)?;
-    fetch_pack(&request_roots, &haves)?;
+    let request_roots = if depth.is_some() {
+        roots.clone()
+    } else {
+        missing_fetch_roots(&store, &roots)?
+    };
+    let shallow_boundaries = fetch_pack(&request_roots, &haves, depth)?;
+    if let Some(depth) = depth {
+        let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
+        write_shallow_file(
+            repo,
+            boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
+        )?;
+    }
 
     let mut update_rows = Vec::new();
     for (refspec, row) in &resolved {
@@ -9139,6 +9195,28 @@ fn http_refspec_destination(refspec: &str, source_ref: &str) -> Result<Option<St
     Ok(None)
 }
 
+fn shallow_roots_from_resolved_rows(
+    store: &LooseObjectStore,
+    resolved: &[(String, LsRemoteRow)],
+) -> Result<Vec<ObjectId>> {
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(resolved.len()));
+    for (_, row) in resolved {
+        match object_kind_hint_or_read(store, &row.id)? {
+            GitObjectKind::Commit => roots.push(row.id.clone()),
+            GitObjectKind::Tag => {
+                if let Some(id) = peel_tag(store, &row.id)?
+                    && object_kind_hint_or_read(store, &id)? == GitObjectKind::Commit
+                {
+                    roots.push(id);
+                }
+            }
+            _ => {}
+        }
+    }
+    sort_dedup_object_ids(&mut roots);
+    Ok(roots)
+}
+
 fn invalid_fetch_refspec_error(refspec: &str) -> CliError {
     CliError::Fatal {
         code: 128,
@@ -9173,6 +9251,7 @@ fn fetch_multiple_refspecs_from_location(
     repo: &GitRepo,
     location: &str,
     refspecs: &[String],
+    depth: Option<usize>,
     quiet: bool,
     prune: bool,
     no_tags: bool,
@@ -9194,16 +9273,27 @@ fn fetch_multiple_refspecs_from_location(
     };
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        copy_local_fetch_objects(
-            &source,
-            repo,
-            &source_refs,
-            &destination_refs,
-            "FETCH_HEAD",
-            None,
-            refspecs,
-            128,
-        )?;
+        if let Some(depth) = depth {
+            copy_local_fetch_objects_for_depth_refspecs(
+                &source,
+                repo,
+                &source_refs,
+                refspecs,
+                depth,
+                no_tags,
+            )?;
+        } else {
+            copy_local_fetch_objects(
+                &source,
+                repo,
+                &source_refs,
+                &destination_refs,
+                "FETCH_HEAD",
+                None,
+                refspecs,
+                128,
+            )?;
+        }
     }
     let fetch_update_rows = if quiet {
         Vec::new()
@@ -10054,19 +10144,13 @@ fn fetch_with_depth(
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
         let prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         let prune_tags = prune && effective_fetch_prune_tags(&repo, None, prune_tags)?;
-        if depth.map(validate_positive_depth).transpose()?.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: format!(
-                    "depth fetch from explicit location '{remote}' is not supported yet"
-                ),
-            });
-        }
+        let depth = depth.map(validate_positive_depth).transpose()?;
         return fetch_with_repo_and_location(
             repo,
             remote,
             branch,
             missing_ref_code,
+            depth,
             quiet,
             dry_run,
             append,
@@ -10176,13 +10260,14 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &remote,
                 &url,
                 std::slice::from_ref(refspec),
+                None,
                 quiet,
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
             let refspecs = fetch_refspecs_from_refmap(branch, refmap)?;
             return fetch_multiple_refspecs_from_http_remote(
-                &repo, &remote, &url, &refspecs, quiet,
+                &repo, &remote, &url, &refspecs, None, quiet,
             );
         }
         return fetch_with_http_remote(repo, remote, branch, missing_ref_code, &url);
@@ -10194,6 +10279,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &remote,
                 &url,
                 std::slice::from_ref(refspec),
+                None,
                 quiet,
                 prune,
             );
@@ -10201,7 +10287,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
             let refspecs = fetch_refspecs_from_refmap(branch, refmap)?;
             return fetch_multiple_refspecs_from_daemon_remote(
-                &repo, &remote, &url, &refspecs, quiet, prune,
+                &repo, &remote, &url, &refspecs, None, quiet, prune,
             );
         }
         return fetch_with_daemon_remote(repo, remote, branch, missing_ref_code, &url);
@@ -10213,6 +10299,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &remote,
                 &url,
                 std::slice::from_ref(refspec),
+                None,
                 quiet,
                 prune,
             );
@@ -10220,7 +10307,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
             let refspecs = fetch_refspecs_from_refmap(branch, refmap)?;
             return fetch_multiple_refspecs_from_ssh_remote(
-                &repo, &remote, &url, &refspecs, quiet, prune,
+                &repo, &remote, &url, &refspecs, None, quiet, prune,
             );
         }
         return fetch_with_ssh_remote(repo, remote, branch, missing_ref_code, &url);
@@ -10478,6 +10565,7 @@ fn fetch_with_repo_and_location(
     location: String,
     branch: Option<String>,
     missing_ref_code: i32,
+    depth: Option<usize>,
     quiet: bool,
     dry_run: bool,
     _append: bool,
@@ -10510,6 +10598,17 @@ fn fetch_with_repo_and_location(
             && (source_name.contains('*') || destination.contains('*'))
         {
             let source = local_clone_source(&source_path)?;
+            if depth.is_some() {
+                return fetch_multiple_refspecs_from_location(
+                    &repo,
+                    &location,
+                    &[refspec.to_owned()],
+                    depth,
+                    quiet,
+                    prune,
+                    no_tags,
+                );
+            }
             return fetch_direct_location_wildcard_refspec(
                 &repo,
                 &source,
@@ -10527,6 +10626,18 @@ fn fetch_with_repo_and_location(
             && !destination.contains(':')
         {
             let source = local_clone_source(&source_path)?;
+            if let Some(depth) = depth {
+                return fetch_direct_location_head_to_ref_depth(
+                    &repo,
+                    &source,
+                    &location,
+                    destination,
+                    quiet,
+                    update_head_ok,
+                    no_tags,
+                    depth,
+                );
+            }
             return fetch_direct_location_head_to_ref(
                 &repo,
                 &source,
@@ -10544,6 +10655,14 @@ fn fetch_with_repo_and_location(
             && !destination.contains(':')
         {
             if source_path.is_file() {
+                if depth.is_some() {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!(
+                            "depth fetch from bundle '{location}' is not supported yet"
+                        ),
+                    });
+                }
                 return pack_commands::fetch_bundle_refspec(
                     &repo,
                     &source_path,
@@ -10552,6 +10671,19 @@ fn fetch_with_repo_and_location(
                 );
             }
             let source = local_clone_source(&source_path)?;
+            if let Some(depth) = depth {
+                return fetch_direct_location_refspec_to_ref_depth(
+                    &repo,
+                    &source,
+                    &location,
+                    source_name,
+                    destination,
+                    quiet,
+                    update_head_ok,
+                    no_tags,
+                    depth,
+                );
+            }
             return fetch_direct_location_refspec_to_ref(
                 &repo,
                 &source,
@@ -10566,6 +10698,17 @@ fn fetch_with_repo_and_location(
         if !prune && !refspec.contains(':') {
             let source = local_clone_source(&source_path)?;
             let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+            if let Some(depth) = depth {
+                return fetch_branch_without_destination_ref_depth(
+                    &repo,
+                    &source,
+                    &source_refs,
+                    refspec,
+                    &location,
+                    no_tags,
+                    depth,
+                );
+            }
             return fetch_branch_without_destination_ref(
                 &repo,
                 &source,
@@ -10577,6 +10720,18 @@ fn fetch_with_repo_and_location(
     }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
+        if let Some(depth) = depth {
+            return fetch_direct_location_head_depth(
+                &repo,
+                &source,
+                &location,
+                quiet,
+                dry_run,
+                write_fetch_head,
+                no_tags,
+                depth,
+            );
+        }
         return fetch_direct_location_head(
             &repo,
             &source,
@@ -10728,6 +10883,43 @@ fn fetch_direct_location_head(
     Ok(())
 }
 
+fn fetch_direct_location_head_depth(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    quiet: bool,
+    dry_run: bool,
+    write_fetch_head: bool,
+    no_tags: bool,
+    depth: usize,
+) -> Result<()> {
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let head = source_refs.resolve("HEAD")?;
+    if dry_run {
+        if !quiet && write_fetch_head {
+            eprintln!("From {}", fetch_head_url_display(location));
+            eprintln!(" * branch            HEAD       -> FETCH_HEAD");
+        }
+        return Ok(());
+    }
+    copy_local_fetch_objects_for_depth_roots(
+        source,
+        repo,
+        &source_refs,
+        std::slice::from_ref(&head),
+        depth,
+        no_tags,
+    )?;
+    if write_fetch_head {
+        write_direct_location_head_fetch_head_file(repo, &head, location)?;
+    }
+    if !quiet && write_fetch_head {
+        eprintln!("From {}", fetch_head_url_display(location));
+        eprintln!(" * branch            HEAD       -> FETCH_HEAD");
+    }
+    Ok(())
+}
+
 fn fetch_direct_location_head_to_ref(
     repo: &GitRepo,
     source: &LocalCloneSource,
@@ -10781,6 +10973,43 @@ fn fetch_direct_location_head_to_ref(
             eprintln!(" * [new tag]         {tag}        -> {tag}");
             Ok::<(), CliError>(())
         })?;
+    }
+    Ok(())
+}
+
+fn fetch_direct_location_head_to_ref_depth(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    destination: &str,
+    quiet: bool,
+    update_head_ok: bool,
+    no_tags: bool,
+    depth: usize,
+) -> Result<()> {
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let head = source_refs.resolve("HEAD")?;
+    copy_local_fetch_objects_for_depth_roots(
+        source,
+        repo,
+        &source_refs,
+        std::slice::from_ref(&head),
+        depth,
+        no_tags,
+    )?;
+    let destination_ref = branch_ref_name(destination)?;
+    if !update_head_ok {
+        reject_fetch_into_current_branch(repo, &destination_refs, &destination_ref)?;
+    }
+    destination_refs.write_ref(&destination_ref, &head)?;
+    if !no_tags {
+        copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+    }
+    write_direct_location_fetch_head_file(repo, &source_refs, location)?;
+    if !quiet {
+        eprintln!("From {}", fetch_head_url_display(location));
+        eprintln!(" * [new ref]         HEAD       -> {destination}");
     }
     Ok(())
 }
@@ -10865,6 +11094,30 @@ fn fetch_branch_without_destination_ref(
         &mut seen,
         PackEncodeOptions::delta(10, 50),
         pack_missing_threshold,
+    )?;
+    write_branch_fetch_head_file(repo, &id, &ref_name, url, false)
+}
+
+fn fetch_branch_without_destination_ref_depth(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    source_refs: &RefStore,
+    branch: &str,
+    url: &str,
+    no_tags: bool,
+    depth: usize,
+) -> Result<()> {
+    let ref_name = branch_ref_name(branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(branch, 128))?;
+    copy_local_fetch_objects_for_depth_roots(
+        source,
+        repo,
+        source_refs,
+        std::slice::from_ref(&id),
+        depth,
+        no_tags,
     )?;
     write_branch_fetch_head_file(repo, &id, &ref_name, url, false)
 }
@@ -10954,6 +11207,50 @@ fn fetch_direct_location_refspec_to_ref(
     Ok(())
 }
 
+fn fetch_direct_location_refspec_to_ref_depth(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    source_name: &str,
+    destination: &str,
+    quiet: bool,
+    update_head_ok: bool,
+    no_tags: bool,
+    depth: usize,
+) -> Result<()> {
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let resolved = resolve_direct_fetch_source_ref(&source_refs, source_name)?;
+    copy_local_fetch_objects_for_depth_roots(
+        source,
+        repo,
+        &source_refs,
+        std::slice::from_ref(&resolved.id),
+        depth,
+        no_tags,
+    )?;
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let destination_ref = destination_fetch_ref_name(destination)?;
+    reject_non_commit_branch_destination(&source_store, &resolved.id, &destination_ref)?;
+    if !update_head_ok {
+        reject_fetch_into_current_branch(repo, &destination_refs, &destination_ref)?;
+    }
+    destination_refs.write_ref(&destination_ref, &resolved.id)?;
+    if !no_tags {
+        copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+    }
+    write_direct_location_refspec_fetch_head_file(repo, &source_refs, &resolved, location)?;
+    if !quiet {
+        eprintln!("From {}", fetch_head_url_display(location));
+        eprintln!(
+            " * [new ref]         {}        -> {}",
+            resolved.display,
+            fetch_update_destination_display(&destination_ref)
+        );
+    }
+    Ok(())
+}
+
 struct DirectFetchSourceRef {
     id: ObjectId,
     display: String,
@@ -10972,6 +11269,26 @@ fn resolve_direct_fetch_source_ref(
 ) -> Result<DirectFetchSourceRef> {
     let source_name = source_name.strip_prefix('+').unwrap_or(source_name);
     if source_name.starts_with("refs/") {
+        if let Some(branch) = source_name.strip_prefix("refs/heads/") {
+            return source_refs
+                .resolve(source_name)
+                .map(|id| DirectFetchSourceRef {
+                    id,
+                    display: branch.to_owned(),
+                    fetch_head_kind: DirectFetchHeadKind::Branch,
+                })
+                .map_err(CliError::Io);
+        }
+        if let Some(remote_tracking) = source_name.strip_prefix("refs/remotes/") {
+            return source_refs
+                .resolve(source_name)
+                .map(|id| DirectFetchSourceRef {
+                    id,
+                    display: remote_tracking.to_owned(),
+                    fetch_head_kind: DirectFetchHeadKind::RemoteTracking,
+                })
+                .map_err(CliError::Io);
+        }
         return source_refs
             .resolve(source_name)
             .map(|id| DirectFetchSourceRef {
@@ -11068,17 +11385,17 @@ fn write_direct_location_refspec_fetch_head_file(
     source: &DirectFetchSourceRef,
     location: &str,
 ) -> Result<()> {
+    let display_url = fetch_head_url_display(location);
     let description = match source.fetch_head_kind {
-        DirectFetchHeadKind::Branch => format!("branch '{}' of {}", source.display, location),
+        DirectFetchHeadKind::Branch => format!("branch '{}' of {}", source.display, display_url),
         DirectFetchHeadKind::RemoteTracking => {
             format!(
                 "remote-tracking branch '{}' of {}",
-                source.display, location
+                source.display, display_url
             )
         }
-        DirectFetchHeadKind::Ref => location.to_owned(),
+        DirectFetchHeadKind::Ref => display_url.clone(),
     };
-    let display_url = fetch_head_url_display(location);
     let mut rows = vec![format!("{}\t\t{}\n", source.id.to_hex(), description)];
     source_refs.for_each_ref_name("refs/tags/", |ref_name| {
         let tag = ref_name.strip_prefix("refs/tags/").unwrap_or(ref_name);
@@ -12274,6 +12591,160 @@ fn copy_local_fetch_objects(
     Ok(())
 }
 
+fn copy_local_fetch_objects_for_depth_refspecs(
+    source: &LocalCloneSource,
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    fetch_refspecs: &[String],
+    depth: usize,
+    no_tags: bool,
+) -> Result<()> {
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(fetch_refspecs.len()));
+    {
+        let _trace = phase_trace("fetch.local.collect_depth_roots");
+        collect_local_fetch_refspec_roots(source_refs, fetch_refspecs, &mut roots)?;
+    }
+    copy_local_fetch_objects_for_depth_roots(
+        source,
+        destination_repo,
+        source_refs,
+        &roots,
+        depth,
+        no_tags,
+    )
+}
+
+fn copy_local_fetch_objects_for_depth_roots(
+    source: &LocalCloneSource,
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    roots: &[ObjectId],
+    depth: usize,
+    no_tags: bool,
+) -> Result<()> {
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    {
+        let _trace = phase_trace("fetch.local.validate_destination_store");
+        validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    }
+    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let mut roots = roots.to_vec();
+    sort_dedup_object_ids(&mut roots);
+    phase_trace_emit(
+        "fetch.local.depth_roots",
+        0.0,
+        &[("count", roots.len().to_string())],
+    );
+
+    let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        roots.len(),
+    ));
+    let mut shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(roots.len()));
+    {
+        let _trace = phase_trace("fetch.local.copy_depth_objects");
+        for root in &roots {
+            match object_kind_hint_or_read(&source_store, root)? {
+                GitObjectKind::Commit => {
+                    let depth_limited_commits = upload_pack_depth_limited_commits(
+                        &source_store,
+                        std::slice::from_ref(root),
+                        depth,
+                    )?;
+                    copy_reachable_objects_for_depth_into(
+                        &source_store,
+                        &destination_store,
+                        &depth_limited_commits,
+                        &mut seen,
+                    )?;
+                    shallow_roots.push(root.clone());
+                }
+                GitObjectKind::Tag => {
+                    if let Some(commit) = peel_tag(&source_store, root)?
+                        && object_kind_hint_or_read(&source_store, &commit)?
+                            == GitObjectKind::Commit
+                    {
+                        let depth_limited_commits = upload_pack_depth_limited_commits(
+                            &source_store,
+                            std::slice::from_ref(&commit),
+                            depth,
+                        )?;
+                        copy_reachable_objects_for_depth_into(
+                            &source_store,
+                            &destination_store,
+                            &depth_limited_commits,
+                            &mut seen,
+                        )?;
+                        shallow_roots.push(commit);
+                    }
+                    let _ =
+                        copy_object_if_missing(&source_store, &destination_store, root, &mut seen)?;
+                }
+                _ => {
+                    let _ =
+                        copy_object_if_missing(&source_store, &destination_store, root, &mut seen)?;
+                }
+            }
+        }
+    }
+    if !no_tags {
+        copy_fetch_pack_included_tags(
+            source_refs,
+            &source_store,
+            &destination_store,
+            &source_repo,
+            &mut seen,
+            Some(depth),
+        )?;
+    }
+    sort_dedup_object_ids(&mut shallow_roots);
+    if !shallow_roots.is_empty() {
+        write_shallow_file(
+            destination_repo,
+            shallow_boundaries(&source_store, &shallow_roots, depth)?,
+        )?;
+    }
+    Ok(())
+}
+
+fn collect_local_fetch_refspec_roots(
+    source_refs: &RefStore,
+    refspecs: &[String],
+    roots: &mut Vec<ObjectId>,
+) -> Result<()> {
+    for refspec in refspecs {
+        let refspec = refspec.trim_start_matches('+');
+        let Some((source, destination)) = refspec.split_once(':') else {
+            continue;
+        };
+        if let Some((source_prefix, source_suffix, _, _)) =
+            wildcard_fetch_parts(source, destination)
+        {
+            source_refs.for_each_resolved_ref(source_prefix, |ref_name, id| {
+                if ref_name
+                    .strip_prefix(source_prefix)
+                    .and_then(|rest| rest.strip_suffix(source_suffix))
+                    .is_some()
+                {
+                    roots.push(id.clone());
+                }
+                Ok::<(), CliError>(())
+            })?;
+            continue;
+        }
+        if source.contains('*') || destination.contains('*') {
+            continue;
+        }
+        match source_refs.resolve(source) {
+            Ok(id) => roots.push(id),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Ok(())
+}
+
 fn collect_configured_fetch_roots(
     source_refs: &RefStore,
     destination_refs: &RefStore,
@@ -12559,6 +13030,8 @@ fn fetch_with_http_remote_depth(
         &[],
     )?;
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
     let mut request_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     if let Some(branch) = branch {
@@ -12609,6 +13082,7 @@ fn fetch_with_http_remote_depth(
             helper,
             &repo.objects_dir,
             &request_roots,
+            &haves,
             Some(depth),
         )?
     } else {
@@ -12616,6 +13090,7 @@ fn fetch_with_http_remote_depth(
             &parsed_url,
             &repo.objects_dir,
             &request_roots,
+            &haves,
             Some(depth),
         )?
     };
@@ -14016,12 +14491,13 @@ fn http_fetch_smart_pack_with_depth_with_helper(
     helper: &mut RemoteHttpHelperSession,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request(roots, &[], depth)?;
+    let request = build_upload_pack_request(roots, haves, depth)?;
     let response_path = temp_http_helper_output_path()?;
     let result = (|| {
         let head = helper.request_to_file(
@@ -14060,12 +14536,13 @@ fn http_fetch_smart_pack_with_depth_direct(
     url: &ParsedHttpUrl,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
+    haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request(roots, &[], depth)?;
+    let request = build_upload_pack_request(roots, haves, depth)?;
     let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
     if head.status_code != 200 {
         return Err(CliError::Fatal {

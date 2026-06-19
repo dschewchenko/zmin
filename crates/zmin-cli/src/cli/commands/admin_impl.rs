@@ -1243,10 +1243,7 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
 
 fn diagnose_log(repo: &GitRepo) -> Result<String> {
     let mut report = String::new();
-    report.push_str(&format!(
-        "git version {}.zmin\n",
-        env!("CARGO_PKG_VERSION")
-    ));
+    report.push_str(&format!("{}\n", git_compatible_version_line()));
     report.push_str(&format!("cpu: {}\n", std::env::consts::ARCH));
     report.push_str("no commit associated with this build\n");
     report.push_str(&format!(

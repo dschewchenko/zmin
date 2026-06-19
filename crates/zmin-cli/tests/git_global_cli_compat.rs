@@ -103,6 +103,28 @@ fn global_exec_path_query_and_override_match_git_shape() {
 }
 
 #[test]
+fn root_version_option_reports_git_compatible_version_and_zmin_version() {
+    let dir = TempDir::new().expect("temp dir");
+    let output = Command::new(zmin_bin())
+        .arg("--version")
+        .current_dir(dir.path())
+        .output()
+        .expect("run zmin --version");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.starts_with("git version 2.36.0 "), "{stdout}");
+    assert!(stdout.contains("(zmin "), "{stdout}");
+    assert!(String::from_utf8_lossy(&output.stderr).is_empty());
+}
+
+#[test]
 fn global_bare_option_applies_to_init_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let zmin_repo = dir.path().join("zmin-bare");

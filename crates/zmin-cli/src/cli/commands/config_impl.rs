@@ -851,22 +851,7 @@ pub(crate) fn var(list: bool, variable: Option<&str>) -> Result<()> {
 }
 
 pub(crate) fn version(build_options: bool) -> Result<()> {
-    println!("git version {}.zmin", env!("CARGO_PKG_VERSION"));
-    if build_options {
-        println!("cpu: {}", std::env::consts::ARCH);
-        println!("no commit associated with this build");
-        println!(
-            "sizeof-long: {}",
-            std::mem::size_of::<std::os::raw::c_long>()
-        );
-        println!("sizeof-size_t: {}", std::mem::size_of::<usize>());
-        println!("shell-path: {}", git_shell_path());
-        println!("default-ref-format: files");
-        println!("zlib: miniz_oxide");
-        println!("SHA-1: zmin-git-core");
-        println!("SHA-256: zmin-git-core");
-    }
-    Ok(())
+    write_git_compatible_version(std::io::stdout().lock(), build_options).map_err(CliError::Io)
 }
 
 fn print_optional_var(value: Option<String>) -> Result<()> {

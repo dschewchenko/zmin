@@ -492,19 +492,7 @@ fn parse_scalar_version_args(args: &[String]) -> Result<Option<bool>> {
 }
 
 fn scalar_version(build_options: bool) -> Result<()> {
-    eprintln!("git version {}", env!("CARGO_PKG_VERSION"));
-    if build_options {
-        eprintln!("cpu: {}", std::env::consts::ARCH);
-        eprintln!("no commit associated with this build");
-        eprintln!(
-            "sizeof-long: {}",
-            std::mem::size_of::<std::os::raw::c_long>()
-        );
-        eprintln!("sizeof-size_t: {}", std::mem::size_of::<usize>());
-        eprintln!("shell-path: /bin/sh");
-        eprintln!("rust: enabled");
-    }
-    Ok(())
+    write_git_compatible_version(std::io::stderr().lock(), build_options).map_err(CliError::Io)
 }
 
 fn scalar_effective_cwd(directories: Vec<PathBuf>) -> Result<PathBuf> {

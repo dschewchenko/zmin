@@ -332,6 +332,66 @@ fn assert_matching_shallow_state(
     );
 }
 
+fn assert_matching_shallow_state_for_missing_objects(
+    zmin_repo: &std::path::Path,
+    git_repo: &std::path::Path,
+    missing_objects: &[String],
+) {
+    assert_eq!(
+        git(zmin_repo, ["rev-parse", "--is-shallow-repository"]),
+        git(git_repo, ["rev-parse", "--is-shallow-repository"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".git/shallow")).expect("read zmin shallow"),
+        fs::read_to_string(git_repo.join(".git/shallow")).expect("read git shallow")
+    );
+    for missing_object in missing_objects {
+        assert_eq!(
+            git_object_exists(zmin_repo, missing_object),
+            git_object_exists(git_repo, missing_object),
+            "object presence differs for {missing_object}"
+        );
+    }
+}
+
+fn prepare_two_branch_shallow_remote(
+    root: &std::path::Path,
+) -> (std::path::PathBuf, String, String) {
+    let remote = root.join("remote.git");
+    let work = root.join("work");
+    git(root, ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(root, ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("main.txt"), b"main base\n").expect("write main base");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "main base"]);
+    let main_parent = git(&work, ["rev-parse", "HEAD"]);
+    fs::write(work.join("main.txt"), b"main tip\n").expect("write main tip");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "main tip"]);
+    git(&work, ["switch", "-c", "feature", &main_parent]);
+    fs::write(work.join("feature.txt"), b"feature base\n").expect("write feature base");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "feature base"]);
+    let feature_parent = git(&work, ["rev-parse", "HEAD"]);
+    fs::write(work.join("feature.txt"), b"feature tip\n").expect("write feature tip");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "feature tip"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature"]);
+    set_bare_head_to_main(&remote);
+    (remote, main_parent, feature_parent)
+}
+
 fn assert_no_alternates(repo: &std::path::Path) {
     assert!(
         !repo.join(".git/objects/info/alternates").exists(),
@@ -1907,6 +1967,53 @@ fn fetch_reads_shallow_ssh_remote_like_stock_git() {
         git(&git_client, ["show-ref"])
     );
     assert_matching_shallow_state(&zmin_client, &git_client, &parent);
+}
+
+#[test]
+fn fetch_depth_ssh_multiple_explicit_refspecs_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (remote, main_parent, feature_parent) = prepare_two_branch_shallow_remote(dir.path());
+    let git_client = dir.path().join("git-depth-multi-ssh");
+    let zmin_client = dir.path().join("zmin-depth-multi-ssh");
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    for client in [&git_client, &zmin_client] {
+        git(dir.path(), ["init", client.to_str().expect("client path")]);
+        git(client, ["remote", "add", "origin", url.as_str()]);
+    }
+    let args = [
+        "fetch",
+        "--depth=1",
+        "origin",
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git shallow multi-refspec ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin shallow multi-refspec ssh",
+    );
+
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_matching_shallow_state_for_missing_objects(
+        &zmin_client,
+        &git_client,
+        &[main_parent, feature_parent],
+    );
 }
 
 #[test]
@@ -5071,6 +5178,52 @@ fn fetch_reads_shallow_smart_http_pack_like_stock_git() {
 }
 
 #[test]
+fn fetch_depth_smart_http_multiple_explicit_refspecs_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (remote, main_parent, feature_parent) = prepare_two_branch_shallow_remote(dir.path());
+    let git_client = dir.path().join("git-depth-multi-http");
+    let zmin_client = dir.path().join("zmin-depth-multi-http");
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/{}", server.port, "remote.git");
+    git(dir.path(), ["init", "git-depth-multi-http"]);
+    git(dir.path(), ["init", "zmin-depth-multi-http"]);
+    git(&git_client, ["remote", "add", "origin", url.as_str()]);
+    run_zmin(&zmin_client, ["remote", "add", "origin", url.as_str()]);
+    let args = [
+        "fetch",
+        "--depth=1",
+        "origin",
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+
+    git(&git_client, args);
+    run_zmin(&zmin_client, args);
+
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_matching_shallow_state_for_missing_objects(
+        &zmin_client,
+        &git_client,
+        &[main_parent, feature_parent],
+    );
+    assert_eq!(
+        git(
+            &zmin_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        ),
+        git(
+            &git_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        )
+    );
+    assert!(remote.join("git-daemon-export-ok").is_file());
+}
+
+#[test]
 fn pull_rebase_reads_smart_http_pack_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -5722,6 +5875,41 @@ fn fetch_reads_shallow_git_daemon_remote_like_stock_git() {
         git(&git_client, ["show-ref"])
     );
     assert_matching_shallow_state(&zmin_client, &git_client, &parent);
+}
+
+#[test]
+fn fetch_depth_git_daemon_multiple_explicit_refspecs_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (_remote, main_parent, feature_parent) = prepare_two_branch_shallow_remote(dir.path());
+    let git_client = dir.path().join("git-depth-multi-daemon");
+    let zmin_client = dir.path().join("zmin-depth-multi-daemon");
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    for client in [&git_client, &zmin_client] {
+        git(dir.path(), ["init", client.to_str().expect("client path")]);
+        git(client, ["remote", "add", "origin", url.as_str()]);
+    }
+    let args = [
+        "fetch",
+        "--depth=1",
+        "origin",
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+
+    git(&git_client, args);
+    run_zmin(&zmin_client, args);
+
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_matching_shallow_state_for_missing_objects(
+        &zmin_client,
+        &git_client,
+        &[main_parent, feature_parent],
+    );
 }
 
 #[test]

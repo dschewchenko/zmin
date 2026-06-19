@@ -4,10 +4,44 @@ use clap::{CommandFactory, Parser};
 
 use super::*;
 
+pub(crate) const GIT_COMPAT_VERSION: &str = "2.36.0";
+
 static BROKEN_PIPE_PANIC: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn command_definition() -> clap::Command {
     Args::command()
+}
+
+pub(crate) fn git_compatible_version_line() -> String {
+    format!(
+        "git version {} (zmin {})",
+        GIT_COMPAT_VERSION,
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+pub(crate) fn write_git_compatible_version(
+    mut writer: impl std::io::Write,
+    build_options: bool,
+) -> io::Result<()> {
+    writeln!(writer, "{}", git_compatible_version_line())?;
+    if build_options {
+        writeln!(writer, "cpu: {}", std::env::consts::ARCH)?;
+        writeln!(writer, "no commit associated with this build")?;
+        writeln!(
+            writer,
+            "sizeof-long: {}",
+            std::mem::size_of::<std::os::raw::c_long>()
+        )?;
+        writeln!(writer, "sizeof-size_t: {}", std::mem::size_of::<usize>())?;
+        writeln!(writer, "shell-path: {}", git_shell_path())?;
+        writeln!(writer, "default-ref-format: files")?;
+        writeln!(writer, "zmin-version: {}", env!("CARGO_PKG_VERSION"))?;
+        writeln!(writer, "zlib: miniz_oxide")?;
+        writeln!(writer, "SHA-1: zmin-git-core")?;
+        writeln!(writer, "SHA-256: zmin-git-core")?;
+    }
+    Ok(())
 }
 
 pub(crate) fn install_broken_pipe_panic_hook() {
@@ -63,6 +97,10 @@ pub(crate) fn parse_cli_invocation(
     set_global_repo_options(global_repo_options);
     set_global_pathspec_options(pathspec_options);
     let command_args = apply_command_alias(command_args)?;
+    if let Some(build_options) = root_version_invocation(&command_args) {
+        write_git_compatible_version(io::stdout().lock(), build_options).map_err(CliError::Io)?;
+        return Err(CliError::Exit(0));
+    }
     let command_args = normalize_empty_init_template(command_args);
     let command_args = normalize_history_count_shorthand(command_args);
     validate_scalar_invocation_before_clap(&command_args)?;
@@ -142,6 +180,18 @@ fn apply_command_alias(command_args: Vec<String>) -> Result<Vec<String>> {
     }
     expanded.extend(command_args.into_iter().skip(1));
     Ok(expanded)
+}
+
+fn root_version_invocation(args: &[String]) -> Option<bool> {
+    match args {
+        [arg] if matches!(arg.as_str(), "--version" | "-v") => Some(false),
+        [arg, build_options]
+            if matches!(arg.as_str(), "--version" | "-v") && build_options == "--build-options" =>
+        {
+            Some(true)
+        }
+        _ => None,
+    }
 }
 
 fn is_known_command(command: &str) -> bool {

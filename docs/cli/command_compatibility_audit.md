@@ -18,6 +18,26 @@ This file is the compact public summary of the current Git command surface.
   claim that every command matches stock Git behavior for every option and edge
   case
 
+## Hard-fail inventory
+
+`unsupported`, `not supported yet`, and `not implemented yet` call sites are
+tracked as behavior gaps unless they are parser validation for corrupt input,
+unsupported repository formats, or intentionally external/legacy integrations.
+
+Current high-priority gap classes:
+
+- Git replacement flow: root `--version`, `version --build-options`, `fetch`
+  forms emitted by IDEs, local/file/HTTP/SSH daemon transports.
+- Core Git behavior: `cat-file` filter/textconv modes, selected `blame`,
+  `notes`, `stash`, `submodule`, `ls-files`, and history-format options.
+- Repository/transport formats: reftable, non-core remote helpers, bundle edge
+  cases, and rare archive/pack variants.
+- External legacy integrations: `p4`, `svn`, `archimport`, `git gui`, and
+  `git citool` subcommands.
+
+Do not present command inventory parity as full option parity while this
+inventory has user-visible hard-fails.
+
 ## Behavior parity
 
 Behavior parity is tracked by local compatibility tests, smoke scripts, and the

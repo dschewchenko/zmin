@@ -38,3 +38,22 @@ assert_eq!(runtime.objects().read_object_content(&blob_id).unwrap(), b"ok");
 - If you need stock Git interoperability, keep repository object ids and on-disk structure in Git-compatible mode.
 - If you need custom metadata ids, generate them separately with `zmin_primitives::id`.
 - If you need a different hashing policy for application data, apply it outside the `.git` object graph.
+
+## Local Git Replacement Checks
+
+Preview dogfood uses a local `git` shim that dispatches to `zmin`.
+
+Keep these checks green before asking an IDE or GUI client to use the binary:
+
+```bash
+zmin --version
+zmin version --build-options
+git --version
+git status
+git fetch --prune --no-tags
+```
+
+The version line must start with a Git-compatible version, currently
+`git version 2.36.0`, and include the real Zmin package version after it. Some
+clients reject tools below their minimum Git version before running any other
+command.
