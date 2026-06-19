@@ -6733,6 +6733,8 @@ fn render_stash_list_format(
                     'd' => out.push_str(&format!("stash@{{{index}}}")),
                     'D' => out.push_str(&format!("refs/stash@{{{index}}}")),
                     's' => out.push_str(&entry.message),
+                    'N' | 'n' => out.push_str(&signature_name(entry.reflog_identity.as_bytes())),
+                    'E' | 'e' => out.push_str(&signature_email(entry.reflog_identity.as_bytes())),
                     'K' => out.push_str("%gK"),
                     _ => {
                         return Err(unsupported_stash_list_format_atom(&format!(
@@ -6802,7 +6804,7 @@ fn render_stash_list_format(
                 };
                 match next {
                     '?' => out.push('N'),
-                    'K' | 'F' | 'P' => {}
+                    'K' | 'F' | 'P' | 'S' | 'G' => {}
                     'T' => out.push_str("undefined"),
                     _ => return Err(unsupported_stash_list_format_atom(&format!("%G{next}"))),
                 }
@@ -8142,6 +8144,7 @@ fn parse_stash_selector_date(date: &str) -> Option<i64> {
 struct StashEntry {
     id: ObjectId,
     message: String,
+    reflog_identity: String,
 }
 
 fn parse_stash_selector(selector: &str) -> Result<usize> {
@@ -8186,6 +8189,7 @@ fn stash_entries(repo: &GitRepo, store: &LooseObjectStore) -> Result<Vec<StashEn
                 .map(|entry| StashEntry {
                     id: entry.new_id,
                     message: entry.message,
+                    reflog_identity: entry.identity,
                 })
                 .collect::<Vec<_>>();
             entries.reverse();
@@ -8200,6 +8204,7 @@ fn stash_entries(repo: &GitRepo, store: &LooseObjectStore) -> Result<Vec<StashEn
                     Ok(vec![StashEntry {
                         id,
                         message: commit_subject(&commit.message),
+                        reflog_identity: String::from_utf8_lossy(&commit.committer).into_owned(),
                     }])
                 }
                 Err(_) => Ok(Vec::new()),

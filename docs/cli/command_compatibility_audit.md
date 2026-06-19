@@ -66,6 +66,8 @@ Recently closed replacement gaps:
 - `stash list --format` and `stash list --pretty=format:` support common
   stash reflog atoms used by clients: `%H`, `%h`, `%gd`, `%gD`, `%gs`, `%s`,
   `%%`, `%n`, and `%xNN`
+- `stash list --format` also supports reflog identity atoms `%gN`, `%gE`,
+  `%gn`, `%ge`, plus unsigned signature text atoms `%GS` and `%GG`
 - `notes copy --for-rewrite=<command>` follows the configured rewrite gate for
   exact `notes.rewriteRef` refs and implies stdin pair input
 - `notes add --allow-empty` opens the configured editor and writes the edited

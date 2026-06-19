@@ -1302,6 +1302,7 @@ fn collect_reflog_names(
 pub(crate) struct ReflogEntry {
     pub(crate) old_id: ObjectId,
     pub(crate) new_id: ObjectId,
+    pub(crate) identity: String,
     pub(crate) timestamp: i64,
     pub(crate) timezone: String,
     pub(crate) message: String,
@@ -1314,10 +1315,14 @@ pub(crate) fn parse_reflog_entry(line: &str) -> Option<ReflogEntry> {
     let new_id = ObjectId::from_hex(GitHashAlgorithm::Sha1, fields.next()?).ok()?;
     let timezone = fields.next_back()?.to_owned();
     let timestamp = fields.next_back()?.parse().ok()?;
-    fields.next()?;
+    let identity = fields.collect::<Vec<_>>().join(" ");
+    if identity.is_empty() {
+        return None;
+    }
     Some(ReflogEntry {
         old_id,
         new_id,
+        identity,
         timestamp,
         timezone,
         message: message.to_owned(),
