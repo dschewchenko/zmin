@@ -3936,3 +3936,31 @@ but those did not translate to end-to-end clone performance. The experiment was
 reverted. Do not retry striped/non-contiguous worker assignment unless new
 evidence explains the external stopwatch regression and preserves both
 `clone-large` and the 480-entry default clone.
+
+Rejected batched read-then-write checkout experiment:
+
+- rejected batched run:
+  `C:\Users\skron\zmin-bench-20260619T070335Z-79027-out`
+
+A non-Unix large fresh-checkout experiment changed the existing two-worker path
+to read regular blobs into bounded per-worker batches and then materialize each
+batch. The hypothesis was that grouping object reads ahead of direct writes
+would reduce the 1920-file Windows materialization tail without changing the
+public checkout behavior.
+
+Local validation stayed green:
+
+- `cargo check -p zmin-cli --bin zmin --profile compat`
+- `cargo test -p zmin-git-core checkout -- --nocapture` (`10/10`)
+- `cargo test -p zmin-cli --test git_clone_compat clone_ -- --nocapture`
+  (`10/10`)
+
+The Windows traced `clone-large` run regressed externally: Git `1.186045s`, Gix
+`2.743261s`, Zmin `4.012232s`; Zmin/Git ratio `3.382867`, Zmin/Gix ratio
+`1.462578`. Parsed phase rows still put the cost in direct materialization:
+`object_read=0.136088s`, `materialize_file_write_direct=2.234422s`,
+`parallel_worker_file_write_direct_max=1.195622s`, 1920 regular files,
+`2027064` bytes, and two workers. The experiment was reverted. Do not retry
+read-all-then-write batching for large Windows checkout unless new evidence
+explains why it improves external stopwatch timing while preserving both
+default `clone` and `clone-large` gates.
