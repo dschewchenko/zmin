@@ -4074,3 +4074,40 @@ unclosed against stock Git in this combined run and mixed against Gitoxide. The
 latest evidence is not stable enough to claim large Windows clone closure; keep
 the next work focused on balanced evidence before making another materialization
 experiment.
+
+Windows benchmark ratio gates:
+
+`tools/windows-native-benchmark.ps1` now has optional max-ratio thresholds for
+the generated `comparison.csv`: `MaxZminVsGitMeanRatio`,
+`MaxZminVsGitMedianRatio`, `MaxZminVsGitPairMedianRatio`,
+`MaxZminVsGixMeanRatio`, `MaxZminVsGixMedianRatio`, and
+`MaxZminVsGixPairMedianRatio`. The default remains reporting-only. When a
+threshold is set, every selected operation must keep that ratio at or below the
+threshold or the benchmark exits non-zero.
+
+`tools/parallels-windows-runner.sh benchmark` exposes the same gates through
+environment variables:
+
+- `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO`
+- `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO`
+- `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO`
+- `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO`
+- `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO`
+- `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO`
+
+Validation:
+
+- `bash -n tools/parallels-windows-runner.sh`
+- `git diff --check`
+- Windows runner smoke with permissive gates:
+  `ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO=10
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO=10
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO=10
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO=10
+  tools/parallels-windows-runner.sh benchmark 1 clone`
+- Smoke output:
+  `C:\Users\skron\zmin-bench-20260619T083050Z-58781-out`
+
+This smoke proves the gate path and runner passthrough only. It is not
+performance closure evidence because it used one repeat and intentionally loose
+thresholds.

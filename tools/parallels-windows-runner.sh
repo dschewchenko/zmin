@@ -69,6 +69,12 @@ Environment:
   ZMIN_WINDOWS_BENCH_SSH_TRACE
   ZMIN_WINDOWS_BENCH_SSH_PACKET_TRACE
   ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO
+  ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO
   ZMIN_PARALLELS_GUEST_EXEC_TIMEOUT_SECONDS
   ZMIN_PARALLELS_UPSTREAM_DETACH
   ZMIN_PARALLELS_UPSTREAM_REUSE_BINARY
@@ -529,6 +535,7 @@ benchmark_guest() {
   local trace_arg=""
   local ssh_trace_arg=""
   local ops_arg=""
+  local ratio_gate_arg=""
   if [[ "${ZMIN_WINDOWS_BENCH_PHASE_TRACE:-0}" == "1" ]]; then
     trace_arg=" -ZminPhaseTraceDir $(ps_quote "$out_dir\\phase-traces")"
     if [[ "${ZMIN_WINDOWS_BENCH_PHASE_TRACE_ONLY:-0}" == "1" ]]; then
@@ -545,12 +552,30 @@ benchmark_guest() {
   if [[ -n "$ops" ]]; then
     ops_arg=" -Ops $(ps_quote "$ops")"
   fi
+  if [[ -n "${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGitMeanRatio ${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEAN_RATIO}"
+  fi
+  if [[ -n "${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGitMedianRatio ${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_MEDIAN_RATIO}"
+  fi
+  if [[ -n "${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGitPairMedianRatio ${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIT_PAIR_MEDIAN_RATIO}"
+  fi
+  if [[ -n "${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGixMeanRatio ${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEAN_RATIO}"
+  fi
+  if [[ -n "${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGixMedianRatio ${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_MEDIAN_RATIO}"
+  fi
+  if [[ -n "${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO:-}" ]]; then
+    ratio_gate_arg+=" -MaxZminVsGixPairMedianRatio ${ZMIN_WINDOWS_BENCH_MAX_ZMIN_VS_GIX_PAIR_MEDIAN_RATIO}"
+  fi
   copy_repo_to_guest "$remote_root"
   run_guest_powershell "\$ErrorActionPreference = 'Stop'
 	Set-Location $(ps_quote "$remote_root")
 	tar -xzf .\\zmin-worktree.tar.gz
 	\$env:CARGO_TARGET_DIR = 'C:\\Users\\${guest_user}\\zmin-target'
-	.\\tools\\windows-native-benchmark.ps1 -Repeats ${repeats} -OutDir $(ps_quote "$out_dir")${trace_arg}${ssh_trace_arg}${ssh_packet_trace_arg}${ops_arg}"
+	.\\tools\\windows-native-benchmark.ps1 -Repeats ${repeats} -OutDir $(ps_quote "$out_dir")${trace_arg}${ssh_trace_arg}${ssh_packet_trace_arg}${ops_arg}${ratio_gate_arg}"
 }
 
 http_benchmark_guest() {
