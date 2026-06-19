@@ -42,13 +42,43 @@ Examples:
 | `notes remove` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 
+Tracked closed blocks in this table: `75/75` variants.
+
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.
+
+## Hard-Fail Scan
+
+Raw scan from 2026-06-19:
+
+`rg -n "unsupported|not supported yet|not implemented yet" crates/zmin-cli/src crates/zmin-git-core/src --glob '*.rs'`
+
+This found `134` code hits. This is not the variant denominator. Each hit must
+be classified as one of:
+
+- Git-supported user variant to implement and test
+- parser validation for invalid input
+- corrupt or unsupported repository/storage format
+- intentionally external or legacy integration
+- additive Zmin-only behavior
+
+Largest raw clusters:
+
+| Area | Raw hits | Next action |
+| --- | ---: | --- |
+| `worktree_impl.rs` | `27` | split `clean`, `ls-files`, submodule, sparse-checkout, stash format atoms |
+| `history_impl.rs` | `25` | split blame ranges/options, reflog formats, diff/log decorators, filter-branch |
+| `transport_impl.rs` | `20` | split explicit-location fetch, remote helpers, reftable, HTTP/env guards |
+| `notes_impl.rs` | `7` | split notes copy/edit/add/remove/prune/merge option gaps |
+| `pack.rs` / `pack_impl.rs` | `11` | classify pack/bundle/commit-graph format guards versus stock-supported variants |
+| `admin_impl.rs` | `5` | classify hook validation and legacy foreign-SCM adapters |
+| remaining files | `39` | classify small parser/runtime guards individually |
 
 ## Audit Order
 
 1. Local git-replacement blockers from IDE/GUI dogfood.
-2. Commands with live `unsupported` branches that stock Git accepts.
+2. Commands with live `unsupported` branches that stock Git accepts, expanded
+   into option/mode/state variants before implementation.
 3. High-use porcelain variants: `status`, `add`, `commit`, `diff`, `log`,
    `blame`, `stash`, `branch`, `checkout`, `switch`, `restore`.
 4. Transport variants: local/file, smart HTTP, SSH, git daemon, depth,

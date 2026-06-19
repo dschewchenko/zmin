@@ -77,6 +77,9 @@ Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
+- Variant inventory: the 2026-06-19 raw hard-fail scan has `134`
+  `unsupported` / `not supported yet` / `not implemented yet` code hits to
+  classify before any global percentage is honest.
 - Core Git behavior: selected `notes`, `stash`, `submodule`, `ls-files`, and
   history-format options.
 - Repository/transport formats: reftable, non-core remote helpers, bundle edge
