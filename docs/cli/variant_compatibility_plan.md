@@ -58,10 +58,11 @@ Examples:
 | `status` long mode toggles | `2` | `0` | `--long`, `--no-long` with short/long order-sensitive forms |
 | `status` verbose modes | `2` | `0` | `--verbose`, `--no-verbose`, `-v`, `-vv`, reset order and machine-readable combinations |
 | `status` column modes | `2` | `0` | `--column`, `--no-column`, `--column=always/never`, `column.status=always` and machine-readable combinations |
+| `status` global no-op option | `1` | `0` | `--no-optional-locks status --short` via leading global option parser |
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `154` verified variants.
+Tracked closed blocks in this table: `155` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

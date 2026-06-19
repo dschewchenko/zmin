@@ -123,13 +123,15 @@ Recently closed replacement gaps:
 - `status --untracked-cache`, `status --no-untracked-cache`,
   `status --split-index`, and `status --no-split-index` were reclassified as
   invalid input because stock Git `2.47.1` rejects them for `git status`
+- global `--no-optional-locks status --short` matches stock Git through the
+  shared leading-global-option parser
 
 Current high-priority gap classes:
 
 - Git replacement flow: remaining IDE/GUI command combinations discovered by
   local dogfood with `/Users/dschewchenko/.local/bin/git`.
 - Status matrix: `docs/cli/matrices/status_v2_47.tsv` currently tracks `48`
-  rows: `33` closed, `2` partial, `9` open, and `4` invalid-input.
+  rows: `34` closed, `2` partial, `8` open, and `4` invalid-input.
 - Variant inventory: the 2026-06-19 raw hard-fail scan has `132`
   `unsupported` / `not supported yet` / `not implemented yet` code hits to
   classify before any global percentage is honest.

@@ -56,7 +56,7 @@ transports or platforms.
 
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `33` | `2` | `9` | `4` |
+| `status` | `docs/cli/matrices/status_v2_47.tsv` | `48` | `34` | `2` | `8` | `4` |
 
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also
@@ -78,6 +78,8 @@ The latest audit reclassified `--untracked-cache`, `--no-untracked-cache`,
 `--split-index`, and `--no-split-index` from open status gaps to
 `invalid-input`: stock Git `2.47.1` rejects them for `git status` with exit
 code `129`. They belong to `update-index`, not the `status` support surface.
+The latest audit closed global `--no-optional-locks` for `status --short`
+using existing global CLI parity evidence.
 
 ## Required Matrix Columns
 
