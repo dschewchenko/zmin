@@ -7,13 +7,19 @@ enum ColumnMode {
     Row,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ColumnSpec {
+    mode: ColumnMode,
+    dense: bool,
+}
+
 pub(crate) fn column(
     mode: Option<&str>,
     raw_mode: Option<u32>,
     width: Option<usize>,
     padding: Option<usize>,
 ) -> Result<()> {
-    let mode = parse_column_mode(mode, raw_mode)?;
+    let spec = parse_column_mode(mode, raw_mode)?;
     let width = width.unwrap_or(80);
     let padding = padding.unwrap_or(1);
     let mut input = String::new();
@@ -22,30 +28,51 @@ pub(crate) fn column(
         .split_terminator('\n')
         .map(|line| line.trim_end_matches('\r').to_owned())
         .collect::<Vec<_>>();
-    let output = render_columns(&items, mode, width, padding);
+    let output = render_columns(&items, spec, width, padding);
     if !output.is_empty() {
         print!("{output}");
     }
     Ok(())
 }
 
-fn parse_column_mode(mode: Option<&str>, raw_mode: Option<u32>) -> Result<ColumnMode> {
+fn parse_column_mode(mode: Option<&str>, raw_mode: Option<u32>) -> Result<ColumnSpec> {
     if let Some(raw_mode) = raw_mode {
         return Ok(if raw_mode == 0 {
-            ColumnMode::Plain
+            ColumnSpec {
+                mode: ColumnMode::Plain,
+                dense: false,
+            }
         } else {
-            ColumnMode::Column
+            ColumnSpec {
+                mode: ColumnMode::Column,
+                dense: false,
+            }
         });
     }
+    let mut spec = ColumnSpec {
+        mode: ColumnMode::Plain,
+        dense: false,
+    };
     let Some(mode) = mode else {
-        return Ok(ColumnMode::Plain);
+        return Ok(spec);
     };
     for token in mode.split(',') {
         match token {
-            "plain" => return Ok(ColumnMode::Plain),
-            "column" => return Ok(ColumnMode::Column),
-            "row" => return Ok(ColumnMode::Row),
-            "dense" | "nodense" => {}
+            "plain" => spec.mode = ColumnMode::Plain,
+            "column" => spec.mode = ColumnMode::Column,
+            "row" => spec.mode = ColumnMode::Row,
+            "dense" => {
+                if spec.mode == ColumnMode::Plain {
+                    spec.mode = ColumnMode::Column;
+                }
+                spec.dense = true;
+            }
+            "nodense" => {
+                if spec.mode == ColumnMode::Plain {
+                    spec.mode = ColumnMode::Column;
+                }
+                spec.dense = false;
+            }
             "" => {}
             other => {
                 return Err(CliError::Fatal {
@@ -55,31 +82,31 @@ fn parse_column_mode(mode: Option<&str>, raw_mode: Option<u32>) -> Result<Column
             }
         }
     }
-    Ok(ColumnMode::Plain)
+    Ok(spec)
 }
 
-fn render_columns(items: &[String], mode: ColumnMode, width: usize, padding: usize) -> String {
+fn render_columns(items: &[String], spec: ColumnSpec, width: usize, padding: usize) -> String {
     if items.is_empty() {
         return String::new();
     }
-    if mode == ColumnMode::Plain {
+    if spec.mode == ColumnMode::Plain {
         let mut out = items.join("\n");
         out.push('\n');
         return out;
     }
-    let columns = best_column_count(items, mode, width, padding);
+    let columns = best_column_count(items, spec, width, padding);
     let rows = items.len().div_ceil(columns);
-    let column_widths = column_widths(items, mode, columns, rows);
+    let column_widths = column_widths(items, spec.mode, columns, rows, spec.dense);
     let mut out = String::new();
     for row in 0..rows {
         let mut last_col = 0;
         for col in 0..columns {
-            if column_item(items, mode, columns, rows, row, col).is_some() {
+            if column_item(items, spec.mode, columns, rows, row, col).is_some() {
                 last_col = col;
             }
         }
         for (col, column_width) in column_widths.iter().enumerate().take(last_col + 1) {
-            let Some(item) = column_item(items, mode, columns, rows, row, col) else {
+            let Some(item) = column_item(items, spec.mode, columns, rows, row, col) else {
                 continue;
             };
             out.push_str(item);
@@ -93,15 +120,20 @@ fn render_columns(items: &[String], mode: ColumnMode, width: usize, padding: usi
     out
 }
 
-fn best_column_count(items: &[String], mode: ColumnMode, width: usize, padding: usize) -> usize {
+fn best_column_count(items: &[String], spec: ColumnSpec, width: usize, padding: usize) -> usize {
     for columns in (1..=items.len()).rev() {
-        if columns != items.len() && !items.len().is_multiple_of(columns) {
-            continue;
-        }
         let rows = items.len().div_ceil(columns);
-        let widths = column_widths(items, mode, columns, rows);
-        let total =
-            widths.iter().sum::<usize>() + padding.saturating_mul(columns.saturating_sub(1));
+        let widths = column_widths(items, spec.mode, columns, rows, spec.dense);
+        let total = if spec.dense {
+            widths.iter().sum::<usize>() + padding.saturating_mul(columns.saturating_sub(1))
+        } else {
+            widths
+                .first()
+                .copied()
+                .unwrap_or(0)
+                .saturating_add(padding)
+                .saturating_mul(columns)
+        };
         if total <= width {
             return columns;
         }
@@ -109,7 +141,13 @@ fn best_column_count(items: &[String], mode: ColumnMode, width: usize, padding: 
     1
 }
 
-fn column_widths(items: &[String], mode: ColumnMode, columns: usize, rows: usize) -> Vec<usize> {
+fn column_widths(
+    items: &[String],
+    mode: ColumnMode,
+    columns: usize,
+    rows: usize,
+    dense: bool,
+) -> Vec<usize> {
     let mut widths = vec![0; columns];
     for row in 0..rows {
         for (col, width) in widths.iter_mut().enumerate() {
@@ -117,6 +155,10 @@ fn column_widths(items: &[String], mode: ColumnMode, columns: usize, rows: usize
                 *width = (*width).max(item.len());
             }
         }
+    }
+    if !dense {
+        let width = widths.iter().copied().max().unwrap_or(0);
+        widths.fill(width);
     }
     widths
 }

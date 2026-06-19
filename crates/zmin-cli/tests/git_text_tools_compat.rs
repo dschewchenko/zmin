@@ -92,6 +92,19 @@ fn column_matches_stock_git_for_common_modes() {
             git_with_stdin_args(repo.path(), args, input)
         );
     }
+
+    let dense_input = "one\ntwo\nthree\nfour\nfive\n";
+    for args in [
+        ["column", "--mode=dense", "--padding=2", "--width=20"].as_slice(),
+        ["column", "--mode=nodense", "--padding=2", "--width=20"].as_slice(),
+        ["column", "--mode=column,dense", "--padding=2", "--width=18"].as_slice(),
+        ["column", "--mode=row,dense", "--padding=2", "--width=20"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_with_stdin_args(repo.path(), args, dense_input),
+            git_with_stdin_args(repo.path(), args, dense_input)
+        );
+    }
 }
 
 #[test]

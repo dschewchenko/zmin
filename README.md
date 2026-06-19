@@ -161,7 +161,7 @@ parser is not the same thing as matching Git's behavior.
 | Git `2.47` baseline option/positional spellings | live CLI schema for baseline commands | `1506` | `1506` | `0` | `100%` parser coverage |
 | Full Zmin argument entries | live CLI schema | `1393` | `1393` | `0` | `100%` parser coverage |
 | Full Zmin option/positional spellings | live CLI schema | `1652` | `1652` | `0` | `100%` parser coverage |
-| Audited behavior variants | focused parity tests and dogfood fixes | `114` | `114` | `0` | `100%` of audited variants |
+| Audited behavior variants | focused parity tests and dogfood fixes | `118` | `118` | `0` | `100%` of audited variants |
 | Hard-fail branches to classify | current source scan | `132` | `0` | `132` | global denominator still open |
 
 Global Git behavior parity is still being counted. It must include command

@@ -86,6 +86,8 @@ Recently closed replacement gaps:
   including order-sensitive merge and merge-state forms
 - `clean --no-interactive` matches stock Git's non-interactive toggle order
   for dry-run clean flows
+- `column --mode` now matches stock Git dense and nodense layout selection for
+  `dense`, `nodense`, `column,dense`, and `row,dense`
 
 Current high-priority gap classes:
 
