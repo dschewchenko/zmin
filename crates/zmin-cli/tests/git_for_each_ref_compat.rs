@@ -170,10 +170,19 @@ fn for_each_ref_date_atoms_match_stock_git() {
             "refs/tags",
             "%(refname:short)|%(authorname)|%(authoremail)|%(authordate)|%(authordate:unix)|%(authordate:raw)|%(authordate:iso)|%(authordate:iso-strict)|%(authordate:rfc)|%(authordate:rfc2822)|%(authordate:short)",
         ),
+        (
+            "refs/heads refs/tags",
+            "%(refname:short)|%(creator)|%(creatordate)|%(creatordate:unix)|%(creatordate:raw)|%(creatordate:iso)|%(creatordate:iso-strict)|%(creatordate:rfc)|%(creatordate:rfc2822)|%(creatordate:short)",
+        ),
     ] {
+        let patterns = pattern.split_whitespace().collect::<Vec<_>>();
+        let mut zmin_args = vec!["for-each-ref", "--format", format];
+        zmin_args.extend(patterns.iter().copied());
+        let mut git_args = vec!["for-each-ref", "--format", format];
+        git_args.extend(patterns.iter().copied());
         assert_eq!(
-            run_zmin(repo.path(), ["for-each-ref", "--format", format, pattern]),
-            git(repo.path(), ["for-each-ref", "--format", format, pattern]),
+            common::run_zmin_args(repo.path(), &zmin_args),
+            common::git_args(repo.path(), &git_args),
             "for-each-ref date atoms should match for {pattern}"
         );
     }

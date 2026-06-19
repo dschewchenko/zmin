@@ -1973,6 +1973,9 @@ pub(crate) struct ForEachRefRow {
     pub(crate) author_email: String,
     pub(crate) author_timestamp: Option<i64>,
     pub(crate) author_timezone: Option<String>,
+    pub(crate) creator: String,
+    pub(crate) creator_timestamp: Option<i64>,
+    pub(crate) creator_timezone: Option<String>,
     pub(crate) tagger_name: String,
     pub(crate) tagger_email: String,
     pub(crate) tagger_timestamp: Option<i64>,
@@ -1991,6 +1994,7 @@ struct ForEachRefRequirements {
     need_object_kind: bool,
     need_subject: bool,
     need_author: bool,
+    need_creator: bool,
     need_tagger: bool,
     need_committer: bool,
 }
@@ -2188,6 +2192,9 @@ fn build_for_each_ref_row(
         author_email: metadata.author_email,
         author_timestamp: metadata.author_timestamp,
         author_timezone: metadata.author_timezone,
+        creator: metadata.creator,
+        creator_timestamp: metadata.creator_timestamp,
+        creator_timezone: metadata.creator_timezone,
         tagger_timestamp: metadata.tagger_timestamp,
         tagger_timezone: metadata.tagger_timezone,
         committer_timestamp: metadata.committer_timestamp,
@@ -2244,6 +2251,7 @@ fn load_for_each_ref_metadata(
     if !requirements.need_object_kind
         && !requirements.need_subject
         && !requirements.need_author
+        && !requirements.need_creator
         && !requirements.need_tagger
         && !requirements.need_committer
     {
@@ -2257,6 +2265,7 @@ fn load_for_each_ref_metadata(
 
     if !requirements.need_subject
         && !requirements.need_author
+        && !requirements.need_creator
         && !requirements.need_tagger
         && !requirements.need_committer
     {
@@ -2325,6 +2334,14 @@ fn apply_for_each_ref_atom_requirements(
             requirements.need_object_kind = true;
             requirements.need_author = true;
         }
+        "creator" => {
+            requirements.need_object_kind = true;
+            requirements.need_creator = true;
+        }
+        atom if for_each_ref_date_atom_base(atom) == Some("creatordate") => {
+            requirements.need_object_kind = true;
+            requirements.need_creator = true;
+        }
         "taggername" | "taggeremail" => {
             requirements.need_object_kind = true;
             requirements.need_tagger = true;
@@ -2391,13 +2408,14 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             "subject" => left.subject.cmp(&right.subject),
             "contents:subject" => left.subject.cmp(&right.subject),
             "authordate" => left.author_timestamp.cmp(&right.author_timestamp),
+            "creatordate" => left.creator_timestamp.cmp(&right.creator_timestamp),
             "taggerdate" => left.tagger_timestamp.cmp(&right.tagger_timestamp),
             "committerdate" => left.committer_timestamp.cmp(&right.committer_timestamp),
             _ => std::cmp::Ordering::Equal,
         };
         match key {
             "refname" | "objectname" | "objecttype" | "subject" | "contents:subject"
-            | "authordate" | "taggerdate" | "committerdate" => {
+            | "authordate" | "creatordate" | "taggerdate" | "committerdate" => {
                 if descending {
                     rows.sort_by(|left, right| compare(right, left));
                 } else {
@@ -2511,6 +2529,14 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
                 row.author_timezone.as_deref(),
             )
         }
+        "creator" => Ok(row.creator.clone()),
+        atom if for_each_ref_date_atom_base(atom) == Some("creatordate") => {
+            format_for_each_ref_date_atom(
+                atom,
+                row.creator_timestamp,
+                row.creator_timezone.as_deref(),
+            )
+        }
         atom if for_each_ref_date_atom_base(atom) == Some("committerdate") => {
             format_for_each_ref_date_atom(
                 atom,
@@ -2528,6 +2554,7 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
 fn for_each_ref_date_atom_base(atom: &str) -> Option<&str> {
     match atom.split_once(':').map_or(atom, |(base, _)| base) {
         "authordate" => Some("authordate"),
+        "creatordate" => Some("creatordate"),
         "taggerdate" => Some("taggerdate"),
         "committerdate" => Some("committerdate"),
         _ => None,
@@ -2599,6 +2626,9 @@ pub(crate) struct RefObjectMetadata {
     pub(crate) author_email: String,
     pub(crate) author_timestamp: Option<i64>,
     pub(crate) author_timezone: Option<String>,
+    pub(crate) creator: String,
+    pub(crate) creator_timestamp: Option<i64>,
+    pub(crate) creator_timezone: Option<String>,
     pub(crate) tagger_name: String,
     pub(crate) tagger_email: String,
     pub(crate) tagger_timestamp: Option<i64>,
@@ -2657,6 +2687,11 @@ fn object_ref_metadata_parts(
                 author_email: signature_email(&commit.author),
                 author_timestamp: author_date.as_ref().map(|(timestamp, _)| *timestamp),
                 author_timezone: author_date.map(|(_, timezone)| timezone),
+                creator: String::from_utf8_lossy(&commit.committer).into_owned(),
+                creator_timestamp: committer_date.as_ref().map(|(timestamp, _)| *timestamp),
+                creator_timezone: committer_date
+                    .as_ref()
+                    .map(|(_, timezone)| timezone.clone()),
                 tagger_name: String::new(),
                 tagger_email: String::new(),
                 tagger_timestamp: None,
@@ -2675,6 +2710,9 @@ fn object_ref_metadata_parts(
                 author_email: String::new(),
                 author_timestamp: None,
                 author_timezone: None,
+                creator: String::from_utf8_lossy(&tag.tagger).into_owned(),
+                creator_timestamp: tagger_date.as_ref().map(|(timestamp, _)| *timestamp),
+                creator_timezone: tagger_date.as_ref().map(|(_, timezone)| timezone.clone()),
                 tagger_name: signature_name(&tag.tagger),
                 tagger_email: signature_email(&tag.tagger),
                 tagger_timestamp: tagger_date.as_ref().map(|(timestamp, _)| *timestamp),
@@ -2689,6 +2727,9 @@ fn object_ref_metadata_parts(
             author_email: String::new(),
             author_timestamp: None,
             author_timezone: None,
+            creator: String::new(),
+            creator_timestamp: None,
+            creator_timezone: None,
             tagger_name: String::new(),
             tagger_email: String::new(),
             tagger_timestamp: None,
@@ -5963,6 +6004,9 @@ fn tag(options: TagOptions) -> Result<()> {
                     author_email: metadata.author_email,
                     author_timestamp: metadata.author_timestamp,
                     author_timezone: metadata.author_timezone,
+                    creator: metadata.creator,
+                    creator_timestamp: metadata.creator_timestamp,
+                    creator_timezone: metadata.creator_timezone,
                     tagger_name: metadata.tagger_name,
                     tagger_email: metadata.tagger_email,
                     tagger_timestamp: metadata.tagger_timestamp,

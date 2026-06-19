@@ -71,6 +71,8 @@ Recently closed replacement gaps:
   `rfc2822`, and `short` formats
 - `for-each-ref` supports stock author atoms for commit refs:
   `authorname`, `authoremail`, and the same `authordate` formats
+- `for-each-ref` supports `creator` and `creatordate` for commit refs and
+  annotated tag refs
 - `stash list --format` and `stash list --pretty=format:` support common
   stash reflog atoms used by clients: `%H`, `%h`, `%gd`, `%gD`, `%gs`, `%s`,
   `%%`, `%n`, and `%xNN`
