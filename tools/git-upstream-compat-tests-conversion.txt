@@ -1,0 +1,2 @@
+# mode<TAB>test<TAB>reason
+exhaustive	t0021-conversion.sh	attributes and worktree conversion behavior

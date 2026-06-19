@@ -1,0 +1,2 @@
+# mode<TAB>test<TAB>reason
+standard	t1500-rev-parse.sh	revision/path parsing plumbing

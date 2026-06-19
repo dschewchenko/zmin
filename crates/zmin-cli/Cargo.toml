@@ -1,0 +1,33 @@
+[package]
+name = "zmin-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+
+[features]
+default = []
+mail-tls = ["dep:native-tls"]
+
+[[bin]]
+name = "zmin"
+path = "src/main.rs"
+
+[[bin]]
+name = "git-http-backend"
+path = "src/bin/git-http-backend.rs"
+
+[dependencies]
+chrono = { version = "0.4.39", default-features = false, features = ["std"] }
+clap = { version = "4.5.47", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+flate2 = { version = "1.0.35", default-features = false, features = ["zlib"] }
+memmap2 = "0.9.9"
+regex = "1.11.1"
+native-tls = { version = "0.2.14", optional = true }
+similar = { version = "2.7.0" }
+zmin-cli-schema = { path = "../zmin-cli-schema" }
+zmin-cli-runtime = { path = "../zmin-cli-runtime" }
+zmin-git-core = { path = "../zmin-git-core" }
+zmin-primitives = { path = "../zmin-primitives" }
+
+[dev-dependencies]
+tempfile = "3.10.1"
