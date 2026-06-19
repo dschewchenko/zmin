@@ -9259,6 +9259,16 @@ fn fetch_multiple_refspecs_from_location(
     let Some(source_path) = local_repository_path_from_location(location)? else {
         return Err(unsupported_remote_helper_error(location, String::new()));
     };
+    if source_path.is_file() {
+        return pack_commands::fetch_bundle_refspecs(
+            repo,
+            &source_path,
+            location,
+            refspecs,
+            depth.is_some(),
+            quiet,
+        );
+    }
     let source = {
         let _trace = phase_trace("fetch.local.resolve_source");
         local_clone_source(&source_path)?
@@ -10601,6 +10611,16 @@ fn fetch_with_repo_and_location(
             && !destination.is_empty()
             && (source_name.contains('*') || destination.contains('*'))
         {
+            if source_path.is_file() {
+                return pack_commands::fetch_bundle_refspecs(
+                    &repo,
+                    &source_path,
+                    &location,
+                    &[refspec.to_owned()],
+                    depth.is_some(),
+                    quiet,
+                );
+            }
             let source = local_clone_source(&source_path)?;
             if depth.is_some() {
                 return fetch_multiple_refspecs_from_location(
@@ -10659,19 +10679,13 @@ fn fetch_with_repo_and_location(
             && !destination.contains(':')
         {
             if source_path.is_file() {
-                if depth.is_some() {
-                    return Err(CliError::Fatal {
-                        code: 128,
-                        message: format!(
-                            "depth fetch from bundle '{location}' is not supported yet"
-                        ),
-                    });
-                }
-                return pack_commands::fetch_bundle_refspec(
+                return pack_commands::fetch_bundle_refspecs(
                     &repo,
                     &source_path,
-                    source_name,
-                    destination,
+                    &location,
+                    &[refspec.to_owned()],
+                    depth.is_some(),
+                    quiet,
                 );
             }
             let source = local_clone_source(&source_path)?;

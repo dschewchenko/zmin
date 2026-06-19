@@ -6,8 +6,8 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use common::{
-    command_output_with_env, configure_identity, git, git_failure_output, git_status,
-    git_status_args, git_with_env, run_zmin, run_zmin_failure_output, run_zmin_status,
+    command_any_output, command_output_with_env, configure_identity, git, git_failure_output,
+    git_status, git_status_args, git_with_env, run_zmin, run_zmin_failure_output, run_zmin_status,
     run_zmin_with_env, zmin_bin,
 };
 
@@ -2251,6 +2251,70 @@ fn fetch_depth_explicit_file_url_multiple_refspecs_like_stock_git() {
             git_status_args(&git_client, &["cat-file", "-e", &parent])
         );
     }
+}
+
+#[test]
+fn fetch_depth_bundle_multiple_explicit_refspecs_ignores_depth_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    let bundle = dir.path().join("repo.bundle");
+    let bundle_path = bundle.to_str().expect("bundle path");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+    git(&source, ["switch", "-c", "feature"]);
+    fs::write(source.join("feature.txt"), b"feature\n").expect("write feature");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "feature"]);
+    git(&source, ["switch", "main"]);
+    git(&source, ["bundle", "create", bundle_path, "--all"]);
+
+    git(dir.path(), ["init", "-b", "main", "git-client"]);
+    run_zmin(dir.path(), ["init", "-b", "main", "zmin-client"]);
+
+    let args = [
+        "fetch",
+        "--depth=1",
+        bundle_path,
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+    let git_output = command_any_output("git", &git_client, &args, "git");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert!(
+        git_output
+            .2
+            .contains("warning: option \"depth\" is ignored"),
+        "{}",
+        git_output.2
+    );
+    assert!(
+        zmin_output
+            .2
+            .contains("warning: option \"depth\" is ignored"),
+        "{}",
+        zmin_output.2
+    );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert!(!zmin_client.join(".git/shallow").exists());
+    assert!(!git_client.join(".git/shallow").exists());
 }
 
 #[test]

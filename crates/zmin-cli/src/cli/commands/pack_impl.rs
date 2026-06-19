@@ -3980,12 +3980,17 @@ fn bundle_unbundle(file: PathBuf, patterns: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn fetch_bundle_refspec(
+pub(crate) fn fetch_bundle_refspecs(
     repo: &GitRepo,
     file: &Path,
-    source: &str,
-    destination: &str,
+    location: &str,
+    refspecs: &[String],
+    depth_ignored: bool,
+    quiet: bool,
 ) -> Result<()> {
+    if depth_ignored {
+        eprintln!("warning: option \"depth\" is ignored for {location}");
+    }
     let bundle = parse_bundle_header(file)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     verify_bundle_prerequisites(Some(&store), &bundle.prerequisites)?;
@@ -4006,16 +4011,61 @@ pub(crate) fn fetch_bundle_refspec(
         &indexed,
     )?;
     write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
-    let head = bundle_resolve_fetch_head(&bundle.heads, source).ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: format!("couldn't find remote ref {source}"),
-    })?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    refs.write_ref(
-        &destination_fetch_ref_name_for_bundle(destination)?,
-        &head.id,
-    )?;
+    let mut fetch_head = String::new();
+    for refspec in refspecs {
+        let (source, destination) = parse_bundle_fetch_refspec(refspec)?;
+        let head =
+            bundle_resolve_fetch_head(&bundle.heads, source).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("couldn't find remote ref {source}"),
+            })?;
+        if let Some(destination) = destination {
+            refs.write_ref(
+                &destination_fetch_ref_name_for_bundle(destination)?,
+                &head.id,
+            )?;
+        }
+        fetch_head.push_str(&bundle_fetch_head_row(head, location));
+    }
+    fs::write(repo.git_dir.join("FETCH_HEAD"), fetch_head)?;
+    if !quiet {
+        eprintln!("From {}", location);
+    }
     Ok(())
+}
+
+fn parse_bundle_fetch_refspec(refspec: &str) -> Result<(&str, Option<&str>)> {
+    let refspec = refspec.strip_prefix('+').unwrap_or(refspec);
+    if let Some((source, destination)) = refspec.split_once(':') {
+        if source.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("invalid refspec '{refspec}'"),
+            });
+        }
+        return Ok((source, (!destination.is_empty()).then_some(destination)));
+    }
+    Ok((refspec, None))
+}
+
+fn bundle_fetch_head_row(head: &BundleHead, location: &str) -> String {
+    format!(
+        "{}\t\t{} of {}\n",
+        head.id.to_hex(),
+        bundle_fetch_head_description(&head.name),
+        location
+    )
+}
+
+fn bundle_fetch_head_description(name: &str) -> String {
+    if let Some(branch) = name.strip_prefix("refs/heads/") {
+        format!("branch '{branch}'")
+    } else if let Some(tag) = name.strip_prefix("refs/tags/") {
+        format!("tag '{tag}'")
+    } else {
+        format!("'{name}'")
+    }
 }
 
 fn bundle_resolve_fetch_head<'a>(heads: &'a [BundleHead], source: &str) -> Option<&'a BundleHead> {
