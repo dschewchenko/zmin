@@ -1503,6 +1503,68 @@ fn notes_remove_ignore_missing_and_stdin_match_stock_git() {
         run_zmin_status(zmin_repo.path(), ["notes", "show", "HEAD"]),
         git_status(git_repo.path(), ["notes", "show", "HEAD"])
     );
+
+    write_file(git_repo.path(), "second.txt", "second\n");
+    write_file(zmin_repo.path(), "second.txt", "second\n");
+    git(git_repo.path(), ["add", "-A"]);
+    run_zmin(zmin_repo.path(), ["add", "-A"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "second"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "second"]);
+    let git_second = git(git_repo.path(), ["rev-parse", "HEAD"]);
+    let zmin_second = git(zmin_repo.path(), ["rev-parse", "HEAD"]);
+    assert_eq!(zmin_second, git_second);
+
+    git_with_env(git_repo.path(), ["notes", "add", "-m", "second", &git_second]);
+    run_zmin_with_env(
+        zmin_repo.path(),
+        ["notes", "add", "-m", "second", &zmin_second],
+    );
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "notes",
+                "remove",
+                "--stdin",
+                "--no-stdin",
+                &zmin_second,
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &["notes", "remove", "--stdin", "--no-stdin", &git_second],
+            "git",
+        )
+    );
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["notes", "show", &zmin_second]),
+        git_status(git_repo.path(), ["notes", "show", &git_second])
+    );
+
+    git_with_env(git_repo.path(), ["notes", "add", "-m", "second", &git_second]);
+    run_zmin_with_env(
+        zmin_repo.path(),
+        ["notes", "add", "-m", "second", &zmin_second],
+    );
+    assert_eq!(
+        git_with_stdin(
+            git_repo.path(),
+            ["notes", "remove", "--no-stdin", "--stdin"],
+            &format!("{git_second}\n"),
+        ),
+        run_zmin_with_stdin_args(
+            zmin_repo.path(),
+            &["notes", "remove", "--no-stdin", "--stdin"],
+            &format!("{zmin_second}\n"),
+        )
+    );
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["notes", "show", &zmin_second]),
+        git_status(git_repo.path(), ["notes", "show", &git_second])
+    );
 }
 
 #[test]
