@@ -298,6 +298,11 @@ fn notes_copy(
 ) -> Result<()> {
     ensure_mutable_notes_ref(ref_name, "copy")?;
     let args = parse_notes_copy_args(args)?;
+    if let Some(command) = args.for_rewrite.as_deref()
+        && !notes_copy_for_rewrite_enabled(repo, ref_name, command)?
+    {
+        return Ok(());
+    }
     let mut notes = read_notes_map(store, refs, ref_name)?;
     let pairs = if args.stdin {
         read_notes_copy_stdin_pairs()?
@@ -339,19 +344,47 @@ fn notes_copy(
 struct NotesCopyArgs {
     force: bool,
     stdin: bool,
+    for_rewrite: Option<String>,
     pairs: Vec<(String, String)>,
 }
 
 fn parse_notes_copy_args(args: Vec<String>) -> Result<NotesCopyArgs> {
     let mut force = false;
     let mut stdin = false;
+    let mut for_rewrite = None;
     let mut objects = Vec::new();
-    for arg in args {
+    let mut cursor = 0usize;
+    while cursor < args.len() {
+        let arg = &args[cursor];
         match arg.as_str() {
             "-f" | "--force" => force = true,
             "--no-force" => force = false,
             "--stdin" => stdin = true,
-            "--no-stdin" => stdin = false,
+            "--no-stdin" | "--no-for-rewrite" => {
+                stdin = false;
+                for_rewrite = None;
+            }
+            "--for-rewrite" => {
+                cursor += 1;
+                let Some(command) = args.get(cursor) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `for-rewrite' requires a value".into(),
+                    });
+                };
+                stdin = true;
+                for_rewrite = Some(command.clone());
+            }
+            value if value.starts_with("--for-rewrite=") => {
+                stdin = true;
+                for_rewrite = Some(value["--for-rewrite=".len()..].to_owned());
+            }
+            value if value.starts_with("--no-for-rewrite=") => {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "option `no-for-rewrite' takes no value".into(),
+                });
+            }
             value if value.starts_with('-') => {
                 return Err(CliError::Fatal {
                     code: 129,
@@ -360,6 +393,7 @@ fn parse_notes_copy_args(args: Vec<String>) -> Result<NotesCopyArgs> {
             }
             value => objects.push(value.to_owned()),
         }
+        cursor += 1;
     }
     if stdin && !objects.is_empty() {
         return Err(CliError::Fatal {
@@ -381,8 +415,33 @@ fn parse_notes_copy_args(args: Vec<String>) -> Result<NotesCopyArgs> {
     Ok(NotesCopyArgs {
         force,
         stdin,
+        for_rewrite,
         pairs,
     })
+}
+
+fn notes_copy_for_rewrite_enabled(
+    repo: &GitRepo,
+    ref_name: &str,
+    command: &str,
+) -> Result<bool> {
+    if let Some(value) = read_config_value(repo, &format!("notes.rewrite.{command}"))?
+        && parse_git_bool(&value) == Some(false)
+    {
+        return Ok(false);
+    }
+    let Some(rewrite_ref) = read_config_value(repo, "notes.rewriteRef")? else {
+        return Ok(false);
+    };
+    Ok(notes_rewrite_ref_matches(&rewrite_ref, ref_name))
+}
+
+fn notes_rewrite_ref_matches(pattern: &str, ref_name: &str) -> bool {
+    pattern == ref_name
+        || pattern == "*"
+        || pattern
+            .strip_suffix('*')
+            .is_some_and(|prefix| ref_name.starts_with(prefix))
 }
 
 fn read_notes_copy_stdin_pairs() -> Result<Vec<(String, String)>> {
