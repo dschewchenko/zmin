@@ -34,6 +34,7 @@ Examples:
 | `blame --no-abbrev` forms | `3` | `0` | `--no-abbrev`, `--abbrev=N --no-abbrev`, `--no-abbrev --abbrev=N` |
 | `blame` final-disabled mode toggles | `10` | `0` | `--no-progress`, `--no-score-debug`, `--no-color-lines`, `--no-color-by-age`, `--no-minimal` plus positive-then-no forms |
 | `blame -L` extended range forms | `6` | `0` | `N,-M`, `,N`, `/re/,-N`, `N,/re/`, `/re/,/re/`, `^/re/` |
+| `blame -L :name` plain symbol boundary | `1` | `0` | stops at the matching non-function line like stock Git instead of extending to EOF |
 | `init` quiet forms | `2` | `0` | `-q`, `--quiet` |
 | `notes add` empty editor forms | `2` | `0` | `--allow-empty`, `--allow-empty --no-edit` |
 | `notes copy` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |
@@ -43,7 +44,7 @@ Examples:
 | `notes remove` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 
-Tracked closed blocks in this table: `81/81` variants.
+Tracked closed blocks in this table: `82/82` variants.
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.

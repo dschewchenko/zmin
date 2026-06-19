@@ -2068,17 +2068,18 @@ fn resolve_blame_line_range(lines: &[BlameLine], range: &BlameLineRange) -> Resu
             Ok((start, end.max(start)))
         }
         BlameLineRange::Function(function) => {
-            let start = lines
+            let start_index = lines
                 .iter()
-                .find(|line| blame_function_line_matches(&line.content, function.as_bytes()))
-                .map(|line| line.line_no)
+                .position(|line| blame_function_line_matches(&line.content, function.as_bytes()))
                 .ok_or_else(|| unsupported_blame_line_range(function))?;
+            let start = lines[start_index].line_no;
             let end = lines
                 .iter()
-                .skip_while(|line| line.line_no <= start)
-                .find(|line| line.content.iter().all(|byte| byte.is_ascii_whitespace()))
-                .map(|line| line.line_no.saturating_sub(1))
-                .unwrap_or_else(|| lines.last().map(|line| line.line_no).unwrap_or(start));
+                .skip(start_index + 1)
+                .take_while(|line| blame_function_body_line_matches(&line.content))
+                .last()
+                .map(|line| line.line_no)
+                .unwrap_or(start);
             Ok((start, end.max(start)))
         }
     }
@@ -2109,6 +2110,14 @@ fn blame_function_line_matches(line: &[u8], function: &[u8]) -> bool {
         && line
             .windows(function.len())
             .any(|window| window == function)
+}
+
+fn blame_function_body_line_matches(line: &[u8]) -> bool {
+    let starts_with_whitespace = line.first().is_some_and(u8::is_ascii_whitespace);
+    let Some(first) = line.iter().find(|byte| !byte.is_ascii_whitespace()) else {
+        return false;
+    };
+    starts_with_whitespace || matches!(*first, b'}' | b')' | b']')
 }
 
 fn unsupported_blame_line_range(value: &str) -> CliError {

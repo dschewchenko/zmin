@@ -205,6 +205,7 @@ fn blame_line_range_forms_match_stock_git() {
         ["blame", "-L", "2,/four/", "a.txt"].as_slice(),
         ["blame", "-L", "/two/,/four/", "a.txt"].as_slice(),
         ["blame", "-L", "^/two/", "a.txt"].as_slice(),
+        ["blame", "-L", ":two", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

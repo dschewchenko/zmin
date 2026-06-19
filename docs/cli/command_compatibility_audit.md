@@ -50,6 +50,8 @@ Recently closed replacement gaps:
   their output behavior is implemented
 - additional `blame -L` stock range forms now match for negative counts,
   omitted start, regex end bounds, regex-to-regex bounds, and `^/regex/`
+- `blame -L :name` no longer extends plain symbol matches to EOF when stock Git
+  treats the match as a single-line range
 - `init -q` and `init --quiet` suppress initialization output like stock Git
 - `log --diff-merges=combined` and `log --diff-merges=dense-combined` are
   accepted and render the matching combined diff form
