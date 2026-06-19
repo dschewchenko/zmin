@@ -232,10 +232,14 @@ fn notes_edit_message_source_options_match_stock_git() {
         "long-message",
         "short-file",
         "long-file",
+        "compact-file",
         "short-reuse",
         "long-reuse",
+        "compact-reuse",
         "short-reedit",
         "long-reedit",
+        "compact-reedit",
+        "compact-message",
     ] {
         let git_repo = notes_base_repo();
         let zmin_repo = notes_base_repo();
@@ -338,6 +342,20 @@ fn notes_edit_message_source_options_match_stock_git() {
                     "HEAD".to_owned(),
                 ],
             ),
+            "compact-file" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-Fnote.txt".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-Fnote.txt".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+            ),
             "short-reuse" => (
                 vec![
                     "notes".to_owned(),
@@ -368,6 +386,20 @@ fn notes_edit_message_source_options_match_stock_git() {
                     "HEAD".to_owned(),
                 ],
             ),
+            "compact-reuse" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("-C{git_blob}"),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("-C{zmin_blob}"),
+                    "HEAD".to_owned(),
+                ],
+            ),
             "short-reedit" => (
                 vec![
                     "notes".to_owned(),
@@ -395,6 +427,34 @@ fn notes_edit_message_source_options_match_stock_git() {
                     "notes".to_owned(),
                     "edit".to_owned(),
                     format!("--reedit-message={zmin_blob}"),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "compact-reedit" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("-c{git_blob}"),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    format!("-c{zmin_blob}"),
+                    "HEAD".to_owned(),
+                ],
+            ),
+            "compact-message" => (
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-mcompact".to_owned(),
+                    "HEAD".to_owned(),
+                ],
+                vec![
+                    "notes".to_owned(),
+                    "edit".to_owned(),
+                    "-mcompact".to_owned(),
                     "HEAD".to_owned(),
                 ],
             ),
