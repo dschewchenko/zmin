@@ -148,8 +148,19 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-This table tracks command names, not every option combination. Preview builds
-still have option and workflow gaps.
+The command-name inventory is complete for the tracked Git baselines. Full Git
+compatibility also requires option, mode, repository-state and transport
+variants to match stock Git. That deeper denominator is still being audited for
+the preview.
+
+| Area | Coverage | Meaning |
+| --- | ---: | --- |
+| Git `2.32` command names | `145/145` | every tracked command name is present |
+| Git `2.47` command names | `151/151` | every tracked command name is present |
+| Audited behavior variants | `88/88` | tested option or workflow variants that currently match stock Git |
+| Global option/workflow parity | not published | still being counted; do not treat command-name coverage as full Git compatibility |
+
+Command-name coverage by reference group:
 
 | Group | Command names present |
 | --- | ---: |
@@ -166,8 +177,6 @@ still have option and workflow gaps.
 | Administration | `20/20` |
 | Server Admin | `11/11` |
 | Plumbing Commands | `54/54` |
-| Zmin Workflow Commands | `14/14` |
-| Unique command surface | `168/168` |
 
 ## Preview Limits
 
