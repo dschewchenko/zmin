@@ -6348,7 +6348,10 @@ fn stash_list(args: &[String]) -> Result<()> {
                 );
             }
             StashListFormat::Custom(format) => {
-                println!("{}", render_stash_list_format(format, index, entry)?);
+                println!(
+                    "{}",
+                    render_stash_list_format(format, index, entry, &store)?
+                );
             }
         }
         if show_patch {
@@ -6538,7 +6541,14 @@ fn parse_stash_list_format(option: &str) -> Result<String> {
     Ok(format.to_owned())
 }
 
-fn render_stash_list_format(format: &str, index: usize, entry: &StashEntry) -> Result<String> {
+fn render_stash_list_format(
+    format: &str,
+    index: usize,
+    entry: &StashEntry,
+    store: &LooseObjectStore,
+) -> Result<String> {
+    let commit_cache = CommitObjectCache::new(store);
+    let commit = commit_cache.read_commit(&entry.id)?;
     let mut out = String::new();
     let mut chars = format.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -6556,6 +6566,24 @@ fn render_stash_list_format(format: &str, index: usize, entry: &StashEntry) -> R
             'H' => out.push_str(&entry.id.to_hex()),
             'h' => out.push_str(&entry.id.short_hex(7)),
             's' => out.push_str(&entry.message),
+            'P' => {
+                for (index, parent) in commit.parents.iter().enumerate() {
+                    if index > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&parent.to_hex());
+                }
+            }
+            'p' => {
+                for (index, parent) in commit.parents.iter().enumerate() {
+                    if index > 0 {
+                        out.push(' ');
+                    }
+                    out.push_str(&parent.short_hex(7));
+                }
+            }
+            'T' => out.push_str(&commit.tree.to_hex()),
+            't' => out.push_str(&commit.tree.short_hex(7)),
             'g' => {
                 let Some(reflog_atom) = chars.next() else {
                     return Err(unsupported_stash_list_format_atom("%g"));
@@ -6581,6 +6609,34 @@ fn render_stash_list_format(format: &str, index: usize, entry: &StashEntry) -> R
                 let byte = parse_hex_byte(high, low)
                     .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
                 out.push(byte as char);
+            }
+            'a' => {
+                let Some(next) = chars.next() else {
+                    return Err(unsupported_stash_list_format_atom("%a"));
+                };
+                match next {
+                    'n' => out.push_str(&signature_name(&commit.author)),
+                    'e' => out.push_str(&signature_email(&commit.author)),
+                    't' => {
+                        out.push_str(&signature_timestamp(&commit.author).unwrap_or(0).to_string())
+                    }
+                    _ => return Err(unsupported_stash_list_format_atom(&format!("%a{next}"))),
+                }
+            }
+            'c' => {
+                let Some(next) = chars.next() else {
+                    return Err(unsupported_stash_list_format_atom("%c"));
+                };
+                match next {
+                    'n' => out.push_str(&signature_name(&commit.committer)),
+                    'e' => out.push_str(&signature_email(&commit.committer)),
+                    't' => out.push_str(
+                        &signature_timestamp(&commit.committer)
+                            .unwrap_or(0)
+                            .to_string(),
+                    ),
+                    _ => return Err(unsupported_stash_list_format_atom(&format!("%c{next}"))),
+                }
             }
             _ => return Err(unsupported_stash_list_format_atom(&format!("%{atom}"))),
         }

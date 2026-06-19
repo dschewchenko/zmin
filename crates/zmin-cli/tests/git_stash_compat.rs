@@ -1285,6 +1285,12 @@ fn stash_list_formats_match_stock_git() {
         ["stash", "list", "--pretty=format:%gd:%h:%gs"].as_slice(),
         ["stash", "list", "--format=format:%gd%x00%H%x00%gs"].as_slice(),
         ["stash", "list", "--format=tformat:%%:%gd:%s"].as_slice(),
+        [
+            "stash",
+            "list",
+            "--format=%an|%ae|%cn|%ce|%at|%ct|%P|%p|%T|%t",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
