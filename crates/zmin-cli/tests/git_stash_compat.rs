@@ -8,7 +8,7 @@ use common::{
     clone_repo_fixture, command_any_output, command_output_with_env, configure_identity, git,
     git_args, git_failure_output, git_init, git_status, git_status_with_stdin, git_with_env,
     git_with_stdin, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_status_with_stdin, run_zmin_with_env, run_zmin_with_stdin, zmin_bin, write_file,
+    run_zmin_status_with_stdin, run_zmin_with_env, run_zmin_with_stdin, write_file, zmin_bin,
 };
 
 fn stash_fixture_repo() -> TempDir {
@@ -118,10 +118,7 @@ fn stash_push_apply_pop_matches_stock_git_state() {
         run_zmin(zmin_repo.path(), ["rev-parse", "stash@{0}"]),
         run_zmin(zmin_repo.path(), ["rev-parse", "stash"])
     );
-    assert_eq!(
-        run_zmin(zmin_repo.path(), ["show", "stash^2:a.txt"]),
-        "one"
-    );
+    assert_eq!(run_zmin(zmin_repo.path(), ["show", "stash^2:a.txt"]), "one");
     assert_eq!(
         run_zmin(zmin_repo.path(), ["show", "stash:a.txt"]),
         "one\ntwo"
@@ -1300,6 +1297,9 @@ fn stash_list_formats_match_stock_git() {
         ["stash", "list", "--format=%r|%R|%q|%Q|%z"].as_slice(),
         ["stash", "list", "--format=%gL|%gI|%gq|%gZ"].as_slice(),
         ["stash", "list", "--format=%aZ|%cZ|%GZ"].as_slice(),
+        ["stash", "list", "--format=%Cred%h%Creset:%s"].as_slice(),
+        ["stash", "list", "--format=%C(red)%h%C(reset):%s"].as_slice(),
+        ["stash", "list", "--format=%C(auto,red)%h%Creset:%s"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
@@ -2183,10 +2183,7 @@ fn stash_reference_commands_accept_no_quiet_like_stock_git() {
     git_with_env(git_repo.path(), ["stash", "push", "-q", "-m", "second"]);
     run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-q", "-m", "second"]);
     git(git_repo.path(), ["stash", "drop", "--quiet", "--no-quiet"]);
-    run_zmin(
-        zmin_repo.path(),
-        ["stash", "drop", "--quiet", "--no-quiet"],
-    );
+    run_zmin(zmin_repo.path(), ["stash", "drop", "--quiet", "--no-quiet"]);
     assert_eq!(run_zmin(zmin_repo.path(), ["stash", "list"]), "");
 }
 

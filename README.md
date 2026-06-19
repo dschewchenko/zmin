@@ -162,7 +162,7 @@ evidence. Its full Git `2.47` denominator is still being built.
 | Setup and Config | `6/6` (`100%`) | `39/39` | `44/44` | `0/TBD` |
 | Getting and Creating Projects | `2/2` (`100%`) | `51/51` | `62/62` | `2/TBD` |
 | Basic Snapshotting | `9/9` (`100%`) | `143/143` | `183/183` | `25/TBD` |
-| Branching and Merging | `9/9` (`100%`) | `112/112` | `139/139` | `18/TBD` |
+| Branching and Merging | `9/9` (`100%`) | `112/112` | `139/139` | `21/TBD` |
 | Sharing and Updating Projects | `5/5` (`100%`) | `34/34` | `45/45` | `0/TBD` |
 | Inspection and Comparison | `7/7` (`100%`) | `155/155` | `179/179` | `8/TBD` |
 | Patching | `5/5` (`100%`) | `96/96` | `114/114` | `0/TBD` |
@@ -173,7 +173,7 @@ evidence. Its full Git `2.47` denominator is still being built.
 | Server Admin | `2/2` (`100%`) | `15/15` | `16/16` | `0/TBD` |
 | Plumbing Commands | `20/20` (`100%`) | `243/243` | `288/288` | `0/TBD` |
 | Other Git `2.47` commands | `71/71` (`100%`) | `464/464` | `534/534` | `4/TBD` |
-| **Git `2.47` total** | **`151/151` (`100%`)** | **`1264/1264`** | **`1506/1506`** | **`126/TBD`** |
+| **Git `2.47` total** | **`151/151` (`100%`)** | **`1264/1264`** | **`1506/1506`** | **`129/TBD`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and

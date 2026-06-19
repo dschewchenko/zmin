@@ -93,6 +93,9 @@ Recently closed replacement gaps:
 - `log --diff-merges=m` is accepted as the stock alias for separate merge
   diffs, and separate/on/m stat output skips empty parent diff blocks like
   stock Git
+- `stash list --format` accepts common non-forced pretty color atoms
+  `%Cred`, `%C(red)`, and `%C(auto,red)` with reset forms when output is not
+  color-forced
 
 Current high-priority gap classes:
 

@@ -1416,8 +1416,7 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         pathspecs
     };
     let show_stage_format = options.stage || options.unmerged;
-    let cached_ignored_recurse_submodules =
-        recurse_submodules && options.ignored && options.cached;
+    let cached_ignored_recurse_submodules = recurse_submodules && options.ignored && options.cached;
     let include_all_cached = !options.ignored
         && !options.others
         && !options.stage
@@ -3640,7 +3639,10 @@ pub(crate) fn submodule(args: Vec<String>) -> Result<()> {
         args.remove(0);
     }
     if args.is_empty() {
-        let quiet_args = quiet.then(|| "--quiet".to_owned()).into_iter().collect::<Vec<_>>();
+        let quiet_args = quiet
+            .then(|| "--quiet".to_owned())
+            .into_iter()
+            .collect::<Vec<_>>();
         return submodule_status(&quiet_args);
     }
     let prefixed_args = |args: &[String]| {
@@ -4811,10 +4813,7 @@ fn submodule_add(args: &[String]) -> Result<()> {
     } else if !options.force {
         return Err(CliError::Fatal {
             code: 128,
-            message: format!(
-                "'{}' already exists in the index",
-                submodule_path.display()
-            ),
+            message: format!("'{}' already exists in the index", submodule_path.display()),
         });
     }
     let submodule_path_string = submodule_path.to_string_lossy().replace('\\', "/");
@@ -4834,11 +4833,7 @@ fn submodule_add(args: &[String]) -> Result<()> {
         &format!("submodule.{submodule_name}.url"),
         &options.repository,
     )?;
-    set_config_value(
-        &repo,
-        &format!("submodule.{submodule_name}.active"),
-        "true",
-    )?;
+    set_config_value(&repo, &format!("submodule.{submodule_name}.active"), "true")?;
 
     let submodule_repo = find_repo_at(&absolute_submodule_path)?;
     let submodule_refs = RefStore::new(&submodule_repo.git_dir, GitHashAlgorithm::Sha1);
@@ -6805,6 +6800,7 @@ fn render_stash_list_format(
                     _ => stash_format_literal_atom(&mut out, "G", next),
                 }
             }
+            'C' if consume_stash_color_atom(&mut chars) => {}
             'C' | 'w' | '<' | '>' => {
                 return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
             }
@@ -6812,6 +6808,44 @@ fn render_stash_list_format(
         }
     }
     Ok(out)
+}
+
+fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> bool
+where
+    I: Iterator<Item = char> + Clone,
+{
+    if matches!(chars.peek(), Some('(')) {
+        chars.next();
+        let mut spec = String::new();
+        for ch in chars.by_ref() {
+            if ch == ')' {
+                return !spec
+                    .split_once(',')
+                    .is_some_and(|(mode, _)| mode.trim() == "always");
+            }
+            spec.push(ch);
+        }
+        return false;
+    }
+
+    let color_atoms = [
+        "normal", "reset", "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+        "bold", "dim", "ul", "blink", "reverse", "italic", "strike",
+    ];
+    let mut preview = chars.clone();
+    let lookahead = preview.by_ref().take(8).collect::<String>();
+    if let Some(atom) = color_atoms
+        .iter()
+        .filter(|atom| lookahead.starts_with(**atom))
+        .max_by_key(|atom| atom.len())
+    {
+        for _ in 0..atom.chars().count() {
+            chars.next();
+        }
+        return true;
+    }
+
+    false
 }
 
 fn stash_format_literal_atom(out: &mut String, prefix: &str, atom: char) {
@@ -6846,7 +6880,8 @@ fn stash_format_sanitized_subject(message: &[u8]) -> String {
 
 fn signature_email_local_part(signature: &[u8]) -> String {
     let email = signature_email(signature);
-    email.split_once('@')
+    email
+        .split_once('@')
         .map_or(email.as_str(), |(local, _)| local)
         .to_owned()
 }
