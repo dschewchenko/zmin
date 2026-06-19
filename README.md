@@ -148,40 +148,37 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-Command-name coverage is complete for Git `2.47`. That does not mean Zmin is
-fully behavior-compatible with Git `2.47` yet: parser coverage and behavior
-parity are separate counts.
+Zmin exposes every command entry point from Git `2.47`, but that is not the
+same as full Git behavior support. Parser coverage only means the CLI accepts
+the argument shape. Real support is tracked in `Verified behavior`, where the
+full Git `2.47` denominator is still being built.
 
-The table follows the Git reference groups. `Accepted args` and `Accepted
-spellings` are the Git-compatible surface declared by Zmin's CLI schema.
-`Verified behavior` counts option/state/transport variants with focused parity
-evidence. Its full Git `2.47` denominator is still being built.
-
-| Git reference group | Commands | Accepted args | Accepted spellings | Verified behavior |
+| Git reference group | Entry points present | Parser args declared | Parser spellings declared | Verified behavior |
 | --- | ---: | ---: | ---: | ---: |
-| Setup and Config | `6/6` (`100%`) | `39/39` | `44/44` | `0/TBD` |
-| Getting and Creating Projects | `2/2` (`100%`) | `51/51` | `62/62` | `2/TBD` |
-| Basic Snapshotting | `9/9` (`100%`) | `143/143` | `183/183` | `25/TBD` |
-| Branching and Merging | `9/9` (`100%`) | `112/112` | `139/139` | `21/TBD` |
-| Sharing and Updating Projects | `5/5` (`100%`) | `34/34` | `45/45` | `0/TBD` |
-| Inspection and Comparison | `7/7` (`100%`) | `155/155` | `179/179` | `8/TBD` |
-| Patching | `5/5` (`100%`) | `96/96` | `114/114` | `0/TBD` |
-| Debugging | `3/3` (`100%`) | `10/10` | `13/13` | `52/TBD` |
-| Email | `6/6` (`100%`) | `30/30` | `36/36` | `0/TBD` |
-| External Systems | `2/2` (`100%`) | `2/2` | `2/2` | `0/TBD` |
-| Administration | `8/8` (`100%`) | `63/63` | `73/73` | `17/TBD` |
-| Server Admin | `2/2` (`100%`) | `15/15` | `16/16` | `0/TBD` |
-| Plumbing Commands | `20/20` (`100%`) | `243/243` | `288/288` | `0/TBD` |
-| Other Git `2.47` commands | `71/71` (`100%`) | `464/464` | `534/534` | `4/TBD` |
-| **Git `2.47` total** | **`151/151` (`100%`)** | **`1264/1264`** | **`1506/1506`** | **`129/TBD`** |
+| Setup and Config | `6/6` | `39/39` | `44/44` | `0/TBD` |
+| Getting and Creating Projects | `2/2` | `51/51` | `62/62` | `2/TBD` |
+| Basic Snapshotting | `9/9` | `143/143` | `183/183` | `25/TBD` |
+| Branching and Merging | `9/9` | `112/112` | `139/139` | `21/TBD` |
+| Sharing and Updating Projects | `5/5` | `34/34` | `45/45` | `0/TBD` |
+| Inspection and Comparison | `7/7` | `155/155` | `179/179` | `8/TBD` |
+| Patching | `5/5` | `96/96` | `114/114` | `0/TBD` |
+| Debugging | `3/3` | `10/10` | `13/13` | `52/TBD` |
+| Email | `6/6` | `30/30` | `36/36` | `0/TBD` |
+| External Systems | `2/2` | `2/2` | `2/2` | `0/TBD` |
+| Administration | `8/8` | `63/63` | `73/73` | `17/TBD` |
+| Server Admin | `2/2` | `15/15` | `16/16` | `0/TBD` |
+| Plumbing Commands | `20/20` | `243/243` | `288/288` | `0/TBD` |
+| Other Git `2.47` commands | `71/71` | `464/464` | `534/534` | `4/TBD` |
+| **Git `2.47` total** | **`151/151`** | **`1264/1264`** | **`1506/1506`** | **`129/TBD`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
-Full Git `2.47` behavior parity is still in progress. The remaining denominator
-must count command plus option plus mode plus repository state plus transport
-workflow before a global percentage is honest.
+Do not read the first three columns as support percentages. Full Git `2.47`
+behavior parity is still in progress. The remaining denominator must count
+command plus option plus mode plus repository state plus transport workflow
+before a global percentage is honest.
 
 <details>
 <summary>Commands counted in each group</summary>
