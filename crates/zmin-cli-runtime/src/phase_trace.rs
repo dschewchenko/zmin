@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::time::Instant;
 
-pub(crate) struct PhaseTrace {
+pub struct PhaseTrace {
     label: &'static str,
     start: Option<Instant>,
     start_rss: Option<u64>,
@@ -10,7 +10,7 @@ pub(crate) struct PhaseTrace {
 }
 
 impl PhaseTrace {
-    pub(crate) fn new(label: &'static str) -> Self {
+    pub fn new(label: &'static str) -> Self {
         let enabled = phase_trace_enabled();
         let rss_enabled = enabled && phase_trace_rss_enabled();
         Self {
@@ -46,11 +46,11 @@ impl Drop for PhaseTrace {
     }
 }
 
-pub(crate) fn phase_trace(label: &'static str) -> PhaseTrace {
+pub fn phase_trace(label: &'static str) -> PhaseTrace {
     PhaseTrace::new(label)
 }
 
-pub(crate) fn phase_trace_emit(label: &'static str, seconds: f64, fields: &[(&str, String)]) {
+pub fn phase_trace_emit(label: &'static str, seconds: f64, fields: &[(&str, String)]) {
     if !phase_trace_enabled() {
         return;
     }
@@ -64,7 +64,7 @@ pub(crate) fn phase_trace_emit(label: &'static str, seconds: f64, fields: &[(&st
     write_phase_trace_line(&line);
 }
 
-pub(crate) fn phase_trace_enabled() -> bool {
+pub fn phase_trace_enabled() -> bool {
     std::env::var_os("ZMIN_PHASE_TRACE").is_some_and(|value| !value.is_empty())
 }
 

@@ -2,9 +2,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
-use super::{CliError, Result};
+use crate::{CliError, Result};
 
-pub(crate) fn remove_file_if_exists(path: &Path) -> Result<()> {
+pub fn remove_file_if_exists(path: &Path) -> Result<()> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -12,7 +12,7 @@ pub(crate) fn remove_file_if_exists(path: &Path) -> Result<()> {
     }
 }
 
-pub(crate) fn remove_path_if_exists(path: &Path) -> Result<()> {
+pub fn remove_path_if_exists(path: &Path) -> Result<()> {
     match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),

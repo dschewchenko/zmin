@@ -2,6 +2,14 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+mod fs_ops;
+mod phase_trace;
+mod temp_files;
+
+pub use fs_ops::{remove_file_if_exists, remove_path_if_exists};
+pub use phase_trace::{PhaseTrace, phase_trace, phase_trace_emit, phase_trace_enabled};
+pub use temp_files::{unique_temp_sibling, write_content_addressed_file};
+
 pub type Result<T> = std::result::Result<T, CliError>;
 
 #[derive(Debug)]

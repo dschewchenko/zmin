@@ -134,6 +134,36 @@ no-op compat rebuild at `0.15s`. The next build-speed slice should extract
 transport/runtime domains into crates instead of changing global Cargo worker
 counts.
 
+The first runtime crate split is now in place. `crates/zmin-cli-runtime` owns
+stable runtime contracts (`CliError`, `Result`, `GitRepo`, `CloneOptions`) and
+the hard-error clone/upload-pack/receive-pack service registry. `zmin-cli`
+keeps narrow internal re-exports so command/runtime behavior did not need a
+broad rewrite, and no fallback was added for missing service registration.
+Validation passed for `cargo check -p zmin-cli --bin zmin --profile compat`,
+focused primitive transport adapter tests, primitive runtime mode-stability
+tests, submodule clone/update tests, patch-id parity, commit cleanup parity,
+scoped rustfmt, and scoped `git diff --check`. Clean no-op
+`cargo build -p zmin-cli --bins --profile compat --timings` passed in `0.24s`;
+the first timed build after the split had Cargo lock contention and is not
+accepted timing evidence.
+
+The follow-up runtime helper extraction moved phase tracing, content-addressed
+temporary-file writes, unique temp sibling generation, and remove-if-exists
+filesystem helpers into `zmin-cli-runtime`. `zmin-cli` now re-exports these
+helpers from the runtime crate instead of compiling separate local modules.
+This keeps Git behavior unchanged while moving another commonly touched
+runtime surface behind the stable crate boundary. Validation passed for
+`cargo check -p zmin-cli --bin zmin --profile compat`, focused
+`git_clone_compat clone_` (`10/10`), full `git_pack_integrity_compat`
+(`61/61`), touched-file rustfmt with `skip_children=true` where needed, and
+`git diff --check`. A clean no-op compat `--bins` build completed in `0.43s`
+Cargo time (`0.55s` wall); after touching only
+`crates/zmin-cli-runtime/src/phase_trace.rs`, compat `--bins` rebuilt in
+`4.06s` Cargo time (`4.14s` wall). That keeps the current runtime-helper edit
+loop within the target `<10-20s` macOS range. Windows guest cleanup still needs
+fresh confirmation before using new Windows timing evidence: host process state
+was clean, but the guest cleanup `prlctl exec` command hung and was stopped.
+
 ## Current measured baseline
 
 Last full selected macOS `standard` run:

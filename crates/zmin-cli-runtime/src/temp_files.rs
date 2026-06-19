@@ -3,12 +3,12 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{CliError, Result};
+use crate::{CliError, Result};
 
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 const CONTENT_ADDRESSED_FILE_BUF_CAPACITY: usize = 256 * 1024;
 
-pub(crate) fn write_content_addressed_file(path: &Path, bytes: &[u8]) -> Result<()> {
+pub fn write_content_addressed_file(path: &Path, bytes: &[u8]) -> Result<()> {
     match fs::metadata(path) {
         Ok(metadata) => {
             if metadata.len() == bytes.len() as u64 && fs::read(path)? == bytes {
@@ -63,7 +63,7 @@ fn write_unique_temp_file(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn unique_temp_sibling(path: &Path) -> PathBuf {
+pub fn unique_temp_sibling(path: &Path) -> PathBuf {
     let mut value = std::ffi::OsString::from(path.as_os_str());
     value.push(format!(
         ".tmp-{}-{}",

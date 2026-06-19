@@ -25,9 +25,10 @@ pub(crate) use config_primitives::*;
 mod env_primitives;
 pub(crate) use env_primitives::*;
 
-#[path = "runtime/phase_trace.rs"]
-mod phase_trace_primitives;
-pub(crate) use phase_trace_primitives::*;
+pub(crate) use zmin_cli_runtime::{
+    PhaseTrace, phase_trace, phase_trace_emit, phase_trace_enabled, remove_file_if_exists,
+    remove_path_if_exists, unique_temp_sibling, write_content_addressed_file,
+};
 
 #[path = "runtime/object.rs"]
 mod object_primitives;
@@ -65,17 +66,9 @@ pub(crate) use worktree_index_primitives::*;
 mod worktree_files_primitives;
 pub(crate) use worktree_files_primitives::*;
 
-#[path = "runtime/temp_files.rs"]
-mod temp_files_primitives;
-pub(crate) use temp_files_primitives::*;
-
 #[path = "runtime/clone_service.rs"]
 mod clone_service_primitives;
 pub(crate) use clone_service_primitives::*;
-
-#[path = "runtime/fs_ops.rs"]
-mod fs_ops_primitives;
-pub(crate) use fs_ops_primitives::*;
 
 #[path = "runtime/pack_index.rs"]
 mod pack_index_primitives;
