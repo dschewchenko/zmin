@@ -44,6 +44,9 @@ Recently closed replacement gaps:
   both `REV:path` and `--path=<path> <blob>` forms
 - `cat-file --textconv` runs configured diff-driver textconv commands and
   falls back to raw blob output when no textconv driver applies
+- `ls-files --recurse-submodules --ignored --cached --exclude-standard`
+  follows stock Git's supported cached-ignored mode instead of rejecting all
+  ignored recurse-submodule combinations
 
 Current high-priority gap classes:
 

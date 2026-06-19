@@ -1374,7 +1374,7 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
             || options.killed
             || options.deleted
             || options.modified
-            || options.ignored
+            || (options.ignored && !options.cached)
             || options.unmerged
             || options.resolve_undo
             || options.with_tree.is_some())
@@ -1404,6 +1404,8 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         pathspecs
     };
     let show_stage_format = options.stage || options.unmerged;
+    let cached_ignored_recurse_submodules =
+        recurse_submodules && options.ignored && options.cached;
     let include_all_cached = !options.ignored
         && !options.others
         && !options.stage
@@ -1412,7 +1414,7 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
         && !options.modified
         && !options.killed;
     let mut index = read_repo_index(&repo)?;
-    if recurse_submodules {
+    if recurse_submodules && !cached_ignored_recurse_submodules {
         index = ls_files_index_with_submodules(&repo, index)?;
     }
     let mut with_tree_paths = HashSet::new();

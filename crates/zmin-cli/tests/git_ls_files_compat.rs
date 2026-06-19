@@ -480,6 +480,9 @@ fn ls_files_recurse_submodules_matches_stock_git() {
         ["init", "-b", "main", repo.to_str().expect("repo path")],
     );
     configure_identity(&repo);
+    fs::write(repo.join(".gitignore"), b"*.root\n").expect("write root ignore");
+    fs::write(repo.join("ignored.root"), b"ignored\n").expect("write ignored root");
+    git(&repo, ["add", "-f", ".gitignore", "ignored.root"]);
     let output = Command::new("git")
         .args([
             "-c",
@@ -504,6 +507,41 @@ fn ls_files_recurse_submodules_matches_stock_git() {
         ["ls-files", "--recurse-submodules", "-t"].as_slice(),
         ["ls-files", "--recurse-submodules", "-s"].as_slice(),
         ["ls-files", "--recurse-submodules", "--format=%(path)"].as_slice(),
+        [
+            "ls-files",
+            "--recurse-submodules",
+            "--ignored",
+            "--cached",
+            "--exclude-standard",
+        ]
+        .as_slice(),
+        [
+            "ls-files",
+            "--recurse-submodules",
+            "--ignored",
+            "--cached",
+            "--exclude-standard",
+            "-s",
+        ]
+        .as_slice(),
+        [
+            "ls-files",
+            "--recurse-submodules",
+            "--ignored",
+            "--cached",
+            "--exclude-standard",
+            "-t",
+        ]
+        .as_slice(),
+        [
+            "ls-files",
+            "--recurse-submodules",
+            "--ignored",
+            "--cached",
+            "--exclude-standard",
+            "-z",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(&repo, args),
