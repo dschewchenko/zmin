@@ -10,15 +10,19 @@ written by stock Git.
 
 ## Install Preview
 
-Preview artifacts are published on GitHub Releases, not in official stores.
+Preview artifacts are published from a Git branch, not in official stores.
 
-Current preview: [`v0.0.1-preview.20260619`](https://github.com/dschewchenko/zmin/releases/tag/v0.0.1-preview.20260619)
+Current preview source tag:
+[`v0.0.1-preview.20260619`](https://github.com/dschewchenko/zmin/tree/v0.0.1-preview.20260619)
+
+Current preview artifacts:
+[`artifacts-v0.0.1-preview.20260619`](https://github.com/dschewchenko/zmin/tree/artifacts-v0.0.1-preview.20260619)
 
 macOS ARM64:
 
 ```bash
 curl -L -o zmin-aarch64-apple-darwin.tar.gz \
-  https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-aarch64-apple-darwin.tar.gz
+  https://github.com/dschewchenko/zmin/raw/artifacts-v0.0.1-preview.20260619/zmin-aarch64-apple-darwin.tar.gz
 tar -xzf zmin-aarch64-apple-darwin.tar.gz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
@@ -28,7 +32,7 @@ Windows ARM64, PowerShell:
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-aarch64-pc-windows-gnullvm.zip" `
+  -Uri "https://github.com/dschewchenko/zmin/raw/artifacts-v0.0.1-preview.20260619/zmin-aarch64-pc-windows-gnullvm.zip" `
   -OutFile "zmin-aarch64-pc-windows-gnullvm.zip"
 Expand-Archive .\zmin-aarch64-pc-windows-gnullvm.zip -DestinationPath .\zmin
 .\zmin\zmin.exe --version
@@ -43,7 +47,8 @@ cargo build -p zmin-cli --release --bin zmin
 ./target/release/zmin --version
 ```
 
-Check downloaded files with `SHA256SUMS` from the same release.
+Check downloaded files with
+[`SHA256SUMS`](https://github.com/dschewchenko/zmin/raw/artifacts-v0.0.1-preview.20260619/SHA256SUMS).
 
 ## What Is Included
 
@@ -171,7 +176,10 @@ tools/git-cli-readiness-status.sh --require-complete
 
 ## Download And Install Analytics
 
-GitHub Releases expose per-asset download counts through the GitHub API. Example:
+The current artifact branch gives working download URLs, but it does not expose
+per-file download counts.
+
+GitHub Releases expose per-asset download counts through the GitHub API:
 
 ```bash
 gh api repos/dschewchenko/zmin/releases/tags/v0.0.1-preview.20260619 \
@@ -179,7 +187,8 @@ gh api repos/dschewchenko/zmin/releases/tags/v0.0.1-preview.20260619 \
 ```
 
 There is no install telemetry in the binaries. Direct ZIP/TAR installs can show
-downloads, not completed installs.
+downloads only when the hosting layer records them; they do not prove completed
+installs.
 
 For install counts later, use one of these:
 
