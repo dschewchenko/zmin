@@ -20,17 +20,48 @@ through Homebrew, apt, winget, Chocolatey, crates.io, or other package channels.
 
 Current preview: `v0.0.1-preview.20260619`
 
-Current preview downloads are available for macOS ARM64 and Windows ARM64.
-Other platforms can build from source for now.
+Preview downloads are GitHub Release assets. Pick the archive for your
+platform.
 
 ### macOS
+
+Apple Silicon:
+
+```bash
+curl -LO https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-aarch64-apple-darwin.tar.gz
+tar -xzf zmin-aarch64-apple-darwin.tar.gz
+mkdir -p ~/.local/bin
+install -m 0755 zmin ~/.local/bin/zmin
+zmin --version
+```
+
+Intel:
+
+```bash
+curl -LO https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-x86_64-apple-darwin.tar.gz
+tar -xzf zmin-x86_64-apple-darwin.tar.gz
+mkdir -p ~/.local/bin
+install -m 0755 zmin ~/.local/bin/zmin
+zmin --version
+```
+
+### Linux
+
+x86_64:
+
+```bash
+curl -LO https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-x86_64-unknown-linux-gnu.tar.gz
+tar -xzf zmin-x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ~/.local/bin
+install -m 0755 zmin ~/.local/bin/zmin
+zmin --version
+```
 
 ARM64:
 
 ```bash
-curl -L -o zmin-aarch64-apple-darwin.tar.gz \
-  https://github.com/dschewchenko/zmin/raw/artifacts-v0.0.1-preview.20260619/zmin-aarch64-apple-darwin.tar.gz
-tar -xzf zmin-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-aarch64-unknown-linux-gnu.tar.gz
+tar -xzf zmin-aarch64-unknown-linux-gnu.tar.gz
 mkdir -p ~/.local/bin
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
@@ -38,22 +69,29 @@ zmin --version
 
 ### Windows
 
+x86_64, PowerShell:
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-x86_64-pc-windows-msvc.zip" `
+  -OutFile "zmin-x86_64-pc-windows-msvc.zip"
+Expand-Archive .\zmin-x86_64-pc-windows-msvc.zip -DestinationPath .\zmin
+.\zmin\zmin.exe --version
+```
+
 ARM64, PowerShell:
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://github.com/dschewchenko/zmin/raw/artifacts-v0.0.1-preview.20260619/zmin-aarch64-pc-windows-gnullvm.zip" `
-  -OutFile "zmin-aarch64-pc-windows-gnullvm.zip"
-Expand-Archive .\zmin-aarch64-pc-windows-gnullvm.zip -DestinationPath .\zmin
+  -Uri "https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/zmin-aarch64-pc-windows-msvc.zip" `
+  -OutFile "zmin-aarch64-pc-windows-msvc.zip"
+Expand-Archive .\zmin-aarch64-pc-windows-msvc.zip -DestinationPath .\zmin
 .\zmin\zmin.exe --version
 ```
 
-Keep `libunwind.dll` next to `zmin.exe`; it is included in the ZIP.
+### Build From Source
 
-### Linux And Other Platforms
-
-Build from source for platforms that do not have a preview download yet.
-Requires the Rust toolchain:
+Requires Rust:
 
 ```bash
 cargo build -p zmin-cli --release --bin zmin
@@ -63,7 +101,7 @@ cargo build -p zmin-cli --release --bin zmin
 ## Verify Download
 
 Optional checksums:
-[`SHA256SUMS`](https://github.com/dschewchenko/zmin/raw/artifacts-v0.0.1-preview.20260619/SHA256SUMS)
+[`SHA256SUMS`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619/SHA256SUMS)
 
 ## Start
 
@@ -192,7 +230,7 @@ Zmin is against that tool by median; values below `x1.00` mean Zmin is slower.
 | macOS | `log` | `0.021s` | `0.027s` (`x1.28`) | `0.023s` (`x1.07`) |
 | macOS | `merge-base` | `0.018s` | `0.027s` (`x1.46`) | `0.023s` (`x1.27`) |
 | Windows | `clone` | `1.136s` | `1.413s` (`x1.24`) | `1.152s` (`x1.01`) |
-| Windows | `clone-large` | `4.257s` | `2.515s` (`x0.59`) | `2.755s` (`x0.65`) |
+| Windows | `clone-large` | `2.431s` | `2.135s` (`x0.88`) | `2.158s` (`x0.89`) |
 
 ## Trademark Notice
 
