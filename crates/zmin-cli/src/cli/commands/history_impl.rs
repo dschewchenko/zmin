@@ -1555,6 +1555,7 @@ enum BlameDateMode {
     Raw,
     Unix,
     Rfc2822,
+    Local,
 }
 
 #[derive(Debug, Clone)]
@@ -1795,6 +1796,7 @@ fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
         "raw" => Ok(BlameDateMode::Raw),
         "unix" => Ok(BlameDateMode::Unix),
         "rfc" | "rfc2822" => Ok(BlameDateMode::Rfc2822),
+        "local" => Ok(BlameDateMode::Local),
         _ => Err(CliError::Fatal {
             code: 129,
             message: format!("unsupported blame date mode '{value}'"),
@@ -2086,10 +2088,10 @@ fn print_blame_lines(
         if options.show_number {
             print!(" {}", line.line_no);
         }
-        if options.date_mode == BlameDateMode::IsoStrict {
-            print!(" ({author} {date:<25} {}) ", line.line_no);
-        } else {
-            print!(" ({author} {date} {}) ", line.line_no);
+        match options.date_mode {
+            BlameDateMode::IsoStrict => print!(" ({author} {date:<25} {}) ", line.line_no),
+            BlameDateMode::Local => print!(" ({author} {date:<30} {}) ", line.line_no),
+            _ => print!(" ({author} {date} {}) ", line.line_no),
         }
         io::stdout().write_all(&line.content)?;
         if !line.content.ends_with(b"\n") {
@@ -2138,6 +2140,22 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
             Ok(timestamp.to_string())
         }
         BlameDateMode::Rfc2822 => signature_mail_date(signature),
+        BlameDateMode::Local => {
+            let (timestamp, _) =
+                signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "commit has invalid author date".into(),
+                })?;
+            let utc =
+                chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "commit author timestamp is out of range".into(),
+                })?;
+            Ok(utc
+                .with_timezone(&chrono::Local)
+                .format("%a %b %-d %H:%M:%S %Y")
+                .to_string())
+        }
     }
 }
 

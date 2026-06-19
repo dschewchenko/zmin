@@ -201,6 +201,7 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
         ["blame", "--date=unix", "a.txt"].as_slice(),
         ["blame", "--date=rfc", "a.txt"].as_slice(),
         ["blame", "--date=rfc2822", "a.txt"].as_slice(),
+        ["blame", "--date=local", "a.txt"].as_slice(),
         ["blame", "-L", "1,1", "a.txt"].as_slice(),
         ["blame", "-w", "a.txt"].as_slice(),
         ["blame", "--root", "a.txt"].as_slice(),

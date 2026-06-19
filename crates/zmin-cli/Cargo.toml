@@ -17,7 +17,7 @@ name = "git-http-backend"
 path = "src/bin/git-http-backend.rs"
 
 [dependencies]
-chrono = { version = "0.4.39", default-features = false, features = ["std"] }
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
 clap = { version = "4.5.47", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 flate2 = { version = "1.0.35", default-features = false, features = ["zlib"] }
 memmap2 = "0.9.9"
