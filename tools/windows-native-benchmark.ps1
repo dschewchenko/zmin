@@ -276,6 +276,63 @@ function Measure-Tool {
   }) | Out-Null
 }
 
+function New-MeasureSpec {
+  param(
+    [string]$Tool,
+    [string]$Op,
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [string]$Extra,
+    [string]$WorkingDirectory = (Get-Location).Path
+  )
+
+  return [pscustomobject]@{
+    Tool = $Tool
+    Op = $Op
+    FilePath = $FilePath
+    Arguments = $Arguments
+    WorkingDirectory = $WorkingDirectory
+    Extra = $Extra
+  }
+}
+
+function Get-BalancedMeasureSpecs {
+  param(
+    [object[]]$Specs,
+    [int]$Repeat
+  )
+
+  if ($Specs.Count -le 1) {
+    return @($Specs)
+  }
+
+  $offset = ($Repeat - 1) % $Specs.Count
+  $ordered = New-Object System.Collections.Generic.List[object]
+  for ($i = 0; $i -lt $Specs.Count; $i++) {
+    $ordered.Add($Specs[($i + $offset) % $Specs.Count]) | Out-Null
+  }
+  return $ordered.ToArray()
+}
+
+function Measure-ToolSpecs {
+  param(
+    [object[]]$Specs,
+    [int]$Repeat
+  )
+
+  foreach ($spec in (Get-BalancedMeasureSpecs -Specs $Specs -Repeat $Repeat)) {
+    $measureArgs = @{
+      Tool = $spec.Tool
+      Op = $spec.Op
+      FilePath = $spec.FilePath
+      Arguments = $spec.Arguments
+      WorkingDirectory = $spec.WorkingDirectory
+      Extra = $spec.Extra
+    }
+    Measure-Tool @measureArgs
+  }
+}
+
 function Add-Check {
   param(
     [string]$Name,
@@ -871,12 +928,15 @@ try {
       if (Test-BenchmarkOp "clone") {
         $gitClone = Join-Path $WorkDir "git-clone-$n"
         $zminClone = Join-Path $WorkDir "zmin-clone-$n"
-        Measure-Tool -Tool "git" -Op "clone" -FilePath $GitExe -Arguments @("clone", "-q", $Src, $gitClone) -Extra "$n/local"
+        $cloneSpecs = @(
+          New-MeasureSpec -Tool "git" -Op "clone" -FilePath $GitExe -Arguments @("clone", "-q", $Src, $gitClone) -Extra "$n/local"
+        )
         if ($GixExe) {
           $gixClone = Join-Path $WorkDir "gix-clone-$n"
-          Measure-Tool -Tool "gix" -Op "clone" -FilePath $GixExe -Arguments @("clone", $Src, $gixClone) -Extra "$n/local"
+          $cloneSpecs += New-MeasureSpec -Tool "gix" -Op "clone" -FilePath $GixExe -Arguments @("clone", $Src, $gixClone) -Extra "$n/local"
         }
-        Measure-Tool -Tool "zmin" -Op "clone" -FilePath $ZminGitExe -Arguments @("clone", "-q", $Src, $zminClone) -Extra "$n/local"
+        $cloneSpecs += New-MeasureSpec -Tool "zmin" -Op "clone" -FilePath $ZminGitExe -Arguments @("clone", "-q", $Src, $zminClone) -Extra "$n/local"
+        Measure-ToolSpecs -Specs $cloneSpecs -Repeat $n
         Assert-SameRef -Name "clone-$n" -LeftRepo $gitClone -RightRepo $zminClone -Ref "HEAD"
         Assert-SameRef -Name "clone-$n-tree" -LeftRepo $gitClone -RightRepo $zminClone -Ref "HEAD^{tree}"
       }
@@ -884,12 +944,15 @@ try {
       if (Test-BenchmarkOp "clone-large") {
         $gitLargeClone = Join-Path $WorkDir "git-clone-large-$n"
         $zminLargeClone = Join-Path $WorkDir "zmin-clone-large-$n"
-        Measure-Tool -Tool "git" -Op "clone-large" -FilePath $GitExe -Arguments @("clone", "-q", $LargeSrc, $gitLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        $cloneLargeSpecs = @(
+          New-MeasureSpec -Tool "git" -Op "clone-large" -FilePath $GitExe -Arguments @("clone", "-q", $LargeSrc, $gitLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        )
         if ($GixExe) {
           $gixLargeClone = Join-Path $WorkDir "gix-clone-large-$n"
-          Measure-Tool -Tool "gix" -Op "clone-large" -FilePath $GixExe -Arguments @("clone", $LargeSrc, $gixLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+          $cloneLargeSpecs += New-MeasureSpec -Tool "gix" -Op "clone-large" -FilePath $GixExe -Arguments @("clone", $LargeSrc, $gixLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
         }
-        Measure-Tool -Tool "zmin" -Op "clone-large" -FilePath $ZminGitExe -Arguments @("clone", "-q", $LargeSrc, $zminLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        $cloneLargeSpecs += New-MeasureSpec -Tool "zmin" -Op "clone-large" -FilePath $ZminGitExe -Arguments @("clone", "-q", $LargeSrc, $zminLargeClone) -Extra "$n/$CloneLargeCommits commits/$CloneLargeFilesPerCommit files"
+        Measure-ToolSpecs -Specs $cloneLargeSpecs -Repeat $n
         Assert-SameRef -Name "clone-large-$n" -LeftRepo $gitLargeClone -RightRepo $zminLargeClone -Ref "HEAD"
         Assert-SameRef -Name "clone-large-$n-tree" -LeftRepo $gitLargeClone -RightRepo $zminLargeClone -Ref "HEAD^{tree}"
       }

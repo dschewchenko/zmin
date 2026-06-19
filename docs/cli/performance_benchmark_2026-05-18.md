@@ -3964,3 +3964,54 @@ The Windows traced `clone-large` run regressed externally: Git `1.186045s`, Gix
 read-all-then-write batching for large Windows checkout unless new evidence
 explains why it improves external stopwatch timing while preserving both
 default `clone` and `clone-large` gates.
+
+Windows balanced clone benchmark ordering:
+
+- fixed-order baseline before the gate fix:
+  `C:\Users\skron\zmin-bench-20260619T071508Z-87737-out`
+- first helper validation attempt:
+  `C:\Users\skron\zmin-bench-20260619T072514Z-90750`
+- balanced-order validation:
+  `C:\Users\skron\zmin-bench-20260619T072857Z-91389-out`
+
+The Windows benchmark previously measured local `clone` and `clone-large` in a
+fixed Git, Gitoxide, Zmin order for every repeat, unlike the macOS benchmark's
+balanced/randomized operation ordering. This made clone rows more sensitive to
+warm/cold filesystem and VM state, and it always placed Zmin last in the
+three-way comparison. The benchmark now builds per-repeat measurement specs and
+rotates the tool order: repeat 1 starts with Git, repeat 2 starts with Gitoxide,
+and repeat 3 starts with Zmin when all three tools are present.
+
+The first helper version failed in PowerShell with `Argument types do not
+match` because it returned the generic list object instead of an array. The
+helper now returns `ToArray()`, and the balanced scoped gate completed.
+
+Validation:
+
+- `git diff --check -- tools/windows-native-benchmark.ps1`
+- `tools/parallels-windows-runner.sh benchmark 3 clone,clone-large`
+- `checks.csv` had all `12` clone/tree checks `ok`
+- post-run process probe returned no `git`, `gix`, `cargo`, `rustc`, or `zmin`
+  processes
+
+The balanced `bench.csv` confirmed the intended order:
+
+| Repeat | `clone` order | `clone-large` order |
+| --- | --- | --- |
+| 1 | Git, Gix, Zmin | Git, Gix, Zmin |
+| 2 | Gix, Zmin, Git | Gix, Zmin, Git |
+| 3 | Zmin, Git, Gix | Zmin, Git, Gix |
+
+Balanced scoped ratios:
+
+| Operation | Mean ratio | Median ratio | Paired median | Zmin vs Gix mean | Zmin vs Gix median | Zmin vs Gix paired median |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `clone` | `0.716940` | `0.893475` | `1.394072` | `0.673909` | `0.662654` | `1.376148` |
+| `clone-large` | `1.778496` | `2.028921` | `4.558178` | `0.641560` | `0.489970` | `1.658765` |
+
+Treat the scoped default `clone` aggregate mean/median as green in this balanced
+run but still noisy by paired median. Treat `clone-large` as still open against
+stock Git, with better aggregate Gitoxide comparison but mixed paired evidence
+because the third Gitoxide row was an outlier (`8.512475s`). Future Windows
+clone work should use balanced-order artifacts when judging Git/Gitoxide
+comparisons.
