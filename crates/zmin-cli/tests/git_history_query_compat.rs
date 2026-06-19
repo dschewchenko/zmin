@@ -109,6 +109,21 @@ fn blame_fixture_repo() -> TempDir {
     repo
 }
 
+fn blame_line_range_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\ntwo\nthree\nfour\nfive\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "A",
+        "a@example.test",
+        "1700000000 +0000",
+        "base",
+    );
+    repo
+}
+
 fn whatchanged_cases() -> Vec<Vec<&'static str>> {
     if !stock_git_version_at_least(2, 54) {
         return Vec::new();
@@ -174,6 +189,26 @@ fn shortlog_matches_stock_git_for_author_summaries() {
         assert_eq!(
             run_zmin_args(repo.path(), args),
             git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn blame_line_range_forms_match_stock_git() {
+    let git_repo = blame_line_range_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    for args in [
+        ["blame", "-L", "3,-2", "a.txt"].as_slice(),
+        ["blame", "-L", ",3", "a.txt"].as_slice(),
+        ["blame", "-L", "/two/,-1", "a.txt"].as_slice(),
+        ["blame", "-L", "2,/four/", "a.txt"].as_slice(),
+        ["blame", "-L", "/two/,/four/", "a.txt"].as_slice(),
+        ["blame", "-L", "^/two/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
             "args: {args:?}"
         );
     }
