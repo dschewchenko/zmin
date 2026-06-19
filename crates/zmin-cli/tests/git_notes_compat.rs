@@ -5,10 +5,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_failure_output_with_env, command_output, command_output_with_env, command_stdout_bytes,
-    configure_identity, git, git_failure_output, git_init, git_status, git_with_env,
-    git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, run_zmin_with_stdin_args, write_file, zmin_bin,
+    command_any_output, command_failure_output_with_env, command_output, command_output_with_env,
+    command_stdout_bytes, configure_identity, git, git_failure_output, git_init, git_status,
+    git_with_env, git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_failure_output,
+    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args, write_file, zmin_bin,
 };
 
 fn notes_base_repo() -> TempDir {
@@ -1950,6 +1950,108 @@ fn notes_merge_quiet_and_verbose_options_match_stock_git() {
         assert_eq!(
             run_zmin(zmin_repo.path(), ["notes", "--ref=left", "show", &object]),
             git(git_repo.path(), ["notes", "--ref=left", "show", &object])
+        );
+    }
+}
+
+#[test]
+fn notes_merge_no_strategy_toggle_matches_stock_git_order() {
+    fn setup_conflicting_refs() -> (TempDir, TempDir, String) {
+        let git_repo = notes_base_repo();
+        let zmin_repo = notes_base_repo();
+        let object = git(git_repo.path(), ["rev-parse", "HEAD"]);
+        command_output(
+            "git",
+            git_repo.path(),
+            &["notes", "--ref=left", "add", "-m", "left", &object],
+            "git",
+        );
+        command_output(
+            "git",
+            git_repo.path(),
+            &["notes", "--ref=right", "add", "-m", "right", &object],
+            "git",
+        );
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["notes", "--ref=left", "add", "-m", "left", &object],
+            "zmin",
+        );
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["notes", "--ref=right", "add", "-m", "right", &object],
+            "zmin",
+        );
+        (git_repo, zmin_repo, object)
+    }
+
+    for (name, args) in [
+        (
+            "manual",
+            vec!["notes", "--ref=left", "merge", "--no-strategy", "right"],
+        ),
+        (
+            "reset",
+            vec![
+                "notes",
+                "--ref=left",
+                "merge",
+                "--strategy=ours",
+                "--no-strategy",
+                "right",
+            ],
+        ),
+        (
+            "override",
+            vec![
+                "notes",
+                "--ref=left",
+                "merge",
+                "--no-strategy",
+                "--strategy=ours",
+                "right",
+            ],
+        ),
+    ] {
+        let (git_repo, zmin_repo, object) = setup_conflicting_refs();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "notes merge output should match for {name}",
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["notes", "--ref=left", "show", &object]),
+            git(git_repo.path(), ["notes", "--ref=left", "show", &object]),
+            "notes merge content should match for {name}",
+        );
+    }
+
+    for (name, args) in [
+        (
+            "commit-no-strategy",
+            vec!["notes", "merge", "--commit", "--no-strategy"],
+        ),
+        (
+            "commit-reset-strategy",
+            vec!["notes", "merge", "-s", "ours", "--no-strategy", "--commit"],
+        ),
+        (
+            "abort-no-strategy",
+            vec!["notes", "merge", "--abort", "--no-strategy"],
+        ),
+        (
+            "abort-reset-strategy",
+            vec!["notes", "merge", "-s", "ours", "--no-strategy", "--abort"],
+        ),
+    ] {
+        let git_repo = notes_base_repo();
+        let zmin_repo = notes_base_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "notes merge state failure should match for {name}",
         );
     }
 }

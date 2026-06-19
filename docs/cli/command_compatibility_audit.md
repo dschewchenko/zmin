@@ -61,6 +61,8 @@ Recently closed replacement gaps:
   note content like stock Git, including the `--no-edit` toggle form
 - `notes edit` supports stock Git's deprecated message-source options
   `-m`, `-F`, `-C`, and `-c` plus their long forms and warning text
+- `notes merge --no-strategy` resets strategy selection like stock Git,
+  including order-sensitive merge and merge-state forms
 - `clean --no-interactive` matches stock Git's non-interactive toggle order
   for dry-run clean flows
 

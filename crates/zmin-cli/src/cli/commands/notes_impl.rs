@@ -1351,6 +1351,10 @@ fn parse_notes_merge_args(args: Vec<String>) -> Result<NotesMergeAction> {
                 };
                 strategy = parse_notes_merge_strategy(strategy_name)?;
             }
+            "--no-strategy" => {
+                strategy_seen = false;
+                strategy = NotesMergeStrategy::Manual;
+            }
             "--commit" => commit = true,
             "--abort" => abort = true,
             "-q" | "--quiet" => quiet = true,
