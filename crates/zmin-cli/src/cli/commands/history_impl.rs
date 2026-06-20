@@ -2156,8 +2156,8 @@ fn parse_log_date_mode(value: Option<&str>) -> Result<LogDateMode<'_>> {
             value.strip_prefix("format-local:").unwrap_or_default(),
         )),
         _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported log date mode '{value}'"),
+            code: 128,
+            message: format!("unknown date format {value}"),
         }),
     }
 }

@@ -6,9 +6,10 @@ use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_output_with_env, configure_identity, git, git_args, git_init,
-    git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, stock_git_bin, write_file, zmin_bin,
+    clone_repo_fixture, command_output_with_env, configure_identity, git, git_args,
+    git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, stock_git_bin, write_file,
+    zmin_bin,
 };
 
 fn commit_empty_as(cwd: &std::path::Path, name: &str, email: &str, message: &str) {
@@ -1031,6 +1032,21 @@ fn log_date_formats_match_stock_git() {
             "date mode: {mode}"
         );
     }
+}
+
+#[test]
+fn log_invalid_date_format_matches_stock_git_failure() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+
+    let args = ["log", "-1", "--date=bad", "--format=%ad"];
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
 }
 
 #[test]
