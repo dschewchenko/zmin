@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 18/151 commands with matrix rows / 225/4632 represented doc-option pairs / 810 written rows / 727 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 19/151 commands with matrix rows / 225/4632 represented doc-option pairs / 811 written rows / 727 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -180,7 +180,7 @@ deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
 Do not publish a support percentage just because open written rows are now
-`0/810`; the complete command matrices and complete doc-option matrices remain
+`0/811`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -218,6 +218,7 @@ until a full matrix is expanded and verified.
 | `init` quiet forms | `2` | `0` | `-q`, `--quiet` |
 | `notes add` empty editor forms | `2` | `0` | `--allow-empty`, `--allow-empty --no-edit` |
 | `notes copy` stdin/no-stdin toggle forms | `2` | `0` | `--stdin --no-stdin`, `--no-stdin --stdin` |
+| `notes copy` unknown option usage | `1` | `0` | `git notes copy --bad` exits `129` with stock usage text instead of a custom unsupported-option fatal diagnostic |
 | `notes edit` message-source forms | `8` | `0` | `-m`, `--message=`, `-F`, `--file=`, `-C`, `--reuse-message=`, `-c`, `--reedit-message=` |
 | `notes edit` compact short source forms | `4` | `0` | `-mmsg`, `-Ffile`, `-C<object>`, `-c<object>` |
 | `notes merge` no-strategy toggle forms | `7` | `0` | merge order variants plus `--commit`/`--abort` state variants |

@@ -60,6 +60,29 @@ fn notes_usage() -> &'static str {
 "
 }
 
+fn notes_copy_usage() -> &'static str {
+    "usage: git notes copy [<options>] <from-object> <to-object>
+   or: git notes copy --stdin [<from-object> <to-object>]...
+
+    -f, --[no-]force      replace existing notes
+    --[no-]stdin          read objects from stdin
+    --[no-]for-rewrite <command>
+                          load rewriting config for <command> (implies --stdin)
+
+"
+}
+
+fn notes_copy_unknown_option(option: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown option `{}'\n{}",
+            option.trim_start_matches('-'),
+            notes_copy_usage()
+        ),
+    }
+}
+
 fn parse_notes_args(args: Vec<String>) -> Result<NotesArgs> {
     let mut notes_ref = None;
     let mut cursor = 0usize;
@@ -386,10 +409,7 @@ fn parse_notes_copy_args(args: Vec<String>) -> Result<NotesCopyArgs> {
                 });
             }
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported notes copy option '{value}'"),
-                });
+                return Err(notes_copy_unknown_option(value));
             }
             value => objects.push(value.to_owned()),
         }
