@@ -125,6 +125,7 @@ pub(crate) fn dispatch(
             deepen: _,
             unshallow,
             shallow_since: _,
+            shallow_exclude: _,
             negotiation_tip,
             negotiate_only,
             server_option: _,

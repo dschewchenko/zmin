@@ -8455,6 +8455,7 @@ pub(crate) fn run_fetch(
     let has_server_options = fetch_has_server_options(raw_args);
     let deepen = fetch_deepen_amount(raw_args)?;
     let shallow_since = fetch_shallow_since(raw_args)?;
+    let shallow_exclude = fetch_shallow_exclude(raw_args);
     if stdin {
         let stdin = io::stdin();
         let mut stdin = io::BufReader::with_capacity(TRANSPORT_STDIN_BUF_CAPACITY, stdin.lock());
@@ -8478,6 +8479,13 @@ pub(crate) fn run_fetch(
             message: "fetch --shallow-since cannot be used with other shallow mode options".into(),
         });
     }
+    if !shallow_exclude.is_empty() && (depth.is_some() || deepen.is_some() || unshallow) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude cannot be used with other shallow mode options"
+                .into(),
+        });
+    }
     if unshallow && (all || multiple || refspecs.len() > 1) {
         return Err(CliError::Fatal {
             code: 128,
@@ -8488,6 +8496,12 @@ pub(crate) fn run_fetch(
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --shallow-since currently supports one named remote branch".into(),
+        });
+    }
+    if !shallow_exclude.is_empty() && (all || multiple || refspecs.len() > 1) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude currently supports one named remote branch".into(),
         });
     }
     if deepen.is_some() && (all || multiple || refspecs.len() > 1) {
@@ -8523,6 +8537,7 @@ pub(crate) fn run_fetch(
                 deepen,
                 false,
                 None,
+                &[],
                 128,
                 quiet,
                 dry_run,
@@ -8558,6 +8573,7 @@ pub(crate) fn run_fetch(
                 deepen,
                 false,
                 None,
+                &[],
                 128,
                 quiet,
                 dry_run,
@@ -8612,6 +8628,7 @@ pub(crate) fn run_fetch(
         deepen,
         unshallow,
         shallow_since,
+        &shallow_exclude,
         128,
         quiet,
         dry_run,
@@ -8733,6 +8750,26 @@ fn fetch_shallow_since(raw_args: &[String]) -> Result<Option<i64>> {
         }
     }
     Ok(None)
+}
+
+fn fetch_shallow_exclude(raw_args: &[String]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut args = raw_args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--shallow-exclude" {
+            if let Some(value) = args.next() {
+                values.push(value.clone());
+            }
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--shallow-exclude=") {
+            values.push(value.to_owned());
+        }
+    }
+    values
 }
 
 fn parse_fetch_recurse_submodules_mode(value: &str) -> Result<FetchRecurseSubmodulesMode> {
@@ -9798,6 +9835,7 @@ pub(crate) fn run_pull(
                 None,
                 false,
                 None,
+                &[],
                 1,
                 false,
                 false,
@@ -10464,6 +10502,7 @@ fn fetch_with_depth(
     deepen: Option<usize>,
     unshallow: bool,
     shallow_since: Option<i64>,
+    shallow_exclude: &[String],
     missing_ref_code: i32,
     quiet: bool,
     dry_run: bool,
@@ -10504,6 +10543,13 @@ fn fetch_with_depth(
             return Err(CliError::Fatal {
                 code: 128,
                 message: "fetch --shallow-since currently supports named local and file remotes"
+                    .into(),
+            });
+        }
+        if !shallow_exclude.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --shallow-exclude currently supports named local and file remotes"
                     .into(),
             });
         }
@@ -10577,6 +10623,27 @@ fn fetch_with_depth(
             branch,
             missing_ref_code,
             since,
+            append,
+            write_fetch_head,
+        );
+    }
+    if !shallow_exclude.is_empty() {
+        if prefetch
+            || !refmap.is_empty()
+            || branch.as_deref().is_none_or(|value| value.contains(':'))
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --shallow-exclude currently supports one named remote branch"
+                    .into(),
+            });
+        }
+        return fetch_with_repo_and_remote_shallow_exclude(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            shallow_exclude,
             append,
             write_fetch_head,
         );
@@ -14536,6 +14603,92 @@ fn fetch_with_repo_and_remote_shallow_since(
             &request.wants,
             since,
             &request,
+        )?,
+    )
+}
+
+fn fetch_with_repo_and_remote_shallow_exclude(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    exclude_revs: &[String],
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude needs smart HTTP transport support before use".into(),
+        });
+    }
+    if is_git_daemon_transport_url(&url) || is_ssh_transport_url(&url) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude currently supports local and file remotes".into(),
+        });
+    }
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(unsupported_remote_helper_error(&url, String::new()));
+    };
+    let Some(branch) = branch else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude currently supports one named remote branch".into(),
+        });
+    };
+    let source = local_clone_source(&source_path)?;
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let source_repo = local_clone_source_repo(&source);
+    let ref_name = branch_ref_name(&branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(&branch, missing_ref_code))?;
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, false)?;
+    }
+    let commit_cache = CommitObjectCache::new(&source_store);
+    let exclude_roots = Vec::new();
+    let commits = collect_commits_from_ids_with_id_exclusions_cached(
+        &source_repo,
+        &source_store,
+        &commit_cache,
+        std::slice::from_ref(&id),
+        &exclude_roots,
+        exclude_revs,
+        None,
+    )?;
+    let mut fetched_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        commits.len(),
+    ));
+    copy_reachable_objects_for_depth_into(
+        &source_store,
+        &destination_store,
+        &commits,
+        &mut fetched_objects,
+    )?;
+    copy_fetch_pack_included_tags(
+        &source_refs,
+        &source_store,
+        &destination_store,
+        &source_repo,
+        &mut fetched_objects,
+        None,
+    )?;
+    write_shallow_file(
+        &repo,
+        upload_pack_exclusion_shallow_boundaries(
+            &source_repo,
+            &source_store,
+            &commits,
+            &exclude_roots,
+            exclude_revs,
         )?,
     )
 }

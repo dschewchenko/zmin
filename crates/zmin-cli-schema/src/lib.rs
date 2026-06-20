@@ -1130,6 +1130,8 @@ pub enum Command {
         unshallow: bool,
         #[arg(long = "shallow-since")]
         shallow_since: Option<String>,
+        #[arg(long = "shallow-exclude")]
+        shallow_exclude: Vec<String>,
         #[arg(long = "negotiation-tip")]
         negotiation_tip: Vec<String>,
         #[arg(long = "negotiate-only", action = ArgAction::SetTrue)]
