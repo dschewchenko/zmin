@@ -11564,12 +11564,6 @@ fn fetch_with_repo_and_location(
                 .into(),
         });
     }
-    if deepen.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --deepen currently supports explicit local and file branches".into(),
-        });
-    }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
         if unshallow {
@@ -11580,6 +11574,18 @@ fn fetch_with_repo_and_location(
                 quiet,
                 dry_run,
                 write_fetch_head,
+            );
+        }
+        if let Some(deepen) = deepen {
+            return fetch_direct_location_head_deepen(
+                &repo,
+                &source,
+                &location,
+                quiet,
+                dry_run,
+                write_fetch_head,
+                no_tags,
+                deepen,
             );
         }
         if let Some(depth) = depth {
@@ -11604,6 +11610,13 @@ fn fetch_with_repo_and_location(
         );
     }
     if prune && branch.is_none() {
+        if deepen.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports explicit local and file branches"
+                    .into(),
+            });
+        }
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -11810,6 +11823,50 @@ fn fetch_direct_location_head_unshallow(
         write_shallow_file(repo, Vec::new())?;
     }
     Ok(())
+}
+
+fn fetch_direct_location_head_deepen(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    quiet: bool,
+    dry_run: bool,
+    write_fetch_head: bool,
+    no_tags: bool,
+    deepen: usize,
+) -> Result<()> {
+    let Some(shallow_boundaries) = read_repo_shallow_boundaries(repo)? else {
+        return fetch_direct_location_head(
+            repo,
+            source,
+            location,
+            quiet,
+            dry_run,
+            write_fetch_head,
+        );
+    };
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let head = source_refs.resolve("HEAD")?;
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let Some(current_depth) =
+        shallow_depth_from_source_tip(&source_store, &head, &shallow_boundaries)?
+    else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen could not match the local shallow boundary to remote history"
+                .into(),
+        });
+    };
+    fetch_direct_location_head_depth(
+        repo,
+        source,
+        location,
+        quiet,
+        dry_run,
+        write_fetch_head,
+        no_tags,
+        current_depth.saturating_add(deepen),
+    )
 }
 
 fn fetch_direct_location_head_to_ref(

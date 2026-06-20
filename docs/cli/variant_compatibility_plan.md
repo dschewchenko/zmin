@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 191 written rows / 176 written rows matching stock Git / 9 open written rows`
+`0/151 complete command matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 195 written rows / 180 written rows matching stock Git / 9 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -163,6 +163,7 @@ after the expansion plan above is done for that command.
 | `fetch --shallow-since` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --shallow-exclude` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --deepen` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches in existing shallow repos |
+| `fetch --deepen` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --unshallow` explicit local/file branch forms | `2` | `0` | explicit local path and file URL branch fetches in existing shallow repos |
 | `fetch --unshallow` explicit local/file HEAD forms | `2` | `0` | explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --update-shallow` local/file remote forms | `4` | `0` | named and explicit local path/file URL branch fetches where the remote itself is shallow |
@@ -180,7 +181,7 @@ after the expansion plan above is done for that command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `273` verified variants.
+Tracked closed blocks in this table: `277` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
