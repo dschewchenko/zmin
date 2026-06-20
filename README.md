@@ -148,28 +148,27 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-The first table counts dispatch surface only: whether a Git `2.47` command name
-is wired to a Zmin command handler. It is not a support percentage. Real
-compatibility is counted by behavior variants: command, option, value, option
-combination, repository state, transport and platform.
+Zmin wires all `151` Git `2.47` command names to a command handler. That only
+proves dispatch. Real compatibility is counted by behavior variants: command,
+option, value, option combination, repository state, transport and platform.
 
-| Git reference group | Git commands | Zmin dispatch entry points | Git doc option seed rows | Audited closed behavior variants |
-| --- | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `6` | `76` | `0` |
-| Getting and Creating Projects | `2` | `2` | `57` | `2` |
-| Basic Snapshotting | `9` | `9` | `252` | `64` |
-| Branching and Merging | `9` | `9` | `267` | `30` |
-| Sharing and Updating Projects | `5` | `5` | `119` | `0` |
-| Inspection and Comparison | `7` | `7` | `108` | `8` |
-| Patching | `5` | `5` | `179` | `0` |
-| Debugging | `3` | `3` | `127` | `52` |
-| Email | `6` | `6` | `229` | `0` |
-| External Systems | `2` | `2` | `95` | `0` |
-| Administration | `8` | `8` | `134` | `17` |
-| Server Admin | `2` | `2` | `28` | `0` |
-| Plumbing Commands | `20` | `20` | `332` | `70` |
-| Other Git `2.47` commands | `71` | `71` | `600` | `4` |
-| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`247`** |
+| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix invalid input | Closed block variants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` |
+| Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `2` |
+| Basic Snapshotting | `9` | `252` | `60` | `56` | `4` | `64` |
+| Branching and Merging | `9` | `267` | `0` | `0` | `0` | `30` |
+| Sharing and Updating Projects | `5` | `119` | `0` | `0` | `0` | `0` |
+| Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `8` |
+| Patching | `5` | `179` | `0` | `0` | `0` | `0` |
+| Debugging | `3` | `127` | `0` | `0` | `0` | `52` |
+| Email | `6` | `229` | `0` | `0` | `0` | `0` |
+| External Systems | `2` | `95` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `134` | `0` | `0` | `0` | `17` |
+| Server Admin | `2` | `28` | `0` | `0` | `0` | `0` |
+| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `70` |
+| Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `4` |
+| **Git `2.47` unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`4`** | **`247`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -179,6 +178,8 @@ Do not read command inventory or doc option rows as implemented support. The
 option rows are a seed extracted from Git `2.47.1` docs. They still need to be
 split into values, negations, repeated options, order-sensitive combinations,
 repository states, transports and platforms, then checked against stock Git.
+Reference group rows follow the git-scm command sections and are not meant to
+be added together; the total row is unique.
 
 Current command-level matrices:
 

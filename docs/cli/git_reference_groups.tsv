@@ -1,0 +1,85 @@
+group	command
+Setup and Config	config
+Setup and Config	help
+Setup and Config	bugreport
+Setup and Config	credential
+Setup and Config	credential-cache
+Setup and Config	credential-store
+Getting and Creating Projects	init
+Getting and Creating Projects	clone
+Basic Snapshotting	add
+Basic Snapshotting	status
+Basic Snapshotting	diff
+Basic Snapshotting	commit
+Basic Snapshotting	notes
+Basic Snapshotting	restore
+Basic Snapshotting	reset
+Basic Snapshotting	rm
+Basic Snapshotting	mv
+Branching and Merging	branch
+Branching and Merging	checkout
+Branching and Merging	switch
+Branching and Merging	merge
+Branching and Merging	mergetool
+Branching and Merging	log
+Branching and Merging	stash
+Branching and Merging	tag
+Branching and Merging	worktree
+Sharing and Updating Projects	fetch
+Sharing and Updating Projects	pull
+Sharing and Updating Projects	push
+Sharing and Updating Projects	remote
+Sharing and Updating Projects	submodule
+Inspection and Comparison	show
+Inspection and Comparison	log
+Inspection and Comparison	diff
+Inspection and Comparison	difftool
+Inspection and Comparison	range-diff
+Inspection and Comparison	shortlog
+Inspection and Comparison	describe
+Patching	apply
+Patching	cherry-pick
+Patching	diff
+Patching	rebase
+Patching	revert
+Debugging	bisect
+Debugging	blame
+Debugging	grep
+Email	am
+Email	apply
+Email	imap-send
+Email	format-patch
+Email	send-email
+Email	request-pull
+External Systems	svn
+External Systems	fast-import
+Administration	clean
+Administration	gc
+Administration	fsck
+Administration	reflog
+Administration	filter-branch
+Administration	instaweb
+Administration	archive
+Administration	bundle
+Server Admin	daemon
+Server Admin	update-server-info
+Plumbing Commands	cat-file
+Plumbing Commands	check-ignore
+Plumbing Commands	checkout-index
+Plumbing Commands	commit-tree
+Plumbing Commands	count-objects
+Plumbing Commands	diff-index
+Plumbing Commands	for-each-ref
+Plumbing Commands	hash-object
+Plumbing Commands	ls-files
+Plumbing Commands	ls-tree
+Plumbing Commands	merge-base
+Plumbing Commands	read-tree
+Plumbing Commands	rev-list
+Plumbing Commands	rev-parse
+Plumbing Commands	show-ref
+Plumbing Commands	symbolic-ref
+Plumbing Commands	update-index
+Plumbing Commands	update-ref
+Plumbing Commands	verify-pack
+Plumbing Commands	write-tree

@@ -35,6 +35,13 @@ different exit codes or different repository state.
 - `tools/git-command-gap.sh` checks command entry points only.
 - `tools/git-compat-option-inventory.sh` extracts a seed option list from Git
   `v2.47.1` documentation.
+- `tools/git-compat-audit-summary.sh` combines command groups, option seed
+  rows, command matrices and closed behavior blocks into the summary used by
+  the README.
+- `docs/cli/git_reference_groups.tsv` maps commands into git-scm reference
+  groups. Commands can appear in more than one group.
+- `docs/cli/git_audit_primary_groups.tsv` resolves duplicate group membership
+  for closed behavior block reporting.
 - `docs/cli/variant_compatibility_plan.md` tracks closed behavior blocks and
   open hard-fail clusters.
 - `docs/cli/matrices/status_v2_47.tsv` is the first command-level matrix for
@@ -52,13 +59,49 @@ This is not the final denominator. It does not yet split option values,
 negations, repeated options, order-sensitive combinations, repository states,
 transports or platforms.
 
+## Generated Summary
+
+Run:
+
+```bash
+tools/git-compat-audit-summary.sh
+```
+
+Current generated summary:
+
+| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `0` | `2` |
+| Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `0` | `4` | `64` |
+| Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `0` | `30` |
+| Sharing and Updating Projects | `5` | `119` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `0` | `8` |
+| Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `0` | `52` |
+| Email | `6` | `229` | `0` | `0` | `0` | `0` | `0` | `0` |
+| External Systems | `2` | `95` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `134` | `0` | `0` | `0` | `0` | `0` | `17` |
+| Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `70` |
+| Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
+| **Git 2.47 unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`0`** | **`0`** | **`4`** | **`247`** |
+
+The matrix columns are command-level matrices with explicit option/value/state
+rows. Closed block variants are focused parity blocks from
+`docs/cli/variant_compatibility_plan.md`; they are not a full denominator.
+Reference group rows follow git-scm sections and can duplicate command names.
+The total row is unique.
+
 ## Command Matrices
 
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
 
-Additional closed behavior blocks without a full command matrix yet:
+Selected closed behavior blocks without a full command matrix yet. The full
+closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
+by `tools/git-compat-audit-summary.sh`.
 
 | Command | Closed variants | Evidence |
 | --- | ---: | --- |
