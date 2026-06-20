@@ -1142,6 +1142,8 @@ pub enum Command {
         server_option: Vec<String>,
         #[arg(long = "upload-pack")]
         upload_pack: Option<String>,
+        #[arg(long = "filter")]
+        filter: Option<String>,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
         remote: Option<String>,

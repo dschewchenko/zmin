@@ -8553,6 +8553,7 @@ pub(crate) fn run_fetch(
     update_shallow: bool,
     negotiation_tips: Vec<String>,
     negotiate_only: bool,
+    filter: Option<String>,
     stdin: bool,
     remote: Option<String>,
     mut refspecs: Vec<String>,
@@ -8632,6 +8633,51 @@ pub(crate) fn run_fetch(
     }
     if negotiate_only {
         return fetch_negotiate_only(remote, &negotiation_tips);
+    }
+    if let Some(filter) = filter.as_deref() {
+        if all || multiple || refspecs.len() > 1 || refmap.iter().any(|value| !value.is_empty()) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --filter currently supports one named network remote branch".into(),
+            });
+        }
+        if refspecs.is_empty() || refspecs[0].contains(':') {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --filter currently supports one named network remote branch".into(),
+            });
+        }
+        if depth.is_some()
+            || deepen.is_some()
+            || unshallow
+            || update_shallow
+            || shallow_since.is_some()
+            || !shallow_exclude.is_empty()
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --filter currently supports non-shallow network fetches".into(),
+            });
+        }
+        if has_server_options || upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --filter currently supports one named network remote branch".into(),
+            });
+        }
+        fetch_with_repo_and_remote_filter(
+            remote,
+            refspecs.into_iter().next(),
+            filter,
+            128,
+            append,
+            write_fetch_head,
+        )?;
+        if !dry_run {
+            write_fetch_commit_graph_if_enabled()?;
+            write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+        }
+        return Ok(());
     }
     if all {
         if remote.is_some() || !refspecs.is_empty() {
@@ -15551,6 +15597,67 @@ fn fetch_with_http_remote_shallow_options(
     write_shallow_file(&repo, shallow_boundaries)
 }
 
+fn fetch_with_http_remote_filter(
+    repo: GitRepo,
+    remote: String,
+    branch: String,
+    missing_ref_code: i32,
+    url: &str,
+    filter: &str,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let mut helper = if parsed_url.scheme == HttpScheme::Https {
+        Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
+    } else {
+        None
+    };
+    let (rows, _) = discover_http_refs_with_helper(
+        &parsed_url,
+        helper.as_mut().map(std::convert::identity),
+        false,
+        false,
+        false,
+        &[],
+    )?;
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let ref_name = branch_ref_name(&branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let roots = [id.clone()];
+    let options = UploadPackShallowOptions::filter(filter);
+    if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_with_shallow_options_with_helper(
+            &parsed_url,
+            helper,
+            &repo.objects_dir,
+            &roots,
+            &haves,
+            options,
+        )?;
+    } else {
+        http_fetch_smart_pack_with_shallow_options_direct(
+            &parsed_url,
+            &repo.objects_dir,
+            &roots,
+            &haves,
+            options,
+        )?;
+    }
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
 fn fetch_with_daemon_remote(
     repo: GitRepo,
     remote: String,
@@ -15710,6 +15817,42 @@ fn fetch_with_daemon_remote_shallow_options(
     )
 }
 
+fn fetch_with_daemon_remote_filter(
+    repo: GitRepo,
+    remote: String,
+    branch: String,
+    missing_ref_code: i32,
+    url: &str,
+    filter: &str,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let ref_name = branch_ref_name(&branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let roots = [id.clone()];
+    daemon_fetch_pack_with_shallow_options_and_haves(
+        url,
+        &repo.objects_dir,
+        &roots,
+        &haves,
+        UploadPackShallowOptions::filter(filter),
+    )?;
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
 fn fetch_with_ssh_remote(
     repo: GitRepo,
     remote: String,
@@ -15860,6 +16003,55 @@ fn fetch_with_ssh_remote_shallow_options(
         |roots, haves, options| {
             ssh_fetch_pack_with_shallow_options_and_haves(url, &objects_dir, roots, haves, options)
         },
+    )
+}
+
+fn fetch_with_ssh_remote_filter(
+    repo: GitRepo,
+    remote: String,
+    branch: String,
+    missing_ref_code: i32,
+    url: &str,
+    filter: &str,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let rows = ssh_ls_remote_rows(url, false, false, false, &[])?;
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let ref_name = branch_ref_name(&branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let roots = [id.clone()];
+    ssh_fetch_pack_with_shallow_options_and_haves(
+        url,
+        &repo.objects_dir,
+        &roots,
+        &haves,
+        UploadPackShallowOptions::filter(filter),
+    )?;
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
+fn record_fetch_filter_promisor_config(repo: &GitRepo, remote: &str, filter: &str) -> Result<()> {
+    set_config_values(
+        repo,
+        &[
+            (format!("remote.{remote}.promisor"), "true".to_owned()),
+            (
+                format!("remote.{remote}.partialclonefilter"),
+                filter.to_owned(),
+            ),
+        ],
     )
 }
 
@@ -17587,6 +17779,69 @@ fn fetch_with_repo_and_remote_update_shallow(
     Err(unsupported_remote_helper_error(&url, String::new()))
 }
 
+fn fetch_with_repo_and_remote_filter(
+    remote: Option<String>,
+    branch: Option<String>,
+    filter: &str,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    let remote = default_fetch_remote(&repo, remote)?;
+    validate_remote_name(&remote)?;
+    if !remote_exists(&repo, &remote)? {
+        return Err(remote_repository_unavailable_error(&remote));
+    }
+    let Some(branch) = branch else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports one named network remote branch".into(),
+        });
+    };
+    let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url) {
+        return fetch_with_http_remote_filter(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            filter,
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        return fetch_with_daemon_remote_filter(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            filter,
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        return fetch_with_ssh_remote_filter(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            filter,
+            append,
+            write_fetch_head,
+        );
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: "fetch --filter currently supports network remotes".into(),
+    })
+}
+
 fn fetch_local_unshallow_objects_via_upload_pack(
     destination_repo: &GitRepo,
     source_refs: &RefStore,
@@ -18299,6 +18554,7 @@ struct UploadPackShallowOptions<'a> {
     deepen_not: &'a [String],
     shallows: &'a [ObjectId],
     deepen_relative: bool,
+    filter: Option<&'a str>,
 }
 
 impl<'a> UploadPackShallowOptions<'a> {
@@ -18309,6 +18565,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             deepen_not: &[],
             shallows: &[],
             deepen_relative: false,
+            filter: None,
         }
     }
 
@@ -18319,6 +18576,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             deepen_not: &[],
             shallows,
             deepen_relative: true,
+            filter: None,
         }
     }
 
@@ -18329,6 +18587,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             deepen_not: &[],
             shallows,
             deepen_relative: false,
+            filter: None,
         }
     }
 
@@ -18339,6 +18598,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             deepen_not: &[],
             shallows: &[],
             deepen_relative: false,
+            filter: None,
         }
     }
 
@@ -18349,6 +18609,18 @@ impl<'a> UploadPackShallowOptions<'a> {
             deepen_not,
             shallows: &[],
             deepen_relative: false,
+            filter: None,
+        }
+    }
+
+    fn filter(filter: &'a str) -> Self {
+        Self {
+            depth: None,
+            since: None,
+            deepen_not: &[],
+            shallows: &[],
+            deepen_relative: false,
+            filter: Some(filter),
         }
     }
 
@@ -18358,6 +18630,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             && self.deepen_not.is_empty()
             && self.shallows.is_empty()
             && !self.deepen_relative
+            && self.filter.is_none()
     }
 
     fn is_unshallow(self) -> bool {
@@ -18366,6 +18639,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             && self.deepen_not.is_empty()
             && !self.shallows.is_empty()
             && !self.deepen_relative
+            && self.filter.is_none()
     }
 }
 
@@ -18375,7 +18649,16 @@ fn build_upload_pack_request_with_shallows(
     depth: Option<usize>,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(roots, haves, depth, None, &[], shallows, false)
+    build_upload_pack_request_with_shallow_options(
+        roots,
+        haves,
+        depth,
+        None,
+        &[],
+        shallows,
+        false,
+        None,
+    )
 }
 
 fn build_upload_pack_request_with_since(
@@ -18392,6 +18675,7 @@ fn build_upload_pack_request_with_since(
         &[],
         shallows,
         false,
+        None,
     )
 }
 
@@ -18402,7 +18686,7 @@ fn build_upload_pack_request_with_deepen_not(
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
     build_upload_pack_request_with_shallow_options(
-        roots, haves, None, None, deepen_not, shallows, false,
+        roots, haves, None, None, deepen_not, shallows, false, None,
     )
 }
 
@@ -18414,6 +18698,7 @@ fn build_upload_pack_request_with_shallow_options(
     deepen_not: &[String],
     shallows: &[ObjectId],
     deepen_relative: bool,
+    filter: Option<&str>,
 ) -> Result<Vec<u8>> {
     let mut request = Vec::with_capacity(upload_pack_request_capacity(
         roots,
@@ -18423,9 +18708,15 @@ fn build_upload_pack_request_with_shallow_options(
         deepen_not,
         shallows,
         deepen_relative,
+        filter,
     ));
-    let first_extra = if deepen_relative {
+    let first_extra = if deepen_relative && filter.is_some() {
+        b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative filter"
+            .as_slice()
+    } else if deepen_relative {
         b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative".as_slice()
+    } else if filter.is_some() {
+        b" side-band-64k thin-pack ofs-delta no-progress include-tag filter".as_slice()
     } else {
         b" side-band-64k thin-pack ofs-delta no-progress include-tag".as_slice()
     };
@@ -18470,6 +18761,12 @@ fn build_upload_pack_request_with_shallow_options(
         request.extend_from_slice(rev.as_bytes());
         request.push(b'\n');
     }
+    if let Some(filter) = filter {
+        append_pkt_line_len(&mut request, b"filter ".len() + filter.len() + 1)?;
+        request.extend_from_slice(b"filter ");
+        request.extend_from_slice(filter.as_bytes());
+        request.push(b'\n');
+    }
     request.extend_from_slice(b"0000");
     for have in haves {
         append_pkt_line_len(&mut request, b"have ".len() + have.hex_len() + 1)?;
@@ -18495,6 +18792,7 @@ fn build_upload_pack_request_from_shallow_options(
         options.deepen_not,
         options.shallows,
         options.deepen_relative,
+        options.filter,
     )
 }
 
@@ -18506,9 +18804,14 @@ fn upload_pack_request_capacity(
     deepen_not: &[String],
     shallows: &[ObjectId],
     deepen_relative: bool,
+    filter: Option<&str>,
 ) -> usize {
-    let first_extra = if deepen_relative {
+    let first_extra = if deepen_relative && filter.is_some() {
+        " side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative filter".len()
+    } else if deepen_relative {
         " side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative".len()
+    } else if filter.is_some() {
+        " side-band-64k thin-pack ofs-delta no-progress include-tag filter".len()
     } else {
         " side-band-64k thin-pack ofs-delta no-progress include-tag".len()
     };
@@ -18533,11 +18836,14 @@ fn upload_pack_request_capacity(
         .iter()
         .map(|id| 4 + "shallow ".len() + id.hex_len() + 1)
         .sum::<usize>();
+    let filter = filter
+        .map(|filter| 4 + "filter ".len() + filter.len() + 1)
+        .unwrap_or(0);
     let haves = haves
         .iter()
         .map(|have| 4 + "have ".len() + have.hex_len() + 1)
         .sum::<usize>();
-    wants + shallows + deepen + deepen_since + deepen_not + haves + 4 + 4 + "done\n".len()
+    wants + shallows + deepen + deepen_since + deepen_not + filter + haves + 4 + 4 + "done\n".len()
 }
 
 fn decimal_len(mut value: usize) -> usize {

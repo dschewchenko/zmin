@@ -3478,6 +3478,127 @@ fn fetch_update_shallow_network_branchless_transports_match_stock_git() {
 }
 
 #[test]
+fn fetch_filter_blob_none_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("filter.git");
+    let work = dir.path().join("filter-work");
+    git(dir.path(), ["init", "--bare", "filter.git"]);
+    git(&remote, ["config", "uploadpack.allowFilter", "true"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "filter-work"]);
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write a");
+    fs::create_dir_all(work.join("dir")).expect("create dir");
+    fs::write(work.join("dir/b.txt"), b"nested\n").expect("write b");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+    let args = ["fetch", "--quiet", "--filter=blob:none", "origin", "main"];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-http", url.as_str());
+    command_output("git", &git_client, &args, "git filter http");
+    command_output(zmin_bin(), &zmin_client, &args, "zmin filter http");
+    assert_filtered_fetch_matches_stock_git("smart-http filter", &git_client, &zmin_client);
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter ssh",
+    );
+    assert_filtered_fetch_matches_stock_git("ssh filter", &git_client, &zmin_client);
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-daemon", url.as_str());
+    command_output("git", &git_client, &args, "git filter daemon");
+    command_output(zmin_bin(), &zmin_client, &args, "zmin filter daemon");
+    assert_filtered_fetch_matches_stock_git("git-daemon filter", &git_client, &zmin_client);
+}
+
+fn assert_filtered_fetch_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+) {
+    assert_eq!(
+        git(zmin_client, ["show-ref"]),
+        git(git_client, ["show-ref"]),
+        "{label}"
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+        "{label}"
+    );
+    assert_eq!(
+        run_zmin(zmin_client, ["config", "--get", "remote.origin.promisor"]),
+        git(git_client, ["config", "--get", "remote.origin.promisor"]),
+        "{label}"
+    );
+    assert_eq!(
+        run_zmin(
+            zmin_client,
+            ["config", "--get", "remote.origin.partialclonefilter"]
+        ),
+        git(
+            git_client,
+            ["config", "--get", "remote.origin.partialclonefilter"]
+        ),
+        "{label}"
+    );
+    assert_eq!(
+        filtered_blob_local_presence(zmin_bin(), zmin_client),
+        filtered_blob_local_presence(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_client,
+        ),
+        "{label}"
+    );
+}
+
+fn filtered_blob_local_presence(command: &str, repo: &std::path::Path) -> i32 {
+    let blob = git(repo, ["rev-parse", "origin/main:a.txt"]);
+    Command::new(command)
+        .current_dir(repo)
+        .env("GIT_NO_LAZY_FETCH", "1")
+        .args(["cat-file", "-e", blob.as_str()])
+        .output()
+        .expect("cat-file local blob presence")
+        .status
+        .code()
+        .expect("cat-file exit code")
+}
+
+#[test]
 fn fetch_reads_shallow_ssh_remote_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
