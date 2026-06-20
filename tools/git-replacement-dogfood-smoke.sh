@@ -283,6 +283,7 @@ compare_command diff_cached_name_status_z diff --cached --name-status -z
 compare_command diff_cached_name_only_z diff --cached --name-only -z
 compare_command diff_cached_pathspec_name_only_z diff --cached --name-only -z -- new.txt
 compare_command diff_cached_raw_z diff --cached --raw -z
+compare_command diff_cached_pathspec_raw_z diff --cached --raw -z -- new.txt
 
 compare_root_path_command rev_parse_toplevel rev-parse --show-toplevel
 
