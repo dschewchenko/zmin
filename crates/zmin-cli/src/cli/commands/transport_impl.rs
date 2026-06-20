@@ -8517,9 +8517,7 @@ pub(crate) fn run_fetch(
             message: "fetch --deepen currently supports one named remote branch".into(),
         });
     }
-    if upload_pack_command.is_some()
-        && (unshallow || shallow_since.is_some() || !shallow_exclude.is_empty())
-    {
+    if upload_pack_command.is_some() && (shallow_since.is_some() || !shallow_exclude.is_empty()) {
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --upload-pack currently supports one named local or file remote".into(),
@@ -10709,6 +10707,7 @@ fn fetch_with_depth(
             tags,
             atomic,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     if let Some(since) = shallow_since {
@@ -15057,6 +15056,7 @@ fn fetch_with_repo_and_remote_unshallow(
     tags: bool,
     atomic: bool,
     _write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url)
@@ -15071,12 +15071,12 @@ fn fetch_with_repo_and_remote_unshallow(
     let Some(source_path) = local_repository_path_from_location(&url)? else {
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
-    if read_repo_shallow_boundaries(&repo)?.is_none() {
+    let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
         return Err(CliError::Fatal {
             code: 128,
             message: "--unshallow on a complete repository does not make sense".into(),
         });
-    }
+    };
     let source = local_clone_source(&source_path)?;
     let source_refs = refs_adapter_from_git_dir(&source.git_dir);
     let fetch_refspecs = if branch.is_none() {
@@ -15101,15 +15101,62 @@ fn fetch_with_repo_and_remote_unshallow(
         false,
         None,
     )?;
-    copy_local_unshallow_objects(
-        &source,
-        &repo,
-        &source_refs,
-        branch.as_deref(),
-        &fetch_refspecs,
-        missing_ref_code,
-    )?;
+    if let Some(command) = upload_pack_command {
+        fetch_local_unshallow_objects_via_upload_pack(
+            &repo,
+            &source_refs,
+            branch.as_deref(),
+            &fetch_refspecs,
+            missing_ref_code,
+            command,
+            source_path.to_string_lossy().as_ref(),
+            &sorted_object_ids_from_set(&shallow_boundaries),
+        )?;
+    } else {
+        copy_local_unshallow_objects(
+            &source,
+            &repo,
+            &source_refs,
+            branch.as_deref(),
+            &fetch_refspecs,
+            missing_ref_code,
+        )?;
+    }
     write_shallow_file(&repo, Vec::new())
+}
+
+fn fetch_local_unshallow_objects_via_upload_pack(
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    branch: Option<&str>,
+    fetch_refspecs: &[String],
+    missing_ref_code: i32,
+    upload_pack_command: &str,
+    repository_path: &str,
+    shallows: &[ObjectId],
+) -> Result<()> {
+    let destination_refs = refs_adapter_from_git_dir(&destination_repo.git_dir);
+    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
+    collect_unshallow_roots(
+        source_refs,
+        branch,
+        fetch_refspecs,
+        missing_ref_code,
+        &mut roots,
+    )?;
+    sort_dedup_object_ids(&mut roots);
+    let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
+    fetch_pack_with_local_upload_pack_command_with_depth(
+        upload_pack_command,
+        repository_path,
+        &destination_repo.objects_dir,
+        &roots,
+        &haves,
+        Some(i32::MAX as usize),
+        shallows,
+    )
+    .map(|_| ())
 }
 
 fn copy_local_unshallow_objects(
