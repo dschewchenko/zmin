@@ -38,6 +38,14 @@ const PACK_MISSING_REACHABLE_OBJECT_THRESHOLD: usize = 128;
 static TEMP_HTTP_HELPER_BODY_COUNTER: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FetchRecurseSubmodulesMode {
+    Default,
+    Yes,
+    OnDemand,
+    No,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct UploadPackOptions {
     pub(crate) strict: bool,
@@ -8427,7 +8435,6 @@ pub(crate) fn run_fetch(
     no_tags: bool,
     tags: bool,
     _atomic: bool,
-    _recurse_submodules: bool,
     update_head_ok: bool,
     write_fetch_head: bool,
     refmap: Vec<String>,
@@ -8443,6 +8450,7 @@ pub(crate) fn run_fetch(
     ensure_packet_trace_path_exists()?;
     write_fetch_hidden_refs_trace_if_needed()?;
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
+    let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     if stdin {
         let stdin = io::stdin();
         let mut stdin = io::BufReader::with_capacity(TRANSPORT_STDIN_BUF_CAPACITY, stdin.lock());
@@ -8487,6 +8495,7 @@ pub(crate) fn run_fetch(
                 write_fetch_head,
                 &refmap,
                 prefetch,
+                recurse_submodules_mode,
             )?;
         }
         if !dry_run {
@@ -8517,6 +8526,7 @@ pub(crate) fn run_fetch(
                 write_fetch_head,
                 &refmap,
                 prefetch,
+                recurse_submodules_mode,
             )?;
         }
         if !dry_run {
@@ -8565,6 +8575,7 @@ pub(crate) fn run_fetch(
         write_fetch_head,
         &refmap,
         prefetch,
+        recurse_submodules_mode,
     )?;
     if !dry_run {
         write_fetch_commit_graph_if_enabled()?;
@@ -8589,6 +8600,64 @@ fn fetch_no_tags(raw_args: &[String], no_tags: bool, tags: bool) -> bool {
         effective_no_tags
     } else {
         no_tags && !tags
+    }
+}
+
+fn fetch_recurse_submodules_mode(raw_args: &[String]) -> Result<FetchRecurseSubmodulesMode> {
+    let mut mode = FetchRecurseSubmodulesMode::Default;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--no-recurse-submodules" {
+            mode = FetchRecurseSubmodulesMode::No;
+        } else if arg == "--recurse-submodules" {
+            mode = FetchRecurseSubmodulesMode::Yes;
+        } else if let Some(value) = arg.strip_prefix("--recurse-submodules=") {
+            mode = parse_fetch_recurse_submodules_mode(value)?;
+        }
+    }
+    Ok(mode)
+}
+
+fn parse_fetch_recurse_submodules_mode(value: &str) -> Result<FetchRecurseSubmodulesMode> {
+    match value {
+        "yes" => Ok(FetchRecurseSubmodulesMode::Yes),
+        "on-demand" => Ok(FetchRecurseSubmodulesMode::OnDemand),
+        "no" => Ok(FetchRecurseSubmodulesMode::No),
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: format!(
+                "bad recurse-submodules argument: {value}. expected yes, on-demand, or no"
+            ),
+        }),
+    }
+}
+
+fn ensure_fetch_recurse_submodules_supported(
+    repo: &GitRepo,
+    mode: FetchRecurseSubmodulesMode,
+) -> Result<()> {
+    if matches!(
+        mode,
+        FetchRecurseSubmodulesMode::Default | FetchRecurseSubmodulesMode::No
+    ) {
+        return Ok(());
+    }
+    if !fetch_repo_declares_submodules(repo)? {
+        return Ok(());
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: "fetch submodule recursion needs a dedicated implementation before use".into(),
+    })
+}
+
+fn fetch_repo_declares_submodules(repo: &GitRepo) -> Result<bool> {
+    match fs::metadata(repo.root.join(".gitmodules")) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(CliError::Io(error)),
     }
 }
 
@@ -9613,6 +9682,7 @@ pub(crate) fn run_pull(
                 true,
                 &[],
                 false,
+                FetchRecurseSubmodulesMode::Default,
             )?;
         }
         "FETCH_HEAD".to_owned()
@@ -10274,8 +10344,10 @@ fn fetch_with_depth(
     write_fetch_head: bool,
     refmap: &[String],
     prefetch: bool,
+    recurse_submodules_mode: FetchRecurseSubmodulesMode,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
+    ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode)?;
     let explicit_remote = remote.clone();
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {

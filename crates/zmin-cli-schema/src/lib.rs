@@ -1104,8 +1104,16 @@ pub enum Command {
         tags: bool,
         #[arg(long = "atomic", action = ArgAction::SetTrue)]
         atomic: bool,
-        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
-        recurse_submodules: bool,
+        #[arg(
+            long = "recurse-submodules",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "yes",
+            action = ArgAction::Append
+        )]
+        recurse_submodules: Vec<String>,
+        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
+        no_recurse_submodules: bool,
         #[arg(long = "update-head-ok", action = ArgAction::SetTrue)]
         update_head_ok: bool,
         #[arg(long = "write-fetch-head", overrides_with = "no_write_fetch_head", action = ArgAction::SetTrue)]

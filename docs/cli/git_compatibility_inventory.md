@@ -92,7 +92,7 @@ Do not collapse these layers into one percentage.
 | --- | ---: | ---: | --- |
 | Git command names | `151` | `151` | no, dispatch only |
 | Git doc option spellings | `2500` | not reported | no, seed only |
-| Audited behavior variants | `107` | `93` | yes, for those rows only |
+| Audited behavior variants | `112` | `98` | yes, for those rows only |
 | Full Git behavior denominator | incomplete | not reported | yes, after expansion |
 
 The full denominator must include command, option, value, option combination,
@@ -115,7 +115,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `47` | `37` | `0` | `9` | `1` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `52` | `42` | `0` | `9` | `1` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -125,7 +125,7 @@ Current generated summary:
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`2500`** | **`107`** | **`93`** | **`0`** | **`9`** | **`5`** | **`253`** |
+| **Git 2.47 unique total** | **`151`** | **`2500`** | **`112`** | **`98`** | **`0`** | **`9`** | **`5`** | **`253`** |
 
 The matrix columns are the audited subset of explicit option/value/state rows.
 They are not the final denominator until each command matrix has been expanded
@@ -146,7 +146,7 @@ These rates are for audited rows only.
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `47` | `37` | `0` | `9` | `1` |
+| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `52` | `42` | `0` | `9` | `1` |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
@@ -199,6 +199,11 @@ for dirty, untracked and upstream-ahead states. The latest implementation slice
 split the previous partial pathspec row into exact status-specific rows for
 file, directory, default glob, explicit magic, exclude magic, human output and
 global pathspec flags.
+
+The latest `fetch` slice closed `--recurse-submodules`, `=yes`, `=on-demand`,
+`=no`, and `--no-recurse-submodules` only for repositories without submodules.
+The submodule-enabled `on-demand` behavior remains open until recursive fetch
+updates changed submodule commits like stock Git.
 
 ## Required Matrix Columns
 
