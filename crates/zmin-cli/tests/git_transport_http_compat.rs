@@ -506,6 +506,38 @@ fn assert_network_branch_shallow_fetch_matches_stock_git(
     );
 }
 
+fn assert_network_branch_unshallow_fetch_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+) {
+    assert_eq!(
+        git(zmin_client, ["show-ref"]),
+        git(git_client, ["show-ref"]),
+        "{label}"
+    );
+    assert_eq!(
+        git(zmin_client, ["rev-parse", "--is-shallow-repository"]),
+        git(git_client, ["rev-parse", "--is-shallow-repository"]),
+        "{label}"
+    );
+    assert_eq!(
+        zmin_client.join(".git/shallow").exists(),
+        git_client.join(".git/shallow").exists(),
+        "{label}"
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+        "{label}"
+    );
+    assert_eq!(
+        git(zmin_client, ["rev-list", "--count", "origin/main"]),
+        git(git_client, ["rev-list", "--count", "origin/main"]),
+        "{label}"
+    );
+}
+
 fn assert_no_alternates(repo: &std::path::Path) {
     assert!(
         !repo.join(".git/objects/info/alternates").exists(),
@@ -2367,6 +2399,120 @@ fn fetch_deepen_network_branch_transports_match_stock_git() {
     );
     assert_network_branch_shallow_fetch_matches_stock_git(
         "git-daemon deepen",
+        &git_client,
+        &zmin_client,
+    );
+}
+
+#[test]
+fn fetch_unshallow_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_shallow_since_remote(dir.path());
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "unshallow-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "git depth http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "zmin depth http",
+    );
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--unshallow", "origin", "main"],
+        "git unshallow http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--unshallow", "origin", "main"],
+        "zmin unshallow http",
+    );
+    assert_network_branch_unshallow_fetch_matches_stock_git(
+        "smart-http unshallow",
+        &git_client,
+        &zmin_client,
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "unshallow-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git depth ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin depth ssh",
+    );
+    command_output_with_env(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--unshallow", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git unshallow ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--unshallow", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin unshallow ssh",
+    );
+    assert_network_branch_unshallow_fetch_matches_stock_git(
+        "ssh unshallow",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "unshallow-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "git depth daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "zmin depth daemon",
+    );
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--unshallow", "origin", "main"],
+        "git unshallow daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--unshallow", "origin", "main"],
+        "zmin unshallow daemon",
+    );
+    assert_network_branch_unshallow_fetch_matches_stock_git(
+        "git-daemon unshallow",
         &git_client,
         &zmin_client,
     );

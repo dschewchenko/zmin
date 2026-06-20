@@ -16513,27 +16513,75 @@ fn fetch_with_repo_and_remote_unshallow(
     no_tags: bool,
     tags: bool,
     atomic: bool,
-    _write_fetch_head: bool,
+    write_fetch_head: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
-    if is_http_transport_url(&url)
-        || is_git_daemon_transport_url(&url)
-        || is_ssh_transport_url(&url)
-    {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --unshallow currently supports local and file remotes".into(),
-        });
-    }
-    let Some(source_path) = local_repository_path_from_location(&url)? else {
-        return Err(unsupported_remote_helper_error(&url, String::new()));
-    };
     let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
         return Err(CliError::Fatal {
             code: 128,
             message: "--unshallow on a complete repository does not make sense".into(),
         });
+    };
+    if is_http_transport_url(&url) {
+        let Some(branch) = branch else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports one named remote branch".into(),
+            });
+        };
+        let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+        return fetch_with_http_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::unshallow(&shallows),
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        let Some(branch) = branch else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports one named remote branch".into(),
+            });
+        };
+        let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+        return fetch_with_daemon_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::unshallow(&shallows),
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        let Some(branch) = branch else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports one named remote branch".into(),
+            });
+        };
+        let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+        return fetch_with_ssh_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::unshallow(&shallows),
+            append,
+            write_fetch_head,
+        );
+    }
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
     let source_refs = refs_adapter_from_git_dir(&source.git_dir);
@@ -17313,6 +17361,16 @@ impl<'a> UploadPackShallowOptions<'a> {
             deepen_not: &[],
             shallows,
             deepen_relative: true,
+        }
+    }
+
+    fn unshallow(shallows: &'a [ObjectId]) -> Self {
+        Self {
+            depth: Some(i32::MAX as usize),
+            since: None,
+            deepen_not: &[],
+            shallows,
+            deepen_relative: false,
         }
     }
 
