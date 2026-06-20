@@ -169,18 +169,18 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `16/151` | `branch`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
-| Documented option spellings represented by rows | `224/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `804` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `726/804` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/804` | written rows that still do not match stock Git |
-| Invalid input rows | `78/804` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `17/151` | `archive`, `branch`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
+| Documented option spellings represented by rows | `225/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `805` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `726/805` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/805` | written rows that still do not match stock Git |
+| Invalid input rows | `79/805` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `726/804` as Git compatibility. It only means `726` of the `804`
+Do not read `726/805` as Git compatibility. It only means `726` of the `805`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `78/804` additional rows are
-stock-compatible invalid inputs. Do not read `224/4632` as option support
+unexpanded surface is not counted yet, and `79/805` additional rows are
+stock-compatible invalid inputs. Do not read `225/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -214,11 +214,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `0` | `147` | `0` | `1` | `0` | `0` | `1` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `173` | `143` | `0` | `30` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `4` | `2` | `0` | `2` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`804`** | **`726`** | **`0`** | **`78`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`805`** | **`726`** | **`0`** | **`79`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -231,6 +231,7 @@ Current command-level matrices:
 
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `archive` | `17` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
@@ -248,7 +249,7 @@ Current command-level matrices:
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
 | `version` | `2` | `0` | `2` | `3` | `2` | `0` | `0` | `1` | no |
 
-`branch`, `column`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files`,
+`archive`, `branch`, `column`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files`,
 `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` or
 `version`
 having `0` open rows does not mean full command compatibility. It means no open

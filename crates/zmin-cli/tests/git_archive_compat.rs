@@ -5,8 +5,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::{
-    command_stdout_bytes, configure_identity, git, git_status, git_with_env, git_with_stdin_bytes,
-    run_zmin, run_zmin_status, run_zmin_with_stdin_bytes, zmin_bin,
+    command_stdout_bytes, configure_identity, git, git_failure_output, git_status, git_with_env,
+    git_with_stdin_bytes, run_zmin, run_zmin_failure_output, run_zmin_status,
+    run_zmin_with_stdin_bytes, zmin_bin,
 };
 
 fn zmin_upload_archive_exec() -> String {
@@ -214,6 +215,11 @@ fn archive_matches_stock_git_for_zip_and_tgz_formats() {
             );
         }
     }
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["archive", "--format=bad", "HEAD"]),
+        git_failure_output(repo.path(), &["archive", "--format=bad", "HEAD"])
+    );
 }
 
 #[test]

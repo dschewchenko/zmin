@@ -132,7 +132,7 @@ impl ArchiveFormat {
             "zip" => Ok(Self::Zip),
             other => Err(CliError::Fatal {
                 code: 128,
-                message: format!("unsupported archive format: {other}"),
+                message: format!("Unknown archive format '{other}'"),
             }),
         }
     }
