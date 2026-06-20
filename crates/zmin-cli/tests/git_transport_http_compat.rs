@@ -267,6 +267,63 @@ exec /bin/sh -c "$cmd"
     script
 }
 
+fn write_logging_fake_ssh(root: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let script = root.join("fake-ssh-logging.sh");
+    let log = root.join("fake-ssh-requests.log");
+    fs::write(
+        &script,
+        format!(
+            r#"#!/bin/sh
+set -eu
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -p|-l|-o|-F|-i|-J)
+      shift 2
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+if [ "$#" -lt 2 ]; then
+  echo "fake ssh missing remote command" >&2
+  exit 1
+fi
+shift
+cmd="$*"
+cmd="$(printf '%s\n' "$cmd" | sed -E "s#'/(.):#'\1:#g; s#\"/(.):#\"\1:#g; s# /(.:)# \1#g")"
+printf 'GIT_PROTOCOL=%s\n' "${{GIT_PROTOCOL-}}" >> '{}'
+printf 'REMOTE_COMMAND=%s\n' "$cmd" >> '{}'
+printf '%s\n' '--- request ---' >> '{}'
+tee -a '{}' | /bin/sh -c "$cmd"
+"#,
+            log.display(),
+            log.display(),
+            log.display(),
+            log.display(),
+        ),
+    )
+    .expect("write logging fake ssh");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut perms = fs::metadata(&script)
+            .expect("logging fake ssh metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).expect("chmod logging fake ssh");
+    }
+    (script, log)
+}
+
 fn fake_ssh_command_arg(script: &std::path::Path) -> String {
     let path = script.display().to_string();
     #[cfg(windows)]
@@ -7746,6 +7803,65 @@ fn fetch_server_option_repeated_protocol_v2_smart_http_branch_matches_stock_git(
     );
 }
 
+#[test]
+fn fetch_server_option_protocol_v2_ssh_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
+        "equals",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+            "main",
+        ],
+        &["fetch", "--server-option=trace", "origin", "main"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_separate_protocol_v2_ssh_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
+        "separate",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option",
+            "trace",
+            "origin",
+            "main",
+        ],
+        &["fetch", "--server-option", "trace", "origin", "main"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_repeated_protocol_v2_ssh_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
+        "repeated",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+            "main",
+        ],
+        &[
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+            "main",
+        ],
+        &["server-option=trace", "server-option=mode=full"],
+    );
+}
+
 fn assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
     label: &str,
     stock_args: &[&str],
@@ -7847,6 +7963,119 @@ fn assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
                 .any(|body| body.contains("command=fetch")),
         "Zmin should issue protocol v2 ls-refs and fetch commands"
     );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "origin/main:alpha.txt"]),
+        git(&git_client, ["cat-file", "-p", "origin/main:alpha.txt"])
+    );
+    git(&zmin_client, ["fsck", "--strict"]);
+}
+
+fn assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
+    label: &str,
+    stock_args: &[&str],
+    zmin_args: &[&str],
+    expected_options: &[&str],
+) {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let git_client = dir.path().join(format!("git-server-option-ssh-{label}"));
+    let zmin_client = dir.path().join(format!("zmin-server-option-ssh-{label}"));
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("alpha.txt"), b"alpha\n").expect("write alpha");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+
+    let (fake_ssh, fake_ssh_log) = write_logging_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let stock_envs = [
+        ("GIT_SSH_COMMAND", fake_ssh_arg.as_str()),
+        ("GIT_PROTOCOL", "version=2"),
+    ];
+    let zmin_envs = [("GIT_SSH_COMMAND", fake_ssh_arg.as_str())];
+    let url = ssh_url_for_remote(&remote);
+    git(
+        dir.path(),
+        ["init", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", zmin_client.to_str().expect("zmin client")],
+    );
+    git(&git_client, ["remote", "add", "origin", url.as_str()]);
+    run_zmin(&zmin_client, ["remote", "add", "origin", url.as_str()]);
+
+    let stock = command_output_with_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &git_client,
+        stock_args,
+        &stock_envs,
+        "git fetch --server-option over ssh",
+    );
+    assert_eq!(stock.0, 0);
+    let stock_log = fs::read_to_string(&fake_ssh_log).expect("stock fake ssh log");
+    assert!(
+        stock_log.contains("GIT_PROTOCOL=version=2"),
+        "stock Git should request protocol v2 over SSH:\n{stock_log}"
+    );
+    assert!(
+        stock_log.contains("command=ls-refs") && stock_log.contains("command=fetch"),
+        "stock Git should issue protocol v2 ls-refs and fetch commands:\n{stock_log}"
+    );
+    for expected in expected_options {
+        assert!(
+            stock_log.matches(expected).count() >= 2,
+            "stock Git should send {expected} during ls-refs and fetch:\n{stock_log}"
+        );
+    }
+
+    let zmin = command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        zmin_args,
+        &zmin_envs,
+        "zmin fetch --server-option over ssh",
+    );
+    assert_eq!(zmin.0, 0);
+    assert_eq!(zmin.1, stock.1);
+    let full_log = fs::read_to_string(&fake_ssh_log).expect("zmin fake ssh log");
+    let zmin_log = &full_log[stock_log.len()..];
+    assert!(
+        zmin_log.contains("GIT_PROTOCOL=version=2"),
+        "Zmin should request protocol v2 over SSH:\n{zmin_log}"
+    );
+    assert!(
+        zmin_log.contains("command=ls-refs") && zmin_log.contains("command=fetch"),
+        "Zmin should issue protocol v2 ls-refs and fetch commands:\n{zmin_log}"
+    );
+    for expected in expected_options {
+        assert!(
+            zmin_log.matches(expected).count() >= 2,
+            "Zmin should send {expected} during ls-refs and fetch:\n{zmin_log}"
+        );
+    }
     assert_eq!(
         git(&zmin_client, ["show-ref"]),
         git(&git_client, ["show-ref"])

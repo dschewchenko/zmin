@@ -178,7 +178,7 @@ Do not collapse these layers into one percentage.
 | Commands with any matrix rows | `15/151` | no | audit rows exist for `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` |
 | Git doc option pairs represented by rows | `220/4632` | no | documented command-option pairs with at least one behavior row |
 | Written behavior rows | `706` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `628/706` | yes, row by row | exact written rows with parity evidence |
+| Written rows matching stock Git | `631/706` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -211,7 +211,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `58` | `35` | `0` | `0` | `23` | `30` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `246` | `236` | `0` | `4` | `6` | `133` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `246` | `239` | `0` | `1` | `6` | `130` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `135` | `132` | `0` | `0` | `3` | `21` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -221,7 +221,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `152` | `124` | `0` | `0` | `28` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `0` | `1` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`706`** | **`628`** | **`0`** | **`4`** | **`74`** | **`399`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`706`** | **`631`** | **`0`** | **`1`** | **`74`** | **`396`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -232,8 +232,8 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `220/4632`
-represented option pairs or `628/706` passing written rows as a Git support
-percentage. The `628/706` number is audit progress for rows already written
+represented option pairs or `631/706` passing written rows as a Git support
+percentage. The `631/706` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -345,11 +345,11 @@ with default/on-demand recursion and explicit `--recurse-submodules`: parent
 remote-tracking refs and `FETCH_HEAD` remain unchanged while the changed
 submodule object is still fetched, matching stock Git.
 The latest `fetch --server-option` slice closed equals, separate-value and
-repeated protocol-v2 smart HTTP branch rows: Zmin now sends
-`Git-Protocol: version=2`, forwards all server-option values during both
-`ls-refs` and `fetch`, and writes the same remote-tracking ref and
-`FETCH_HEAD` as stock Git. The SSH protocol-v2 rows remain open until they
-have their own stock-Git oracle tests.
+repeated protocol-v2 smart HTTP and SSH branch rows: Zmin now sends
+`Git-Protocol: version=2` for smart HTTP, sets `GIT_PROTOCOL=version=2` for
+SSH upload-pack, forwards all server-option values during both `ls-refs` and
+`fetch`, and writes the same remote-tracking ref and `FETCH_HEAD` as stock Git.
+The remaining written fetch open row is broader submodule recursion.
 The latest `fetch --upload-pack` slices closed equals and separate-value forms
 for named local path and file URL remotes, configured fetch, explicit branch
 `FETCH_HEAD` modes, multiple explicit refspecs, local/file `--all`,

@@ -11469,7 +11469,7 @@ fn fetch_with_depth(
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode, Some(&url))?;
     if has_server_options {
-        if !is_http_transport_url(&url)
+        if !(is_http_transport_url(&url) || is_ssh_transport_url(&url))
             || branch.as_deref().is_none_or(|value| value.contains(':'))
             || prefetch
             || !refmap.is_empty()
@@ -11843,6 +11843,36 @@ pub(crate) fn fetch_with_repo_and_remote(
         );
     }
     if is_ssh_transport_url(&url) {
+        if !server_options.is_empty() {
+            let Some(branch) = branch.as_deref() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --server-option currently supports one SSH branch".into(),
+                });
+            };
+            if branch.contains(':')
+                || !refmap.is_empty()
+                || prefetch
+                || update_shallow
+                || dry_run
+                || upload_pack_command.is_some()
+            {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --server-option currently supports one SSH branch".into(),
+                });
+            }
+            return fetch_with_ssh_remote_v2_server_options(
+                repo,
+                remote,
+                branch,
+                missing_ref_code,
+                &url,
+                append,
+                write_fetch_head,
+                server_options,
+            );
+        }
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_ssh_remote(
                 &repo,
@@ -15839,6 +15869,125 @@ fn fetch_with_http_remote_v2_server_options(
     Ok(())
 }
 
+fn fetch_with_ssh_remote_v2_server_options(
+    repo: GitRepo,
+    remote: String,
+    branch: &str,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    server_options: &[String],
+) -> Result<()> {
+    let rows = ssh_upload_pack_v2_ls_refs(url, branch, server_options)?;
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let ref_name = branch_ref_name(branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(branch, missing_ref_code))?;
+    let roots = [id.clone()];
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let pack_fetched = ssh_fetch_smart_pack_v2(
+        url,
+        &repo.objects_dir,
+        &request_roots,
+        &haves,
+        server_options,
+    )?;
+    if !pack_fetched {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    }
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
+fn ssh_upload_pack_v2_ls_refs(
+    url: &str,
+    branch: &str,
+    server_options: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let mut session = ssh_open_upload_pack_v2(url)?;
+    let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
+    let rows = {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "ssh transport stdout is unavailable".into(),
+        })?;
+        parse_upload_pack_v2_ls_refs_response(stdout)?
+    };
+    session.finish()?;
+    Ok(rows)
+}
+
+fn ssh_fetch_smart_pack_v2(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+) -> Result<bool> {
+    if roots.is_empty() {
+        return Ok(true);
+    }
+    let mut session = ssh_open_upload_pack_v2(url)?;
+    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
+    let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+    let pack_path = {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "ssh transport stdout is unavailable".into(),
+        })?;
+        parse_upload_pack_v2_pack_to_open_file(stdout, &temp_pack, file)?
+    };
+    let Some(pack_path) = pack_path else {
+        let _ = fs::remove_file(&temp_pack);
+        session.finish()?;
+        return Ok(false);
+    };
+    write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+    session.finish()?;
+    Ok(true)
+}
+
+fn ssh_open_upload_pack_v2(url: &str) -> Result<RemoteCommandSession> {
+    let parsed = ParsedSshUrl::parse(url)?;
+    let mut session =
+        spawn_ssh_remote_command_with_git_protocol(&parsed, "git-upload-pack", Some("version=2"))?;
+    {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "ssh transport stdout is unavailable".into(),
+        })?;
+        parse_upload_pack_v2_capabilities(stdout)?;
+    }
+    Ok(session)
+}
+
+fn write_ssh_v2_request_and_close_stdin(
+    session: &mut RemoteCommandSession,
+    request: &[u8],
+) -> Result<()> {
+    let mut stdin = session.stdin.take().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "ssh transport stdin is unavailable".into(),
+    })?;
+    stdin.write_all(request)?;
+    stdin.flush()?;
+    Ok(())
+}
+
 fn http_url_with_git_protocol_v2(url: &ParsedHttpUrl) -> ParsedHttpUrl {
     let mut url = url.clone();
     url.extra_headers.retain(|header| {
@@ -18970,9 +19119,20 @@ fn ssh_command_argv() -> Result<Vec<String>> {
 }
 
 fn spawn_ssh_remote_command(url: &ParsedSshUrl, service: &str) -> Result<RemoteCommandSession> {
+    spawn_ssh_remote_command_with_git_protocol(url, service, None)
+}
+
+fn spawn_ssh_remote_command_with_git_protocol(
+    url: &ParsedSshUrl,
+    service: &str,
+    git_protocol: Option<&str>,
+) -> Result<RemoteCommandSession> {
     let mut argv = ssh_command_argv()?;
     let program = argv.remove(0);
     let mut command = ssh_transport_command(program, argv);
+    if let Some(git_protocol) = git_protocol {
+        command.env("GIT_PROTOCOL", git_protocol);
+    }
     if let Some(port) = url.port {
         command.arg("-p").arg(port.to_string());
     }
