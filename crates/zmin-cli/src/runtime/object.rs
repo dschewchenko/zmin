@@ -33,8 +33,12 @@ pub(crate) fn print_rev_parse_object(
     rev: &str,
     short: Option<usize>,
     verify: bool,
+    quiet: bool,
 ) -> Result<()> {
     let id = resolve_objectish(repo, rev).map_err(|_| {
+        if verify && quiet {
+            return CliError::Exit(1);
+        }
         if verify {
             CliError::Fatal {
                 code: 128,

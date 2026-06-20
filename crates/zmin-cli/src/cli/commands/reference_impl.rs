@@ -6703,7 +6703,7 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
                 println!("{ref_name}");
             }
         } else {
-            print_rev_parse_object(&repo, rev, options.short, options.verify)?;
+            print_rev_parse_object(&repo, rev, options.short, options.verify, options.quiet)?;
         }
     }
     Ok(())
@@ -6883,7 +6883,13 @@ fn print_rev_parse_ordered(
                     }
                     println!("{}", abbrev_ref_name(repo, rev)?);
                 } else {
-                    print_rev_parse_object(repo, rev, options.short, options.verify)?;
+                    print_rev_parse_object(
+                        repo,
+                        rev,
+                        options.short,
+                        options.verify,
+                        options.quiet,
+                    )?;
                 }
             }
         }

@@ -170,16 +170,16 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `15/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
-| Documented option spellings represented by rows | `221/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `713` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `639/713` | exact written rows with focused parity evidence |
-| Open written rows | `0/713` | written rows that still do not match stock Git |
-| Invalid input rows | `74/713` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `223/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `716` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `640/716` | exact written rows with focused parity evidence |
+| Open written rows | `0/716` | written rows that still do not match stock Git |
+| Invalid input rows | `76/716` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `639/713` as Git compatibility. It only means `639` of the `713`
+Do not read `640/716` as Git compatibility. It only means `640` of the `716`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `221/4632` as option support either; it only means
+counted yet. Do not read `223/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -215,9 +215,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `155` | `127` | `0` | `28` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `158` | `128` | `0` | `30` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `1` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`713`** | **`639`** | **`0`** | **`74`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`716`** | **`640`** | **`0`** | **`76`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -240,7 +240,7 @@ Current command-level matrices:
 | `ls-files` | `42` | `0` | `27` | `53` | `45` | `0` | `0` | `8` | no |
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
-| `rev-parse` | `72` | `0` | `22` | `34` | `32` | `0` | `0` | `2` | no |
+| `rev-parse` | `72` | `0` | `24` | `37` | `33` | `0` | `0` | `4` | no |
 | `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
