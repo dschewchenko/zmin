@@ -2129,8 +2129,8 @@ fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
         "relative" => Ok(BlameDateMode::Relative),
         "human" => Ok(BlameDateMode::Human),
         _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported blame date mode '{value}'"),
+            code: 128,
+            message: format!("unknown date format {value}"),
         }),
     }
 }
