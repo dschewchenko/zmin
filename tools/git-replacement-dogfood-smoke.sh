@@ -237,6 +237,7 @@ compare_command log_date_iso_strict_z log -z --date=iso-strict --format=%H%x00%a
 
 printf 'nested changed\n' >"$stock_client/dir/nested.txt"
 printf 'nested changed\n' >"$zmin_client/dir/nested.txt"
+compare_command diff_pathspec_dir_name_status_z diff --name-status -z -- dir
 compare_command status_pathspec_dir_z status --porcelain=v1 -z -- dir
 
 "$stock_git" -C "$stock_client" add tracked.txt new.txt
