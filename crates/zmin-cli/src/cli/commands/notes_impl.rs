@@ -72,13 +72,92 @@ fn notes_copy_usage() -> &'static str {
 "
 }
 
-fn notes_copy_unknown_option(option: &str) -> CliError {
+fn notes_add_usage() -> &'static str {
+    "usage: git notes add [<options>] [<object>]
+
+    -m, --message <message>
+                          note contents as a string
+    -F, --file <file>     note contents in a file
+    -c, --reedit-message <object>
+                          reuse and edit specified note object
+    -e, --[no-]edit       edit note message in editor
+    -C, --reuse-message <object>
+                          reuse specified note object
+    --[no-]allow-empty    allow storing empty note
+    -f, --[no-]force      replace existing notes
+    --[no-]separator[=<paragraph-break>]
+                          insert <paragraph-break> between paragraphs
+    --[no-]stripspace     remove unnecessary whitespace
+
+"
+}
+
+fn notes_edit_usage() -> &'static str {
+    "usage: git notes edit [<object>]
+
+    -m, --message <message>
+                          note contents as a string
+    -F, --file <file>     note contents in a file
+    -c, --reedit-message <object>
+                          reuse and edit specified note object
+    -C, --reuse-message <object>
+                          reuse specified note object
+    -e, --[no-]edit       edit note message in editor
+    --[no-]allow-empty    allow storing empty note
+    --[no-]separator[=<paragraph-break>]
+                          insert <paragraph-break> between paragraphs
+    --[no-]stripspace     remove unnecessary whitespace
+
+"
+}
+
+fn notes_remove_usage() -> &'static str {
+    "usage: git notes remove [<object>]
+
+    --[no-]ignore-missing attempt to remove non-existent note is not an error
+    --[no-]stdin          read object names from the standard input
+
+"
+}
+
+fn notes_prune_usage() -> &'static str {
+    "usage: git notes prune [<options>]
+
+    -n, --[no-]dry-run    do not remove, show only
+    -v, --[no-]verbose    report pruned notes
+
+"
+}
+
+fn notes_merge_usage() -> &'static str {
+    "usage: git notes merge [<options>] <notes-ref>
+   or: git notes merge --commit [<options>]
+   or: git notes merge --abort [<options>]
+
+General options
+    -v, --[no-]verbose    be more verbose
+    -q, --[no-]quiet      be more quiet
+
+Merge options
+    -s, --[no-]strategy <strategy>
+                          resolve notes conflicts using the given strategy (manual/ours/theirs/union/cat_sort_uniq)
+
+Committing unmerged notes
+    --commit              finalize notes merge by committing unmerged notes
+
+Aborting notes merge resolution
+    --abort               abort notes merge
+
+"
+}
+
+fn notes_unknown_option(option: &str, usage: &str) -> CliError {
     CliError::Stderr {
         code: 129,
         text: format!(
             "error: unknown option `{}'\n{}",
             option.trim_start_matches('-'),
-            notes_copy_usage()
+            usage
         ),
     }
 }
@@ -409,7 +488,7 @@ fn parse_notes_copy_args(args: Vec<String>) -> Result<NotesCopyArgs> {
                 });
             }
             value if value.starts_with('-') => {
-                return Err(notes_copy_unknown_option(value));
+                return Err(notes_unknown_option(value, notes_copy_usage()));
             }
             value => objects.push(value.to_owned()),
         }
@@ -704,10 +783,7 @@ fn parse_notes_edit_args(args: Vec<String>) -> Result<NotesEditArgs> {
                 sources.push(NotesMessageSource::Reedit(objectish.to_owned()));
             }
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported notes edit option '{value}'"),
-                });
+                return Err(notes_unknown_option(value, notes_edit_usage()));
             }
             value => {
                 if object.replace(value.to_owned()).is_some() {
@@ -1030,10 +1106,7 @@ fn parse_notes_add_args(args: Vec<String>) -> Result<NotesAddArgs> {
                 sources.push(NotesMessageSource::Reedit(message.to_owned()));
             }
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported notes add option '{value}'"),
-                });
+                return Err(notes_unknown_option(value, notes_add_usage()));
             }
             value => {
                 if object.replace(value.to_owned()).is_some() {
@@ -1133,10 +1206,7 @@ fn parse_notes_remove_args(args: Vec<String>) -> Result<(bool, bool, Vec<String>
             "--stdin" => stdin = true,
             "--no-stdin" => stdin = false,
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported notes remove option '{value}'"),
-                });
+                return Err(notes_unknown_option(value, notes_remove_usage()));
             }
             value => objects.push(value.to_owned()),
         }
@@ -1199,10 +1269,7 @@ fn parse_notes_prune_args(args: Vec<String>) -> Result<(bool, bool)> {
                 verbose = true;
             }
             value => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported notes prune option '{value}'"),
-                });
+                return Err(notes_unknown_option(value, notes_prune_usage()));
             }
         }
     }
@@ -1364,10 +1431,7 @@ fn parse_notes_merge_args(args: Vec<String>) -> Result<NotesMergeAction> {
             value if value.starts_with("--strategy=") => {
                 strategy_seen = true;
                 let Some(strategy_name) = value.strip_prefix("--strategy=") else {
-                    return Err(CliError::Fatal {
-                        code: 129,
-                        message: format!("unsupported notes merge option '{value}'"),
-                    });
+                    return Err(notes_unknown_option(value, notes_merge_usage()));
                 };
                 strategy = parse_notes_merge_strategy(strategy_name)?;
             }
@@ -1380,10 +1444,7 @@ fn parse_notes_merge_args(args: Vec<String>) -> Result<NotesMergeAction> {
             "-q" | "--quiet" => quiet = true,
             "--no-quiet" | "-v" | "--verbose" | "--no-verbose" => quiet = false,
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported notes merge option '{value}'"),
-                });
+                return Err(notes_unknown_option(value, notes_merge_usage()));
             }
             value => {
                 if source.replace(value.to_owned()).is_some() {
