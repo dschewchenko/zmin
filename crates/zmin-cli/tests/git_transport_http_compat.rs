@@ -607,6 +607,48 @@ fn prepare_shallow_exclude_remote(root: &std::path::Path) -> std::path::PathBuf 
     remote
 }
 
+fn prepare_repeated_shallow_exclude_remote(
+    root: &std::path::Path,
+) -> (std::path::PathBuf, String, String) {
+    let remote = root.join("remote.git");
+    let work = root.join("work");
+    git(root, ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(root, ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+
+    fs::write(work.join("root.txt"), "root\n").expect("write root");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "root"]);
+    git(&work, ["checkout", "-b", "left"]);
+    fs::write(work.join("left.txt"), "left\n").expect("write left");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "left"]);
+    let left_tip = git(&work, ["rev-parse", "left"]);
+    git(&work, ["checkout", "main"]);
+    git(&work, ["checkout", "-b", "right"]);
+    fs::write(work.join("right.txt"), "right\n").expect("write right");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "right"]);
+    let right_tip = git(&work, ["rev-parse", "right"]);
+    git(&work, ["checkout", "main"]);
+    git(&work, ["merge", "--no-ff", "left", "-m", "merge left"]);
+    git(&work, ["merge", "--no-ff", "right", "-m", "merge right"]);
+
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "left", "right"]);
+    set_bare_head_to_main(&remote);
+    (remote, left_tip, right_tip)
+}
+
 fn prepare_two_branch_shallow_exclude_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("remote.git");
     let work = root.join("work");
@@ -2949,6 +2991,112 @@ fn fetch_shallow_exclude_network_branchless_transports_match_stock_git() {
         &git_client,
         &zmin_client,
     );
+}
+
+#[test]
+fn fetch_shallow_exclude_repeated_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (remote, left_tip, right_tip) = prepare_repeated_shallow_exclude_remote(dir.path());
+    let args = [
+        "fetch",
+        "--quiet",
+        "--shallow-exclude=refs/heads/left",
+        "--shallow-exclude",
+        "refs/heads/right",
+        "origin",
+        "main",
+    ];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "exclude-repeated-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git shallow-exclude repeated http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin shallow-exclude repeated http",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "smart-http shallow-exclude repeated",
+        &git_client,
+        &zmin_client,
+    );
+    for excluded_tip in [&left_tip, &right_tip] {
+        assert_eq!(
+            git_status_args(&zmin_client, &["cat-file", "-e", excluded_tip]),
+            git_status_args(&git_client, &["cat-file", "-e", excluded_tip]),
+            "smart-http shallow-exclude repeated"
+        );
+    }
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "exclude-repeated-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git shallow-exclude repeated ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin shallow-exclude repeated ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh shallow-exclude repeated",
+        &git_client,
+        &zmin_client,
+    );
+    for excluded_tip in [&left_tip, &right_tip] {
+        assert_eq!(
+            git_status_args(&zmin_client, &["cat-file", "-e", excluded_tip]),
+            git_status_args(&git_client, &["cat-file", "-e", excluded_tip]),
+            "ssh shallow-exclude repeated"
+        );
+    }
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "exclude-repeated-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git shallow-exclude repeated daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin shallow-exclude repeated daemon",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "git-daemon shallow-exclude repeated",
+        &git_client,
+        &zmin_client,
+    );
+    for excluded_tip in [&left_tip, &right_tip] {
+        assert_eq!(
+            git_status_args(&zmin_client, &["cat-file", "-e", excluded_tip]),
+            git_status_args(&git_client, &["cat-file", "-e", excluded_tip]),
+            "git-daemon shallow-exclude repeated"
+        );
+    }
 }
 
 #[test]

@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 725 written rows / 649 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 728 written rows / 652 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -177,6 +177,7 @@ command.
 | `fetch --shallow-exclude` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs |
 | `fetch --shallow-exclude` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches with matching remote-tracking ref, FETCH_HEAD and shallow state |
 | `fetch --shallow-exclude` network branchless configured fetch forms | `3` | `0` | smart HTTP, SSH and git daemon configured fetches with matching remote-tracking refs, FETCH_HEAD and shallow state |
+| `fetch --shallow-exclude` repeated network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches with repeated exclude values for two branch histories |
 | `fetch --deepen` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches in existing shallow repos |
 | `fetch --deepen` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --deepen` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs in existing shallow repos |
@@ -218,7 +219,7 @@ command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `416` verified variants.
+Tracked closed blocks in this table: `419` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
