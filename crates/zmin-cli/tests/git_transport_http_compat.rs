@@ -4350,6 +4350,83 @@ fn fetch_filter_blob_limit_network_branch_transports_match_stock_git() {
     );
 }
 
+#[test]
+fn fetch_filter_blob_limit_network_branchless_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_filter_remote(dir.path());
+    let args = ["fetch", "--quiet", "--filter=blob:limit=8", "origin"];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-limit-branchless-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git filter limit branchless http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter limit branchless http",
+    );
+    assert_blob_limit_filter_fetch_matches_stock_git(
+        "smart-http filter blob limit branchless",
+        &git_client,
+        &zmin_client,
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-limit-branchless-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter limit branchless ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter limit branchless ssh",
+    );
+    assert_blob_limit_filter_fetch_matches_stock_git(
+        "ssh filter blob limit branchless",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-limit-branchless-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git filter limit branchless daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter limit branchless daemon",
+    );
+    assert_blob_limit_filter_fetch_matches_stock_git(
+        "git-daemon filter blob limit branchless",
+        &git_client,
+        &zmin_client,
+    );
+}
+
 fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("filter.git");
     let work = root.join("filter-work");
