@@ -107,6 +107,7 @@ pub(crate) fn parse_cli_invocation(
     validate_version_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
+    validate_fetch_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -306,6 +307,25 @@ fn validate_diff_invocation_before_clap(command_args: &[String]) -> Result<()> {
             code: 129,
             text: "error: invalid option: --no-rename\n".into(),
         });
+    }
+    Ok(())
+}
+
+fn validate_fetch_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("fetch") {
+        return Ok(());
+    }
+    let mut args = command_args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--server-option" && args.peek().is_none() {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `server-option' requires a value\n".into(),
+            });
+        }
     }
     Ok(())
 }

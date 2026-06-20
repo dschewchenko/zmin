@@ -194,6 +194,15 @@ fn invalid_option_combinations_match_stock_git_failures() {
         )
     );
     assert_eq!(
+        command_output(
+            zmin_bin(),
+            repo.path(),
+            &["fetch", "--server-option"],
+            "zmin"
+        ),
+        command_output("git", repo.path(), &["fetch", "--server-option"], "git")
+    );
+    assert_eq!(
         git(repo.path(), ["symbolic-ref", "refs/remotes/origin/HEAD"]),
         "refs/remotes/origin/main"
     );
