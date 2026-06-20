@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 218/4632 represented doc-option pairs / 668 written rows / 595 written rows matching stock Git / 2 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 218/4632 represented doc-option pairs / 670 written rows / 597 written rows matching stock Git / 2 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -190,6 +190,7 @@ command.
 | `fetch --update-shallow` network multiple explicit refspec forms | `3` | `0` | smart HTTP, SSH and git daemon fetches with two destination refspecs from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --update-shallow` network branchless configured fetch forms | `3` | `0` | smart HTTP, SSH and git daemon configured fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --recurse-submodules local/file changed submodule modes` | `3` | `0` | implicit yes, explicit yes and on-demand for initialized submodule, changed gitlink commit fetched into submodule object database without checkout |
+| `fetch --recurse-submodules smart HTTP uninitialized submodule modes` | `2` | `0` | implicit yes and on-demand for smart HTTP parent fetches where the submodule is present in the index but not initialized locally |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
