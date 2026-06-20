@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `7/151` | `config`, `status`, `fetch`, `diff`, `log`, `ls-files` and `rev-parse` have started behavior matrices |
-| Documented option spellings represented by rows | `176/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `488` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `452/488` | exact written rows with focused parity evidence |
-| Open written rows | `9/488` | written rows that still do not match stock Git |
-| Invalid input rows | `27/488` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `8/151` | `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files` and `rev-parse` have started behavior matrices |
+| Documented option spellings represented by rows | `178/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `522` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `475/522` | exact written rows with focused parity evidence |
+| Open written rows | `9/522` | written rows that still do not match stock Git |
+| Invalid input rows | `38/522` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `452/488` as Git compatibility. It only means `452` of the `488`
+Do not read `475/522` as Git compatibility. It only means `475` of the `522`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `176/4632` as option support either; it only means
+counted yet. Do not read `178/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -215,9 +215,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `78` | `68` | `0` | `10` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `112` | `91` | `0` | `21` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`488`** | **`452`** | **`9`** | **`27`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`522`** | **`475`** | **`9`** | **`38`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -235,13 +235,15 @@ Current command-level matrices:
 | `fetch` | `73` | `0` | `28` | `189` | `177` | `0` | `9` | `3` | no |
 | `diff` | `133` | `0` | `31` | `53` | `53` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `31` | `56` | `55` | `0` | `0` | `1` | no |
+| `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
 | `ls-files` | `42` | `0` | `27` | `53` | `45` | `0` | `0` | `8` | no |
 | `rev-parse` | `72` | `0` | `20` | `25` | `23` | `0` | `0` | `2` | no |
 
-`config`, `status`, `diff`, `log`, `ls-files` or `rev-parse` having `0` open
-rows does not mean full command compatibility. It means no open item remains
-among the rows currently written. Unwritten values, option combinations,
-repository states, transports and platform cases are still unknown.
+`config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files` or `rev-parse`
+having `0` open rows does not mean full command compatibility. It means no open
+item remains among the rows currently written. Unwritten values, option
+combinations, repository states, transports and platform cases are still
+unknown.
 
 A global percentage will be published only after every Git `2.47.1` command has
 a complete matrix built from Git docs, upstream Git tests and real tool traces.

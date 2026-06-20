@@ -125,6 +125,9 @@ focused parity evidence checks the same surface.
   patch, reverse, pickaxe, ordering, path, exit-code and binary-text variants.
 - `docs/cli/matrices/log_v2_47.tsv` tracks the first `log` format, traversal,
   decoration, merge-diff, date, reflog and IDE-shaped NUL-output variants.
+- `docs/cli/matrices/for_each_ref_v2_47.tsv` tracks the first
+  `for-each-ref` format, sort, refname/objectname modifier, date, upstream and
+  invalid-input variants.
 - `docs/cli/matrices/ls_files_v2_47.tsv` tracks the first `ls-files` cached,
   stage, NUL, EOL, ignored/others, unmerged and submodule variants.
 - `docs/cli/matrices/rev_parse_v2_47.tsv` tracks the first `rev-parse`
@@ -155,10 +158,10 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `7/151` | no | audit rows exist for `config`, `status`, `fetch`, `diff`, `log`, `ls-files` and `rev-parse` |
-| Git doc option pairs represented by rows | `176/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `488` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `452/488` | yes, row by row | exact written rows with parity evidence |
+| Commands with any matrix rows | `8/151` | no | audit rows exist for `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files` and `rev-parse` |
+| Git doc option pairs represented by rows | `178/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `522` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `475/522` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -199,9 +202,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` | `0` | `17` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `78` | `68` | `0` | `0` | `10` | `76` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `112` | `91` | `0` | `0` | `21` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`488`** | **`452`** | **`0`** | **`9`** | **`27`** | **`330`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`522`** | **`475`** | **`0`** | **`9`** | **`38`** | **`330`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -211,9 +214,9 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `176/4632`
-represented option pairs or `452/488` passing written rows as a Git support
-percentage. The `452/488` number is audit progress for rows already written
+Never use `151/151` command presence, `4632` option spellings, `178/4632`
+represented option pairs or `475/522` passing written rows as a Git support
+percentage. The `475/522` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -232,6 +235,7 @@ variants.
 | `fetch` | `73` | `0` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `189` | `177` | `0` | `9` | `3` | no |
 | `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `53` | `53` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `31` | `docs/cli/matrices/log_v2_47.tsv` | `56` | `55` | `0` | `0` | `1` | no |
+| `for-each-ref` | `22` | `0` | `2` | `docs/cli/matrices/for_each_ref_v2_47.tsv` | `34` | `23` | `0` | `0` | `11` | no |
 | `ls-files` | `42` | `0` | `27` | `docs/cli/matrices/ls_files_v2_47.tsv` | `53` | `45` | `0` | `0` | `8` | no |
 | `rev-parse` | `72` | `0` | `20` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `25` | `23` | `0` | `0` | `2` | no |
 
