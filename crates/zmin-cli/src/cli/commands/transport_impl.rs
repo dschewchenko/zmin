@@ -8431,14 +8431,20 @@ pub(crate) fn run_fetch(
     refmap: Vec<String>,
     depth: Option<String>,
     negotiation_tips: Vec<String>,
+    stdin: bool,
     remote: Option<String>,
-    refspecs: Vec<String>,
+    mut refspecs: Vec<String>,
     raw_args: &[String],
 ) -> Result<()> {
     let _trace = phase_trace("fetch.total");
     ensure_packet_trace_path_exists()?;
     write_fetch_hidden_refs_trace_if_needed()?;
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
+    if stdin {
+        let stdin = io::stdin();
+        let mut stdin = io::BufReader::with_capacity(TRANSPORT_STDIN_BUF_CAPACITY, stdin.lock());
+        collect_trimmed_lines_from_reader(&mut stdin, &mut refspecs)?;
+    }
     let no_tags = fetch_no_tags(raw_args, no_tags, tags);
     let refspecs = force_fetch_refspecs(force, refspecs);
     if !refmap.is_empty() && refspecs.is_empty() {
@@ -8491,6 +8497,7 @@ pub(crate) fn run_fetch(
             prune,
             no_prune,
             dry_run,
+            append,
             write_fetch_head,
             no_tags,
         )?;
@@ -8761,7 +8768,8 @@ fn fetch_multiple_refspecs(
     prune: bool,
     no_prune: bool,
     dry_run: bool,
-    _write_fetch_head: bool,
+    append: bool,
+    write_fetch_head: bool,
     no_tags: bool,
 ) -> Result<()> {
     let depth = depth.map(validate_positive_depth).transpose()?;
@@ -8864,6 +8872,18 @@ fn fetch_multiple_refspecs(
     {
         let _trace = phase_trace("fetch.local.render");
         print_fetch_update_rows(&url, &fetch_update_rows);
+    }
+    if write_fetch_head {
+        let _trace = phase_trace("fetch.local.write_fetch_head");
+        write_configured_fetch_head_file(
+            &repo,
+            &source_refs,
+            &remote,
+            &url,
+            &refspecs,
+            append,
+            true,
+        )?;
     }
     if prune {
         let _trace = phase_trace("fetch.local.prune");
@@ -10404,6 +10424,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &url,
                 &fetch_refspecs,
                 append,
+                true,
             )?;
         }
         {
@@ -10530,6 +10551,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &url,
                 &fetch_refspecs,
                 append,
+                false,
             )?;
         }
         let hook_head_branch = if atomic {
@@ -12319,6 +12341,7 @@ fn write_configured_fetch_head_file(
     url: &str,
     refspecs: &[String],
     append: bool,
+    explicit_refspec_fetch: bool,
 ) -> Result<()> {
     let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1))?
         .and_then(|current| {
@@ -12356,11 +12379,12 @@ fn write_configured_fetch_head_file(
                 } else {
                     source_ref.strip_prefix("refs/heads/").unwrap_or(source_ref)
                 };
-                let marker = if current_merge.as_deref() == Some(source_ref) {
-                    ""
-                } else {
-                    "not-for-merge"
-                };
+                let marker =
+                    if explicit_refspec_fetch || current_merge.as_deref() == Some(source_ref) {
+                        ""
+                    } else {
+                        "not-for-merge"
+                    };
                 let row = format!(
                     "{}\t{}\tbranch '{}' of {}\n",
                     id.to_hex(),
@@ -12381,7 +12405,7 @@ fn write_configured_fetch_head_file(
             continue;
         };
         let branch = source.strip_prefix("refs/heads/").unwrap_or(source);
-        let marker = if current_merge.as_deref() == Some(source) {
+        let marker = if explicit_refspec_fetch || current_merge.as_deref() == Some(source) {
             ""
         } else {
             "not-for-merge"

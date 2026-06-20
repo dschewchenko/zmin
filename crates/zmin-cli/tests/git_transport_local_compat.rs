@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::io::Write;
 use std::process::Command;
 
 use tempfile::TempDir;
@@ -2084,6 +2085,87 @@ fn fetch_named_remote_accepts_multiple_explicit_refspecs_like_stock_git() {
     assert_eq!(
         git(&client, ["rev-parse", "refs/tags/newtag"]),
         git(&source, ["rev-parse", "refs/tags/newtag"])
+    );
+}
+
+#[test]
+fn fetch_stdin_refspecs_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+    git(&source, ["branch", "feature"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", client.to_str().expect("client path")],
+        );
+        git(
+            client,
+            [
+                "remote",
+                "add",
+                "origin",
+                source.to_str().expect("source path"),
+            ],
+        );
+    }
+
+    let stdin_refspecs =
+        b"refs/heads/main:refs/remotes/origin/main\nrefs/heads/feature:refs/remotes/origin/feature\n";
+    let mut git_child = Command::new("git")
+        .args(["fetch", "--stdin", "origin"])
+        .current_dir(&git_client)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn git fetch --stdin");
+    git_child
+        .stdin
+        .as_mut()
+        .expect("git stdin")
+        .write_all(stdin_refspecs)
+        .expect("write git stdin");
+    let git_status = git_child.wait().expect("git fetch --stdin status");
+    assert!(
+        git_status.success(),
+        "git fetch --stdin failed: {git_status}"
+    );
+
+    let mut zmin_child = Command::new(zmin_bin())
+        .args(["fetch", "--stdin", "origin"])
+        .current_dir(&zmin_client)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn zmin fetch --stdin");
+    zmin_child
+        .stdin
+        .as_mut()
+        .expect("zmin stdin")
+        .write_all(stdin_refspecs)
+        .expect("write zmin stdin");
+    let zmin_status = zmin_child.wait().expect("zmin fetch --stdin status");
+    assert!(
+        zmin_status.success(),
+        "zmin fetch --stdin failed: {zmin_status}"
+    );
+
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
     );
 }
 

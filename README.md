@@ -151,17 +151,18 @@ Use commands as `zmin <command>`.
 Zmin wires all `151` Git `2.47` command names to a command handler. That only
 proves dispatch. Real compatibility is counted by behavior variants: command,
 option, value, option combination, repository state, transport and platform.
-The table below is audit progress, not a full support percentage. A group with
-no matrix rows still needs a command-level option/value/state matrix before it
-can be called complete.
+The table below is audit progress, not a support percentage. Matrix rows are
+the variants written down so far. A command can have no open rows in the
+current matrix and still need more rows from Git docs, upstream tests and real
+tool traces before it is complete.
 
-| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix open | Matrix invalid input | Closed block variants |
+| Git reference group | Git commands | Git doc option seed rows | Audited matrix rows | Closed audited | Open audited | Invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `44` | `31` | `13` | `0` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `44` | `32` | `12` | `0` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `52` |
@@ -171,25 +172,25 @@ can be called complete.
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `76` |
 | Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`2500`** | **`104`** | **`87`** | **`13`** | **`4`** | **`253`** |
+| **Git `2.47` unique total** | **`151`** | **`2500`** | **`104`** | **`88`** | **`12`** | **`4`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
-Do not read command inventory or doc option rows as implemented support. The
-option rows are a seed extracted from Git `2.47.1` docs. They still need to be
-split into values, negations, repeated options, order-sensitive combinations,
-repository states, transports and platforms, then checked against stock Git.
-Reference group rows follow the git-scm command sections and are not meant to
-be added together; the total row is unique.
+Do not read command inventory, doc option rows or a closed current matrix as
+complete support. The option rows are a seed extracted from Git `2.47.1` docs.
+They still need to be split into values, negations, repeated options,
+order-sensitive combinations, repository states, transports and platforms, then
+checked against stock Git. Reference group rows follow the git-scm command
+sections and are not meant to be added together; the total row is unique.
 
-Current command-level matrices:
+Current command-level matrices. Closed rate is only for audited rows:
 
-| Command | Rows | Closed | Partial | Open | Invalid input | Closed rate |
+| Command | Audited rows | Closed | Partial | Open | Invalid input | Closed audited |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `status` | `60` | `56` | `0` | `0` | `4` | `93.3%` |
-| `fetch` | `44` | `31` | `0` | `13` | `0` | `70.5%` |
+| `fetch` | `44` | `32` | `0` | `12` | `0` | `72.7%` |
 
 A global percentage will be published only after every Git `2.47.1` command has
 the same option/value/state matrix.

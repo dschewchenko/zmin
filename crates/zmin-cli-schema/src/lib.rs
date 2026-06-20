@@ -1114,6 +1114,8 @@ pub enum Command {
         depth: Option<String>,
         #[arg(long = "negotiation-tip")]
         negotiation_tip: Vec<String>,
+        #[arg(long = "stdin", action = ArgAction::SetTrue)]
+        stdin: bool,
         remote: Option<String>,
         branch: Vec<String>,
     },

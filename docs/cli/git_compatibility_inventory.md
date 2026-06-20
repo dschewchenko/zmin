@@ -30,6 +30,25 @@ Examples:
 These are separate rows because stock Git can produce different output,
 different exit codes or different repository state.
 
+## Audit Workflow
+
+Compatibility work must start from the inventory, not from the current parser.
+
+1. List Git `v2.47.1` commands from upstream command sources.
+2. Seed every documented option spelling from Git docs.
+3. Expand options into values, negations, repeated forms, order-sensitive
+   combinations, positional modes, repository states, transports and platforms.
+4. Add upstream Git test cases and real tool traces, such as IDE command lines,
+   when they expose behavior not obvious from docs.
+5. Record the stock Git command line and expected output, exit code and
+   repository state for each row.
+6. Mark a row `closed` only when Zmin has focused parity evidence for that
+   exact row.
+
+Current matrices are still being expanded. A command with no open rows in the
+current matrix is not automatically complete; it only has no open row among the
+variants written down so far.
+
 ## Files
 
 - `tools/git-command-gap.sh` checks command entry points only.
@@ -46,6 +65,8 @@ different exit codes or different repository state.
   open hard-fail clusters.
 - `docs/cli/matrices/status_v2_47.tsv` is the first command-level matrix for
   Git `status`.
+- `docs/cli/matrices/fetch_v2_47.tsv` tracks the first `fetch` option,
+  transport and repository-state variants.
 
 ## Current Seed
 
@@ -79,7 +100,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `44` | `31` | `0` | `13` | `0` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `44` | `32` | `0` | `12` | `0` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -89,20 +110,23 @@ Current generated summary:
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`2500`** | **`104`** | **`87`** | **`0`** | **`13`** | **`4`** | **`253`** |
+| **Git 2.47 unique total** | **`151`** | **`2500`** | **`104`** | **`88`** | **`0`** | **`12`** | **`4`** | **`253`** |
 
-The matrix columns are command-level matrices with explicit option/value/state
-rows. Closed block variants are focused parity blocks from
-`docs/cli/variant_compatibility_plan.md`; they are not a full denominator.
-Reference group rows follow git-scm sections and can duplicate command names.
-The total row is unique.
+The matrix columns are the audited subset of explicit option/value/state rows.
+They are not the final denominator until each command matrix has been expanded
+from docs, upstream tests and real traces. Closed block variants are focused
+parity blocks from `docs/cli/variant_compatibility_plan.md`; they are not a
+full denominator. Reference group rows follow git-scm sections and can
+duplicate command names. The total row is unique.
 
 ## Command Matrices
+
+These rates are for audited rows only.
 
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `44` | `31` | `0` | `13` | `0` |
+| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `44` | `32` | `0` | `12` | `0` |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
