@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 215/4632 represented doc-option pairs / 649 written rows / 573 written rows matching stock Git / 6 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 215/4632 represented doc-option pairs / 651 written rows / 576 written rows matching stock Git / 5 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -177,6 +177,7 @@ command.
 | `fetch --deepen` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --deepen` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs in existing shallow repos |
 | `fetch --deepen` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches from existing shallow repos using shallow boundary lines plus the `deepen-relative` capability |
+| `fetch --deepen` network multiple explicit refspec forms | `3` | `0` | smart HTTP, SSH and git daemon fetches with two destination refspecs from existing shallow repos using shallow boundary lines plus the `deepen-relative` capability |
 | `fetch --unshallow` explicit local/file branch forms | `2` | `0` | explicit local path and file URL branch fetches in existing shallow repos |
 | `fetch --unshallow` explicit local/file HEAD forms | `2` | `0` | explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --unshallow` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs in existing shallow repos |

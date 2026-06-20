@@ -9319,11 +9319,26 @@ fn fetch_multiple_refspecs(
                 message: "fetch --unshallow currently supports local and file remotes".into(),
             });
         }
-        if deepen.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --deepen currently supports local and file remotes".into(),
-            });
+        if let Some(deepen) = deepen {
+            let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --deepen currently supports existing shallow network repos"
+                        .into(),
+                });
+            };
+            let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            return fetch_multiple_refspecs_from_http_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                Some(UploadPackShallowOptions::depth_with_shallows(
+                    deepen, &shallows,
+                )),
+            );
         }
         if let Some(since) = shallow_since {
             return fetch_multiple_refspecs_from_http_remote(
@@ -9371,11 +9386,27 @@ fn fetch_multiple_refspecs(
                 message: "fetch --unshallow currently supports local and file remotes".into(),
             });
         }
-        if deepen.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --deepen currently supports local and file remotes".into(),
-            });
+        if let Some(deepen) = deepen {
+            let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --deepen currently supports existing shallow network repos"
+                        .into(),
+                });
+            };
+            let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            return fetch_multiple_refspecs_from_daemon_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::depth_with_shallows(
+                    deepen, &shallows,
+                )),
+            );
         }
         if let Some(since) = shallow_since {
             return fetch_multiple_refspecs_from_daemon_remote(
@@ -9426,11 +9457,27 @@ fn fetch_multiple_refspecs(
                 message: "fetch --unshallow currently supports local and file remotes".into(),
             });
         }
-        if deepen.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --deepen currently supports local and file remotes".into(),
-            });
+        if let Some(deepen) = deepen {
+            let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --deepen currently supports existing shallow network repos"
+                        .into(),
+                });
+            };
+            let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            return fetch_multiple_refspecs_from_ssh_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::depth_with_shallows(
+                    deepen, &shallows,
+                )),
+            );
         }
         if let Some(since) = shallow_since {
             return fetch_multiple_refspecs_from_ssh_remote(
@@ -9671,9 +9718,13 @@ fn fetch_multiple_refspecs_from_http_remote(
             repo,
             boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
         )?;
-    } else {
-        let request_roots = missing_fetch_roots(&store, &roots)?;
-        if let Some(shallow_options) = shallow_options {
+    } else if let Some(shallow_options) = shallow_options {
+        let request_roots = if shallow_options.deepen_relative {
+            roots.clone()
+        } else {
+            missing_fetch_roots(&store, &roots)?
+        };
+        {
             let shallow_boundaries = if let Some(helper) = helper.as_mut() {
                 http_fetch_smart_pack_with_shallow_options_with_helper(
                     &parsed_url,
@@ -9697,55 +9748,60 @@ fn fetch_multiple_refspecs_from_http_remote(
                 shallow_boundaries,
                 &advertised_shallow_boundaries,
             );
+            let shallow_boundaries =
+                if shallow_options.deepen_relative && shallow_boundaries.is_empty() {
+                    deepen_relative_shallow_boundaries(
+                        &store,
+                        shallow_options.shallows,
+                        shallow_options.depth.unwrap_or(0),
+                    )?
+                } else {
+                    shallow_boundaries
+                };
             write_shallow_file(repo, shallow_boundaries)?;
+        }
+    } else {
+        let request_roots = missing_fetch_roots(&store, &roots)?;
+        let pack_fetched = if let Some(helper) = helper.as_mut() {
+            http_fetch_smart_pack_with_helper(
+                &parsed_url,
+                helper,
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+            )?
         } else {
-            let pack_fetched = if let Some(helper) = helper.as_mut() {
-                http_fetch_smart_pack_with_helper(
-                    &parsed_url,
-                    helper,
-                    &repo.objects_dir,
-                    &request_roots,
-                    &haves,
-                )?
-            } else {
-                http_fetch_smart_pack_direct(
-                    &parsed_url,
-                    &repo.objects_dir,
-                    &request_roots,
-                    &haves,
-                )?
+            http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &request_roots, &haves)?
+        };
+        if !pack_fetched {
+            let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
+            let fetch_options = HttpFetchOptions {
+                commit: false,
+                tags: false,
+                all: true,
+                verbose: false,
+                recover: false,
+                write_ref: Vec::new(),
+                stdin: false,
+                packfile: None,
+                index_pack_args: Vec::new(),
+                args: Vec::new(),
             };
-            if !pack_fetched {
-                let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
-                let fetch_options = HttpFetchOptions {
-                    commit: false,
-                    tags: false,
-                    all: true,
-                    verbose: false,
-                    recover: false,
-                    write_ref: Vec::new(),
-                    stdin: false,
-                    packfile: None,
-                    index_pack_args: Vec::new(),
-                    args: Vec::new(),
-                };
-                let commit_cache = CommitObjectCache::new(&store);
-                let tree_cache = TreeObjectCache::new(&store);
-                let mut seen =
-                    HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
-                let mut fetch_context = HttpFetchObjectContext {
-                    url: &parsed_url,
-                    helper,
-                    store: &store,
-                    commit_cache: &commit_cache,
-                    tree_cache: &tree_cache,
-                    options: &fetch_options,
-                    seen: &mut seen,
-                    suffix_buffer: String::new(),
-                };
-                for id in &request_roots {
-                    http_fetch_object_recursive(&mut fetch_context, id)?;
-                }
+            let commit_cache = CommitObjectCache::new(&store);
+            let tree_cache = TreeObjectCache::new(&store);
+            let mut seen = HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
+            let mut fetch_context = HttpFetchObjectContext {
+                url: &parsed_url,
+                helper,
+                store: &store,
+                commit_cache: &commit_cache,
+                tree_cache: &tree_cache,
+                options: &fetch_options,
+                seen: &mut seen,
+                suffix_buffer: String::new(),
+            };
+            for id in &request_roots {
+                http_fetch_object_recursive(&mut fetch_context, id)?;
             }
         }
     }
@@ -9864,12 +9920,12 @@ where
         .map(|(_, row)| row.id.clone())
         .collect::<Vec<_>>();
     sort_dedup_object_ids(&mut roots);
-    let request_roots = if depth.is_some() {
+    let shallow_options = shallow_options.unwrap_or_else(|| UploadPackShallowOptions::depth(depth));
+    let request_roots = if depth.is_some() || shallow_options.deepen_relative {
         roots.clone()
     } else {
         missing_fetch_roots(&store, &roots)?
     };
-    let shallow_options = shallow_options.unwrap_or_else(|| UploadPackShallowOptions::depth(depth));
     let shallow_boundaries = fetch_pack(&request_roots, &haves, shallow_options)?;
     if let Some(depth) = depth {
         let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
@@ -9877,6 +9933,17 @@ where
             repo,
             boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
         )?;
+    } else if shallow_options.deepen_relative {
+        let shallow_boundaries = if shallow_boundaries.is_empty() {
+            deepen_relative_shallow_boundaries(
+                &store,
+                shallow_options.shallows,
+                shallow_options.depth.unwrap_or(0),
+            )?
+        } else {
+            shallow_boundaries
+        };
+        write_shallow_file(repo, shallow_boundaries)?;
     } else if shallow_options.uses_advertised_shallow_fallback() {
         write_shallow_file(
             repo,
@@ -16097,6 +16164,55 @@ fn upload_pack_response_or_advertised_shallows(
         return advertised_boundaries.to_vec();
     }
     response_boundaries
+}
+
+fn deepen_relative_shallow_boundaries(
+    store: &LooseObjectStore,
+    shallows: &[ObjectId],
+    deepen: usize,
+) -> Result<Vec<ObjectId>> {
+    let commit_cache = CommitObjectCache::new(store);
+    let mut boundaries = Vec::with_capacity(shallows.len());
+    let mut seen = HashSet::with_capacity(transport_history_collection_capacity(shallows.len()));
+    let mut pending =
+        VecDeque::with_capacity(transport_history_collection_capacity(shallows.len()));
+    for shallow in shallows {
+        pending.push_back((shallow.clone(), deepen));
+    }
+    while let Some((id, remaining)) = pending.pop_front() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if remaining == 0 {
+            boundaries.push(id);
+            continue;
+        }
+        let commit = commit_cache.read_commit(&id)?;
+        if commit.parents.is_empty() {
+            continue;
+        }
+        for parent in &commit.parents {
+            if !object_exists_for_deepen_boundary(store, &parent)? {
+                boundaries.push(id.clone());
+                continue;
+            }
+            if remaining == 1 {
+                boundaries.push(parent.clone());
+            } else {
+                pending.push_back((parent.clone(), remaining - 1));
+            }
+        }
+    }
+    sort_dedup_object_ids(&mut boundaries);
+    Ok(boundaries)
+}
+
+fn object_exists_for_deepen_boundary(store: &LooseObjectStore, id: &ObjectId) -> Result<bool> {
+    match store.contains_object(id) {
+        Ok(exists) => Ok(exists),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(CliError::Io(error)),
+    }
 }
 
 fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
