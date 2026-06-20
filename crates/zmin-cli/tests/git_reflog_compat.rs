@@ -1,8 +1,9 @@
 mod common;
 
 use common::{
-    command_any_output, command_output_with_env, configure_identity, git, git_args, git_init,
-    git_status, git_with_env, run_zmin_args, run_zmin_status, run_zmin_with_env, zmin_bin,
+    command_any_output, command_output_with_env, configure_identity, git, git_args,
+    git_failure_output, git_init, git_status, git_with_env, run_zmin_args, run_zmin_failure_output,
+    run_zmin_status, run_zmin_with_env, zmin_bin,
 };
 
 #[test]
@@ -66,15 +67,24 @@ fn reflog_show_date_modes_match_stock_git() {
 }
 
 #[test]
+fn reflog_invalid_date_format_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["reflog", "--date=bogus"]),
+        git_failure_output(repo.path(), &["reflog", "--date=bogus"])
+    );
+}
+
+#[test]
 fn reflog_subcommand_help_matches_stock_git_exit_shape() {
     let repo = git_init();
 
-    let (status, stdout, stderr) = command_any_output(
-        zmin_bin(),
-        repo.path(),
-        &["reflog", "expire", "-h"],
-        "zmin",
-    );
+    let (status, stdout, stderr) =
+        command_any_output(zmin_bin(), repo.path(), &["reflog", "expire", "-h"], "zmin");
     assert_eq!(status, 129);
     assert!(stdout.contains("git reflog expire"), "{stdout}");
     assert!(stderr.is_empty(), "{stderr}");

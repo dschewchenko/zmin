@@ -1171,8 +1171,8 @@ fn parse_reflog_date_mode(value: &str) -> Result<ReflogDateMode> {
         "relative" => Ok(ReflogDateMode::Relative),
         "human" => Ok(ReflogDateMode::Human),
         _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported reflog date format '--date={value}'"),
+            code: 128,
+            message: format!("unknown date format {value}"),
         }),
     }
 }

@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Administration	reflog	--date	bogus	<empty>	one reflog entry	local	all	git reflog --date=bogus	invalid-input	git_reflog_compat::reflog_invalid_date_format_matches_stock_git	invalid reflog date format exits 128 with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic
