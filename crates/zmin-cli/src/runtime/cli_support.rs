@@ -104,6 +104,7 @@ pub(crate) fn parse_cli_invocation(
     let command_args = normalize_empty_init_template(command_args);
     let command_args = normalize_history_count_shorthand(command_args);
     let command_args = normalize_log_date_hyphen_value(command_args);
+    validate_version_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
@@ -215,6 +216,16 @@ fn root_version_invocation(args: &[String]) -> Option<bool> {
         }
         _ => None,
     }
+}
+
+fn validate_version_invocation_before_clap(args: &[String]) -> Result<()> {
+    if matches!(args, [command, option] if command == "version" && option == "--version") {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: unknown option `version'\nusage: git version [--build-options]\n\n    --[no-]build-options  also print build options\n\n".into(),
+        });
+    }
+    Ok(())
 }
 
 fn is_known_command(command: &str) -> bool {

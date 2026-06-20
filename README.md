@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `14/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref` and `tag` have started behavior matrices |
-| Documented option spellings represented by rows | `215/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `656` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `582/656` | exact written rows with focused parity evidence |
-| Open written rows | `4/656` | written rows that still do not match stock Git |
-| Invalid input rows | `70/656` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `15/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
+| Documented option spellings represented by rows | `217/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `659` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `584/659` | exact written rows with focused parity evidence |
+| Open written rows | `4/659` | written rows that still do not match stock Git |
+| Invalid input rows | `71/659` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `582/656` as Git compatibility. It only means `582` of the `656`
+Do not read `584/659` as Git compatibility. It only means `584` of the `659`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `215/4632` as option support either; it only means
+counted yet. Do not read `217/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -216,8 +216,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `146` | `118` | `0` | `28` |
-| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`656`** | **`582`** | **`4`** | **`70`** |
+| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `1` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`659`** | **`584`** | **`4`** | **`71`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -244,9 +244,11 @@ Current command-level matrices:
 | `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
+| `version` | `2` | `0` | `2` | `3` | `2` | `0` | `0` | `1` | no |
 
 `branch`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files`,
-`ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref` or `tag`
+`ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` or
+`version`
 having `0` open rows does not mean full command compatibility. It means no open
 item remains among the rows currently written. Unwritten values, option
 combinations, repository states, transports and platform cases are still
