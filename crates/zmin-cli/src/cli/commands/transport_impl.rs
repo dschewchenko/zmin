@@ -11547,7 +11547,7 @@ fn fetch_with_depth(
     if let Some(since) = shallow_since {
         if prefetch
             || !refmap.is_empty()
-            || branch.as_deref().is_none_or(|value| value.contains(':'))
+            || branch.as_deref().is_some_and(|value| value.contains(':'))
         {
             return Err(CliError::Fatal {
                 code: 128,
@@ -17146,6 +17146,122 @@ fn fetch_network_configured_deepen(
     Err(unsupported_remote_helper_error(&url, String::new()))
 }
 
+fn fetch_network_configured_shallow_since(
+    repo: GitRepo,
+    remote: String,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+    since: i64,
+) -> Result<()> {
+    let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url) {
+        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
+        let mut helper = if parsed_url.scheme == HttpScheme::Https {
+            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
+        } else {
+            None
+        };
+        let (rows, head_branch, advertised_shallow_boundaries) =
+            discover_http_refs_with_helper_and_shallows(
+                &parsed_url,
+                helper.as_mut().map(std::convert::identity),
+                false,
+                false,
+                false,
+                &[],
+            )?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_shallow_since(
+            repo,
+            remote,
+            &url,
+            &rows,
+            &advertised_shallow_boundaries,
+            head_branch,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+            since,
+            |roots, haves, options| {
+                if let Some(helper) = helper.as_mut() {
+                    http_fetch_smart_pack_with_shallow_options_with_helper(
+                        &parsed_url,
+                        helper,
+                        &objects_dir,
+                        roots,
+                        haves,
+                        options,
+                    )
+                } else {
+                    http_fetch_smart_pack_with_shallow_options_direct(
+                        &parsed_url,
+                        &objects_dir,
+                        roots,
+                        haves,
+                        options,
+                    )
+                }
+            },
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        let (rows, advertised_shallow_boundaries) =
+            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
+        let head_branch = daemon_head_branch(&url)?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_shallow_since(
+            repo,
+            remote,
+            &url,
+            &rows,
+            &advertised_shallow_boundaries,
+            head_branch,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+            since,
+            |roots, haves, options| {
+                daemon_fetch_pack_with_shallow_options_and_haves(
+                    &url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            },
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        let (rows, advertised_shallow_boundaries) =
+            ssh_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
+        let head_branch = ssh_head_branch(&url)?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_shallow_since(
+            repo,
+            remote,
+            &url,
+            &rows,
+            &advertised_shallow_boundaries,
+            head_branch,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+            since,
+            |roots, haves, options| {
+                ssh_fetch_pack_with_shallow_options_and_haves(
+                    &url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            },
+        );
+    }
+    Err(unsupported_remote_helper_error(&url, String::new()))
+}
+
 fn fetch_configured_advertised_remote_update_shallow<F>(
     repo: GitRepo,
     remote: String,
@@ -17297,6 +17413,59 @@ where
         deepen_relative_shallow_boundaries(&store, shallows, deepen)?
     } else {
         shallow_boundaries
+    };
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = head_branch {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file(
+            &repo,
+            rows,
+            &remote,
+            url,
+            &fetch_refspecs,
+            append,
+            false,
+        )?;
+    }
+    write_shallow_file(&repo, shallow_boundaries)
+}
+
+fn fetch_configured_advertised_remote_shallow_since<F>(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    rows: &[LsRemoteRow],
+    _advertised_shallow_boundaries: &[ObjectId],
+    head_branch: Option<String>,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+    since: i64,
+    mut fetch_pack: F,
+) -> Result<()>
+where
+    F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
+{
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, rows)?;
+    sort_dedup_object_ids(&mut roots);
+    let shallow_boundaries = if roots.is_empty() {
+        Vec::new()
+    } else {
+        fetch_pack(&roots, &haves, UploadPackShallowOptions::since(since))?
     };
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
@@ -18104,6 +18273,26 @@ fn fetch_with_repo_and_remote_shallow_since(
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     let Some(branch) = branch else {
+        if upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --upload-pack currently supports one named SSH remote branch"
+                    .into(),
+            });
+        }
+        if is_http_transport_url(&url)
+            || is_git_daemon_transport_url(&url)
+            || is_ssh_transport_url(&url)
+        {
+            return fetch_network_configured_shallow_since(
+                repo,
+                remote,
+                missing_ref_code,
+                append,
+                write_fetch_head,
+                since,
+            );
+        }
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --shallow-since currently supports one named remote branch".into(),
