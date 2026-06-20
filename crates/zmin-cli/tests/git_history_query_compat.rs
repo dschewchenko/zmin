@@ -1040,6 +1040,13 @@ fn log_date_formats_match_stock_git() {
             "date mode: {mode}"
         );
     }
+
+    let separate_date_args = ["log", "-1", "--date", "iso", "--format=%ad|%cd"];
+    assert_eq!(
+        run_zmin_args(zmin_repo.path(), &separate_date_args),
+        git_args(git_repo.path(), &separate_date_args),
+        "date mode separate value"
+    );
 }
 
 #[test]
