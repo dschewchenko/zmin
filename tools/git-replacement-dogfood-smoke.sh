@@ -243,6 +243,10 @@ compare_readonly_same_repo \
   rev_parse_nested_cdup \
   "$zmin_client/dir" \
   rev-parse --show-cdup
+compare_readonly_same_repo \
+  rev_parse_nested_prefix \
+  "$zmin_client/dir" \
+  rev-parse --show-prefix
 compare_command config_null_list config --null --list
 compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
