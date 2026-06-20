@@ -122,6 +122,7 @@ pub(crate) fn dispatch(
             no_write_fetch_head,
             refmap,
             depth,
+            deepen: _,
             negotiation_tip,
             negotiate_only,
             server_option: _,

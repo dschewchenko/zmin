@@ -8452,10 +8452,23 @@ pub(crate) fn run_fetch(
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     let has_server_options = fetch_has_server_options(raw_args);
+    let deepen = fetch_deepen_amount(raw_args)?;
     if stdin {
         let stdin = io::stdin();
         let mut stdin = io::BufReader::with_capacity(TRANSPORT_STDIN_BUF_CAPACITY, stdin.lock());
         collect_trimmed_lines_from_reader(&mut stdin, &mut refspecs)?;
+    }
+    if depth.is_some() && deepen.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --depth and --deepen cannot be used together".into(),
+        });
+    }
+    if deepen.is_some() && (all || multiple || refspecs.len() > 1) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen currently supports one named remote branch".into(),
+        });
     }
     let no_tags = fetch_no_tags(raw_args, no_tags, tags);
     let refspecs = force_fetch_refspecs(force, refspecs);
@@ -8481,6 +8494,7 @@ pub(crate) fn run_fetch(
                 Some(remote),
                 None,
                 depth.as_deref(),
+                deepen,
                 128,
                 quiet,
                 dry_run,
@@ -8513,6 +8527,7 @@ pub(crate) fn run_fetch(
                 Some(remote_name),
                 None,
                 depth.as_deref(),
+                deepen,
                 128,
                 quiet,
                 dry_run,
@@ -8564,6 +8579,7 @@ pub(crate) fn run_fetch(
         remote,
         branch,
         depth.as_deref(),
+        deepen,
         128,
         quiet,
         dry_run,
@@ -8639,6 +8655,28 @@ fn fetch_has_server_options(raw_args: &[String]) -> bool {
         }
     }
     false
+}
+
+fn fetch_deepen_amount(raw_args: &[String]) -> Result<Option<usize>> {
+    let mut args = raw_args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--deepen" {
+            let Some(value) = args.next() else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "option '--deepen' requires a value".into(),
+                });
+            };
+            return validate_positive_depth(value).map(Some);
+        }
+        if let Some(value) = arg.strip_prefix("--deepen=") {
+            return validate_positive_depth(value).map(Some);
+        }
+    }
+    Ok(None)
 }
 
 fn parse_fetch_recurse_submodules_mode(value: &str) -> Result<FetchRecurseSubmodulesMode> {
@@ -9701,6 +9739,7 @@ pub(crate) fn run_pull(
                 Some(remote.clone()),
                 Some(branch.clone()),
                 None,
+                None,
                 1,
                 false,
                 false,
@@ -10364,6 +10403,7 @@ fn fetch_with_depth(
     remote: Option<String>,
     branch: Option<String>,
     depth: Option<&str>,
+    deepen: Option<usize>,
     missing_ref_code: i32,
     quiet: bool,
     dry_run: bool,
@@ -10388,6 +10428,12 @@ fn fetch_with_depth(
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
         ensure_fetch_server_options_supported_for_location(&remote, has_server_options)?;
+        if deepen.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports one named remote branch".into(),
+            });
+        }
         let prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         let prune_tags = prune && effective_fetch_prune_tags(&repo, None, prune_tags)?;
         let depth = depth.map(validate_positive_depth).transpose()?;
@@ -10416,8 +10462,43 @@ fn fetch_with_depth(
     let prune_tags = prune && effective_fetch_prune_tags(&repo, Some(&remote), prune_tags)?;
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
+    if let Some(deepen) = deepen {
+        if prefetch
+            || !refmap.is_empty()
+            || branch.as_deref().is_some_and(|value| value.contains(':'))
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports one named remote branch".into(),
+            });
+        }
+        return fetch_with_repo_and_remote_deepen(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            deepen,
+            quiet,
+            append,
+            set_upstream,
+            prune,
+            prune_tags,
+            no_tags,
+            tags,
+            atomic,
+            write_fetch_head,
+        );
+    }
     if let Some(depth) = depth.map(validate_positive_depth).transpose()? {
-        return fetch_with_repo_and_remote_depth(repo, remote, branch, missing_ref_code, depth);
+        return fetch_with_repo_and_remote_depth(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            depth,
+            append,
+            write_fetch_head,
+        );
     }
     fetch_with_repo_and_remote(
         repo,
@@ -14138,6 +14219,8 @@ fn fetch_with_repo_and_remote_depth(
     branch: Option<String>,
     missing_ref_code: i32,
     depth: usize,
+    append: bool,
+    write_fetch_head: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -14171,6 +14254,9 @@ fn fetch_with_repo_and_remote_depth(
             .resolve(&ref_name)
             .map_err(|_| missing_remote_ref_error(&branch, missing_ref_code))?;
         destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+        if write_fetch_head {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, false)?;
+        }
         let depth_limited_commits =
             upload_pack_depth_limited_commits(&source_store, std::slice::from_ref(&id), depth)?;
         copy_reachable_objects_for_depth_into(
@@ -14246,6 +14332,129 @@ fn fetch_with_repo_and_remote_depth(
         write_shallow_file(&repo, shallow_boundaries(&source_store, &roots, depth)?)?;
     }
     Ok(())
+}
+
+fn fetch_with_repo_and_remote_deepen(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    deepen: usize,
+    quiet: bool,
+    append: bool,
+    set_upstream: bool,
+    prune: bool,
+    prune_tags: bool,
+    no_tags: bool,
+    tags: bool,
+    atomic: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let url = fetch_remote_url(&repo, &remote)?;
+    let Some(branch) = branch else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen currently supports one named remote branch".into(),
+        });
+    };
+    if is_http_transport_url(&url)
+        || is_git_daemon_transport_url(&url)
+        || is_ssh_transport_url(&url)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen currently supports local and file remotes".into(),
+        });
+    }
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(unsupported_remote_helper_error(&url, String::new()));
+    };
+    let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+        return fetch_with_repo_and_remote(
+            repo,
+            remote,
+            Some(branch),
+            missing_ref_code,
+            quiet,
+            append,
+            set_upstream,
+            prune,
+            prune_tags,
+            no_tags,
+            tags,
+            atomic,
+            &[],
+            false,
+        );
+    };
+    let source = local_clone_source(&source_path)?;
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let ref_name = branch_ref_name(&branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(&branch, missing_ref_code))?;
+    let current_depth = shallow_depth_from_source_tip(&source_store, &id, &shallow_boundaries)?
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen could not match the local shallow boundary to remote history"
+                .into(),
+        })?;
+    fetch_with_repo_and_remote_depth(
+        repo,
+        remote,
+        Some(branch),
+        missing_ref_code,
+        current_depth.saturating_add(deepen),
+        append,
+        write_fetch_head,
+    )
+}
+
+fn read_repo_shallow_boundaries(repo: &GitRepo) -> Result<Option<HashSet<ObjectId>>> {
+    let path = repo.git_dir.join("shallow");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path).map_err(CliError::Io)?;
+    let mut boundaries = HashSet::new();
+    for line in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        boundaries.insert(ObjectId::from_hex(GitHashAlgorithm::Sha1, line)?);
+    }
+    if boundaries.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(boundaries))
+    }
+}
+
+fn shallow_depth_from_source_tip(
+    store: &LooseObjectStore,
+    tip: &ObjectId,
+    shallow_boundaries: &HashSet<ObjectId>,
+) -> Result<Option<usize>> {
+    let commit_cache = CommitObjectCache::new(store);
+    let mut pending = VecDeque::with_capacity(1);
+    pending.push_back((tip.clone(), 1usize));
+    let mut seen = HashSet::with_capacity(shallow_boundaries.len().max(1));
+    while let Some((id, level)) = pending.pop_front() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if shallow_boundaries.contains(&id) {
+            return Ok(Some(level));
+        }
+        let commit = commit_cache.read_commit(&id)?;
+        reserve_transport_history_queue(&mut pending, commit.parents.len());
+        for parent in &commit.parents {
+            pending.push_back((parent.clone(), level + 1));
+        }
+    }
+    Ok(None)
 }
 
 fn boundaries_or_local_fallback(

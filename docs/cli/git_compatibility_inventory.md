@@ -94,7 +94,7 @@ Do not collapse these layers into one percentage.
 | --- | ---: | ---: | --- |
 | Git command names | `151` | `151` | no, dispatch only |
 | Git doc option spellings | `2500` | not reported | no, seed only |
-| Written behavior rows | `116` | `102` | yes, for those rows only |
+| Written behavior rows | `118` | `104` | yes, for those rows only |
 | Full Git behavior denominator | incomplete | not reported | yes, after expansion |
 
 The full denominator must include command, option, value, option combination,
@@ -117,7 +117,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `56` | `46` | `0` | `9` | `1` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `58` | `48` | `0` | `9` | `1` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -127,7 +127,7 @@ Current generated summary:
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`2500`** | **`116`** | **`102`** | **`0`** | **`9`** | **`5`** | **`253`** |
+| **Git 2.47 unique total** | **`151`** | **`2500`** | **`118`** | **`104`** | **`0`** | **`9`** | **`5`** | **`253`** |
 
 The matrix columns are the written subset of explicit option/value/state rows.
 They are not the final denominator until each command matrix has been expanded
@@ -150,7 +150,7 @@ variants.
 | Command | Git doc option seed rows | Matrix | Behavior rows written | Closed | Partial | Open | Invalid input |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
 | `status` | `28` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `13` | `docs/cli/matrices/fetch_v2_47.tsv` | `56` | `46` | `0` | `9` | `1` |
+| `fetch` | `13` | `docs/cli/matrices/fetch_v2_47.tsv` | `58` | `48` | `0` | `9` | `1` |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted

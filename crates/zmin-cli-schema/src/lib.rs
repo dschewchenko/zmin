@@ -1124,6 +1124,8 @@ pub enum Command {
         refmap: Vec<String>,
         #[arg(long = "depth")]
         depth: Option<String>,
+        #[arg(long = "deepen")]
+        deepen: Option<String>,
         #[arg(long = "negotiation-tip")]
         negotiation_tip: Vec<String>,
         #[arg(long = "negotiate-only", action = ArgAction::SetTrue)]
