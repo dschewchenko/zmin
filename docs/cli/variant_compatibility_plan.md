@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 24/151 commands with matrix rows / 231/4632 represented doc-option pairs / 835 written rows / 732 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 24/151 commands with matrix rows / 231/4632 represented doc-option pairs / 836 written rows / 732 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,7 +195,7 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git status --ignore-submodules=bogus`.
+The latest closed guard classification is `git status --ignored=bogus`.
 The next default slice remains the second
 active lane: run a fresh `unsupported` / `not supported` code scan, choose one
 small remaining guard that is not entangled with unrelated staged changes, then
@@ -203,7 +203,7 @@ classify it as Git-supported behavior, stock-compatible invalid input,
 intentional deferral or Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/835`; the complete command matrices and complete doc-option matrices remain
+`0/836`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -314,6 +314,7 @@ until a full matrix is expanded and verified.
 | `status` pathspec modes | `13` | `0` | exact file, directory, default glob, explicit magic, exclude magic, human output and global pathspec flags |
 | `status` invalid porcelain version usage | `1` | `0` | `git status --porcelain=v3` exits `128` with stock fatal diagnostic instead of an unclassified unsupported-version guard |
 | `status` invalid untracked-files mode usage | `1` | `0` | `git status --untracked-files=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-mode fatal diagnostic |
+| `status` invalid ignored mode usage | `1` | `0` | `git status --ignored=bogus` exits `128` with stock fatal diagnostic instead of an unclassified unsupported-mode guard |
 | `status` invalid ignore-submodules mode usage | `1` | `0` | `git status --ignore-submodules=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-mode fatal diagnostic |
 | `ls-files` replacement stage NUL output | `1` | `0` | `--stage -z` through the `git` shim on a clean cloned index |
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
@@ -395,7 +396,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `499` verified variants.
+Tracked closed blocks in this table: `500` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
