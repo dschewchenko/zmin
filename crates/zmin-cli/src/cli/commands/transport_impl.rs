@@ -11570,14 +11570,18 @@ fn fetch_with_repo_and_location(
             message: "fetch --deepen currently supports explicit local and file branches".into(),
         });
     }
-    if unshallow {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --unshallow currently supports explicit local and file branches".into(),
-        });
-    }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
+        if unshallow {
+            return fetch_direct_location_head_unshallow(
+                &repo,
+                &source,
+                &location,
+                quiet,
+                dry_run,
+                write_fetch_head,
+            );
+        }
         if let Some(depth) = depth {
             return fetch_direct_location_head_depth(
                 &repo,
@@ -11600,6 +11604,13 @@ fn fetch_with_repo_and_location(
         );
     }
     if prune && branch.is_none() {
+        if unshallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports explicit local and file branches"
+                    .into(),
+            });
+        }
         let source = local_clone_source(&source_path)?;
         if prune_tags {
             return fetch_direct_location_prune_tags(
@@ -11776,6 +11787,27 @@ fn fetch_direct_location_head_depth(
     if !quiet && write_fetch_head {
         eprintln!("From {}", fetch_head_url_display(location));
         eprintln!(" * branch            HEAD       -> FETCH_HEAD");
+    }
+    Ok(())
+}
+
+fn fetch_direct_location_head_unshallow(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    quiet: bool,
+    dry_run: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    if read_repo_shallow_boundaries(repo)?.is_none() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--unshallow on a complete repository does not make sense".into(),
+        });
+    }
+    fetch_direct_location_head(repo, source, location, quiet, dry_run, write_fetch_head)?;
+    if !dry_run {
+        write_shallow_file(repo, Vec::new())?;
     }
     Ok(())
 }
