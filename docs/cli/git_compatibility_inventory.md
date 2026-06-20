@@ -3,7 +3,7 @@
 This is the source of truth for counting Git compatibility work.
 
 Command presence is not enough. Parser presence is not enough. Test presence is
-not enough. A closed item is a behavior variant checked against stock Git.
+not enough. A closed item is one behavior variant checked against stock Git.
 
 ## Baseline
 
@@ -15,7 +15,7 @@ not enough. A closed item is a behavior variant checked against stock Git.
 
 ## Unit
 
-One variant is:
+One behavior variant is:
 
 `command + option + value + option combination + repository state + transport + platform`
 
@@ -30,14 +30,20 @@ Examples:
 These are separate rows because stock Git can produce different output,
 different exit codes or different repository state.
 
+The option seed is not this denominator. A single documented spelling such as
+`--date`, `--format`, `--pathspec-from-file` or `--depth` can expand into many
+rows once values, repeated forms, option order, repository state, transport and
+platform behavior are included.
+
 ## Audit Workflow
 
 Compatibility work must start from the inventory, not from the current parser.
 
 1. List Git `v2.47.1` commands from upstream command sources.
 2. Seed every documented option spelling from Git docs.
-3. Expand those option spellings into values, negations, repeated forms, order-sensitive
-   combinations, positional modes, repository states, transports and platforms.
+3. Expand those option spellings into values, negations, repeated forms,
+   order-sensitive combinations, positional modes, repository states,
+   transports and platforms.
 4. Add upstream Git test cases and real tool traces, such as IDE command lines,
    when they expose behavior not obvious from docs.
 5. Record the stock Git command line and expected output, exit code and
@@ -100,7 +106,8 @@ The current documentation seed run found:
 
 This is not the final denominator. It does not yet split option values,
 negations, repeated options, order-sensitive combinations, repository states,
-transports or platforms.
+transports or platforms. It is only the raw input used to build command
+matrices.
 The seed extractor is intentionally conservative and can miss documented forms
 that are hard to parse mechanically from prose. Command matrices may therefore
 contain rows, such as `fetch --depth`, before the seed extractor learns that
@@ -114,14 +121,17 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Command routing | `151/151` | no | dispatch only |
-| Git doc option spellings | `4632` | no | seed only |
+| Git doc option spelling seed | `4632` | no | raw documentation input only |
 | Written behavior rows | `171` | no by itself | explicit rows currently written |
-| Closed behavior rows | `156/171` | yes, row by row | exact written rows that match stock Git |
+| Behavior rows matching stock Git | `156/171` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | incomplete | not yet | still being expanded |
 
 The full denominator must include command, option, value, option combination,
 repository state, transport and platform. It also needs rows from Git docs,
 upstream Git tests and real tool traces such as IDE or GUI invocations.
+
+Until a command's matrix has all of those rows, that command remains
+incomplete even if every currently written row is closed.
 
 ## Generated Summary
 
@@ -133,7 +143,7 @@ tools/git-compat-audit-summary.sh
 
 Current generated summary:
 
-| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
+| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `0` | `2` |
@@ -151,15 +161,16 @@ Current generated summary:
 | Other Git 2.47 commands | `71` | `1075` | `0` | `0` | `0` | `0` | `0` | `4` |
 | **Git 2.47 unique total** | **`151`** | **`4632`** | **`171`** | **`156`** | **`0`** | **`9`** | **`6`** | **`253`** |
 
-The matrix columns are the written subset of explicit option/value/state rows.
-They are not the final denominator until each command matrix has been expanded
-from docs, upstream tests and real traces. Closed block variants are focused
-parity blocks from `docs/cli/variant_compatibility_plan.md`; they are not a
-full denominator. Reference group rows follow git-scm sections and can
-duplicate command names. The total row is unique.
+The matrix columns are the written subset of explicit
+option/value/combination/state/transport/platform rows. They are not the final
+denominator until each command matrix has been expanded from docs, upstream
+tests and real traces. Closed block variants are focused parity blocks from
+`docs/cli/variant_compatibility_plan.md`; they are not a full denominator.
+Reference group rows follow git-scm sections and can duplicate command names.
+The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings or `156/171`
-closed written rows as a Git support percentage. The `156/171` number is audit
+passing written rows as a Git support percentage. The `156/171` number is audit
 progress for rows already written down. A command is complete only after its
 documented options, values, negations, repeated forms, order-sensitive
 combinations, repository states, transports and platforms have behavior rows
@@ -171,7 +182,7 @@ These counts are for written rows only. A command can show no open row and
 still be incomplete if the matrix has not expanded all Git-documented
 variants.
 
-| Command | Git doc option spellings | Doc spellings represented by rows | Matrix | Behavior rows written | Closed | Partial | Open | Invalid input | Complete matrix |
+| Command | Git doc option seed | Doc spellings represented by rows | Matrix | Behavior rows written | Matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `111` | `100` | `0` | `9` | `2` | no |

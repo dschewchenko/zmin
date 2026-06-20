@@ -149,36 +149,37 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 Use commands as `zmin <command>`.
 
 This preview is not 100% Git-compatible yet. Zmin has handlers for all `151`
-Git `2.47` command names, but command routing is only the entry point. A command
-is complete only after its documented options, values, option ordering,
-repository states, transports and platform cases match stock Git.
+Git `2.47.1` command names, but command routing is only the entry point. A
+command is complete only after its documented options, option values, option
+combinations, repository states, transports and platform cases match stock Git.
 
 Real compatibility is counted by behavior variants:
 
 `command + option + value + option combination + repository state + transport + platform`
 
-Current accounting:
+Current accounting. These numbers must not be combined into one percentage:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete Git command matrices | `0/151` | no command has a complete option/value/state/transport/platform matrix yet |
-| Command entry points wired | `151/151` | every Git `2.47` command name reaches Zmin code; not a support claim |
-| Git doc option spelling inventory | `4632` | raw option spellings found in Git `2.47.1` docs and include files |
-| Behavior rows written | `171` | explicit command/option/value/state/transport/platform rows in the current matrix |
-| Behavior rows closed | `156/171` | exact written rows that match stock Git by focused evidence |
+| Fully complete command matrices | `0/151` | no command has a finished Git behavior matrix yet |
+| Command entry points wired | `151/151` | every Git `2.47.1` command name reaches Zmin code; not a support claim |
+| Git doc option spelling seed | `4632` | raw option spellings found in Git `2.47.1` docs and include files |
+| Behavior rows written | `171` | explicit command/option/value/state/transport/platform rows written so far |
+| Behavior rows matching stock Git | `156/171` | exact written rows with focused parity evidence |
 | Full Git behavior denominator | incomplete | still being expanded from docs, upstream tests and real tool traces |
 
-Only closed behavior variants count as supported. Option spellings are just
-input for the matrix until they are split into values, negations, repeated
-forms, order-sensitive combinations, repository states, transports and
-platforms, then checked against stock Git.
+Only closed behavior variants count as supported for that exact row. Option
+spellings are just input for the matrix until they are split into values,
+negations, repeated forms, order-sensitive combinations, repository states,
+transports and platforms, then checked against stock Git.
 
 A command with no open row in the current matrix is not complete. It only means
 the rows written down so far have no open item.
 
-Audit progress by git-scm reference group:
+Audit progress by git-scm reference group. This is inventory progress, not
+Git compatibility percent:
 
-| Git reference group | Git commands | Git doc option spellings | Behavior rows written | Closed rows | Open rows | Invalid input rows |
+| Git reference group | Git commands | Git doc option seed | Behavior rows written | Matching stock Git | Open rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` |
@@ -194,7 +195,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `30` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` |
 | Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` |
-| **Git `2.47` unique total** | **`151`** | **`4632`** | **`171`** | **`156`** | **`9`** | **`6`** |
+| **Git `2.47.1` unique total** | **`151`** | **`4632`** | **`171`** | **`156`** | **`9`** | **`6`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -204,21 +205,23 @@ Do not read command inventory, option spelling inventory or a closed current
 matrix as complete support. Reference group rows follow the git-scm command
 sections and are not meant to be added together; the total row is unique.
 
-Current command-level matrices. This is audit coverage, not command support:
+Current command-level matrices. This is audit coverage, not complete command
+support:
 
-| Command | Git doc option spellings | Doc spellings represented by rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows | Complete matrix |
+| Command | Git doc option seed | Doc spellings represented by rows | Behavior rows written | Matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `28` | `111` | `100` | `0` | `9` | `2` | no |
 
 Doc spellings represented by rows means at least one matrix row mentions that
-documented option. It does not mean every value, negation, order-sensitive
-combination, repository state, transport or platform is covered.
+documented option. It does not mean every value, negation, repeated form,
+order-sensitive combination, repository state, transport or platform is
+covered.
 
 `status` having `0` open rows here does not mean full `git status`
 compatibility. It means no open row remains among the currently written rows.
 A global percentage will be published only after every Git `2.47.1` command has
-the same option/value/state matrix.
+a complete option/value/combination/state/transport/platform matrix.
 
 <details>
 <summary>Commands counted in each group</summary>
