@@ -65,7 +65,8 @@ tools/git-replacement-dogfood-smoke.sh
 ```
 
 The smoke creates a temporary `git` shim that dispatches to `zmin`, then checks
-the IDE-shaped surfaces that usually run first: version, `status -z`,
-porcelain v2 branch status, `rev-parse`, `config`, `ls-files -z`, `diff -z`,
-`log -z` and `fetch --prune --no-tags`. This is a dogfood gate, not a complete
-Git compatibility claim.
+the IDE-shaped surfaces that usually run first: version probes, build-option
+version output, invalid version-option shape, `status -z`, porcelain v2 branch
+status, `rev-parse`, `config`, `ls-files -z`, `diff -z`, `log -z` and
+`fetch --prune --no-tags`. This is a dogfood gate, not a complete Git
+compatibility claim.

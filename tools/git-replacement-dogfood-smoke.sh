@@ -65,6 +65,7 @@ mkdir -p "$capture_dir"
 "$stock_git" init -b main "$source_repo" --quiet
 "$stock_git" -C "$source_repo" config user.name "Zmin Dogfood"
 "$stock_git" -C "$source_repo" config user.email "zmin-dogfood@example.invalid"
+"$stock_git" -C "$source_repo" config commit.gpgsign false
 printf 'one\n' >"$source_repo/tracked.txt"
 mkdir -p "$source_repo/dir"
 printf 'nested\n' >"$source_repo/dir/nested.txt"
@@ -142,6 +143,42 @@ case "$version_output" in
     exit 1
     ;;
 esac
+
+short_version_output="$(PATH="$shim_dir:$PATH" git -v)"
+if [[ "$short_version_output" != "$version_output" ]]; then
+  echo "git -v did not match git --version" >&2
+  printf 'git --version: %s\n' "$version_output" >&2
+  printf 'git -v: %s\n' "$short_version_output" >&2
+  exit 1
+fi
+
+build_options_prefix="$capture_dir/version_build_options.zmin"
+run_capture zmin "$zmin_client" "$build_options_prefix" version --build-options
+if [[ "$(cat "$build_options_prefix.status")" != "0" ]]; then
+  echo "git version --build-options failed through shim" >&2
+  cat "$build_options_prefix.stderr" >&2
+  exit 1
+fi
+for expected in \
+  "git version 2.47.1.zmin " \
+  "cpu:" \
+  "sizeof-long:" \
+  "sizeof-size_t:" \
+  "shell-path:" \
+  "zmin-version:"; do
+  if ! grep -Fq "$expected" "$build_options_prefix.stdout"; then
+    echo "git version --build-options missing '$expected'" >&2
+    cat "$build_options_prefix.stdout" >&2
+    exit 1
+  fi
+done
+if [[ -s "$build_options_prefix.stderr" ]]; then
+  echo "git version --build-options wrote stderr through shim" >&2
+  cat "$build_options_prefix.stderr" >&2
+  exit 1
+fi
+
+compare_command version_invalid version --version
 
 compare_command status_short status --short
 compare_command status_z status -z
