@@ -102,6 +102,7 @@ pub(crate) fn dispatch(
         runtime::Command::Fetch {
             all,
             multiple,
+            prefetch,
             quiet,
             verbose,
             dry_run,
@@ -127,6 +128,7 @@ pub(crate) fn dispatch(
         } => run_fetch(
             all,
             multiple,
+            prefetch,
             quiet,
             verbose,
             dry_run,
@@ -333,6 +335,7 @@ pub(crate) fn run_ls_remote(
 pub(crate) fn run_fetch(
     all: bool,
     multiple: bool,
+    prefetch: bool,
     quiet: bool,
     verbose: bool,
     dry_run: bool,
@@ -359,6 +362,7 @@ pub(crate) fn run_fetch(
     super::transport_commands::run_fetch(
         all,
         multiple,
+        prefetch,
         quiet,
         verbose,
         dry_run,

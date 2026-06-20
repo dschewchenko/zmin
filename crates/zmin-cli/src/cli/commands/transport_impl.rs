@@ -8414,6 +8414,7 @@ pub(crate) fn run_ls_remote(
 pub(crate) fn run_fetch(
     all: bool,
     multiple: bool,
+    prefetch: bool,
     quiet: bool,
     verbose: bool,
     dry_run: bool,
@@ -8481,6 +8482,7 @@ pub(crate) fn run_fetch(
                 update_head_ok,
                 write_fetch_head,
                 &refmap,
+                prefetch,
             )?;
         }
         if !dry_run {
@@ -8510,6 +8512,7 @@ pub(crate) fn run_fetch(
                 update_head_ok,
                 write_fetch_head,
                 &refmap,
+                prefetch,
             )?;
         }
         if !dry_run {
@@ -8530,6 +8533,7 @@ pub(crate) fn run_fetch(
             append,
             write_fetch_head,
             no_tags,
+            prefetch,
         )?;
         if !dry_run {
             write_fetch_commit_graph_if_enabled()?;
@@ -8556,6 +8560,7 @@ pub(crate) fn run_fetch(
         update_head_ok,
         write_fetch_head,
         &refmap,
+        prefetch,
     )?;
     if !dry_run {
         write_fetch_commit_graph_if_enabled()?;
@@ -8792,7 +8797,7 @@ fn write_split_commit_graph_chain_marker(repo: &GitRepo) -> Result<()> {
 
 fn fetch_multiple_refspecs(
     remote: Option<String>,
-    refspecs: Vec<String>,
+    mut refspecs: Vec<String>,
     depth: Option<&str>,
     quiet: bool,
     prune: bool,
@@ -8801,8 +8806,12 @@ fn fetch_multiple_refspecs(
     append: bool,
     write_fetch_head: bool,
     no_tags: bool,
+    prefetch: bool,
 ) -> Result<()> {
     let depth = depth.map(validate_positive_depth).transpose()?;
+    if prefetch {
+        refspecs = prefetch_fetch_refspecs(&refspecs);
+    }
     if dry_run {
         return Ok(());
     }
@@ -9541,6 +9550,7 @@ pub(crate) fn run_pull(
                 false,
                 true,
                 &[],
+                false,
             )?;
         }
         "FETCH_HEAD".to_owned()
@@ -10201,6 +10211,7 @@ fn fetch_with_depth(
     update_head_ok: bool,
     write_fetch_head: bool,
     refmap: &[String],
+    prefetch: bool,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let explicit_remote = remote.clone();
@@ -10249,6 +10260,7 @@ fn fetch_with_depth(
         tags,
         atomic,
         refmap,
+        prefetch,
     )
 }
 
@@ -10277,6 +10289,7 @@ fn fetch_with_missing_ref_code(
         false,
         false,
         &[],
+        false,
     )
 }
 
@@ -10315,6 +10328,7 @@ pub(crate) fn fetch_with_repo_and_remote(
     _tags: bool,
     atomic: bool,
     refmap: &[String],
+    prefetch: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -10421,6 +10435,9 @@ pub(crate) fn fetch_with_repo_and_remote(
             Vec::new()
         }
     };
+    if prefetch {
+        fetch_refspecs = prefetch_fetch_refspecs(&fetch_refspecs);
+    }
     if !explicit_refspec_fetch {
         add_prune_tags_refspec(&mut fetch_refspecs, prune_tags);
     }
@@ -10490,7 +10507,11 @@ pub(crate) fn fetch_with_repo_and_remote(
         let id = source_refs
             .resolve(&ref_name)
             .map_err(|_| missing_remote_ref_error(&branch, missing_ref_code))?;
-        let destination_ref = format!("refs/remotes/{remote}/{branch}");
+        let destination_ref = if prefetch {
+            format!("refs/prefetch/remotes/{remote}/{branch}")
+        } else {
+            format!("refs/remotes/{remote}/{branch}")
+        };
         let atomic_updates = if atomic {
             let mut updates = Vec::with_capacity(1);
             push_atomic_fetch_ref_update(
@@ -10514,7 +10535,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         if atomic {
             run_reference_transaction_hook(&repo, "committed", &atomic_updates)?;
         }
-        write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append)?;
+        write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, prefetch)?;
         return Ok(());
     }
     if !fetch_refspecs.is_empty() {
@@ -11179,7 +11200,7 @@ fn fetch_branch_without_destination_ref(
         PackEncodeOptions::delta(10, 50),
         pack_missing_threshold,
     )?;
-    write_branch_fetch_head_file(repo, &id, &ref_name, url, false)
+    write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
 }
 
 fn fetch_branch_without_destination_ref_depth(
@@ -11203,7 +11224,7 @@ fn fetch_branch_without_destination_ref_depth(
         depth,
         no_tags,
     )?;
-    write_branch_fetch_head_file(repo, &id, &ref_name, url, false)
+    write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
 }
 
 fn set_fetch_upstream_config(repo: &GitRepo, remote: &str, branch: &str) -> Result<()> {
@@ -11836,6 +11857,35 @@ fn fetch_refspecs_from_refmap(branch: &str, refmap: &[String]) -> Result<Vec<Str
         });
     }
     Ok(refspecs)
+}
+
+fn prefetch_fetch_refspecs(refspecs: &[String]) -> Vec<String> {
+    refspecs
+        .iter()
+        .map(|refspec| {
+            let force = refspec.starts_with('+');
+            let body = refspec.trim_start_matches('+');
+            let Some((source, destination)) = body.split_once(':') else {
+                return refspec.clone();
+            };
+            let destination = prefetch_destination_ref(destination);
+            if force {
+                format!("+{source}:{destination}")
+            } else {
+                format!("{source}:{destination}")
+            }
+        })
+        .collect()
+}
+
+fn prefetch_destination_ref(destination: &str) -> String {
+    if destination.starts_with("refs/prefetch/") {
+        destination.to_owned()
+    } else if let Some(rest) = destination.strip_prefix("refs/") {
+        format!("refs/prefetch/{rest}")
+    } else {
+        format!("refs/prefetch/{destination}")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -12521,11 +12571,14 @@ fn write_branch_fetch_head_file(
     source_ref: &str,
     url: &str,
     append: bool,
+    not_for_merge: bool,
 ) -> Result<()> {
     let branch = source_ref.strip_prefix("refs/heads/").unwrap_or(source_ref);
+    let marker = if not_for_merge { "not-for-merge" } else { "" };
     let row = format!(
-        "{}\t\tbranch '{}' of {}\n",
+        "{}\t{}\tbranch '{}' of {}\n",
         id.to_hex(),
+        marker,
         branch,
         fetch_head_url_display(url)
     );

@@ -413,6 +413,132 @@ fn fetch_multiple_without_remotes_matches_stock_git_noop() {
 }
 
 #[test]
+fn fetch_prefetch_named_remote_writes_prefetch_namespace_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+    git(&source, ["switch", "-c", "feature"]);
+    fs::write(source.join("feature.txt"), b"feature\n").expect("write feature");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "feature"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", client.to_str().expect("client path")],
+        );
+        git(
+            client,
+            [
+                "remote",
+                "add",
+                "origin",
+                source.to_str().expect("source path"),
+            ],
+        );
+    }
+
+    git(&git_client, ["fetch", "--prefetch", "origin"]);
+    run_zmin(&zmin_client, ["fetch", "--prefetch", "origin"]);
+
+    assert_eq!(
+        git(
+            &zmin_client,
+            [
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/remotes",
+                "refs/prefetch",
+            ],
+        ),
+        git(
+            &git_client,
+            [
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/remotes",
+                "refs/prefetch",
+            ],
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+}
+
+#[test]
+fn fetch_prefetch_explicit_branch_writes_prefetch_namespace_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", client.to_str().expect("client path")],
+        );
+        git(
+            client,
+            [
+                "remote",
+                "add",
+                "origin",
+                source.to_str().expect("source path"),
+            ],
+        );
+    }
+
+    git(&git_client, ["fetch", "--prefetch", "origin", "main"]);
+    run_zmin(&zmin_client, ["fetch", "--prefetch", "origin", "main"]);
+
+    assert_eq!(
+        git(
+            &zmin_client,
+            [
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/remotes",
+                "refs/prefetch",
+            ],
+        ),
+        git(
+            &git_client,
+            [
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                "refs/remotes",
+                "refs/prefetch",
+            ],
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+}
+
+#[test]
 fn fetch_creates_git_trace_packet_file_for_upstream_harness() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");

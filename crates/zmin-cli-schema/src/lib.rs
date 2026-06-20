@@ -1078,6 +1078,8 @@ pub enum Command {
         all: bool,
         #[arg(long = "multiple", action = ArgAction::SetTrue)]
         multiple: bool,
+        #[arg(long = "prefetch", action = ArgAction::SetTrue)]
+        prefetch: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
