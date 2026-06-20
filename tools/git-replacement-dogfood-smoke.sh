@@ -233,6 +233,7 @@ printf 'loose\n' >"$zmin_client/dir/loose.txt"
 compare_command ls_files_others_pathspec_z ls-files -z --others --exclude-standard -- dir
 rm "$stock_client/dir/loose.txt" "$zmin_client/dir/loose.txt"
 compare_command ls_files_deleted_modified_z ls-files -z --deleted --modified
+compare_command ls_files_worktree_mix_z ls-files -z --modified --deleted --others --exclude-standard
 compare_command diff_name_status_z diff --name-status -z
 compare_command rev_parse_git_dir rev-parse --git-dir
 compare_command rev_parse_inside rev-parse --is-inside-work-tree
