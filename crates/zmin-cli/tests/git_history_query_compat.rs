@@ -8,11 +8,11 @@ use tempfile::TempDir;
 use common::{
     clone_repo_fixture, command_output_with_env, configure_identity, git, git_args, git_init,
     git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, write_file, zmin_bin,
+    run_zmin_with_env, stock_git_bin, write_file, zmin_bin,
 };
 
 fn commit_empty_as(cwd: &std::path::Path, name: &str, email: &str, message: &str) {
-    let output = Command::new("git")
+    let output = Command::new(stock_git_bin())
         .args([
             "-c",
             "commit.gpgsign=false",
@@ -44,7 +44,7 @@ fn git_commit_with_author(
     date: &str,
     message: &str,
 ) {
-    let output = Command::new("git")
+    let output = Command::new(stock_git_bin())
         .args(["-c", "commit.gpgsign=false", "commit", "-m", message])
         .env("GIT_AUTHOR_NAME", name)
         .env("GIT_AUTHOR_EMAIL", email)
@@ -63,7 +63,7 @@ fn git_commit_with_author(
 }
 
 fn write_loose_blob(cwd: &std::path::Path, content: &str) {
-    let mut child = Command::new("git")
+    let mut child = Command::new(stock_git_bin())
         .args(["hash-object", "-w", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
@@ -139,7 +139,7 @@ fn whatchanged_cases() -> Vec<Vec<&'static str>> {
 }
 
 fn stock_git_version_at_least(major: u32, minor: u32) -> bool {
-    let output = Command::new("git")
+    let output = Command::new(stock_git_bin())
         .arg("--version")
         .output()
         .expect("git version");
@@ -377,7 +377,7 @@ fn cherry_matches_stock_git_for_patch_equivalence_and_upstream_default() {
     git_with_env(repo.path(), ["commit", "-m", "add alpha"]);
 
     git(repo.path(), ["checkout", "-b", "topic", "main"]);
-    let cherry_pick = Command::new("git")
+    let cherry_pick = Command::new(stock_git_bin())
         .args(["-c", "commit.gpgsign=false", "cherry-pick", "upstream"])
         .env("GIT_AUTHOR_NAME", "Bench")
         .env("GIT_AUTHOR_EMAIL", "bench@example.test")

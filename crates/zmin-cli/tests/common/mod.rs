@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -8,9 +9,93 @@ use std::{fs, path::Path, path::PathBuf};
 use tempfile::TempDir;
 
 static REMOTE_HTTP_HELPER: OnceLock<PathBuf> = OnceLock::new();
+static STOCK_GIT: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn zmin_bin() -> &'static str {
     option_env!("CARGO_BIN_EXE_zmin").unwrap_or(env!("CARGO_BIN_EXE_zmin"))
+}
+
+pub fn stock_git_bin() -> &'static Path {
+    STOCK_GIT.get_or_init(resolve_stock_git).as_path()
+}
+
+fn resolve_stock_git() -> PathBuf {
+    for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
+        if let Ok(value) = std::env::var(key)
+            && !value.trim().is_empty()
+        {
+            let path = PathBuf::from(value);
+            assert_stock_git(&path, key);
+            return path;
+        }
+    }
+
+    for path in stock_git_candidates() {
+        if is_stock_git(&path) {
+            return path;
+        }
+    }
+
+    for path in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .flat_map(|dir| {
+            stock_git_names()
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
+    {
+        if is_stock_git(&path) {
+            return path;
+        }
+    }
+
+    panic!(
+        "could not find stock Git; set ZMIN_STOCK_GIT to a Git binary that is not the Zmin shim"
+    );
+}
+
+fn stock_git_candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        vec![
+            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
+    }
+}
+
+fn stock_git_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["git.exe", "git"]
+    } else {
+        vec!["git"]
+    }
+}
+
+fn assert_stock_git(path: &Path, source: &str) {
+    assert!(
+        is_stock_git(path),
+        "{source} does not point to stock Git: {}",
+        path.display()
+    );
+}
+
+fn is_stock_git(path: &Path) -> bool {
+    let Ok(output) = Command::new(path).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 pub fn ensure_remote_http_helper() -> &'static Path {
@@ -220,7 +305,7 @@ pub fn command_status_with_stdin(
     stdin: &str,
     label: &str,
 ) -> i32 {
-    let mut child = Command::new(command)
+    let mut child = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -243,7 +328,7 @@ pub fn command_status_with_stdin(
 }
 
 pub fn command_status(command: &str, cwd: &std::path::Path, args: &[&str], label: &str) -> i32 {
-    Command::new(command)
+    Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -268,7 +353,7 @@ pub fn command_any_output(
     args: &[&str],
     label: &str,
 ) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -293,7 +378,7 @@ pub fn command_any_output_with_stdin(
     stdin: &str,
     label: &str,
 ) -> (i32, String, String) {
-    let mut child = Command::new(command)
+    let mut child = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -404,12 +489,19 @@ fn command_with_test_envs(
     args: &[&str],
     envs: &[(&str, &str)],
 ) -> Command {
-    let mut command = Command::new(command);
+    let mut command = Command::new(test_command_program(command));
     command.args(args).current_dir(cwd);
     for (key, value) in envs {
         command.env(key, test_env_value(key, value));
     }
     command
+}
+
+fn test_command_program(command: &str) -> OsString {
+    if command == "git" {
+        return stock_git_bin().as_os_str().to_owned();
+    }
+    OsString::from(command)
 }
 
 #[cfg(windows)]
@@ -430,7 +522,7 @@ fn test_env_value(_key: &str, value: &str) -> String {
 }
 
 pub fn command_stdout_bytes(command: &str, cwd: &std::path::Path, args: &[&str]) -> Vec<u8> {
-    let output = Command::new(command)
+    let output = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -449,7 +541,7 @@ pub fn command_stdout_bytes_with_stdin(
     args: &[&str],
     stdin: &[u8],
 ) -> Vec<u8> {
-    let mut child = Command::new(command)
+    let mut child = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -773,7 +865,7 @@ fn command_with_stdin(
     stdin: &str,
     label: &str,
 ) -> String {
-    let mut child = Command::new(command)
+    let mut child = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
@@ -808,7 +900,7 @@ fn command_with_stdin_bytes(
     stdin: &[u8],
     label: &str,
 ) -> String {
-    let mut child = Command::new(command)
+    let mut child = Command::new(test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())

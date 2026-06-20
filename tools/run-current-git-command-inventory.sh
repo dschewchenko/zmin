@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 zmin_bin="${ZMIN_BIN:-}"
+git_bin="${ZMIN_STOCK_GIT:-${GIT_BIN:-}}"
 allowed_omissions="${ZMIN_CURRENT_GIT_ALLOWED_OMISSIONS:-}"
 
 if [[ -z "$zmin_bin" ]]; then
@@ -17,6 +18,30 @@ if [[ ! -x "$zmin_bin" ]]; then
   exit 1
 fi
 
+if [[ -z "$git_bin" ]]; then
+  for candidate in /usr/bin/git /bin/git; do
+    if [[ -x "$candidate" ]] && ! "$candidate" --version | grep -qi 'zmin'; then
+      git_bin="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$git_bin" ]]; then
+  git_bin="$(command -v git || true)"
+fi
+
+if [[ -z "$git_bin" || ! -x "$git_bin" ]]; then
+  echo "stock Git binary is not executable: ${git_bin:-<empty>}" >&2
+  exit 1
+fi
+
+if "$git_bin" --version | grep -qi 'zmin'; then
+  echo "stock Git binary resolved to Zmin shim: $git_bin" >&2
+  echo "set ZMIN_STOCK_GIT to a stock Git binary" >&2
+  exit 1
+fi
+
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -28,7 +53,7 @@ unexpected_missing="$tmp_dir/unexpected-missing.txt"
 allowed_missing="$tmp_dir/allowed-missing.txt"
 extra="$tmp_dir/extra.txt"
 
-git help -a | awk '
+"$git_bin" help -a | awk '
   /^Main Porcelain Commands$/ ||
   /^Ancillary Commands/ ||
   /^Interacting with Others$/ ||
@@ -64,7 +89,7 @@ unexpected_missing_count="$(wc -l <"$unexpected_missing" | tr -d ' ')"
 extra_count="$(wc -l <"$extra" | tr -d ' ')"
 
 printf 'Current Git command inventory\n'
-printf 'git_version=%s\n' "$(git --version)"
+printf 'git_version=%s\n' "$("$git_bin" --version)"
 printf 'current_git_commands=%s\n' "$current_count"
 printf 'zmin_modern_commands=%s\n' "$zmin_count"
 printf 'missing_current_git_commands=%s\n' "$missing_count"

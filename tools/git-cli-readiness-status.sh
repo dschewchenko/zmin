@@ -34,13 +34,38 @@ if [[ ! -x "$zmin_bin" ]]; then
   cargo build -p zmin-cli --bin zmin --quiet
 fi
 
+stock_git="${ZMIN_STOCK_GIT:-${GIT_BIN:-}}"
+if [[ -z "$stock_git" ]]; then
+  for candidate in /usr/bin/git /bin/git; do
+    if [[ -x "$candidate" ]] && ! "$candidate" --version | grep -qi 'zmin'; then
+      stock_git="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$stock_git" ]]; then
+  stock_git="$(command -v git || true)"
+fi
+
+if [[ -z "$stock_git" || ! -x "$stock_git" ]]; then
+  echo "stock Git binary is not executable: ${stock_git:-<empty>}" >&2
+  exit 1
+fi
+
+if "$stock_git" --version | grep -qi 'zmin'; then
+  echo "stock Git binary resolved to Zmin shim: $stock_git" >&2
+  echo "set ZMIN_STOCK_GIT to a stock Git binary" >&2
+  exit 1
+fi
+
 report="$(mktemp)"
 inventory="$(mktemp)"
 matrix_summary="$(mktemp)"
 trap 'rm -f "$report" "$inventory" "$matrix_summary"' EXIT
 
 "$zmin_bin" compat --profile v2-47 --format text >"$report"
-ZMIN_BIN="$zmin_bin" tools/run-current-git-command-inventory.sh >"$inventory"
+ZMIN_BIN="$zmin_bin" ZMIN_STOCK_GIT="$stock_git" tools/run-current-git-command-inventory.sh >"$inventory"
 tools/git-compat-command-summary.sh --tsv >"$matrix_summary"
 
 ready_line="$(grep -E '^Ready commands: [0-9]+ \(explicitly not ready: [0-9]+\)$' "$report")"

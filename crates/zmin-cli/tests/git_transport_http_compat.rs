@@ -10,7 +10,7 @@ use common::{
     command_failure_output, command_failure_output_with_env, command_output,
     command_output_with_env, configure_identity, ensure_remote_http_helper, git, git_args,
     git_init, git_with_env, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
-    run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin_args, zmin_bin,
+    run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin_args, stock_git_bin, zmin_bin,
 };
 
 fn unused_local_port() -> u16 {
@@ -35,7 +35,7 @@ fn wait_for_tcp_port(port: u16) {
 fn wait_for_ref(repo: &std::path::Path, suffix: &str) -> String {
     let mut last_error = String::new();
     for _ in 0..200 {
-        let output = Command::new("git")
+        let output = Command::new(stock_git_bin())
             .current_dir(repo)
             .arg("show-ref")
             .output()
@@ -305,7 +305,7 @@ fn scp_url_for_remote(remote: &std::path::Path) -> String {
 }
 
 fn git_object_exists(repo: &std::path::Path, object: &str) -> bool {
-    Command::new("git")
+    Command::new(stock_git_bin())
         .args(["cat-file", "-e", object])
         .current_dir(repo)
         .status()
@@ -909,7 +909,7 @@ impl StockGitDaemon {
     fn spawn_with_args(root: &std::path::Path, port: u16, extra_args: &[&str]) -> Self {
         let port_arg = format!("--port={port}");
         let base_path = format!("--base-path={}", root.display());
-        let mut command = Command::new("git");
+        let mut command = Command::new(stock_git_bin());
         command.args([
             "daemon",
             "--export-all",
@@ -1212,7 +1212,7 @@ fn http_backend_response_with_translated_path_at(
     path_info: &str,
 ) -> Vec<u8> {
     let path_translated = project_root.join(path_info.trim_start_matches('/'));
-    let output = Command::new(command)
+    let output = backend_command(command)
         .arg("http-backend")
         .env_remove("GIT_PROJECT_ROOT")
         .env("GIT_HTTP_EXPORT_ALL", "1")
@@ -1246,7 +1246,7 @@ fn http_backend_response_with_body(
     } else {
         "application/x-git-upload-pack-request"
     };
-    let output = Command::new(command)
+    let output = backend_command(command)
         .arg("http-backend")
         .env("GIT_PROJECT_ROOT", project_root)
         .env("PATH_INFO", path_info)
@@ -1322,7 +1322,7 @@ fn http_backend_failure_with_body(
     } else {
         "application/x-git-upload-pack-request"
     };
-    let output = Command::new(command)
+    let output = backend_command(command)
         .arg("http-backend")
         .env("GIT_PROJECT_ROOT", project_root)
         .env("PATH_INFO", path_info)
@@ -1356,6 +1356,13 @@ fn http_backend_failure_with_body(
             .trim_end_matches('\n')
             .to_owned(),
     )
+}
+
+fn backend_command(command: &str) -> Command {
+    if command == "git" {
+        return Command::new(stock_git_bin());
+    }
+    Command::new(command)
 }
 
 fn pkt_line_bytes(payload: &[u8]) -> Vec<u8> {
@@ -1500,7 +1507,7 @@ fn daemon_serves_stock_git_clone_protocol_v1() {
     let port = unused_local_port();
     let _daemon = StockGitDaemon::spawn(dir.path(), port);
     let url = format!("git://127.0.0.1:{port}/remote.git");
-    let output = Command::new("git")
+    let output = Command::new(stock_git_bin())
         .args([
             "-c",
             "protocol.version=0",
@@ -3724,7 +3731,7 @@ fn http_backend_upload_pack_deepen_since_emits_time_limited_pack() {
     for (idx, timestamp) in [(1, 1700000100), (2, 1700000200), (3, 1700000300)] {
         fs::write(work.join("a.txt"), format!("commit {idx}\n")).expect("write fixture");
         git(&work, ["add", "-A"]);
-        let output = Command::new("git")
+        let output = Command::new(stock_git_bin())
             .args(["commit", "-m", &format!("commit {idx}")])
             .current_dir(&work)
             .env("GIT_AUTHOR_DATE", format!("{timestamp} +0000"))
