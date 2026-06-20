@@ -4958,6 +4958,87 @@ fn fetch_filter_combine_network_branchless_transports_match_stock_git() {
     );
 }
 
+#[test]
+fn fetch_filter_sparse_oid_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_filter_remote(dir.path());
+    let spec = git(&remote, ["rev-parse", "main:sparse-spec"]);
+    let root_blob = git(&remote, ["rev-parse", "main:small.txt"]);
+    let keep_blob = git(&remote, ["rev-parse", "main:keep/a.txt"]);
+    let drop_blob = git(&remote, ["rev-parse", "main:drop/b.txt"]);
+    let filter = format!("--filter=sparse:oid={spec}");
+    let args = ["fetch", "--quiet", filter.as_str(), "origin", "main"];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-sparse-oid-http", url.as_str());
+    command_output("git", &git_client, &args, "git filter sparse oid http");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter sparse oid http",
+    );
+    assert_sparse_oid_filter_fetch_matches_stock_git(
+        "smart-http filter sparse:oid",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        keep_blob.as_str(),
+        drop_blob.as_str(),
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-sparse-oid-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter sparse oid ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter sparse oid ssh",
+    );
+    assert_sparse_oid_filter_fetch_matches_stock_git(
+        "ssh filter sparse:oid",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        keep_blob.as_str(),
+        drop_blob.as_str(),
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-sparse-oid-daemon", url.as_str());
+    command_output("git", &git_client, &args, "git filter sparse oid daemon");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter sparse oid daemon",
+    );
+    assert_sparse_oid_filter_fetch_matches_stock_git(
+        "git-daemon filter sparse:oid",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        keep_blob.as_str(),
+        drop_blob.as_str(),
+    );
+}
+
 fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("filter.git");
     let work = root.join("filter-work");
@@ -4970,8 +5051,13 @@ fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     fs::write(work.join("small.txt"), b"tiny\n").expect("write small");
     fs::write(work.join("large.txt"), b"large blob payload\n").expect("write large");
     fs::create_dir_all(work.join("dir/sub")).expect("create dir");
+    fs::create_dir_all(work.join("keep")).expect("create keep");
+    fs::create_dir_all(work.join("drop")).expect("create drop");
     fs::write(work.join("dir/b.txt"), b"nested\n").expect("write b");
     fs::write(work.join("dir/sub/deep.txt"), b"deep\n").expect("write deep");
+    fs::write(work.join("keep/a.txt"), b"keep\n").expect("write keep");
+    fs::write(work.join("drop/b.txt"), b"drop\n").expect("write drop");
+    fs::write(work.join("sparse-spec"), b"/keep/\nsmall.txt\n").expect("write sparse spec");
     git(&work, ["add", "-A"]);
     git_with_env(&work, ["commit", "-m", "initial"]);
     git(
@@ -6203,6 +6289,47 @@ fn assert_combined_filter_fetch_matches_stock_git(
             "{label}"
         );
     }
+}
+
+fn assert_sparse_oid_filter_fetch_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+    root_blob: &str,
+    keep_blob: &str,
+    drop_blob: &str,
+) {
+    assert_filter_fetch_common_matches_stock_git(label, git_client, zmin_client);
+    for object in [root_blob, keep_blob] {
+        assert_eq!(
+            filtered_object_local_presence(zmin_bin(), zmin_client, object),
+            0,
+            "{label}"
+        );
+        assert_eq!(
+            filtered_object_local_presence(
+                stock_git_bin().to_str().expect("stock git path"),
+                git_client,
+                object,
+            ),
+            0,
+            "{label}"
+        );
+    }
+    assert_ne!(
+        filtered_object_local_presence(zmin_bin(), zmin_client, drop_blob),
+        0,
+        "{label}"
+    );
+    assert_eq!(
+        filtered_object_local_presence(zmin_bin(), zmin_client, drop_blob),
+        filtered_object_local_presence(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_client,
+            drop_blob,
+        ),
+        "{label}"
+    );
 }
 
 fn filtered_blob_local_presence(command: &str, repo: &std::path::Path, path: &str) -> i32 {
