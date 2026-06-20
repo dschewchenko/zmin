@@ -9821,11 +9821,131 @@ fn fetch_server_option_repeated_protocol_v2_ssh_branchless_matches_stock_git() {
 
 #[test]
 fn fetch_server_option_protocol_v2_git_daemon_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+        "branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+        ],
+        &["fetch", "--server-option=trace", "origin"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_protocol_v2_git_daemon_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+        "branch",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+            "main",
+        ],
+        &["fetch", "--server-option=trace", "origin", "main"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_separate_protocol_v2_git_daemon_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+        "separate-branch",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option",
+            "trace",
+            "origin",
+            "main",
+        ],
+        &["fetch", "--server-option", "trace", "origin", "main"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_separate_protocol_v2_git_daemon_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+        "separate-branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option",
+            "trace",
+            "origin",
+        ],
+        &["fetch", "--server-option", "trace", "origin"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_repeated_protocol_v2_git_daemon_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+        "repeated-branch",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+            "main",
+        ],
+        &[
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+            "main",
+        ],
+        &["server-option=trace", "server-option=mode=full"],
+    );
+}
+
+#[test]
+fn fetch_server_option_repeated_protocol_v2_git_daemon_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+        "repeated-branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+        ],
+        &[
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+        ],
+        &["server-option=trace", "server-option=mode=full"],
+    );
+}
+
+fn assert_server_option_protocol_v2_git_daemon_matches_stock_git(
+    label: &str,
+    stock_args: &[&str],
+    zmin_args: &[&str],
+    expected_options: &[&str],
+) {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
     let work = dir.path().join("work");
-    let git_client = dir.path().join("git-server-option-daemon-branchless");
-    let zmin_client = dir.path().join("zmin-server-option-daemon-branchless");
+    let git_client = dir.path().join(format!("git-server-option-daemon-{label}"));
+    let zmin_client = dir
+        .path()
+        .join(format!("zmin-server-option-daemon-{label}"));
     git(dir.path(), ["init", "--bare", "remote.git"]);
     fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
     git(dir.path(), ["init", "-b", "main", "work"]);
@@ -9869,37 +9989,37 @@ fn fetch_server_option_protocol_v2_git_daemon_branchless_matches_stock_git() {
     let stock = command_output(
         stock_git_bin().to_str().expect("stock git path"),
         &git_client,
-        &[
-            "-c",
-            "protocol.version=2",
-            "fetch",
-            "--server-option=trace",
-            "origin",
-        ],
+        stock_args,
         "git fetch --server-option over git-daemon",
     );
     assert_eq!(stock.0, 0);
     let stock_trace = fs::read_to_string(&trace).expect("stock daemon packet trace");
-    let stock_option_count = stock_trace.matches("server-option=trace").count();
-    assert!(
-        stock_option_count >= 2,
-        "stock Git should send server-option during ls-refs and fetch:\n{stock_trace}"
-    );
+    let mut stock_option_counts = Vec::new();
+    for expected in expected_options {
+        let count = stock_trace.matches(expected).count();
+        assert!(
+            count >= 2,
+            "stock Git should send {expected} during ls-refs and fetch:\n{stock_trace}"
+        );
+        stock_option_counts.push((*expected, count));
+    }
 
     let zmin = command_output(
         zmin_bin(),
         &zmin_client,
-        &["fetch", "--server-option=trace", "origin"],
+        zmin_args,
         "zmin fetch --server-option over git-daemon",
     );
     assert_eq!(zmin.0, 0);
     assert_eq!(zmin.1, stock.1);
     let full_trace = fs::read_to_string(&trace).expect("zmin daemon packet trace");
-    let full_option_count = full_trace.matches("server-option=trace").count();
-    assert!(
-        full_option_count >= stock_option_count + 2,
-        "Zmin should send server-option during ls-refs and fetch:\n{full_trace}"
-    );
+    for (expected, stock_count) in stock_option_counts {
+        let full_count = full_trace.matches(expected).count();
+        assert!(
+            full_count >= stock_count + 2,
+            "Zmin should send {expected} during ls-refs and fetch:\n{full_trace}"
+        );
+    }
     assert_eq!(
         git(&zmin_client, ["show-ref"]),
         git(&git_client, ["show-ref"])
