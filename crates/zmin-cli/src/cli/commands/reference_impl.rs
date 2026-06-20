@@ -1464,7 +1464,7 @@ pub(crate) fn symbolic_ref(
             }
         }
     } else {
-        match refs.read_symbolic_ref(&name.to_owned()) {
+        match symbolic_ref_read_recursive(refs, name) {
             Ok(Some(target)) => target,
             Ok(None) if quiet => return Err(CliError::Exit(1)),
             Ok(None) => {
@@ -1473,9 +1473,7 @@ pub(crate) fn symbolic_ref(
                     message: format!("ref {name} is not a symbolic ref"),
                 });
             }
-            Err(error) => {
-                return Err(map_primitive_error(error, "read symbolic ref"));
-            }
+            Err(error) => return Err(error),
         }
     };
     if short {
@@ -1484,6 +1482,26 @@ pub(crate) fn symbolic_ref(
         println!("{target}");
     }
     Ok(())
+}
+
+fn symbolic_ref_read_recursive(refs: &dyn GitRefsStore, name: &str) -> Result<Option<String>> {
+    let mut current = name.to_owned();
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        if !seen.insert(current.clone()) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("symbolic ref loop: {current}"),
+            });
+        }
+        let Some(target) = refs
+            .read_symbolic_ref(&current)
+            .map_err(|error| map_primitive_error(error, "read symbolic ref"))?
+        else {
+            return Ok(if current == name { None } else { Some(current) });
+        };
+        current = target;
+    }
 }
 
 fn symbolic_ref_read_raw(repo: &GitRepo, name: &str) -> Result<Option<String>> {

@@ -70,6 +70,36 @@ fn update_ref_and_symbolic_ref_match_stock_git_state() {
 }
 
 #[test]
+fn symbolic_ref_read_modes_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/inner", "refs/heads/main"],
+        );
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/outer", "refs/heads/inner"],
+        );
+    }
+
+    for args in [
+        ["symbolic-ref", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "-q", "refs/heads/inner"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin symbolic-ref"),
+            command_any_output("git", git_repo.path(), args, "git symbolic-ref"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn update_ref_pseudoref_matches_stock_git_and_resolves_revision() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
