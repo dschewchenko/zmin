@@ -8512,11 +8512,7 @@ pub(crate) fn run_fetch(
         });
     }
     if upload_pack_command.is_some()
-        && (depth.is_some()
-            || deepen.is_some()
-            || unshallow
-            || shallow_since.is_some()
-            || !shallow_exclude.is_empty())
+        && (deepen.is_some() || unshallow || shallow_since.is_some() || !shallow_exclude.is_empty())
     {
         return Err(CliError::Fatal {
             code: 128,
@@ -10786,6 +10782,7 @@ fn fetch_with_depth(
             depth,
             append,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     fetch_with_repo_and_remote(
@@ -14643,6 +14640,7 @@ fn fetch_with_repo_and_remote_depth(
     depth: usize,
     append: bool,
     write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -14678,6 +14676,24 @@ fn fetch_with_repo_and_remote_depth(
         destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
         if write_fetch_head {
             write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, false)?;
+        }
+        if let Some(command) = upload_pack_command {
+            let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
+            let request_roots = missing_fetch_roots(&destination_store, std::slice::from_ref(&id))?;
+            let shallow_boundaries = fetch_pack_with_local_upload_pack_command_with_depth(
+                command,
+                source_path.to_string_lossy().as_ref(),
+                &repo.objects_dir,
+                &request_roots,
+                &haves,
+                Some(depth),
+            )?;
+            roots.push(id);
+            write_shallow_file(
+                &repo,
+                boundaries_or_local_fallback(&repo, &roots, depth, shallow_boundaries)?,
+            )?;
+            return Ok(());
         }
         let depth_limited_commits =
             upload_pack_depth_limited_commits(&source_store, std::slice::from_ref(&id), depth)?;
@@ -15004,6 +15020,7 @@ fn fetch_with_repo_and_remote_deepen(
         current_depth.saturating_add(deepen),
         append,
         write_fetch_head,
+        None,
     )
 }
 
@@ -16128,6 +16145,25 @@ fn fetch_pack_with_local_upload_pack_command(
     roots: &[ObjectId],
     haves: &[ObjectId],
 ) -> Result<()> {
+    fetch_pack_with_local_upload_pack_command_with_depth(
+        command,
+        repository_path,
+        objects_dir,
+        roots,
+        haves,
+        None,
+    )
+    .map(|_| ())
+}
+
+fn fetch_pack_with_local_upload_pack_command_with_depth(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+) -> Result<Vec<ObjectId>> {
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
@@ -16138,9 +16174,10 @@ fn fetch_pack_with_local_upload_pack_command(
         while read_pkt_line_payload_into(stdout, &mut line)? {}
     }
     if roots.is_empty() {
-        return session.finish();
+        session.finish()?;
+        return Ok(Vec::new());
     }
-    let request = build_upload_pack_request(roots, haves, None)?;
+    let request = build_upload_pack_request(roots, haves, depth)?;
     session
         .stdin
         .as_mut()
@@ -16168,7 +16205,8 @@ fn fetch_pack_with_local_upload_pack_command(
         });
     }
     write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
-    session.finish()
+    session.finish()?;
+    Ok(pack_result.unwrap_or_default())
 }
 
 fn spawn_local_upload_pack_command(
