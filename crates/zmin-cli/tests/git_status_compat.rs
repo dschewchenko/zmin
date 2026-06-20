@@ -642,6 +642,17 @@ fn status_invalid_untracked_files_mode_matches_stock_git() {
 }
 
 #[test]
+fn status_invalid_ignore_submodules_mode_matches_stock_git() {
+    let repo = committed_repo();
+    let args = ["status", "--ignore-submodules=bogus"];
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[test]
 fn status_rename_modes_match_stock_git() {
     let repo = committed_repo();
     run_zmin(repo.path(), ["mv", "a.txt", "renamed.txt"]);

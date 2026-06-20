@@ -1250,7 +1250,7 @@ impl StatusIgnoreSubmodulesMode {
             Some("untracked") => Ok(Self::Untracked),
             Some(value) => Err(CliError::Fatal {
                 code: 128,
-                message: format!("Invalid ignore-submodules mode '{value}'"),
+                message: format!("bad --ignore-submodules argument: {value}"),
             }),
         }
     }
