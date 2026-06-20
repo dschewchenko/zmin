@@ -10674,12 +10674,6 @@ fn fetch_with_depth(
                     .into(),
             });
         }
-        if unshallow {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --unshallow currently supports named local and file remotes".into(),
-            });
-        }
         let prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         let prune_tags = prune && effective_fetch_prune_tags(&repo, None, prune_tags)?;
         let depth = depth.map(validate_positive_depth).transpose()?;
@@ -10702,6 +10696,7 @@ fn fetch_with_depth(
             shallow_since,
             &shallow_exclude,
             deepen,
+            unshallow,
         );
     }
     validate_remote_name(&remote)?;
@@ -11327,6 +11322,7 @@ fn fetch_with_repo_and_location(
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
     deepen: Option<usize>,
+    unshallow: bool,
 ) -> Result<()> {
     if is_http_transport_url(&location)
         || is_git_daemon_transport_url(&location)
@@ -11364,6 +11360,13 @@ fn fetch_with_repo_and_location(
             return Err(CliError::Fatal {
                 code: 128,
                 message: "fetch --deepen currently supports explicit local and file branches"
+                    .into(),
+            });
+        }
+        if unshallow && refspec.contains(':') {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports explicit local and file branches"
                     .into(),
             });
         }
@@ -11510,6 +11513,15 @@ fn fetch_with_repo_and_location(
                     deepen,
                 );
             }
+            if unshallow {
+                return fetch_branch_without_destination_ref_unshallow(
+                    &repo,
+                    &source,
+                    &source_refs,
+                    refspec,
+                    &location,
+                );
+            }
             if let Some(depth) = depth {
                 return fetch_branch_without_destination_ref_depth(
                     &repo,
@@ -11556,6 +11568,12 @@ fn fetch_with_repo_and_location(
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --deepen currently supports explicit local and file branches".into(),
+        });
+    }
+    if unshallow {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --unshallow currently supports explicit local and file branches".into(),
         });
     }
     if !prune && !tags && branch.is_none() {
@@ -12141,6 +12159,24 @@ fn fetch_branch_without_destination_ref_deepen(
         no_tags,
         current_depth.saturating_add(deepen),
     )
+}
+
+fn fetch_branch_without_destination_ref_unshallow(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    source_refs: &RefStore,
+    branch: &str,
+    url: &str,
+) -> Result<()> {
+    if read_repo_shallow_boundaries(repo)?.is_none() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--unshallow on a complete repository does not make sense".into(),
+        });
+    }
+    fetch_branch_without_destination_ref(repo, source, source_refs, branch, url, false)?;
+    copy_local_unshallow_objects(source, repo, source_refs, Some(branch), &[], 128)?;
+    write_shallow_file(repo, Vec::new())
 }
 
 fn set_fetch_upstream_config(repo: &GitRepo, remote: &str, branch: &str) -> Result<()> {
