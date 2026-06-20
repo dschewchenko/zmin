@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Other Git 2.47 commands	column	--mode	bad	invalid mode value	stdin input	n/a	all	git column --mode=bad	invalid-input	git_text_tools_compat::column_matches_stock_git_for_common_modes	unsupported column mode guard is classified as stock-compatible invalid input with exit code and error diagnostic parity

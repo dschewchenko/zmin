@@ -3,8 +3,8 @@ mod common;
 use std::fs;
 
 use common::{
-    git, git_args, git_init, git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_args,
-    run_zmin_with_stdin, run_zmin_with_stdin_args,
+    git, git_args, git_failure_output, git_init, git_with_stdin, git_with_stdin_args, run_zmin,
+    run_zmin_args, run_zmin_failure_output, run_zmin_with_stdin, run_zmin_with_stdin_args,
 };
 
 #[test]
@@ -105,6 +105,11 @@ fn column_matches_stock_git_for_common_modes() {
             git_with_stdin_args(repo.path(), args, dense_input)
         );
     }
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--mode=bad"]),
+        git_failure_output(repo.path(), &["column", "--mode=bad"])
+    );
 }
 
 #[test]

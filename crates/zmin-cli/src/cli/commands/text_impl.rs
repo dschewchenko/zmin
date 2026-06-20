@@ -75,9 +75,9 @@ fn parse_column_mode(mode: Option<&str>, raw_mode: Option<u32>) -> Result<Column
             }
             "" => {}
             other => {
-                return Err(CliError::Fatal {
+                return Err(CliError::Stderr {
                     code: 129,
-                    message: format!("unsupported option '{other}'"),
+                    text: format!("error: unsupported option '{other}'\n"),
                 });
             }
         }
