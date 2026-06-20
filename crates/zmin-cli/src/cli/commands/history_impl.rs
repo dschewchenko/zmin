@@ -1824,6 +1824,7 @@ struct BlameOptions {
     abbrev_width: Option<usize>,
     date_mode: BlameDateMode,
     ignore_whitespace: bool,
+    color_by_age: bool,
     line_range: Option<BlameLineRange>,
 }
 
@@ -2102,10 +2103,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         positionals.push(arg.clone());
         cursor += 1;
     }
-    for (enabled, option) in [
-        (score_debug, "--score-debug"),
-        (color_by_age, "--color-by-age"),
-    ] {
+    for (enabled, option) in [(score_debug, "--score-debug")] {
         if enabled {
             return Err(CliError::Fatal {
                 code: 129,
@@ -2144,6 +2142,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         abbrev_width,
         date_mode,
         ignore_whitespace,
+        color_by_age,
         line_range,
     })
 }
@@ -2577,15 +2576,20 @@ fn print_blame_lines(
             signature_name(&commit.author)
         };
         let date = format_blame_date(&commit.author, options.date_mode)?;
-        print!("{display_id}");
+        let mut prefix = display_id;
         if options.show_filename {
-            print!(" {}", String::from_utf8_lossy(path));
+            prefix.push_str(&format!(" {}", String::from_utf8_lossy(path)));
         }
         if options.show_number {
-            print!(" {}", line.line_no);
+            prefix.push_str(&format!(" {}", line.line_no));
         }
         if options.suppress_author {
-            print!(" {}) ", line.line_no);
+            prefix.push_str(&format!(" {}) ", line.line_no));
+            if options.color_by_age {
+                print!("\x1b[34m{prefix}\x1b[m");
+            } else {
+                print!("{prefix}");
+            }
             io::stdout().write_all(&line.content)?;
             if !line.content.ends_with(b"\n") {
                 println!();
@@ -2593,13 +2597,26 @@ fn print_blame_lines(
             continue;
         }
         match options.date_mode {
-            BlameDateMode::IsoStrict => print!(" ({author} {date:<25} {}) ", line.line_no),
-            BlameDateMode::Local => print!(" ({author} {date:<30} {}) ", line.line_no),
-            BlameDateMode::Relative => print!(" ({author} {date:<22} {}) ", line.line_no),
-            BlameDateMode::Human => {
-                print!(" ({author} {date:<16} {}) ", line.line_no)
+            BlameDateMode::IsoStrict => {
+                prefix.push_str(&format!(" ({author} {date:<25} {}) ", line.line_no));
             }
-            _ => print!(" ({author} {date} {}) ", line.line_no),
+            BlameDateMode::Local => {
+                prefix.push_str(&format!(" ({author} {date:<30} {}) ", line.line_no));
+            }
+            BlameDateMode::Relative => {
+                prefix.push_str(&format!(" ({author} {date:<22} {}) ", line.line_no));
+            }
+            BlameDateMode::Human => {
+                prefix.push_str(&format!(" ({author} {date:<16} {}) ", line.line_no));
+            }
+            _ => {
+                prefix.push_str(&format!(" ({author} {date} {}) ", line.line_no));
+            }
+        }
+        if options.color_by_age {
+            print!("\x1b[34m{prefix}\x1b[m");
+        } else {
+            print!("{prefix}");
         }
         io::stdout().write_all(&line.content)?;
         if !line.content.ends_with(b"\n") {
