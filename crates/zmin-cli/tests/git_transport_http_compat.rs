@@ -177,6 +177,8 @@ struct WritableHttpServer {
 struct SmartHttpServer {
     port: u16,
     upload_pack_requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    git_protocol_requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    upload_pack_bodies: std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
 }
@@ -784,8 +786,12 @@ impl SmartHttpServer {
         let port = listener.local_addr().expect("local addr").port();
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let upload_pack_requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let git_protocol_requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let upload_pack_bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let thread_stop = stop.clone();
         let thread_upload_pack_requests = upload_pack_requests.clone();
+        let thread_git_protocol_requests = git_protocol_requests.clone();
+        let thread_upload_pack_bodies = upload_pack_bodies.clone();
         let thread_root = project_root;
         let handle = std::thread::spawn(move || {
             loop {
@@ -797,11 +803,15 @@ impl SmartHttpServer {
                 }
                 let root = thread_root.clone();
                 let upload_pack_requests = thread_upload_pack_requests.clone();
+                let git_protocol_requests = thread_git_protocol_requests.clone();
+                let upload_pack_bodies = thread_upload_pack_bodies.clone();
                 std::thread::spawn(move || {
                     serve_smart_http_connection(
                         &root,
                         service_newline,
                         &upload_pack_requests,
+                        &git_protocol_requests,
+                        &upload_pack_bodies,
                         &mut stream,
                     )
                 });
@@ -810,6 +820,8 @@ impl SmartHttpServer {
         Self {
             port,
             upload_pack_requests,
+            git_protocol_requests,
+            upload_pack_bodies,
             stop,
             handle: Some(handle),
         }
@@ -818,6 +830,20 @@ impl SmartHttpServer {
     fn upload_pack_requests(&self) -> usize {
         self.upload_pack_requests
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn git_protocol_requests(&self) -> usize {
+        self.git_protocol_requests
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn upload_pack_bodies_text(&self) -> Vec<String> {
+        self.upload_pack_bodies
+            .lock()
+            .expect("upload-pack bodies lock")
+            .iter()
+            .map(|body| String::from_utf8_lossy(body).into_owned())
+            .collect()
     }
 }
 
@@ -1158,6 +1184,8 @@ fn serve_smart_http_connection(
     project_root: &std::path::Path,
     service_newline: bool,
     upload_pack_requests: &std::sync::atomic::AtomicUsize,
+    git_protocol_requests: &std::sync::atomic::AtomicUsize,
+    upload_pack_bodies: &std::sync::Mutex<Vec<Vec<u8>>>,
     stream: &mut std::net::TcpStream,
 ) {
     let mut request = Vec::new();
@@ -1178,14 +1206,18 @@ fn serve_smart_http_connection(
     let headers = String::from_utf8_lossy(&request[..header_end]).to_string();
     let mut lines = headers.lines();
     let line = lines.next().unwrap_or_default().to_owned();
-    let content_len = lines
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse::<usize>().ok())
-                .flatten()
-        })
-        .unwrap_or(0);
+    let mut content_len = 0_usize;
+    let mut git_protocol = None::<String>;
+    for line in lines {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.eq_ignore_ascii_case("content-length") {
+            content_len = value.trim().parse::<usize>().unwrap_or(0);
+        } else if name.eq_ignore_ascii_case("git-protocol") {
+            git_protocol = Some(value.trim().to_owned());
+        }
+    }
     let mut body = request[header_end + 4..].to_vec();
     while body.len() < content_len {
         let read = stream.read(&mut buf).expect("read smart body");
@@ -1199,11 +1231,25 @@ fn serve_smart_http_connection(
     let method = parts.next().unwrap_or_default();
     let raw_path = parts.next().unwrap_or_default();
     let (path, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
+    if git_protocol.is_some() {
+        git_protocol_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
     if method == "POST" && path.ends_with("/git-upload-pack") {
         upload_pack_requests.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        upload_pack_bodies
+            .lock()
+            .expect("upload-pack bodies lock")
+            .push(body.clone());
     }
-    let mut backend =
-        http_backend_response_with_body("git", project_root, path, query, method, &body);
+    let mut backend = http_backend_response_with_body_and_protocol(
+        "git",
+        project_root,
+        path,
+        query,
+        method,
+        &body,
+        git_protocol.as_deref(),
+    );
     if !service_newline
         && method == "GET"
         && path.ends_with("/info/refs")
@@ -1402,19 +1448,44 @@ fn http_backend_response_with_body(
     method: &str,
     body: &[u8],
 ) -> Vec<u8> {
+    http_backend_response_with_body_and_protocol(
+        command,
+        project_root,
+        path_info,
+        query_string,
+        method,
+        body,
+        None,
+    )
+}
+
+fn http_backend_response_with_body_and_protocol(
+    command: &str,
+    project_root: &std::path::Path,
+    path_info: &str,
+    query_string: &str,
+    method: &str,
+    body: &[u8],
+    git_protocol: Option<&str>,
+) -> Vec<u8> {
     let content_type = if path_info.ends_with("/git-receive-pack") {
         "application/x-git-receive-pack-request"
     } else {
         "application/x-git-upload-pack-request"
     };
-    let output = backend_command(command)
+    let mut child = backend_command(command);
+    child
         .arg("http-backend")
         .env("GIT_PROJECT_ROOT", project_root)
         .env("PATH_INFO", path_info)
         .env("QUERY_STRING", query_string)
         .env("REQUEST_METHOD", method)
         .env("CONTENT_LENGTH", body.len().to_string())
-        .env("CONTENT_TYPE", content_type)
+        .env("CONTENT_TYPE", content_type);
+    if let Some(git_protocol) = git_protocol {
+        child.env("HTTP_GIT_PROTOCOL", git_protocol);
+    }
+    let output = child
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -7613,6 +7684,115 @@ fn fetch_smart_http_noop_skips_upload_pack_when_roots_exist_locally() {
         "noop smart HTTP fetch should not request a pack when advertised roots already exist"
     );
     assert_eq!(git(&zmin_client, ["show-ref"]), refs_after_first_fetch);
+    git(&zmin_client, ["fsck", "--strict"]);
+}
+
+#[test]
+fn fetch_server_option_protocol_v2_smart_http_branch_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let git_client = dir.path().join("git-server-option");
+    let zmin_client = dir.path().join("zmin-server-option");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("alpha.txt"), b"alpha\n").expect("write alpha");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    git(dir.path(), ["init", "git-server-option"]);
+    git(dir.path(), ["init", "zmin-server-option"]);
+    git(&git_client, ["remote", "add", "origin", url.as_str()]);
+    run_zmin(&zmin_client, ["remote", "add", "origin", url.as_str()]);
+
+    let stock = command_output(
+        stock_git_bin().to_str().expect("stock git path"),
+        &git_client,
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+            "main",
+        ],
+        "git fetch --server-option",
+    );
+    assert_eq!(stock.0, 0);
+    let stock_body_count = server.upload_pack_bodies_text().len();
+    let stock_protocol_count = server.git_protocol_requests();
+    let stock_bodies = server.upload_pack_bodies_text();
+    assert!(
+        stock_protocol_count >= 3,
+        "stock Git should use protocol v2 for discovery and upload-pack requests"
+    );
+    assert!(
+        stock_bodies
+            .iter()
+            .filter(|body| body.contains("server-option=trace"))
+            .count()
+            >= 2,
+        "stock Git should send server-option during ls-refs and fetch"
+    );
+
+    let zmin = command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--server-option=trace", "origin", "main"],
+        "zmin fetch --server-option",
+    );
+    assert_eq!(zmin.0, 0);
+    assert_eq!(zmin.1, stock.1);
+    assert!(
+        server.git_protocol_requests() >= stock_protocol_count + 3,
+        "Zmin should use protocol v2 for discovery and upload-pack requests"
+    );
+    let bodies = server.upload_pack_bodies_text();
+    let zmin_bodies = &bodies[stock_body_count..];
+    assert!(
+        zmin_bodies
+            .iter()
+            .filter(|body| body.contains("server-option=trace"))
+            .count()
+            >= 2,
+        "Zmin should send server-option during ls-refs and fetch"
+    );
+    assert!(
+        zmin_bodies
+            .iter()
+            .any(|body| body.contains("command=ls-refs"))
+            && zmin_bodies
+                .iter()
+                .any(|body| body.contains("command=fetch")),
+        "Zmin should issue protocol v2 ls-refs and fetch commands"
+    );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "origin/main:alpha.txt"]),
+        git(&git_client, ["cat-file", "-p", "origin/main:alpha.txt"])
+    );
     git(&zmin_client, ["fsck", "--strict"]);
 }
 

@@ -947,6 +947,70 @@ fn http_fetch_smart_pack_direct(
     Ok(true)
 }
 
+fn http_fetch_smart_pack_v2_with_helper(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+) -> Result<bool> {
+    if roots.is_empty() {
+        return Ok(true);
+    }
+    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    let response_path = temp_http_helper_output_path()?;
+    let result = (|| {
+        let head = helper.request_to_file(
+            url,
+            "POST",
+            "git-upload-pack",
+            &request,
+            &PackBody::Empty,
+            &response_path,
+        )?;
+        if head.status_code != 200 {
+            return Ok(false);
+        }
+        let mut body = http_helper_file_body_reader(fs::File::open(&response_path)?);
+        let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+        let pack_path = parse_upload_pack_v2_pack_to_open_file(&mut body, &temp_pack, file)?;
+        let Some(pack_path) = pack_path else {
+            let _ = fs::remove_file(&temp_pack);
+            return Ok(false);
+        };
+        write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+        Ok(true)
+    })();
+    let _ = fs::remove_file(response_path);
+    result
+}
+
+fn http_fetch_smart_pack_v2_direct(
+    url: &ParsedHttpUrl,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+) -> Result<bool> {
+    if roots.is_empty() {
+        return Ok(true);
+    }
+    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
+    if head.status_code != 200 {
+        return Ok(false);
+    }
+    let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+    let pack_path = parse_upload_pack_v2_pack_to_open_file(&mut body, &temp_pack, file)?;
+    let Some(pack_path) = pack_path else {
+        let _ = fs::remove_file(&temp_pack);
+        return Ok(false);
+    };
+    write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+    Ok(true)
+}
+
 fn parse_upload_pack_sideband_pack_to_open_file<R: Read>(
     reader: &mut R,
     pack_path: &Path,
@@ -1043,6 +1107,105 @@ fn write_upload_pack_sideband_pack_to_open_file<R: Read>(
                 let progress_start = trace.enabled.then(Instant::now);
                 discard_exact_payload_with_buffer(reader, sideband_len, &mut buffer)?;
                 trace.record_progress_read(progress_start);
+                trace.emit();
+                return Ok(false);
+            }
+        }
+    }
+    file.flush()?;
+    trace.emit();
+    Ok(first_bytes_len == first_bytes.len() && first_bytes == *b"PACK")
+}
+
+fn parse_upload_pack_v2_pack_to_open_file<R: Read>(
+    reader: &mut R,
+    pack_path: &Path,
+    file: fs::File,
+) -> Result<Option<PathBuf>> {
+    let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+    loop {
+        match read_pkt_line_frame_into(reader, &mut payload)? {
+            PktLineFrame::Eof => return Ok(None),
+            PktLineFrame::Flush | PktLineFrame::Delim | PktLineFrame::ResponseEnd => continue,
+            PktLineFrame::Payload => {
+                if payload == b"packfile\n" {
+                    break;
+                }
+                if let Some(message) = payload.strip_prefix(b"ERR ") {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: String::from_utf8_lossy(message).trim().to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    write_upload_pack_v2_sideband_pack_to_open_file(reader, file).map(|wrote_pack| {
+        if wrote_pack {
+            Some(pack_path.to_path_buf())
+        } else {
+            None
+        }
+    })
+}
+
+fn write_upload_pack_v2_sideband_pack_to_open_file<R: Read>(
+    reader: &mut R,
+    file: fs::File,
+) -> Result<bool> {
+    let mut file = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, file);
+    let mut first_bytes = [0_u8; 4];
+    let mut first_bytes_len = 0_usize;
+    let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+    let mut trace = UploadPackSidebandTrace::new(phase_trace_enabled());
+    loop {
+        let frame_start = trace.enabled.then(Instant::now);
+        match read_pkt_line_frame_into(reader, &mut payload)? {
+            PktLineFrame::Eof | PktLineFrame::ResponseEnd => {
+                trace.record_frame_read(frame_start);
+                break;
+            }
+            PktLineFrame::Flush | PktLineFrame::Delim => {
+                trace.record_frame_read(frame_start);
+                continue;
+            }
+            PktLineFrame::Payload => {
+                trace.record_frame_read(frame_start);
+            }
+        }
+        let Some((&band, sideband)) = payload.split_first() else {
+            continue;
+        };
+        match band {
+            1 => {
+                trace.pack_packets += 1;
+                trace.pack_bytes += sideband.len();
+                if first_bytes_len < first_bytes.len() {
+                    let copy_len = (first_bytes.len() - first_bytes_len).min(sideband.len());
+                    first_bytes[first_bytes_len..first_bytes_len + copy_len]
+                        .copy_from_slice(&sideband[..copy_len]);
+                    first_bytes_len += copy_len;
+                }
+                let write_start = trace.enabled.then(Instant::now);
+                file.write_all(sideband)?;
+                if let Some(start) = write_start {
+                    trace.write_elapsed += start.elapsed();
+                }
+            }
+            2 => {
+                trace.progress_packets += 1;
+                trace.progress_bytes += sideband.len();
+            }
+            3 => {
+                trace.error_packets += 1;
+                trace.emit();
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: String::from_utf8_lossy(sideband).trim().to_owned(),
+                });
+            }
+            _ => {
+                trace.other_packets += 1;
                 trace.emit();
                 return Ok(false);
             }
@@ -8565,7 +8728,8 @@ pub(crate) fn run_fetch(
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     validate_fetch_jobs(raw_args)?;
-    let has_server_options = fetch_has_server_options(raw_args);
+    let server_options = fetch_server_options(raw_args)?;
+    let has_server_options = !server_options.is_empty();
     let upload_pack_command = fetch_upload_pack_command(raw_args)?;
     let deepen = fetch_deepen_amount(raw_args)?;
     let shallow_since = fetch_shallow_since(raw_args)?;
@@ -8714,7 +8878,7 @@ pub(crate) fn run_fetch(
                 &refmap,
                 prefetch,
                 recurse_submodules_mode,
-                has_server_options,
+                &server_options,
                 None,
             )?;
         }
@@ -8752,7 +8916,7 @@ pub(crate) fn run_fetch(
                 &refmap,
                 prefetch,
                 recurse_submodules_mode,
-                has_server_options,
+                &server_options,
                 None,
             )?;
         }
@@ -8815,7 +8979,7 @@ pub(crate) fn run_fetch(
         &refmap,
         prefetch,
         recurse_submodules_mode,
-        has_server_options,
+        &server_options,
         upload_pack_command.as_deref(),
     )?;
     if !dry_run {
@@ -8861,20 +9025,28 @@ fn fetch_recurse_submodules_mode(raw_args: &[String]) -> Result<FetchRecurseSubm
     Ok(mode)
 }
 
-fn fetch_has_server_options(raw_args: &[String]) -> bool {
+fn fetch_server_options(raw_args: &[String]) -> Result<Vec<String>> {
+    let mut values = Vec::new();
     let mut args = raw_args.iter().skip(1).peekable();
     while let Some(arg) = args.next() {
         if arg == "--" {
             break;
         }
         if arg == "--server-option" {
-            return true;
+            let Some(value) = args.next() else {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: "error: option `server-option' requires a value\n".into(),
+                });
+            };
+            values.push(value.clone());
+            continue;
         }
-        if arg.starts_with("--server-option=") {
-            return true;
+        if let Some(value) = arg.strip_prefix("--server-option=") {
+            values.push(value.to_owned());
         }
     }
-    false
+    Ok(values)
 }
 
 fn validate_fetch_jobs(raw_args: &[String]) -> Result<()> {
@@ -10577,7 +10749,7 @@ pub(crate) fn run_pull(
                 &[],
                 false,
                 FetchRecurseSubmodulesMode::Default,
-                false,
+                &[],
                 None,
             )?;
         }
@@ -11246,10 +11418,11 @@ fn fetch_with_depth(
     refmap: &[String],
     prefetch: bool,
     recurse_submodules_mode: FetchRecurseSubmodulesMode,
-    has_server_options: bool,
+    server_options: &[String],
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
+    let has_server_options = !server_options.is_empty();
     let explicit_remote = remote.clone();
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
@@ -11295,7 +11468,23 @@ fn fetch_with_depth(
     let prune_tags = prune && effective_fetch_prune_tags(&repo, Some(&remote), prune_tags)?;
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode, Some(&url))?;
-    ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
+    if has_server_options {
+        if !is_http_transport_url(&url)
+            || branch.as_deref().is_none_or(|value| value.contains(':'))
+            || prefetch
+            || !refmap.is_empty()
+            || update_shallow
+            || dry_run
+            || deepen.is_some()
+            || unshallow
+            || shallow_since.is_some()
+            || !shallow_exclude.is_empty()
+            || depth.is_some()
+            || upload_pack_command.is_some()
+        {
+            ensure_fetch_server_options_supported_for_location(&url, true)?;
+        }
+    }
     if upload_pack_command.is_some()
         && (is_http_transport_url(&url) || is_git_daemon_transport_url(&url))
     {
@@ -11459,6 +11648,7 @@ fn fetch_with_depth(
         write_fetch_head,
         dry_run,
         dry_run && fetch_should_recurse_submodules(recurse_submodules_mode),
+        server_options,
         upload_pack_command,
     );
     if result.is_ok() && !dry_run && fetch_should_recurse_submodules(recurse_submodules_mode) {
@@ -11497,6 +11687,7 @@ fn fetch_with_missing_ref_code(
         true,
         false,
         false,
+        &[],
         None,
     )
 }
@@ -11541,10 +11732,43 @@ pub(crate) fn fetch_with_repo_and_remote(
     write_fetch_head: bool,
     dry_run: bool,
     dry_run_recurse_submodules: bool,
+    server_options: &[String],
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
+        if !server_options.is_empty() {
+            let Some(branch) = branch.as_deref() else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --server-option currently supports one smart HTTP branch"
+                        .into(),
+                });
+            };
+            if branch.contains(':')
+                || !refmap.is_empty()
+                || prefetch
+                || update_shallow
+                || dry_run
+                || upload_pack_command.is_some()
+            {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --server-option currently supports one smart HTTP branch"
+                        .into(),
+                });
+            }
+            return fetch_with_http_remote_v2_server_options(
+                repo,
+                remote,
+                branch,
+                missing_ref_code,
+                &url,
+                append,
+                write_fetch_head,
+                server_options,
+            );
+        }
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_http_remote(
                 &repo,
@@ -15546,6 +15770,156 @@ fn fetch_with_http_remote(
     Ok(())
 }
 
+fn fetch_with_http_remote_v2_server_options(
+    repo: GitRepo,
+    remote: String,
+    branch: &str,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    server_options: &[String],
+) -> Result<()> {
+    let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let v2_url = http_url_with_git_protocol_v2(&parsed_url);
+    let mut helper = if v2_url.scheme == HttpScheme::Https {
+        Some(RemoteHttpHelperSession::spawn(&v2_url)?)
+    } else {
+        None
+    };
+    if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_capabilities_with_helper(&v2_url, helper)?;
+    } else {
+        http_upload_pack_v2_capabilities_direct(&v2_url)?;
+    }
+    let rows = if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_ls_refs_with_helper(&v2_url, helper, branch, server_options)?
+    } else {
+        http_upload_pack_v2_ls_refs_direct(&v2_url, branch, server_options)?
+    };
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let ref_name = branch_ref_name(branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(branch, missing_ref_code))?;
+    let roots = [id.clone()];
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let pack_fetched = if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_v2_with_helper(
+            &v2_url,
+            helper,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            server_options,
+        )?
+    } else {
+        http_fetch_smart_pack_v2_direct(
+            &v2_url,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            server_options,
+        )?
+    };
+    if !pack_fetched {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    }
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
+fn http_url_with_git_protocol_v2(url: &ParsedHttpUrl) -> ParsedHttpUrl {
+    let mut url = url.clone();
+    url.extra_headers.retain(|header| {
+        header
+            .split_once(':')
+            .is_none_or(|(name, _)| !name.trim().eq_ignore_ascii_case("git-protocol"))
+    });
+    url.extra_headers.push("Git-Protocol: version=2".to_owned());
+    url
+}
+
+fn http_upload_pack_v2_capabilities_direct(url: &ParsedHttpUrl) -> Result<()> {
+    let (head, mut body) =
+        http_request_reader(url, "GET", "info/refs?service=git-upload-pack", &[])?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_capabilities(&mut body)
+}
+
+fn http_upload_pack_v2_capabilities_with_helper(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+) -> Result<()> {
+    let response = helper.request_to_body(
+        url,
+        "GET",
+        "info/refs?service=git-upload-pack",
+        &[],
+        &PackBody::Empty,
+    )?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response
+        .body
+        .with_reader(|reader| parse_upload_pack_v2_capabilities(reader))
+}
+
+fn http_upload_pack_v2_ls_refs_direct(
+    url: &ParsedHttpUrl,
+    branch: &str,
+    server_options: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_ls_refs_response(&mut body)
+}
+
+fn http_upload_pack_v2_ls_refs_with_helper(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    branch: &str,
+    server_options: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    let response =
+        helper.request_to_body(url, "POST", "git-upload-pack", &request, &PackBody::Empty)?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response
+        .body
+        .with_reader(|reader| parse_upload_pack_v2_ls_refs_response(reader))
+}
+
 fn fetch_with_http_remote_depth(
     repo: GitRepo,
     remote: String,
@@ -17701,6 +18075,7 @@ fn fetch_with_repo_and_remote_deepen(
             write_fetch_head,
             false,
             false,
+            &[],
             None,
         );
     };
@@ -17896,6 +18271,7 @@ fn fetch_with_repo_and_remote_unshallow(
         write_fetch_head,
         false,
         false,
+        &[],
         None,
     )?;
     if let Some(command) = upload_pack_command {
@@ -18747,6 +19123,185 @@ fn build_upload_pack_request(
     depth: Option<usize>,
 ) -> Result<Vec<u8>> {
     build_upload_pack_request_with_shallows(roots, haves, depth, &[])
+}
+
+fn append_pkt_payload(out: &mut Vec<u8>, payload: &[u8]) -> Result<()> {
+    append_pkt_line_len(out, payload.len())?;
+    out.extend_from_slice(payload);
+    Ok(())
+}
+
+fn append_upload_pack_v2_command_header(
+    out: &mut Vec<u8>,
+    command: &str,
+    server_options: &[String],
+) -> Result<()> {
+    append_pkt_payload(out, format!("command={command}\n").as_bytes())?;
+    append_pkt_payload(out, b"agent=zmin/0.1.0\n")?;
+    for option in server_options {
+        if option
+            .as_bytes()
+            .iter()
+            .any(|byte| matches!(byte, b'\0' | b'\n'))
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --server-option value contains an invalid character".into(),
+            });
+        }
+        append_pkt_payload(out, format!("server-option={option}\n").as_bytes())?;
+    }
+    append_pkt_payload(out, b"object-format=sha1\n")?;
+    out.extend_from_slice(b"0001");
+    Ok(())
+}
+
+fn build_upload_pack_v2_ls_refs_request(
+    branch: &str,
+    server_options: &[String],
+) -> Result<Vec<u8>> {
+    let ref_name = branch_ref_name(branch)?;
+    let mut request =
+        Vec::with_capacity(256 + server_options.iter().map(String::len).sum::<usize>());
+    append_upload_pack_v2_command_header(&mut request, "ls-refs", server_options)?;
+    append_pkt_payload(&mut request, format!("ref-prefix {ref_name}\n").as_bytes())?;
+    request.extend_from_slice(b"0000");
+    Ok(request)
+}
+
+fn build_upload_pack_v2_fetch_request(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+) -> Result<Vec<u8>> {
+    let mut request = Vec::with_capacity(
+        upload_pack_request_capacity(roots, haves, None, None, &[], &[], false, None)
+            + 256
+            + server_options.iter().map(String::len).sum::<usize>(),
+    );
+    append_upload_pack_v2_command_header(&mut request, "fetch", server_options)?;
+    append_pkt_payload(&mut request, b"thin-pack\n")?;
+    append_pkt_payload(&mut request, b"no-progress\n")?;
+    append_pkt_payload(&mut request, b"ofs-delta\n")?;
+    for root in roots {
+        append_pkt_line_len(&mut request, b"want ".len() + root.hex_len() + 1)?;
+        request.extend_from_slice(b"want ");
+        root.write_hex_bytes(&mut request);
+        request.push(b'\n');
+    }
+    for have in haves {
+        append_pkt_line_len(&mut request, b"have ".len() + have.hex_len() + 1)?;
+        request.extend_from_slice(b"have ");
+        have.write_hex_bytes(&mut request);
+        request.push(b'\n');
+    }
+    append_pkt_payload(&mut request, b"done\n")?;
+    request.extend_from_slice(b"0000");
+    Ok(request)
+}
+
+enum PktLineFrame {
+    Eof,
+    Flush,
+    Delim,
+    ResponseEnd,
+    Payload,
+}
+
+fn read_pkt_line_frame_into<R: Read + ?Sized>(
+    input: &mut R,
+    payload: &mut Vec<u8>,
+) -> Result<PktLineFrame> {
+    let mut header = [0_u8; 4];
+    match input.read_exact(&mut header) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(PktLineFrame::Eof),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    match &header {
+        b"0000" => {
+            payload.clear();
+            return Ok(PktLineFrame::Flush);
+        }
+        b"0001" => {
+            payload.clear();
+            return Ok(PktLineFrame::Delim);
+        }
+        b"0002" => {
+            payload.clear();
+            return Ok(PktLineFrame::ResponseEnd);
+        }
+        _ => {}
+    }
+    let len = parse_pkt_line_len(&header, "invalid upload-pack pkt-line header")?;
+    let payload_len = len.checked_sub(4).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "invalid upload-pack pkt-line length".into(),
+    })?;
+    read_exact_payload_into(input, payload_len, payload)?;
+    Ok(PktLineFrame::Payload)
+}
+
+fn parse_upload_pack_v2_capabilities<R: Read + ?Sized>(reader: &mut R) -> Result<()> {
+    let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+    let mut version_seen = false;
+    let mut server_option_seen = false;
+    loop {
+        match read_pkt_line_frame_into(reader, &mut payload)? {
+            PktLineFrame::Eof | PktLineFrame::Flush | PktLineFrame::ResponseEnd => break,
+            PktLineFrame::Delim => continue,
+            PktLineFrame::Payload => {
+                if payload == b"version 2\n" {
+                    version_seen = true;
+                } else if trim_lf_payload(&payload) == b"server-option" {
+                    server_option_seen = true;
+                }
+            }
+        }
+    }
+    if !version_seen || !server_option_seen {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack does not advertise protocol v2 server-option".into(),
+        });
+    }
+    Ok(())
+}
+
+fn parse_upload_pack_v2_ls_refs_response<R: Read + ?Sized>(
+    reader: &mut R,
+) -> Result<Vec<LsRemoteRow>> {
+    let mut rows = Vec::with_capacity(HTTP_REMOTE_REF_ROWS_CAPACITY_HINT);
+    let mut payload = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+    loop {
+        match read_pkt_line_frame_into(reader, &mut payload)? {
+            PktLineFrame::Eof | PktLineFrame::Flush | PktLineFrame::ResponseEnd => break,
+            PktLineFrame::Delim => continue,
+            PktLineFrame::Payload => {
+                if let Some(message) = payload.strip_prefix(b"ERR ") {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: String::from_utf8_lossy(message).trim().to_owned(),
+                    });
+                }
+                let Some((id, rest)) = split_ls_remote_space_payload(&payload) else {
+                    continue;
+                };
+                if id == b"unborn" {
+                    continue;
+                }
+                let name = split_once_byte(rest, b' ')
+                    .map(|(name, _)| name)
+                    .unwrap_or(rest);
+                let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
+                rows.push(LsRemoteRow {
+                    id,
+                    name: String::from_utf8_lossy(name).into_owned(),
+                });
+            }
+        }
+    }
+    Ok(rows)
 }
 
 #[derive(Clone, Copy)]
