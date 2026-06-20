@@ -5995,6 +5995,114 @@ fn fetch_shallow_exclude_repeated_local_file_forms_match_stock_git() {
 }
 
 #[test]
+fn fetch_shallow_exclude_multiple_refspecs_local_file_forms_match_stock_git() {
+    for (case_label, use_remote, remote_url_from_source) in [
+        (
+            "named local remote",
+            true,
+            Box::new(|source: &Path| source.display().to_string()) as Box<dyn Fn(&Path) -> String>,
+        ),
+        (
+            "named file remote",
+            true,
+            Box::new(|source: &Path| format!("file://{}", source.display())),
+        ),
+        (
+            "explicit local path",
+            false,
+            Box::new(|source: &Path| source.display().to_string()),
+        ),
+        (
+            "explicit file URL",
+            false,
+            Box::new(|source: &Path| format!("file://{}", source.display())),
+        ),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let source = dir.path().join("source");
+        let git_client = dir
+            .path()
+            .join(format!("git-client-{}", case_label.replace(' ', "-")));
+        let zmin_client = dir
+            .path()
+            .join(format!("zmin-client-{}", case_label.replace(' ', "-")));
+
+        git(
+            dir.path(),
+            ["init", "-b", "main", source.to_str().expect("source path")],
+        );
+        configure_identity(&source);
+        fs::write(source.join("base.txt"), "base\n").expect("write base");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "base"]);
+        let base_tip = git(&source, ["rev-parse", "HEAD"]);
+        fs::write(source.join("main.txt"), "main\n").expect("write main");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "main"]);
+        git(&source, ["checkout", "-b", "feature", &base_tip]);
+        fs::write(source.join("feature.txt"), "feature\n").expect("write feature");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "feature"]);
+        git(&source, ["checkout", "main"]);
+        git(&source, ["branch", "base", &base_tip]);
+
+        let remote_url = remote_url_from_source(&source);
+        for client in [&git_client, &zmin_client] {
+            git(
+                dir.path(),
+                ["init", "-b", "main", client.to_str().expect("client path")],
+            );
+            if use_remote {
+                git(client, ["remote", "add", "origin", &remote_url]);
+            }
+        }
+
+        let mut args = vec!["fetch", "--quiet", "--shallow-exclude=refs/heads/base"];
+        if use_remote {
+            args.push("origin");
+        } else {
+            args.push(remote_url.as_str());
+        }
+        args.extend([
+            "refs/heads/main:refs/remotes/origin/main",
+            "refs/heads/feature:refs/remotes/origin/feature",
+        ]);
+
+        let git_output = command_any_output("git", &git_client, &args, "git");
+        let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+        assert_eq!(zmin_output.0, git_output.0, "{case_label}");
+        assert_eq!(zmin_output.1, git_output.1, "{case_label}");
+        assert_eq!(zmin_output.2, git_output.2, "{case_label}");
+        assert_eq!(
+            git(&zmin_client, ["show-ref"]),
+            git(&git_client, ["show-ref"]),
+            "{case_label}"
+        );
+        assert_eq!(
+            git(&zmin_client, ["rev-parse", "--is-shallow-repository"]),
+            git(&git_client, ["rev-parse", "--is-shallow-repository"]),
+            "{case_label}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+            fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow"),
+            "{case_label}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{case_label}"
+        );
+        assert_eq!(
+            git_status_args(&zmin_client, &["cat-file", "-e", &base_tip]),
+            git_status_args(&git_client, &["cat-file", "-e", &base_tip]),
+            "{case_label}"
+        );
+    }
+}
+
+#[test]
 fn fetch_with_depth_like_stock_git_for_local_remote() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
