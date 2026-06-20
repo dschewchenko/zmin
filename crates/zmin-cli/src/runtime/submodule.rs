@@ -12,6 +12,29 @@ struct GitmodulesEntry {
     branch: Option<String>,
 }
 
+fn submodule_usage() -> &'static str {
+    "usage: git submodule [--quiet] [--cached]
+   or: git submodule [--quiet] add [-b <branch>] [-f|--force] [--name <name>] [--reference <repository>] [--] <repository> [<path>]
+   or: git submodule [--quiet] status [--cached] [--recursive] [--] [<path>...]
+   or: git submodule [--quiet] init [--] [<path>...]
+   or: git submodule [--quiet] deinit [-f|--force] (--all| [--] <path>...)
+   or: git submodule [--quiet] update [--init [--filter=<filter-spec>]] [--remote] [-N|--no-fetch] [-f|--force] [--checkout|--merge|--rebase] [--[no-]recommend-shallow] [--reference <repository>] [--recursive] [--[no-]single-branch] [--] [<path>...]
+   or: git submodule [--quiet] set-branch (--default|--branch <branch>) [--] <path>
+   or: git submodule [--quiet] set-url [--] <path> <newurl>
+   or: git submodule [--quiet] summary [--cached|--files] [--summary-limit <n>] [commit] [--] [<path>...]
+   or: git submodule [--quiet] foreach [--recursive] <command>
+   or: git submodule [--quiet] sync [--recursive] [--] [<path>...]
+   or: git submodule [--quiet] absorbgitdirs [--] [<path>...]
+"
+}
+
+fn submodule_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: submodule_usage().to_owned(),
+    }
+}
+
 pub(crate) fn clone_submodules(
     repo: &GitRepo,
     parent_repository: &str,
@@ -276,10 +299,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
             }
         } else if !path_args && (arg.starts_with("--jobs=") || arg.starts_with("-j")) {
         } else if !path_args && arg.starts_with('-') {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported submodule update option '{arg}'"),
-            });
+            return Err(submodule_usage_error());
         } else {
             paths.push(arg.clone());
         }
@@ -401,10 +421,7 @@ pub(crate) fn deinit_submodules(args: &[String]) -> Result<()> {
             "--no-quiet" if !path_args => quiet = false,
             "--all" if !path_args => all = true,
             option if !path_args && option.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported submodule deinit option '{option}'"),
-                });
+                return Err(submodule_usage_error());
             }
             path => paths.push(path.to_owned()),
         }
@@ -476,10 +493,7 @@ pub(crate) fn set_submodule_branch(args: &[String]) -> Result<()> {
         } else if !path_args && arg.starts_with("--branch=") {
             branch = Some(arg["--branch=".len()..].to_owned());
         } else if !path_args && arg.starts_with('-') {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported submodule set-branch option '{arg}'"),
-            });
+            return Err(submodule_usage_error());
         } else {
             paths.push(arg.clone());
         }
@@ -679,10 +693,7 @@ fn parse_submodule_summary_options(args: &[String]) -> Result<SubmoduleSummaryOp
         } else if !path_args && arg.starts_with("--summary-limit=") {
             summary_limit = parse_submodule_summary_limit(&arg["--summary-limit=".len()..])?;
         } else if !path_args && arg.starts_with('-') {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported submodule summary option '{arg}'"),
-            });
+            return Err(submodule_usage_error());
         } else if path_args {
             paths.push(arg.clone());
         } else {
