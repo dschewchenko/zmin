@@ -171,15 +171,15 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `24/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `227/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `826` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `727/826` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/826` | written rows that still do not match stock Git |
-| Invalid input rows | `99/826` | rows where stock Git rejects the input |
+| Written behavior rows | `827` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `727/827` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/827` | written rows that still do not match stock Git |
+| Invalid input rows | `100/827` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `727/826` as Git compatibility. It only means `727` of the `826`
+Do not read `727/827` as Git compatibility. It only means `727` of the `827`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `99/826` additional rows are
+unexpanded surface is not counted yet, and `100/827` additional rows are
 stock-compatible invalid inputs. Do not read `227/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -211,14 +211,14 @@ Audit progress by git-scm reference group:
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `293` | `283` | `0` | `10` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `152` | `147` | `0` | `5` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` |
-| Debugging | `3` | `0` | `132` | `0` | `2` | `0` | `0` | `2` |
+| Debugging | `3` | `0` | `132` | `0` | `3` | `0` | `0` | `3` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `2` | `0` | `0` | `2` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `177` | `144` | `0` | `33` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`826`** | **`727`** | **`0`** | **`99`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`827`** | **`727`** | **`0`** | **`100`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -233,7 +233,7 @@ Current command-level matrices:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `archive` | `17` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `blame` | `39` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
+| `blame` | `39` | `0` | `1` | `2` | `0` | `0` | `0` | `2` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `cat-file` | `21` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |

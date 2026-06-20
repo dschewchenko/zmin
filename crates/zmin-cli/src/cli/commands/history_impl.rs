@@ -8,6 +8,50 @@ use std::io::{Read, Seek};
 
 const REFLOG_REVERSE_READ_CHUNK_SIZE: usize = 16 * 1024;
 
+const BLAME_USAGE: &str = r#"usage: git blame [<options>] [<rev-opts>] [<rev>] [--] <file>
+
+    <rev-opts> are documented in git-rev-list(1)
+
+    --[no-]incremental    show blame entries as we find them, incrementally
+    -b                    do not show object names of boundary commits (Default: off)
+    --[no-]root           do not treat root commits as boundaries (Default: off)
+    --[no-]show-stats     show work cost statistics
+    --[no-]progress       force progress reporting
+    --[no-]score-debug    show output score for blame entries
+    -f, --[no-]show-name  show original filename (Default: auto)
+    -n, --[no-]show-number
+                          show original linenumber (Default: off)
+    -p, --[no-]porcelain  show in a format designed for machine consumption
+    --[no-]line-porcelain show porcelain format with per-line commit information
+    -c                    use the same output mode as git-annotate (Default: off)
+    -t                    show raw timestamp (Default: off)
+    -l                    show long commit SHA1 (Default: off)
+    -s                    suppress author name and timestamp (Default: off)
+    -e, --[no-]show-email show author email instead of name (Default: off)
+    -w                    ignore whitespace differences
+    --[no-]ignore-rev <rev>
+                          ignore <rev> when blaming
+    --[no-]ignore-revs-file <file>
+                          ignore revisions from <file>
+    --[no-]color-lines    color redundant metadata from previous line differently
+    --[no-]color-by-age   color lines by age
+    --[no-]minimal        spend extra cycles to find better match
+    -S <file>             use revisions from <file> instead of calling git-rev-list
+    --[no-]contents <file>
+                          use <file>'s contents as the final image
+    -C[<score>]           find line copies within and across files
+    -M[<score>]           find line movements within and across files
+    -L <range>            process only line range <start>,<end> or function :<funcname>
+    --[no-]abbrev[=<n>]   use <n> digits to display object names
+"#;
+
+fn blame_unknown_option(option: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!("error: unknown option `{option}'\n{BLAME_USAGE}"),
+    }
+}
+
 pub(crate) fn run_replay(
     contained: bool,
     advance: Option<String>,
@@ -2055,10 +2099,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                         cursor += 1;
                         continue;
                     }
-                    return Err(CliError::Fatal {
-                        code: 129,
-                        message: format!("unsupported blame option '{arg}'"),
-                    });
+                    return Err(blame_unknown_option(arg));
                 }
             }
             cursor += 1;

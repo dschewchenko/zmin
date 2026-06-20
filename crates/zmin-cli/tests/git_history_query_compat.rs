@@ -335,6 +335,20 @@ fn blame_invalid_date_format_matches_stock_git() {
 }
 
 #[test]
+fn blame_unknown_option_matches_stock_git_usage() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "a\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["blame", "--bad", "a.txt"]),
+        git_failure_output(repo.path(), &["blame", "--bad", "a.txt"])
+    );
+}
+
+#[test]
 fn blame_line_regex_and_function_ranges_match_stock_git() {
     let git_repo = git_init();
     configure_identity(git_repo.path());
