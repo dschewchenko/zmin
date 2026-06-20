@@ -8433,6 +8433,7 @@ pub(crate) fn run_fetch(
     refmap: Vec<String>,
     depth: Option<String>,
     negotiation_tips: Vec<String>,
+    negotiate_only: bool,
     stdin: bool,
     remote: Option<String>,
     mut refspecs: Vec<String>,
@@ -8454,6 +8455,9 @@ pub(crate) fn run_fetch(
             code: 128,
             message: "--refmap option is only meaningful with command-line refspec(s)".into(),
         });
+    }
+    if negotiate_only {
+        return fetch_negotiate_only(remote, &negotiation_tips);
     }
     if all {
         if remote.is_some() || !refspecs.is_empty() {
@@ -8731,6 +8735,64 @@ fn wildcard_match(pattern: &str, value: &str) -> bool {
         || parts
             .last()
             .is_none_or(|last| remaining.is_empty() || last.is_empty())
+}
+
+fn fetch_negotiate_only(remote: Option<String>, negotiation_tips: &[String]) -> Result<()> {
+    if negotiation_tips.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--negotiate-only needs one or more --negotiation-tip=*".into(),
+        });
+    }
+    let repo = find_repo_or_bare()?;
+    let remote = default_fetch_remote(&repo, remote)?;
+    validate_remote_name(&remote)?;
+    if !remote_exists(&repo, &remote)? {
+        return Err(remote_repository_unavailable_error(&remote));
+    }
+    let url = fetch_remote_url(&repo, &remote)?;
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(unsupported_remote_helper_error(&url, String::new()));
+    };
+    let source = local_clone_source(&source_path)?;
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let local_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let tip_ids = resolve_fetch_negotiation_tip_ids(&repo, negotiation_tips)?;
+    let mut common = Vec::with_capacity(transport_ref_collection_capacity(tip_ids.len()));
+    for tip in tip_ids {
+        if let Some(id) = first_negotiate_common_commit(&source_store, &local_store, &tip)? {
+            common.push(id);
+        }
+    }
+    sort_dedup_object_ids(&mut common);
+    for id in common {
+        println!("{}", id.to_hex());
+    }
+    Ok(())
+}
+
+fn first_negotiate_common_commit(
+    source_store: &LooseObjectStore,
+    local_store: &LooseObjectStore,
+    tip: &ObjectId,
+) -> Result<Option<ObjectId>> {
+    let Some(commit) = upload_pack_have_commit(local_store, tip)? else {
+        return Ok(None);
+    };
+    let commit_cache = CommitObjectCache::new(local_store);
+    let mut pending = vec![commit];
+    let mut seen = HashSet::with_capacity(transport_history_collection_capacity(1));
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        if source_store.contains_object(&id)? {
+            return Ok(Some(id));
+        }
+        let commit = commit_cache.read_commit(&id)?;
+        pending.extend(commit.parents.iter().cloned());
+    }
+    Ok(None)
 }
 
 fn write_fetch_hidden_refs_trace_if_needed() -> Result<()> {

@@ -661,6 +661,89 @@ fn fetch_negotiation_tip_rejects_missing_object_like_stock_git() {
 }
 
 #[test]
+fn fetch_negotiate_only_outputs_common_tip_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        ["clone", source.to_str().expect("source path"), "git-client"],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            "zmin-client",
+        ],
+    );
+
+    let args = [
+        "fetch",
+        "--negotiate-only",
+        "--negotiation-tip=HEAD",
+        "origin",
+    ];
+    let git_output = command_any_output("git", &git_client, &args, "git");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(zmin_output.2, git_output.2);
+    assert!(!zmin_client.join(".git/FETCH_HEAD").exists());
+    assert!(!git_client.join(".git/FETCH_HEAD").exists());
+}
+
+#[test]
+fn fetch_negotiate_only_without_tip_matches_stock_git_failure() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        ["clone", source.to_str().expect("source path"), "git-client"],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            "zmin-client",
+        ],
+    );
+
+    let args = ["fetch", "--negotiate-only", "origin"];
+    let git_output = command_any_output("git", &git_client, &args, "git");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(zmin_output.2, git_output.2);
+}
+
+#[test]
 fn fetch_follow_remote_head_never_does_not_recreate_remote_head() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");

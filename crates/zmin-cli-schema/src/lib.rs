@@ -1118,6 +1118,8 @@ pub enum Command {
         depth: Option<String>,
         #[arg(long = "negotiation-tip")]
         negotiation_tip: Vec<String>,
+        #[arg(long = "negotiate-only", action = ArgAction::SetTrue)]
+        negotiate_only: bool,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
         remote: Option<String>,
