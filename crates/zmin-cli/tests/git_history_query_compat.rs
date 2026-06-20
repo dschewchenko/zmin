@@ -1018,6 +1018,19 @@ fn log_date_formats_match_stock_git() {
             "date mode: {mode}"
         );
     }
+
+    for mode in [
+        "format:%Y-%m-%d %H:%M:%S %z",
+        "format-local:%Y-%m-%d %H:%M:%S %z",
+    ] {
+        let date_arg = format!("--date={mode}");
+        let args = ["log", "-1", date_arg.as_str(), "--format=%ad|%cd"];
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), &args),
+            git_args(git_repo.path(), &args),
+            "date mode: {mode}"
+        );
+    }
 }
 
 #[test]

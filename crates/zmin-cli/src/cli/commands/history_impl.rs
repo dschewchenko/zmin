@@ -1797,6 +1797,13 @@ enum BlameDateMode {
     Human,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogDateMode<'a> {
+    Builtin(BlameDateMode),
+    Format(&'a str),
+    FormatLocal(&'a str),
+}
+
 #[derive(Debug, Clone)]
 enum BlameLineRange {
     Numeric {
@@ -2127,21 +2134,27 @@ fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
     }
 }
 
-fn parse_log_date_mode(value: Option<&str>) -> Result<BlameDateMode> {
+fn parse_log_date_mode(value: Option<&str>) -> Result<LogDateMode<'_>> {
     let Some(value) = value else {
-        return Ok(BlameDateMode::Default);
+        return Ok(LogDateMode::Builtin(BlameDateMode::Default));
     };
     match value {
-        "iso" => Ok(BlameDateMode::Iso),
-        "iso-strict" => Ok(BlameDateMode::IsoStrict),
-        "default" => Ok(BlameDateMode::Default),
-        "short" => Ok(BlameDateMode::Short),
-        "raw" => Ok(BlameDateMode::Raw),
-        "unix" => Ok(BlameDateMode::Unix),
-        "rfc" | "rfc2822" => Ok(BlameDateMode::Rfc2822),
-        "local" => Ok(BlameDateMode::Local),
-        "relative" => Ok(BlameDateMode::Relative),
-        "human" => Ok(BlameDateMode::Human),
+        "iso" => Ok(LogDateMode::Builtin(BlameDateMode::Iso)),
+        "iso-strict" => Ok(LogDateMode::Builtin(BlameDateMode::IsoStrict)),
+        "default" => Ok(LogDateMode::Builtin(BlameDateMode::Default)),
+        "short" => Ok(LogDateMode::Builtin(BlameDateMode::Short)),
+        "raw" => Ok(LogDateMode::Builtin(BlameDateMode::Raw)),
+        "unix" => Ok(LogDateMode::Builtin(BlameDateMode::Unix)),
+        "rfc" | "rfc2822" => Ok(LogDateMode::Builtin(BlameDateMode::Rfc2822)),
+        "local" => Ok(LogDateMode::Builtin(BlameDateMode::Local)),
+        "relative" => Ok(LogDateMode::Builtin(BlameDateMode::Relative)),
+        "human" => Ok(LogDateMode::Builtin(BlameDateMode::Human)),
+        value if value.starts_with("format:") => Ok(LogDateMode::Format(
+            value.strip_prefix("format:").unwrap_or_default(),
+        )),
+        value if value.starts_with("format-local:") => Ok(LogDateMode::FormatLocal(
+            value.strip_prefix("format-local:").unwrap_or_default(),
+        )),
         _ => Err(CliError::Fatal {
             code: 129,
             message: format!("unsupported log date mode '{value}'"),
@@ -2600,6 +2613,37 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
                 .to_string())
         }
     }
+}
+
+fn format_log_date(signature: &[u8], mode: LogDateMode<'_>) -> Result<String> {
+    match mode {
+        LogDateMode::Builtin(mode) => format_blame_date(signature, mode),
+        LogDateMode::Format(pattern) => signature_formatted_log_date(signature, pattern, false),
+        LogDateMode::FormatLocal(pattern) => signature_formatted_log_date(signature, pattern, true),
+    }
+}
+
+fn signature_formatted_log_date(signature: &[u8], pattern: &str, local: bool) -> Result<String> {
+    let (timestamp, timezone) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid author date".into(),
+        })?;
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit author timestamp is out of range".into(),
+    })?;
+    if local {
+        return Ok(utc
+            .with_timezone(&chrono::Local)
+            .format(pattern)
+            .to_string());
+    }
+    let offset = parse_timezone_offset(timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid author timezone".into(),
+    })?;
+    Ok(utc.with_timezone(&offset).format(pattern).to_string())
 }
 
 fn signature_human_blame_date(signature: &[u8]) -> Result<String> {
@@ -5228,7 +5272,7 @@ impl<'a> LogFormat<'a> {
             abbrev_len,
             decorations,
             notes,
-            BlameDateMode::Default,
+            LogDateMode::Builtin(BlameDateMode::Default),
         )
     }
 
@@ -5240,7 +5284,7 @@ impl<'a> LogFormat<'a> {
         abbrev_len: usize,
         decorations: &LogDecorations,
         notes: &LogNotes,
-        date_mode: BlameDateMode,
+        date_mode: LogDateMode<'_>,
     ) -> Result<String> {
         match self {
             Self::Default => render_default_log(
@@ -5287,7 +5331,7 @@ impl<'a> LogFormat<'a> {
         abbrev_len: usize,
         decorations: &LogDecorations,
         notes: &LogNotes,
-        date_mode: BlameDateMode,
+        date_mode: LogDateMode<'_>,
     ) -> Result<String> {
         match (self, from_parent) {
             (Self::Default, Some(parent)) => {
@@ -5324,7 +5368,7 @@ fn render_default_log(
     abbrev_len: usize,
     decorations: &LogDecorations,
     notes: &LogNotes,
-    date_mode: BlameDateMode,
+    date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -5354,7 +5398,7 @@ fn render_default_log(
     out.push_str(&signature_email(&commit.author));
     out.push_str(">\n");
     out.push_str("Date:   ");
-    out.push_str(&format_blame_date(&commit.author, date_mode)?);
+    out.push_str(&format_log_date(&commit.author, date_mode)?);
     out.push_str("\n\n");
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
@@ -5379,7 +5423,7 @@ fn render_default_log_from_parent(
     from_parent: &ObjectId,
     parents: bool,
     abbrev_len: usize,
-    date_mode: BlameDateMode,
+    date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -5405,7 +5449,7 @@ fn render_default_log_from_parent(
     out.push_str(&signature_email(&commit.author));
     out.push_str(">\n");
     out.push_str("Date:   ");
-    out.push_str(&format_blame_date(&commit.author, date_mode)?);
+    out.push_str(&format_log_date(&commit.author, date_mode)?);
     out.push_str("\n\n");
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
@@ -5470,7 +5514,7 @@ fn render_log_format(
     abbrev_len: usize,
     decorations: &LogDecorations,
     notes: &LogNotes,
-    date_mode: BlameDateMode,
+    date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
     let mut chars = pattern.chars();
@@ -5540,7 +5584,7 @@ fn render_log_format(
                 match next {
                     'n' => out.push_str(&signature_name(&commit.author)),
                     'e' => out.push_str(&signature_email(&commit.author)),
-                    'd' => out.push_str(&format_blame_date(&commit.author, date_mode)?),
+                    'd' => out.push_str(&format_log_date(&commit.author, date_mode)?),
                     't' => {
                         out.push_str(&signature_timestamp(&commit.author).unwrap_or(0).to_string())
                     }
@@ -5561,7 +5605,7 @@ fn render_log_format(
                 match next {
                     'n' => out.push_str(&signature_name(&commit.committer)),
                     'e' => out.push_str(&signature_email(&commit.committer)),
-                    'd' => out.push_str(&format_blame_date(&commit.committer, date_mode)?),
+                    'd' => out.push_str(&format_log_date(&commit.committer, date_mode)?),
                     't' => out.push_str(
                         &signature_timestamp(&commit.committer)
                             .unwrap_or(0)
@@ -5931,7 +5975,7 @@ fn show_object(
                         abbrev_len,
                         &decorations,
                         &notes,
-                        BlameDateMode::Default,
+                        LogDateMode::Builtin(BlameDateMode::Default),
                     )?;
                     out.write_all(rendered.as_bytes())?;
                     if format.separates_patch()
