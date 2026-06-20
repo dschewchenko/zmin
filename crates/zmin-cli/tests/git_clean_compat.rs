@@ -258,3 +258,17 @@ fn clean_unknown_short_switch_matches_stock_git() {
         command_any_output("git", git_repo.path(), &["clean", "-Z"], "git")
     );
 }
+
+#[test]
+fn clean_exclude_missing_value_matches_stock_git() {
+    for args in [vec!["clean", "-e"], vec!["clean", "--exclude"]] {
+        let git_repo = clean_fixture_repo();
+        let zmin_repo = clean_fixture_repo();
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "args: {args:?}"
+        );
+    }
+}

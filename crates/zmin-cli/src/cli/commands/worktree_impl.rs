@@ -151,10 +151,7 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
             "-e" | "--exclude" => {
                 cursor += 1;
                 let Some(pattern) = args.get(cursor) else {
-                    return Err(CliError::Fatal {
-                        code: 129,
-                        message: "clean -e requires a pattern".into(),
-                    });
+                    return Err(clean_option_requires_value(arg));
                 };
                 options.excludes.push(pattern.clone());
             }
@@ -207,6 +204,18 @@ fn clean_unknown_switch(switch: char) -> CliError {
     }
 }
 
+fn clean_option_requires_value(option: &str) -> CliError {
+    let text = if let Some(switch) = option.strip_prefix('-').filter(|value| value.len() == 1) {
+        format!("error: switch `{switch}' requires a value\n")
+    } else {
+        format!(
+            "error: option `{}' requires a value\n",
+            option.trim_start_matches('-')
+        )
+    };
+    CliError::Stderr { code: 129, text }
+}
+
 fn clean_require_force(repo: &GitRepo) -> Result<bool> {
     let Some(entry) = read_config_entry(repo, "clean.requireForce")? else {
         return Ok(true);
@@ -240,10 +249,7 @@ fn parse_clean_short_cluster(value: &str, options: &mut CleanOptions) -> Result<
             'e' => {
                 let pattern_start = 1 + index + flag.len_utf8();
                 if pattern_start >= value.len() {
-                    return Err(CliError::Fatal {
-                        code: 129,
-                        message: "clean -e requires a pattern".into(),
-                    });
+                    return Err(clean_option_requires_value("-e"));
                 }
                 options.excludes.push(value[pattern_start..].to_owned());
                 return Ok(());
