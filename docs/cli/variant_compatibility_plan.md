@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 762 written rows / 686 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 763 written rows / 687 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -173,14 +173,14 @@ updates, project-note update, commit and push.
 ### Current Next Slice Pointer
 
 The next slice is a single WebStorm replacement row:
-`git rev-parse --git-dir` through the temporary `git` shim on a cloned
-repository root.
+`git rev-parse --is-inside-work-tree` through the temporary `git` shim on a
+cloned repository root.
 
 Do not broaden this slice to unrelated `rev-parse` behavior. It is done only
 after these steps complete:
 
 1. Add a closed row to `docs/cli/matrices/rev_parse_v2_47.tsv` with evidence
-   `tools/git-replacement-dogfood-smoke.sh::rev_parse_git_dir`.
+   `tools/git-replacement-dogfood-smoke.sh::rev_parse_inside`.
 2. Run `tools/git-replacement-dogfood-smoke.sh`.
 3. Run the count gates from this document.
 4. Refresh README, `git_compatibility_inventory.md`, this plan and project
@@ -260,6 +260,7 @@ until a full matrix is expanded and verified.
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
+| `rev-parse` replacement git-dir discovery | `1` | `0` | `--git-dir` through the `git` shim on a cloned repository root |
 | `rev-parse` replacement nested path discovery | `1` | `0` | `--show-prefix --show-cdup --show-toplevel` through the `git` shim from a nested cwd |
 | `fetch --shallow-since` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --shallow-since` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches |
@@ -314,7 +315,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `430` verified variants.
+Tracked closed blocks in this table: `431` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
