@@ -49,6 +49,40 @@ Examples:
 Each row needs stock Git evidence for stdout, stderr, exit code and repository
 state when those are observable. Parser acceptance does not close a row.
 
+## Inventory Expansion Plan
+
+Work proceeds in this order for each command group:
+
+1. Extract command names from Git `v2.47.1`.
+2. Extract documented option spellings from `Documentation/git-*.txt`.
+3. Expand each option spelling into behavior rows:
+   value modes, no-toggle forms, repeated options, option order, positional
+   forms, pathspec/refspec forms and invalid values accepted or rejected by
+   stock Git.
+4. Add repository-state rows where behavior differs:
+   clean, dirty, conflicted, bare, detached HEAD, shallow, submodule,
+   linked worktree, sparse checkout and ignored/untracked state.
+5. Add transport rows for network commands:
+   local path, `file://`, smart HTTP, SSH, git daemon, bundle, depth,
+   partial clone, tags, prune, auth and proxy behavior.
+6. Add platform rows where paths, executable lookup, hooks, permissions,
+   symlinks, line endings or process spawning differ between macOS, Linux and
+   Windows.
+7. Import upstream Git test cases and real tool traces after docs expansion,
+   because tools such as IDEs often combine options in ways docs do not make
+   obvious.
+8. Implement only the classified rows. Mark a row `closed` only after stock
+   Git parity evidence covers output, exit code and repository state.
+
+Progress reports use three numbers:
+
+`closed rows / written behavior rows / doc option seed rows`
+
+This is deliberate. `written behavior rows` is the audited subset. `doc option
+seed rows` is not the denominator because one option can expand into many
+behavior rows. The final denominator exists only after the expansion above is
+done for that command.
+
 ## Current Burn-Down
 
 | Block | Closed | Open | Evidence |

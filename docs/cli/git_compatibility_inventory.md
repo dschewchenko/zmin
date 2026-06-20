@@ -36,7 +36,7 @@ Compatibility work must start from the inventory, not from the current parser.
 
 1. List Git `v2.47.1` commands from upstream command sources.
 2. Seed every documented option spelling from Git docs.
-3. Expand options into values, negations, repeated forms, order-sensitive
+3. Expand those option spellings into values, negations, repeated forms, order-sensitive
    combinations, positional modes, repository states, transports and platforms.
 4. Add upstream Git test cases and real tool traces, such as IDE command lines,
    when they expose behavior not obvious from docs.
@@ -44,6 +44,8 @@ Compatibility work must start from the inventory, not from the current parser.
    repository state for each row.
 6. Mark a row `closed` only when Zmin has focused parity evidence for that
    exact row.
+7. Implement missing behavior only after the row is classified; do not count
+   parser acceptance, command dispatch or a broad smoke test as support.
 
 Current matrices are still being expanded. A command with no open rows in the
 current matrix is not automatically complete; it only has no open row among the
@@ -92,7 +94,7 @@ Do not collapse these layers into one percentage.
 | --- | ---: | ---: | --- |
 | Git command names | `151` | `151` | no, dispatch only |
 | Git doc option spellings | `2500` | not reported | no, seed only |
-| Audited behavior variants | `116` | `102` | yes, for those rows only |
+| Written behavior rows | `116` | `102` | yes, for those rows only |
 | Full Git behavior denominator | incomplete | not reported | yes, after expansion |
 
 The full denominator must include command, option, value, option combination,
@@ -127,7 +129,7 @@ Current generated summary:
 | Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
 | **Git 2.47 unique total** | **`151`** | **`2500`** | **`116`** | **`102`** | **`0`** | **`9`** | **`5`** | **`253`** |
 
-The matrix columns are the audited subset of explicit option/value/state rows.
+The matrix columns are the written subset of explicit option/value/state rows.
 They are not the final denominator until each command matrix has been expanded
 from docs, upstream tests and real traces. Closed block variants are focused
 parity blocks from `docs/cli/variant_compatibility_plan.md`; they are not a
@@ -141,12 +143,14 @@ transports and platforms have behavior rows with stock-Git evidence.
 
 ## Command Matrices
 
-These rates are for audited rows only.
+These counts are for written rows only. A command can show no open row and
+still be incomplete if the matrix has not expanded all Git-documented
+variants.
 
-| Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `56` | `46` | `0` | `9` | `1` |
+| Command | Git doc option seed rows | Matrix | Behavior rows written | Closed | Partial | Open | Invalid input |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| `status` | `28` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
+| `fetch` | `13` | `docs/cli/matrices/fetch_v2_47.tsv` | `56` | `46` | `0` | `9` | `1` |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted

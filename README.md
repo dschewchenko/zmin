@@ -148,8 +148,9 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-Zmin has handlers for all `151` Git `2.47` command names. That is dispatch
-coverage only. It does not mean full Git behavior compatibility.
+Zmin has handlers for all `151` Git `2.47` command names. This is command
+dispatch only. It is not a claim that every option, option value or workflow
+matches Git.
 
 Real compatibility is counted by behavior variants:
 
@@ -159,19 +160,22 @@ Current accounting:
 
 | Layer | Known total | Closed | Meaning |
 | --- | ---: | ---: | --- |
-| Git command names | `151` | `151` | command can be dispatched |
-| Git doc option spellings | `2500` | not reported | seed list from Git `2.47.1` docs |
-| Audited behavior variants | `116` | `102` | rows checked against stock Git |
-| Full Git behavior denominator | not complete | not reported | still being expanded from docs, upstream tests and tool traces |
+| Git command names | `151` | `151` | command can be routed to Zmin code |
+| Git doc option spellings | `2500` | not reported | raw option seed from Git `2.47.1` docs |
+| Written behavior rows | `116` | `102` | exact rows already checked against stock Git |
+| Full Git behavior denominator | incomplete | not reported | still being expanded from docs, upstream tests and real tool traces |
 
 Only audited behavior variants count as supported. Option spellings are not
 support until they are split into values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms, then
 checked against stock Git.
 
+A command with no open row in the current matrix is not complete. It only means
+the rows written down so far have no open item.
+
 Audit progress by git-scm reference group:
 
-| Git reference group | Git commands | Git doc option seed rows | Audited behavior rows | Closed behavior rows | Open behavior rows | Invalid input rows | Extra closed behavior blocks |
+| Git reference group | Git commands | Git doc option seed rows | Behavior rows written | Closed rows | Open rows | Invalid input rows | Closed blocks without full matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
@@ -197,13 +201,15 @@ Do not read command inventory, doc option rows or a closed current matrix as
 complete support. Reference group rows follow the git-scm command sections and
 are not meant to be added together; the total row is unique.
 
-Current command-level matrices. Closed rate is only for audited rows:
+Current command-level matrices. This is audit coverage, not command support:
 
-| Command | Audited rows | Closed | Partial | Open | Invalid input | Closed audited |
+| Command | Git doc option seed rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `status` | `60` | `56` | `0` | `0` | `4` | `93.3%` |
-| `fetch` | `56` | `46` | `0` | `9` | `1` | `82.1%` |
+| `status` | `28` | `60` | `56` | `0` | `0` | `4` |
+| `fetch` | `13` | `56` | `46` | `0` | `9` | `1` |
 
+`status` having `0` open rows here does not mean full `git status`
+compatibility. It means no open row remains among the currently written rows.
 A global percentage will be published only after every Git `2.47.1` command has
 the same option/value/state matrix.
 
