@@ -465,6 +465,82 @@ fn fetch_multiple_remotes_appends_fetch_head_like_stock_git() {
 }
 
 #[test]
+fn fetch_multiple_with_upload_pack_local_transports_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let one = dir.path().join("one");
+    let two = dir.path().join("two");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    let wrapper = dir.path().join("upload-pack-multiple.sh");
+    let log = wrapper.with_extension("sh.log");
+
+    fs::write(
+        &wrapper,
+        b"#!/bin/sh\nprintf 'invoked %s\\n' \"$*\" >> \"$0.log\"\nexec git-upload-pack \"$@\"\n",
+    )
+    .expect("write upload-pack wrapper");
+    chmod_executable(&wrapper);
+
+    for (remote, file, branch) in [
+        (&one, "one.txt", "one-branch"),
+        (&two, "two.txt", "two-branch"),
+    ] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", remote.to_str().expect("remote path")],
+        );
+        configure_identity(remote);
+        fs::write(remote.join(file), format!("{file}\n")).expect("write remote file");
+        git(remote, ["add", "-A"]);
+        git_with_env(remote, ["commit", "-m", file]);
+        git(remote, ["branch", branch]);
+    }
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", client.to_str().expect("client path")],
+        );
+        git(
+            client,
+            ["remote", "add", "one", one.to_str().expect("one path")],
+        );
+        git(
+            client,
+            ["remote", "add", "two", &format!("file://{}", two.display())],
+        );
+    }
+
+    let wrapper_command = shell_command_path(wrapper.to_str().expect("wrapper path"));
+    let args = [
+        "fetch",
+        "--quiet",
+        &format!("--upload-pack={wrapper_command}"),
+        "--multiple",
+        "one",
+        "two",
+    ];
+    let git_output = command_any_output("git", &git_client, &args, "git");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert!(
+        !log.exists(),
+        "stock Git does not invoke custom upload-pack for local/file --multiple"
+    );
+}
+
+#[test]
 fn fetch_multiple_without_remotes_matches_stock_git_noop() {
     let dir = TempDir::new().expect("temp dir");
     let git_client = dir.path().join("git-client");

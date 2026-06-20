@@ -8512,8 +8512,7 @@ pub(crate) fn run_fetch(
         });
     }
     if upload_pack_command.is_some()
-        && (multiple
-            || depth.is_some()
+        && (depth.is_some()
             || deepen.is_some()
             || unshallow
             || shallow_since.is_some()
