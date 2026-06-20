@@ -8451,6 +8451,7 @@ pub(crate) fn run_fetch(
     write_fetch_hidden_refs_trace_if_needed()?;
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
+    let has_server_options = fetch_has_server_options(raw_args);
     if stdin {
         let stdin = io::stdin();
         let mut stdin = io::BufReader::with_capacity(TRANSPORT_STDIN_BUF_CAPACITY, stdin.lock());
@@ -8496,6 +8497,7 @@ pub(crate) fn run_fetch(
                 &refmap,
                 prefetch,
                 recurse_submodules_mode,
+                has_server_options,
             )?;
         }
         if !dry_run {
@@ -8527,6 +8529,7 @@ pub(crate) fn run_fetch(
                 &refmap,
                 prefetch,
                 recurse_submodules_mode,
+                has_server_options,
             )?;
         }
         if !dry_run {
@@ -8548,6 +8551,7 @@ pub(crate) fn run_fetch(
             write_fetch_head,
             no_tags,
             prefetch,
+            has_server_options,
         )?;
         if !dry_run {
             write_fetch_commit_graph_if_enabled()?;
@@ -8576,6 +8580,7 @@ pub(crate) fn run_fetch(
         &refmap,
         prefetch,
         recurse_submodules_mode,
+        has_server_options,
     )?;
     if !dry_run {
         write_fetch_commit_graph_if_enabled()?;
@@ -8620,6 +8625,22 @@ fn fetch_recurse_submodules_mode(raw_args: &[String]) -> Result<FetchRecurseSubm
     Ok(mode)
 }
 
+fn fetch_has_server_options(raw_args: &[String]) -> bool {
+    let mut args = raw_args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--server-option" {
+            return true;
+        }
+        if arg.starts_with("--server-option=") {
+            return true;
+        }
+    }
+    false
+}
+
 fn parse_fetch_recurse_submodules_mode(value: &str) -> Result<FetchRecurseSubmodulesMode> {
     match value {
         "yes" => Ok(FetchRecurseSubmodulesMode::Yes),
@@ -8632,6 +8653,16 @@ fn parse_fetch_recurse_submodules_mode(value: &str) -> Result<FetchRecurseSubmod
             ),
         }),
     }
+}
+
+fn ensure_fetch_server_options_supported_for_location(location: &str, enabled: bool) -> Result<()> {
+    if !enabled || local_repository_path_from_location(location)?.is_some() {
+        return Ok(());
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: "fetch --server-option needs protocol v2 transport support before use".into(),
+    })
 }
 
 fn ensure_fetch_recurse_submodules_supported(
@@ -8938,6 +8969,7 @@ fn fetch_multiple_refspecs(
     write_fetch_head: bool,
     no_tags: bool,
     prefetch: bool,
+    has_server_options: bool,
 ) -> Result<()> {
     let depth = depth.map(validate_positive_depth).transpose()?;
     if prefetch {
@@ -8950,6 +8982,7 @@ fn fetch_multiple_refspecs(
     let explicit_remote = remote.clone();
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
+        ensure_fetch_server_options_supported_for_location(&remote, has_server_options)?;
         let effective_prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         return fetch_multiple_refspecs_from_location(
             &repo,
@@ -8966,6 +8999,7 @@ fn fetch_multiple_refspecs(
         return Err(remote_repository_unavailable_error(&remote));
     }
     let url = fetch_remote_url(&repo, &remote)?;
+    ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
         return fetch_multiple_refspecs_from_http_remote(
@@ -9683,6 +9717,7 @@ pub(crate) fn run_pull(
                 &[],
                 false,
                 FetchRecurseSubmodulesMode::Default,
+                false,
             )?;
         }
         "FETCH_HEAD".to_owned()
@@ -10345,12 +10380,14 @@ fn fetch_with_depth(
     refmap: &[String],
     prefetch: bool,
     recurse_submodules_mode: FetchRecurseSubmodulesMode,
+    has_server_options: bool,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode)?;
     let explicit_remote = remote.clone();
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
+        ensure_fetch_server_options_supported_for_location(&remote, has_server_options)?;
         let prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         let prune_tags = prune && effective_fetch_prune_tags(&repo, None, prune_tags)?;
         let depth = depth.map(validate_positive_depth).transpose()?;
@@ -10377,6 +10414,8 @@ fn fetch_with_depth(
     }
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     let prune_tags = prune && effective_fetch_prune_tags(&repo, Some(&remote), prune_tags)?;
+    let url = fetch_remote_url(&repo, &remote)?;
+    ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     if let Some(depth) = depth.map(validate_positive_depth).transpose()? {
         return fetch_with_repo_and_remote_depth(repo, remote, branch, missing_ref_code, depth);
     }

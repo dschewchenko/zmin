@@ -161,7 +161,7 @@ Current accounting:
 | --- | ---: | ---: | --- |
 | Git command names | `151` | `151` | command can be dispatched |
 | Git doc option spellings | `2500` | not reported | seed list from Git `2.47.1` docs |
-| Audited behavior variants | `112` | `98` | rows checked against stock Git |
+| Audited behavior variants | `116` | `102` | rows checked against stock Git |
 | Full Git behavior denominator | not complete | not reported | still being expanded from docs, upstream tests and tool traces |
 
 Only audited behavior variants count as supported. Option spellings are not
@@ -177,7 +177,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `52` | `42` | `9` | `1` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `56` | `46` | `9` | `1` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `52` |
@@ -187,7 +187,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `76` |
 | Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`2500`** | **`112`** | **`98`** | **`9`** | **`5`** | **`253`** |
+| **Git `2.47` unique total** | **`151`** | **`2500`** | **`116`** | **`102`** | **`9`** | **`5`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -202,7 +202,7 @@ Current command-level matrices. Closed rate is only for audited rows:
 | Command | Audited rows | Closed | Partial | Open | Invalid input | Closed audited |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `status` | `60` | `56` | `0` | `0` | `4` | `93.3%` |
-| `fetch` | `52` | `42` | `0` | `9` | `1` | `80.8%` |
+| `fetch` | `56` | `46` | `0` | `9` | `1` | `82.1%` |
 
 A global percentage will be published only after every Git `2.47.1` command has
 the same option/value/state matrix.

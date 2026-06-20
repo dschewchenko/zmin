@@ -1128,6 +1128,8 @@ pub enum Command {
         negotiation_tip: Vec<String>,
         #[arg(long = "negotiate-only", action = ArgAction::SetTrue)]
         negotiate_only: bool,
+        #[arg(long = "server-option")]
+        server_option: Vec<String>,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
         remote: Option<String>,

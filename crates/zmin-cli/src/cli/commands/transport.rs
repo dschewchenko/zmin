@@ -124,6 +124,7 @@ pub(crate) fn dispatch(
             depth,
             negotiation_tip,
             negotiate_only,
+            server_option: _,
             stdin,
             remote,
             branch: refspecs,
