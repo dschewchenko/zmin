@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 785 written rows / 709 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 786 written rows / 710 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -179,7 +179,7 @@ prove it through stock Git versus the temporary `git` shim, then refresh the
 generated counts and commit.
 
 Do not publish a support percentage just because open written rows are now
-`0/785`; the complete command matrices and complete doc-option matrices remain
+`0/786`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -274,6 +274,7 @@ until a full matrix is expanded and verified.
 | `rev-parse` replacement HEAD object id | `1` | `0` | `HEAD` through the `git` shim on a cloned repository root |
 | `rev-parse` replacement top-level path | `1` | `0` | `--show-toplevel` through the `git` shim on a cloned repository root |
 | `rev-parse` replacement nested path discovery | `1` | `0` | `--show-prefix --show-cdup --show-toplevel` through the `git` shim from a nested cwd |
+| `rev-parse` replacement nested cd-up path | `1` | `0` | `--show-cdup` through the `git` shim from a nested cwd |
 | `fetch --shallow-since` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --shallow-since` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches |
 | `fetch --shallow-since` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs |
@@ -330,7 +331,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `453` verified variants.
+Tracked closed blocks in this table: `454` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
