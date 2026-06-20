@@ -83,9 +83,9 @@ Current generated summary:
 | External Systems | `2` | `95` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `134` | `0` | `0` | `0` | `0` | `0` | `17` |
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `70` |
+| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`0`** | **`0`** | **`4`** | **`247`** |
+| **Git 2.47 unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`0`** | **`0`** | **`4`** | **`253`** |
 
 The matrix columns are command-level matrices with explicit option/value/state
 rows. Closed block variants are focused parity blocks from
@@ -115,6 +115,7 @@ by `tools/git-compat-audit-summary.sh`.
 | `for-each-ref` creator atoms | `18` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
 | `for-each-ref` object id abbreviation lengths | `3` | `git_for_each_ref_compat::for_each_ref_matches_stock_git_for_common_formats` |
 | `for-each-ref` invalid object id abbreviation lengths | `4` | `git_for_each_ref_compat::for_each_ref_objectname_short_invalid_lengths_match_stock_git` |
+| `for-each-ref` invalid refname strip values | `6` | `git_for_each_ref_compat::for_each_ref_refname_strip_invalid_values_match_stock_git` |
 
 The `status` matrix includes one newly closed row from this audit slice:
 `git status -z` now matches stock Git's implicit porcelain v1 output. It also

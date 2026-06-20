@@ -77,10 +77,11 @@ Examples:
 | `for-each-ref` creator atoms | `18` | `0` | `creator` and `creatordate` formats for commit refs and annotated tag refs |
 | `for-each-ref` object id abbreviation lengths | `3` | `0` | `objectname:short=4`, `objectname:short=12`, and `objectname:short=40` |
 | `for-each-ref` invalid object id abbreviation lengths | `4` | `0` | `objectname:short=0`, `objectname:short=abc`, `objectname:short=-1`, and `objectname:short=` fatal diagnostics |
+| `for-each-ref` invalid refname strip values | `6` | `0` | `refname:lstrip=abc`, `refname:lstrip=`, `refname:rstrip=abc`, `refname:rstrip=`, and matching invalid sort keys |
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `247` verified variants.
+Tracked closed blocks in this table: `253` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

@@ -261,6 +261,48 @@ fn for_each_ref_objectname_short_invalid_lengths_match_stock_git() {
 }
 
 #[test]
+fn for_each_ref_refname_strip_invalid_values_match_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial subject"]);
+
+    for args in [
+        vec![
+            "for-each-ref",
+            "--format=%(refname:lstrip=abc)",
+            "refs/heads",
+        ],
+        vec!["for-each-ref", "--format=%(refname:lstrip=)", "refs/heads"],
+        vec![
+            "for-each-ref",
+            "--format=%(refname:rstrip=abc)",
+            "refs/heads",
+        ],
+        vec!["for-each-ref", "--format=%(refname:rstrip=)", "refs/heads"],
+        vec![
+            "for-each-ref",
+            "--sort=refname:lstrip=abc",
+            "--format=%(refname)",
+            "refs/heads",
+        ],
+        vec![
+            "for-each-ref",
+            "--sort=refname:rstrip=abc",
+            "--format=%(refname)",
+            "refs/heads",
+        ],
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), &args),
+            git_failure_output(repo.path(), &args),
+            "for-each-ref invalid refname strip value should match for {args:?}"
+        );
+    }
+}
+
+#[test]
 fn for_each_ref_date_atoms_match_stock_git() {
     let repo = common::git_init();
     configure_identity(repo.path());

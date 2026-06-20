@@ -151,6 +151,9 @@ Use commands as `zmin <command>`.
 Zmin wires all `151` Git `2.47` command names to a command handler. That only
 proves dispatch. Real compatibility is counted by behavior variants: command,
 option, value, option combination, repository state, transport and platform.
+The table below is audit progress, not a full support percentage. A group with
+no matrix rows still needs a command-level option/value/state matrix before it
+can be called complete.
 
 | Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -166,9 +169,9 @@ option, value, option combination, repository state, transport and platform.
 | External Systems | `2` | `95` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `134` | `0` | `0` | `0` | `17` |
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `70` |
+| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `76` |
 | Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`4`** | **`247`** |
+| **Git `2.47` unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`4`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and

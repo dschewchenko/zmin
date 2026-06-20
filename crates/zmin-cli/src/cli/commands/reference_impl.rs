@@ -2354,6 +2354,9 @@ fn apply_for_each_ref_atom_requirements(
     match atom {
         "refname" | "refname:short" | "objectname" | "HEAD" => {}
         atom if for_each_ref_refname_strip_modifier(atom).is_some() => {}
+        atom if for_each_ref_refname_strip_invalid_value(atom).is_some() => {
+            return Err(for_each_ref_refname_strip_value_error(atom));
+        }
         atom if for_each_ref_objectname_short_len(atom).is_some() => {}
         atom if for_each_ref_objectname_short_invalid_value(atom).is_some() => {
             return Err(for_each_ref_objectname_short_value_error(atom));
@@ -2482,6 +2485,9 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
                     rows.sort_by(compare);
                 }
             }
+            key if for_each_ref_refname_strip_invalid_value(key).is_some() => {
+                return Err(for_each_ref_refname_strip_value_error(key));
+            }
             _ => {
                 return Err(CliError::Fatal {
                     code: 128,
@@ -2554,6 +2560,9 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
                 &row.ref_name,
                 for_each_ref_refname_strip_modifier(atom).unwrap(),
             ))
+        }
+        atom if for_each_ref_refname_strip_invalid_value(atom).is_some() => {
+            Err(for_each_ref_refname_strip_value_error(atom))
         }
         "objectname" => Ok(row.object_id.to_hex()),
         atom if for_each_ref_objectname_short_len(atom).is_some() => Ok(short_object_id_len(
@@ -2642,6 +2651,21 @@ fn for_each_ref_refname_strip_modifier(atom: &str) -> Option<RefNameStripModifie
         })?;
     let count = value.parse::<i32>().ok()?;
     Some(RefNameStripModifier { mode, count })
+}
+
+fn for_each_ref_refname_strip_invalid_value(atom: &str) -> Option<&str> {
+    let value = atom
+        .strip_prefix("refname:lstrip=")
+        .or_else(|| atom.strip_prefix("refname:rstrip="))?;
+    value.parse::<i32>().err()?;
+    Some(value)
+}
+
+fn for_each_ref_refname_strip_value_error(atom: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("Integer value expected {atom}"),
+    }
 }
 
 fn strip_for_each_ref_refname(ref_name: &str, modifier: RefNameStripModifier) -> String {
