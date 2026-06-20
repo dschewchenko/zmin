@@ -2,6 +2,7 @@ mod common;
 
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 use std::process::Command;
 
 use tempfile::TempDir;
@@ -5177,6 +5178,90 @@ fn fetch_shallow_exclude_local_branch_matches_stock_git() {
             fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
             "{label}"
         );
+    }
+}
+
+#[test]
+fn fetch_shallow_exclude_explicit_location_matches_stock_git() {
+    for (transport_label, remote_url_from_source) in [
+        (
+            "local",
+            Box::new(|source: &Path| source.display().to_string()) as Box<dyn Fn(&Path) -> String>,
+        ),
+        (
+            "file",
+            Box::new(|source: &Path| format!("file://{}", source.display())),
+        ),
+    ] {
+        for (form_label, shallow_exclude_args) in [
+            ("equals", vec!["--shallow-exclude=refs/heads/base"]),
+            ("separate", vec!["--shallow-exclude", "refs/heads/base"]),
+        ] {
+            let dir = TempDir::new().expect("temp dir");
+            let source = dir.path().join("source");
+            let git_client = dir
+                .path()
+                .join(format!("git-client-{transport_label}-{form_label}"));
+            let zmin_client = dir
+                .path()
+                .join(format!("zmin-client-{transport_label}-{form_label}"));
+
+            git(
+                dir.path(),
+                ["init", "-b", "main", source.to_str().expect("source path")],
+            );
+            configure_identity(&source);
+            for name in ["base 1", "base 2"] {
+                fs::write(source.join("file.txt"), format!("{name}\n")).expect("write source file");
+                git(&source, ["add", "-A"]);
+                git_with_env(&source, ["commit", "-m", name]);
+            }
+            git(&source, ["branch", "base"]);
+            for name in ["main 1", "main 2"] {
+                fs::write(source.join("file.txt"), format!("{name}\n")).expect("write source file");
+                git(&source, ["add", "-A"]);
+                git_with_env(&source, ["commit", "-m", name]);
+            }
+
+            for client in [&git_client, &zmin_client] {
+                git(
+                    dir.path(),
+                    ["init", "-b", "main", client.to_str().expect("client path")],
+                );
+            }
+
+            let remote_url = remote_url_from_source(&source);
+            let mut args = vec!["fetch", "--quiet"];
+            args.extend(shallow_exclude_args);
+            args.extend([remote_url.as_str(), "main"]);
+            let case_label = format!("{transport_label} {form_label}");
+            let git_output = command_any_output("git", &git_client, &args, "git");
+            let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+            assert_eq!(zmin_output.0, git_output.0, "{case_label}");
+            assert_eq!(zmin_output.1, git_output.1, "{case_label}");
+            assert_eq!(zmin_output.2, git_output.2, "{case_label}");
+            assert_eq!(
+                git(&zmin_client, ["rev-parse", "--is-shallow-repository"]),
+                git(&git_client, ["rev-parse", "--is-shallow-repository"]),
+                "{case_label}"
+            );
+            assert_eq!(
+                fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+                fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow"),
+                "{case_label}"
+            );
+            assert_eq!(
+                git(&zmin_client, ["rev-list", "--count", "FETCH_HEAD"]),
+                git(&git_client, ["rev-list", "--count", "FETCH_HEAD"]),
+                "{case_label}"
+            );
+            assert_eq!(
+                fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+                fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+                "{case_label}"
+            );
+        }
     }
 }
 

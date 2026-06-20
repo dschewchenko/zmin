@@ -164,10 +164,10 @@ Current audit state. These numbers must not be combined into one percentage:
 | Fully complete command matrices | `0/151` | no command has a finished Git behavior matrix yet |
 | Commands with any matrix rows | `2/151` | `status` and `fetch` have started behavior matrices |
 | Git doc option pairs represented by rows | `50/4632` | documented command-option pairs that have at least one behavior row |
-| Behavior rows written | `179` | explicit command/option/value/combination/state/transport/platform rows written so far |
-| Behavior rows matching stock Git | `164/179` | exact written rows with focused parity evidence |
-| Open written rows | `9/179` | known written rows that are not implemented or not matching yet |
-| Invalid input rows | `6/179` | rows where stock Git rejects the input |
+| Behavior rows written | `183` | explicit command/option/value/combination/state/transport/platform rows written so far |
+| Behavior rows matching stock Git | `168/183` | exact written rows with focused parity evidence |
+| Open written rows | `9/183` | known written rows that are not implemented or not matching yet |
+| Invalid input rows | `6/183` | rows where stock Git rejects the input |
 | Full Git behavior denominator | incomplete | still being expanded from docs, upstream tests and real tool traces |
 
 Only closed behavior variants count as supported for that exact row. Option
@@ -187,7 +187,7 @@ Git compatibility percent:
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `4` |
 | Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` |
-| Sharing and Updating Projects | `5` | `309` | `119` | `108` | `9` | `2` |
+| Sharing and Updating Projects | `5` | `309` | `123` | `112` | `9` | `2` |
 | Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` |
 | Patching | `5` | `333` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `132` | `0` | `0` | `0` | `0` |
@@ -197,7 +197,7 @@ Git compatibility percent:
 | Server Admin | `2` | `30` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` |
 | Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`4632`** | **`179`** | **`164`** | **`9`** | **`6`** |
+| **Git `2.47.1` unique total** | **`151`** | **`4632`** | **`183`** | **`168`** | **`9`** | **`6`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -213,7 +213,7 @@ support:
 | Command | Git doc option seed | Doc spellings represented by rows | Behavior rows written | Matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `28` | `119` | `108` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `123` | `112` | `0` | `9` | `2` | no |
 
 Doc spellings represented by rows means at least one matrix row mentions that
 documented option. It does not mean every value, negation, repeated form,
