@@ -157,19 +157,21 @@ Real compatibility is counted by behavior variants:
 
 `command + option + value + option combination + repository state + transport + platform`
 
-Current accounting. These numbers must not be combined into one percentage:
+Current audit state. These numbers must not be combined into one percentage:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a finished Git behavior matrix yet |
-| Command entry points wired | `151/151` | every Git `2.47.1` command name reaches Zmin code; not a support claim |
-| Git doc option spelling seed | `4632` | raw option spellings found in Git `2.47.1` docs and include files |
-| Behavior rows written | `179` | explicit command/option/value/state/transport/platform rows written so far |
+| Commands with any matrix rows | `2/151` | `status` and `fetch` have started behavior matrices |
+| Git doc option pairs represented by rows | `50/4632` | documented command-option pairs that have at least one behavior row |
+| Behavior rows written | `179` | explicit command/option/value/combination/state/transport/platform rows written so far |
 | Behavior rows matching stock Git | `164/179` | exact written rows with focused parity evidence |
+| Open written rows | `9/179` | known written rows that are not implemented or not matching yet |
+| Invalid input rows | `6/179` | rows where stock Git rejects the input |
 | Full Git behavior denominator | incomplete | still being expanded from docs, upstream tests and real tool traces |
 
 Only closed behavior variants count as supported for that exact row. Option
-spellings are just input for the matrix until they are split into values,
+spellings are input for the matrix until they are split into values,
 negations, repeated forms, order-sensitive combinations, repository states,
 transports and platforms, then checked against stock Git.
 
@@ -211,7 +213,7 @@ support:
 | Command | Git doc option seed | Doc spellings represented by rows | Behavior rows written | Matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `29` | `119` | `108` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `119` | `108` | `0` | `9` | `2` | no |
 
 Doc spellings represented by rows means at least one matrix row mentions that
 documented option. It does not mean every value, negation, repeated form,

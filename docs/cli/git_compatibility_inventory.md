@@ -85,6 +85,9 @@ focused parity evidence checks the same surface.
 - `tools/git-compat-audit-summary.sh` combines command groups, option seed
   rows, command matrices and closed behavior blocks into the summary used by
   the README.
+- `tools/git-compat-command-summary.sh` reports complete command matrices,
+  commands with matrix rows, represented doc-option pairs and written behavior
+  rows.
 - `docs/cli/git_reference_groups.tsv` maps commands into git-scm reference
   groups. Commands can appear in more than one group.
 - `docs/cli/git_audit_primary_groups.tsv` resolves duplicate group membership
@@ -120,9 +123,9 @@ Do not collapse these layers into one percentage.
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
-| Command routing | `151/151` | no | dispatch only |
-| Git doc option spelling seed | `4632` | no | raw documentation input only |
-| Written behavior rows | `179` | no by itself | explicit rows currently written |
+| Commands with any matrix rows | `2/151` | no | audit rows exist only for `status` and `fetch` |
+| Git doc option pairs represented by rows | `50/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `179` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
 | Behavior rows matching stock Git | `164/179` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | incomplete | not yet | still being expanded |
 
@@ -139,6 +142,7 @@ Run:
 
 ```bash
 tools/git-compat-audit-summary.sh
+tools/git-compat-command-summary.sh
 ```
 
 Current generated summary:
@@ -185,7 +189,7 @@ variants.
 | Command | Git doc option seed | Doc spellings represented by rows | Matrix | Behavior rows written | Matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `29` | `docs/cli/matrices/fetch_v2_47.tsv` | `119` | `108` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `119` | `108` | `0` | `9` | `2` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted

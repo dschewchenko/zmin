@@ -98,16 +98,16 @@ compatibility.
 
 Progress reports use these numbers:
 
-`complete command matrices / written behavior rows / rows matching stock Git / open rows`
+`complete command matrices / commands with matrix rows / represented doc-option pairs / written behavior rows / rows matching stock Git / open rows`
 
 For the current branch:
 
-`0/151 complete command matrices / 179 written rows / 164 matching stock Git / 9 open rows`
+`0/151 complete command matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 179 written rows / 164 matching stock Git / 9 open rows`
 
-Keep the doc option seed visible next to this report, but do not use it as a
-percentage denominator. One option spelling can expand into many behavior
-rows. The final denominator exists only after the expansion plan above is done
-for that command.
+Represented doc-option pairs still do not mean support. They only mean at
+least one behavior row exists for that documented option spelling. One option
+spelling can expand into many behavior rows. The final denominator exists only
+after the expansion plan above is done for that command.
 
 ## Closed Evidence Blocks
 
