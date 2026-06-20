@@ -11475,7 +11475,7 @@ fn fetch_with_depth(
         let supported_ref_shape = if is_http_transport_url(&url) {
             branch.as_deref().is_none_or(|value| !value.contains(':'))
         } else if is_ssh_transport_url(&url) {
-            branch.as_deref().is_some_and(|value| !value.contains(':'))
+            branch.as_deref().is_none_or(|value| !value.contains(':'))
         } else {
             false
         };
@@ -11869,10 +11869,26 @@ pub(crate) fn fetch_with_repo_and_remote(
     if is_ssh_transport_url(&url) {
         if !server_options.is_empty() {
             let Some(branch) = branch.as_deref() else {
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: "fetch --server-option currently supports one SSH branch".into(),
-                });
+                if !refmap.is_empty()
+                    || prefetch
+                    || update_shallow
+                    || dry_run
+                    || upload_pack_command.is_some()
+                {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "fetch --server-option currently supports one SSH branch or configured fetch".into(),
+                    });
+                }
+                return fetch_configured_ssh_remote_v2_server_options(
+                    repo,
+                    remote,
+                    missing_ref_code,
+                    &url,
+                    append,
+                    write_fetch_head,
+                    server_options,
+                );
             };
             if branch.contains(':')
                 || !refmap.is_empty()
@@ -11883,9 +11899,9 @@ pub(crate) fn fetch_with_repo_and_remote(
             {
                 return Err(CliError::Fatal {
                     code: 128,
-                    message: "fetch --server-option currently supports one SSH branch".into(),
+                    message: "fetch --server-option currently supports one SSH branch or configured fetch".into(),
                 });
-            }
+            };
             return fetch_with_ssh_remote_v2_server_options(
                 repo,
                 remote,
@@ -16018,6 +16034,62 @@ fn fetch_with_ssh_remote_v2_server_options(
     Ok(())
 }
 
+fn fetch_configured_ssh_remote_v2_server_options(
+    repo: GitRepo,
+    remote: String,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    server_options: &[String],
+) -> Result<()> {
+    let rows = ssh_upload_pack_v2_ls_refs_configured(url, server_options)?;
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
+    sort_dedup_object_ids(&mut roots);
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let pack_fetched = ssh_fetch_smart_pack_v2(
+        url,
+        &repo.objects_dir,
+        &request_roots,
+        &haves,
+        server_options,
+    )?;
+    if !pack_fetched && !request_roots.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    }
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = unique_head_branch_from_rows(&rows) {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file(
+            &repo,
+            &rows,
+            &remote,
+            url,
+            &fetch_refspecs,
+            append,
+            false,
+        )?;
+    }
+    Ok(())
+}
+
 fn ssh_upload_pack_v2_ls_refs(
     url: &str,
     branch: &str,
@@ -16025,6 +16097,24 @@ fn ssh_upload_pack_v2_ls_refs(
 ) -> Result<Vec<LsRemoteRow>> {
     let mut session = ssh_open_upload_pack_v2(url)?;
     let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
+    let rows = {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "ssh transport stdout is unavailable".into(),
+        })?;
+        parse_upload_pack_v2_ls_refs_response(stdout)?
+    };
+    session.finish()?;
+    Ok(rows)
+}
+
+fn ssh_upload_pack_v2_ls_refs_configured(
+    url: &str,
+    server_options: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let mut session = ssh_open_upload_pack_v2(url)?;
+    let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
     write_ssh_v2_request_and_close_stdin(&mut session, &request)?;
     let rows = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
