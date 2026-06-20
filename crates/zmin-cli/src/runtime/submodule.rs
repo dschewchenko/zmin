@@ -1,4 +1,8 @@
 use super::*;
+use crate::cli::commands::transport_commands::{
+    fetch_with_repo_and_remote, is_git_daemon_transport_url, is_http_transport_url,
+    is_ssh_transport_url,
+};
 
 #[derive(Clone, Debug)]
 struct GitmodulesEntry {
@@ -976,15 +980,39 @@ fn fetch_submodule_target(
         return Ok(());
     }
     let remote_url = submodule_remote_url(repo, &submodule_repo, module, parent_repository)?;
-    let Some(remote_path) = local_repository_path_from_location(&remote_url)? else {
-        return Err(CliError::Fatal {
+    if let Some(remote_path) = local_repository_path_from_location(&remote_url)? {
+        fetch_local_submodule_target(
+            repo,
+            module,
+            &submodule_repo,
+            &submodule_store,
+            &remote_path,
+            target,
+        )
+    } else if is_http_transport_url(&remote_url)
+        || is_git_daemon_transport_url(&remote_url)
+        || is_ssh_transport_url(&remote_url)
+    {
+        fetch_network_submodule_target(module, submodule_repo, &submodule_store, target)
+    } else {
+        Err(CliError::Fatal {
             code: 128,
             message: format!(
-                "fetch --recurse-submodules cannot fetch non-local submodule remote '{remote_url}' yet"
+                "fetch --recurse-submodules cannot fetch submodule remote '{remote_url}' yet"
             ),
-        });
-    };
-    let source = local_clone_source(&remote_path)?;
+        })
+    }
+}
+
+fn fetch_local_submodule_target(
+    repo: &GitRepo,
+    module: &GitmodulesEntry,
+    submodule_repo: &GitRepo,
+    submodule_store: &LooseObjectStore,
+    remote_path: &std::path::Path,
+    target: &ObjectId,
+) -> Result<()> {
+    let source = local_clone_source(remote_path)?;
     copy_dir_contents(
         &source.common_dir.join("objects"),
         &submodule_repo.objects_dir,
@@ -1000,6 +1028,45 @@ fn fetch_submodule_target(
         branch.as_deref(),
         true,
     )?;
+    ensure_submodule_target_fetched(module, submodule_store, target)
+}
+
+fn fetch_network_submodule_target(
+    module: &GitmodulesEntry,
+    submodule_repo: GitRepo,
+    submodule_store: &LooseObjectStore,
+    target: &ObjectId,
+) -> Result<()> {
+    fetch_with_repo_and_remote(
+        submodule_repo,
+        "origin".to_owned(),
+        None,
+        128,
+        true,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        &[],
+        false,
+        false,
+        true,
+        false,
+        false,
+        &[],
+        None,
+    )?;
+    ensure_submodule_target_fetched(module, submodule_store, target)
+}
+
+fn ensure_submodule_target_fetched(
+    module: &GitmodulesEntry,
+    submodule_store: &LooseObjectStore,
+    target: &ObjectId,
+) -> Result<()> {
     submodule_store
         .read_object(target)
         .map(|_| ())
