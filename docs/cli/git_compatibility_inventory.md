@@ -177,8 +177,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `15/151` | no | audit rows exist for `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` |
 | Git doc option pairs represented by rows | `223/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `781` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `705/781` | yes, row by row | exact written rows with parity evidence |
+| Written behavior rows | `782` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `706/782` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -209,7 +209,7 @@ Current generated summary:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `56` | `47` | `0` | `0` | `9` | `5` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
-| Basic Snapshotting | `9` | `0` | `371` | `0` | `65` | `61` | `0` | `0` | `4` | `72` |
+| Basic Snapshotting | `9` | `0` | `371` | `0` | `66` | `62` | `0` | `0` | `4` | `73` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `58` | `35` | `0` | `0` | `23` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `289` | `283` | `0` | `0` | `6` | `151` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `142` | `139` | `0` | `0` | `3` | `24` |
@@ -221,7 +221,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `168` | `138` | `0` | `0` | `30` | `92` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `0` | `1` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`781`** | **`705`** | **`0`** | **`0`** | **`76`** | **`449`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`782`** | **`706`** | **`0`** | **`0`** | **`76`** | **`450`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -232,8 +232,8 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `223/4632`
-represented option pairs or `705/781` passing written rows as a Git support
-percentage. The `705/781` number is audit progress for rows already written
+represented option pairs or `706/782` passing written rows as a Git support
+percentage. The `706/782` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -249,7 +249,7 @@ variants.
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `branch` | `51` | `0` | `13` | `docs/cli/matrices/branch_v2_47.tsv` | `31` | `18` | `0` | `0` | `13` | no |
 | `config` | `243` | `0` | `17` | `docs/cli/matrices/config_v2_47.tsv` | `56` | `47` | `0` | `0` | `9` | no |
-| `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `65` | `61` | `0` | `0` | `4` | no |
+| `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `66` | `62` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `0` | `30` | `docs/cli/matrices/fetch_v2_47.tsv` | `289` | `283` | `0` | `0` | `6` | no |
 | `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `57` | `57` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `32` | `docs/cli/matrices/log_v2_47.tsv` | `85` | `82` | `0` | `0` | `3` | no |

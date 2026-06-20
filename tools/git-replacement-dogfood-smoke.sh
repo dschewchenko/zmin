@@ -213,6 +213,7 @@ fi
 compare_command version_invalid version --version
 
 compare_command status_short status --short
+compare_command status_short_branch status --short --branch
 compare_command status_z status -z
 compare_command status_v2_z_branch status --porcelain=v2 -z --branch
 compare_command ls_files_z ls-files -z --cached --others --exclude-standard
