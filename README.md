@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `3/151` | `status`, `fetch` and `rev-parse` have started behavior matrices |
-| Documented option spellings represented by rows | `70/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `275` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `257/275` | exact written rows with focused parity evidence |
-| Open written rows | `9/275` | written rows that still do not match stock Git |
-| Invalid input rows | `9/275` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `4/151` | `config`, `status`, `fetch` and `rev-parse` have started behavior matrices |
+| Documented option spellings represented by rows | `87/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `326` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `299/326` | exact written rows with focused parity evidence |
+| Open written rows | `9/326` | written rows that still do not match stock Git |
+| Invalid input rows | `18/326` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `257/275` as Git compatibility. It only means `257` of the `275`
+Do not read `299/326` as Git compatibility. It only means `299` of the `326`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `70/4632` as option support either; it only means
+counted yet. Do not read `87/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -203,7 +203,7 @@ Audit progress by git-scm reference group:
 
 | Git reference group | Git commands | Complete command matrices | Git doc option seed | Complete documented option matrices | Behavior rows written | Written rows matching stock Git | Open written rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `0` | `276` | `0` | `0` | `0` | `0` | `0` |
+| Setup and Config | `6` | `0` | `276` | `0` | `51` | `42` | `0` | `9` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `4` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `0` | `0` | `0` | `0` |
@@ -217,7 +217,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `25` | `23` | `0` | `2` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`275`** | **`257`** | **`9`** | **`9`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`326`** | **`299`** | **`9`** | **`18`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -230,14 +230,15 @@ Current command-level matrices:
 
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `config` | `243` | `0` | `17` | `51` | `42` | `0` | `0` | `9` | no |
 | `status` | `26` | `0` | `22` | `61` | `57` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `0` | `28` | `189` | `177` | `0` | `9` | `3` | no |
 | `rev-parse` | `72` | `0` | `20` | `25` | `23` | `0` | `0` | `2` | no |
 
-`status` or `rev-parse` having `0` open rows does not mean full command
-compatibility. It means no open item remains among the rows currently written.
-Unwritten values, option combinations, repository states, transports and
-platform cases are still unknown.
+`config`, `status` or `rev-parse` having `0` open rows does not mean full
+command compatibility. It means no open item remains among the rows currently
+written. Unwritten values, option combinations, repository states, transports
+and platform cases are still unknown.
 
 A global percentage will be published only after every Git `2.47.1` command has
 a complete matrix built from Git docs, upstream Git tests and real tool traces.
