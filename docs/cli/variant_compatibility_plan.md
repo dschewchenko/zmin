@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 22/151 commands with matrix rows / 226/4632 represented doc-option pairs / 822 written rows / 727 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 22/151 commands with matrix rows / 226/4632 represented doc-option pairs / 823 written rows / 727 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -127,6 +127,22 @@ command.
 
 Use this as the working queue. Each step should land as a small commit with its
 own stock-Git evidence row instead of bundling unrelated commands.
+
+### Execution Loop
+
+Repeat this loop until the full Git `2.47.1` matrix is closed:
+
+1. Pick exactly one slice from the Immediate Slice Queue.
+2. Write or update the behavior row before relying on implementation work.
+3. Probe stock Git for stdout, stderr, exit code and repository side effects.
+4. Add focused oracle evidence for that exact row.
+5. Implement only the missing behavior for that row.
+6. Run the focused evidence, build and count gates listed below.
+7. Update README, inventory, this plan and project notes with generated counts.
+8. Commit and push before switching to another command, option class or lane.
+
+If a new IDE/tool trace appears, insert it at the top of the queue as a
+behavior row first. Do not replace this loop with broad ad-hoc test runs.
 
 ### Slice Definition of Done
 
@@ -179,15 +195,15 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git cat-file --batch='%(bad)'`
-with stdin input. The next default slice remains the second
+The latest closed guard classification is `git log --diff-merges=bogus -1`.
+The next default slice remains the second
 active lane: run a fresh `unsupported` / `not supported` code scan, choose one
 small remaining guard that is not entangled with unrelated staged changes, then
 classify it as Git-supported behavior, stock-compatible invalid input,
 intentional deferral or Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/822`; the complete command matrices and complete doc-option matrices remain
+`0/823`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -245,6 +261,7 @@ until a full matrix is expanded and verified.
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
 | `log --decorate` boolean value forms | `5` | `0` | `yes`, `on`, `1`, `off`, `0` |
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
+| `log --diff-merges` invalid value usage | `1` | `0` | `git log --diff-merges=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
@@ -366,7 +383,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `486` verified variants.
+Tracked closed blocks in this table: `487` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

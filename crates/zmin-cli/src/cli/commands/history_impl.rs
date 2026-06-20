@@ -4025,8 +4025,8 @@ fn parse_log_diff_merges_arg(
         return Ok(config_mode.unwrap_or(LogMergeDiffMode::Separate));
     }
     parse_log_diff_merges_value(value, true).ok_or_else(|| CliError::Fatal {
-        code: 129,
-        message: format!("unsupported --diff-merges value '{value}'"),
+        code: 128,
+        message: format!("invalid value for '--diff-merges': '{value}'"),
     })
 }
 
