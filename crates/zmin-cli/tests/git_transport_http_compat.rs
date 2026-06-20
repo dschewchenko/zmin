@@ -3724,7 +3724,14 @@ fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
 fn fetch_recurse_submodules_smart_http_parent_uninitialized_submodule_matches_stock_git() {
     let cases = [
         ("implicit-yes", "--recurse-submodules"),
+        ("explicit-yes", "--recurse-submodules=yes"),
+        ("explicit-true", "--recurse-submodules=true"),
+        ("explicit-one", "--recurse-submodules=1"),
         ("on-demand", "--recurse-submodules=on-demand"),
+        ("explicit-no", "--recurse-submodules=no"),
+        ("explicit-false", "--recurse-submodules=false"),
+        ("explicit-zero", "--recurse-submodules=0"),
+        ("no-recurse", "--no-recurse-submodules"),
     ];
 
     for (label, mode_arg) in cases {
