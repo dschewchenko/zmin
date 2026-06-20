@@ -198,6 +198,10 @@ fn for_each_ref_date_atoms_match_stock_git() {
             "%(refname:short)|%(committerdate)|%(committerdate:unix)|%(committerdate:raw)|%(committerdate:iso)|%(committerdate:iso-strict)|%(committerdate:rfc)|%(committerdate:rfc2822)|%(committerdate:short)",
         ),
         (
+            "refs/heads refs/tags",
+            "%(refname:short)|%(committername)|%(committeremail)",
+        ),
+        (
             "refs/tags",
             "%(refname:short)|%(taggerdate)|%(taggerdate:unix)|%(taggerdate:raw)|%(taggerdate:iso)|%(taggerdate:iso-strict)|%(taggerdate:rfc)|%(taggerdate:rfc2822)|%(taggerdate:short)",
         ),

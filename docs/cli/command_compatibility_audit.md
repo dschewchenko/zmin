@@ -73,6 +73,8 @@ Recently closed replacement gaps:
   `authorname`, `authoremail`, and the same `authordate` formats
 - `for-each-ref` supports stock tagger identity atoms for annotated tags:
   `taggername` and `taggeremail`
+- `for-each-ref` supports stock committer identity atoms for commit refs:
+  `committername` and `committeremail`
 - `for-each-ref` supports `creator` and `creatordate` for commit refs and
   annotated tag refs
 - `for-each-ref` supports stock `objectname:short=<n>` abbreviation lengths

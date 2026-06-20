@@ -1980,6 +1980,8 @@ pub(crate) struct ForEachRefRow {
     pub(crate) tagger_email: String,
     pub(crate) tagger_timestamp: Option<i64>,
     pub(crate) tagger_timezone: Option<String>,
+    pub(crate) committer_name: String,
+    pub(crate) committer_email: String,
     pub(crate) committer_timestamp: Option<i64>,
     pub(crate) committer_timezone: Option<String>,
     pub(crate) is_head: bool,
@@ -2202,6 +2204,8 @@ fn build_for_each_ref_row(
         creator_timezone: metadata.creator_timezone,
         tagger_timestamp: metadata.tagger_timestamp,
         tagger_timezone: metadata.tagger_timezone,
+        committer_name: metadata.committer_name,
+        committer_email: metadata.committer_email,
         committer_timestamp: metadata.committer_timestamp,
         committer_timezone: metadata.committer_timezone,
         is_head: current_head_ref == Some(ref_name),
@@ -2358,6 +2362,10 @@ fn apply_for_each_ref_atom_requirements(
         atom if for_each_ref_date_atom_base(atom) == Some("taggerdate") => {
             requirements.need_object_kind = true;
             requirements.need_tagger = true;
+        }
+        "committername" | "committeremail" => {
+            requirements.need_object_kind = true;
+            requirements.need_committer = true;
         }
         atom if for_each_ref_date_atom_base(atom) == Some("committerdate") => {
             requirements.need_object_kind = true;
@@ -2530,6 +2538,14 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
                 Ok(format!("<{}>", row.tagger_email))
             }
         }
+        "committername" => Ok(row.committer_name.clone()),
+        "committeremail" => {
+            if row.committer_email.is_empty() {
+                Ok(String::new())
+            } else {
+                Ok(format!("<{}>", row.committer_email))
+            }
+        }
         atom if for_each_ref_date_atom_base(atom) == Some("taggerdate") => {
             format_for_each_ref_date_atom(
                 atom,
@@ -2675,6 +2691,8 @@ pub(crate) struct RefObjectMetadata {
     pub(crate) tagger_email: String,
     pub(crate) tagger_timestamp: Option<i64>,
     pub(crate) tagger_timezone: Option<String>,
+    pub(crate) committer_name: String,
+    pub(crate) committer_email: String,
     pub(crate) committer_timestamp: Option<i64>,
     pub(crate) committer_timezone: Option<String>,
 }
@@ -2738,6 +2756,8 @@ fn object_ref_metadata_parts(
                 tagger_email: String::new(),
                 tagger_timestamp: None,
                 tagger_timezone: None,
+                committer_name: signature_name(&commit.committer),
+                committer_email: signature_email(&commit.committer),
                 committer_timestamp: committer_date.as_ref().map(|(timestamp, _)| *timestamp),
                 committer_timezone: committer_date.map(|(_, timezone)| timezone),
             })
@@ -2759,6 +2779,8 @@ fn object_ref_metadata_parts(
                 tagger_email: signature_email(&tag.tagger),
                 tagger_timestamp: tagger_date.as_ref().map(|(timestamp, _)| *timestamp),
                 tagger_timezone: tagger_date.map(|(_, timezone)| timezone),
+                committer_name: String::new(),
+                committer_email: String::new(),
                 committer_timestamp: None,
                 committer_timezone: None,
             })
@@ -2776,6 +2798,8 @@ fn object_ref_metadata_parts(
             tagger_email: String::new(),
             tagger_timestamp: None,
             tagger_timezone: None,
+            committer_name: String::new(),
+            committer_email: String::new(),
             committer_timestamp: None,
             committer_timezone: None,
         }),
@@ -6053,6 +6077,8 @@ fn tag(options: TagOptions) -> Result<()> {
                     tagger_email: metadata.tagger_email,
                     tagger_timestamp: metadata.tagger_timestamp,
                     tagger_timezone: metadata.tagger_timezone,
+                    committer_name: metadata.committer_name,
+                    committer_email: metadata.committer_email,
                     committer_timestamp: metadata.committer_timestamp,
                     committer_timezone: metadata.committer_timezone,
                     is_head: false,
