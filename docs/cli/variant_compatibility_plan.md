@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 215/4632 represented doc-option pairs / 628 written rows / 552 written rows matching stock Git / 8 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 215/4632 represented doc-option pairs / 630 written rows / 554 written rows matching stock Git / 8 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -146,7 +146,7 @@ command.
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `log --decorate` boolean value forms | `5` | `0` | `yes`, `on`, `1`, `off`, `0` |
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
-| `log --date` author/committer format values | `9` | `0` | `default`, `local`, `iso`, `iso-strict`, `rfc`, `rfc2822`, `short`, `unix`, `raw` for `%ad` and `%cd` |
+| `log --date` author/committer format values | `11` | `0` | `default`, `local`, `iso`, `iso-strict`, `rfc`, `rfc2822`, `short`, `unix`, `raw`, `relative`, `human` for `%ad` and `%cd` |
 | `stash list` reflog/signature format atoms | `6` | `0` | `%gN`, `%gE`, `%gn`, `%ge`, `%GS`, `%GG` |
 | `stash list` literal-preserved format atoms | `12` | `0` | `%r`, `%R`, `%q`, `%Q`, `%z`, `%gL`, `%gI`, `%gq`, `%gZ`, `%aZ`, `%cZ`, `%GZ` |
 | `stash list` non-forced color format atoms | `3` | `0` | `%Cred`, `%C(red)`, `%C(auto,red)` with reset forms in redirected output |
@@ -201,7 +201,7 @@ command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `345` verified variants.
+Tracked closed blocks in this table: `347` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

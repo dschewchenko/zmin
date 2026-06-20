@@ -1007,6 +1007,17 @@ fn log_date_formats_match_stock_git() {
             "date mode: {mode}"
         );
     }
+
+    let date_env = [("GIT_TEST_DATE_NOW", "1780000000")];
+    for mode in ["relative", "human"] {
+        let date_arg = format!("--date={mode}");
+        let args = ["log", "-1", date_arg.as_str(), "--format=%ad|%cd"];
+        assert_eq!(
+            command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &date_env, "zmin").1,
+            command_output_with_env("git", git_repo.path(), &args, &date_env, "git").1,
+            "date mode: {mode}"
+        );
+    }
 }
 
 #[test]
