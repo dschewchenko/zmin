@@ -102,7 +102,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 171 written rows / 156 matching stock Git / 9 open rows`
+`0/151 complete command matrices / 173 written rows / 158 matching stock Git / 9 open rows`
 
 Keep the doc option seed visible next to this report, but do not use it as a
 percentage denominator. One option spelling can expand into many behavior
@@ -149,6 +149,7 @@ for that command.
 | `status` ignore-submodules modes | `4` | `0` | `--ignore-submodules`, `=all`, `=dirty`, `=untracked` with dirty, untracked and new-commit submodule states |
 | `status` human branch modes | `1` | `0` | `-b`/`--branch` standalone human status for dirty, untracked and upstream-ahead states |
 | `status` pathspec modes | `13` | `0` | exact file, directory, default glob, explicit magic, exclude magic, human output and global pathspec flags |
+| `fetch --update-shallow` local/file remote forms | `2` | `0` | named local path and file URL remotes where the remote itself is shallow |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
@@ -163,7 +164,7 @@ for that command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `253` verified variants.
+Tracked closed blocks in this table: `255` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

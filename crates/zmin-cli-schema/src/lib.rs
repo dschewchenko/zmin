@@ -1128,6 +1128,8 @@ pub enum Command {
         deepen: Option<String>,
         #[arg(long = "unshallow", action = ArgAction::SetTrue)]
         unshallow: bool,
+        #[arg(long = "update-shallow", action = ArgAction::SetTrue)]
+        update_shallow: bool,
         #[arg(long = "shallow-since")]
         shallow_since: Option<String>,
         #[arg(long = "shallow-exclude")]

@@ -5946,6 +5946,59 @@ fn copy_reachable_objects_for_depth_into(
     Ok(())
 }
 
+fn copy_reachable_objects_from_shallow_source_into(
+    source: &LooseObjectStore,
+    destination: &LooseObjectStore,
+    roots: &[ObjectId],
+    shallow_boundaries: &HashSet<ObjectId>,
+    seen: &mut HashSet<ObjectId>,
+) -> Result<()> {
+    let mut commits = Vec::with_capacity(transport_history_collection_capacity(roots.len()));
+    let mut pending = roots.to_vec();
+    let mut scheduled = HashSet::with_capacity(transport_history_collection_capacity(roots.len()));
+    let mut missing = Vec::new();
+    while let Some(id) = pending.pop() {
+        if !scheduled.insert(id.clone()) {
+            continue;
+        }
+        let _ = record_object_if_missing(destination, &id, seen, &mut missing)?;
+        let kind = object_kind_hint_or_read(source, &id)?;
+        if kind == GitObjectKind::Tag {
+            let object = source.read_object(&id)?;
+            let tag = decode_tag(GitHashAlgorithm::Sha1, &object.content)?;
+            pending.push(tag.target);
+            continue;
+        }
+        if kind != GitObjectKind::Commit {
+            continue;
+        }
+        commits.push(id.clone());
+        if shallow_boundaries.contains(&id) {
+            continue;
+        }
+        pending.extend(read_commit_parents_uncached(source, &id)?);
+    }
+    let commit_cache = CommitObjectCache::new(source);
+    let mut object_ids = Vec::with_capacity(transport_history_collection_capacity(commits.len()));
+    collect_rev_list_object_ids_into_cached(
+        source,
+        &commit_cache,
+        &commits,
+        &[],
+        &[],
+        seen,
+        &mut object_ids,
+    )?;
+    record_missing_objects(destination, &object_ids, &mut missing)?;
+    copy_or_pack_missing_objects(
+        source,
+        destination,
+        &missing,
+        PackEncodeOptions::delta(10, 50),
+    )?;
+    Ok(())
+}
+
 fn copy_object_if_missing(
     source: &LooseObjectStore,
     destination: &LooseObjectStore,
@@ -8446,6 +8499,7 @@ pub(crate) fn run_fetch(
     refmap: Vec<String>,
     depth: Option<String>,
     unshallow: bool,
+    update_shallow: bool,
     negotiation_tips: Vec<String>,
     negotiate_only: bool,
     stdin: bool,
@@ -8543,6 +8597,7 @@ pub(crate) fn run_fetch(
                 depth.as_deref(),
                 deepen,
                 false,
+                update_shallow,
                 None,
                 &[],
                 128,
@@ -8580,6 +8635,7 @@ pub(crate) fn run_fetch(
                 depth.as_deref(),
                 deepen,
                 false,
+                update_shallow,
                 None,
                 &[],
                 128,
@@ -8637,6 +8693,7 @@ pub(crate) fn run_fetch(
         depth.as_deref(),
         deepen,
         unshallow,
+        update_shallow,
         shallow_since,
         &shallow_exclude,
         128,
@@ -9260,6 +9317,7 @@ fn fetch_multiple_refspecs(
                 None,
                 &refspecs,
                 128,
+                false,
             )?;
         }
     }
@@ -9734,6 +9792,7 @@ fn fetch_multiple_refspecs_from_location(
                 None,
                 refspecs,
                 128,
+                false,
             )?;
         }
     }
@@ -9910,6 +9969,7 @@ pub(crate) fn run_pull(
                 Some(branch.clone()),
                 None,
                 None,
+                false,
                 false,
                 None,
                 &[],
@@ -10579,6 +10639,7 @@ fn fetch_with_depth(
     depth: Option<&str>,
     deepen: Option<usize>,
     unshallow: bool,
+    update_shallow: bool,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
     missing_ref_code: i32,
@@ -10804,6 +10865,7 @@ fn fetch_with_depth(
         atomic,
         refmap,
         prefetch,
+        update_shallow,
         upload_pack_command,
     )
 }
@@ -10833,6 +10895,7 @@ fn fetch_with_missing_ref_code(
         false,
         false,
         &[],
+        false,
         false,
         None,
     )
@@ -10874,10 +10937,12 @@ pub(crate) fn fetch_with_repo_and_remote(
     atomic: bool,
     refmap: &[String],
     prefetch: bool,
+    update_shallow: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_http_remote(
                 &repo,
@@ -10897,6 +10962,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         return fetch_with_http_remote(repo, remote, branch, missing_ref_code, &url);
     }
     if is_git_daemon_transport_url(&url) {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_daemon_remote(
                 &repo,
@@ -10917,6 +10983,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         return fetch_with_daemon_remote(repo, remote, branch, missing_ref_code, &url);
     }
     if is_ssh_transport_url(&url) {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_ssh_remote(
                 &repo,
@@ -11033,6 +11100,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 },
                 &fetch_refspecs,
                 missing_ref_code,
+                update_shallow,
             )?;
         }
     }
@@ -11237,6 +11305,16 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         Ok(())
     }
+}
+
+fn ensure_fetch_update_shallow_supported_for_local(update_shallow: bool) -> Result<()> {
+    if update_shallow {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --update-shallow currently supports local and file remotes".into(),
+        });
+    }
+    Ok(())
 }
 
 fn fetch_with_repo_and_location(
@@ -11463,6 +11541,7 @@ fn fetch_with_repo_and_location(
         None,
         &[],
         missing_ref_code,
+        false,
     )?;
     if !no_tags {
         copy_configured_fetch_tags(&source_refs, &destination_refs)?;
@@ -11502,6 +11581,7 @@ fn fetch_direct_location_prune_tags(
         None,
         &refspecs,
         missing_ref_code,
+        false,
     )?;
     let fetch_update_rows = if quiet {
         Vec::new()
@@ -11720,6 +11800,7 @@ fn fetch_direct_location_wildcard_refspec(
         None,
         &refspecs,
         missing_ref_code,
+        false,
     )?;
     let fetch_update_rows = if quiet {
         Vec::new()
@@ -13260,6 +13341,7 @@ fn copy_local_fetch_objects(
     branch: Option<&str>,
     fetch_refspecs: &[String],
     missing_ref_code: i32,
+    update_shallow: bool,
 ) -> Result<()> {
     let source_repo = local_clone_source_repo(source);
     let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
@@ -13346,16 +13428,39 @@ fn copy_local_fetch_objects(
     ));
     {
         let _trace = phase_trace("fetch.local.copy_reachable_objects");
-        copy_reachable_objects_into_many(
-            &source_repo,
-            &source_store,
-            &destination_store,
-            &roots,
-            &excluded_roots,
-            &mut seen,
-            PackEncodeOptions::delta(10, 50),
-            PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
-        )?;
+        if let Some(shallow_boundaries) = read_repo_shallow_boundaries(&source_repo)? {
+            if !update_shallow {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!(
+                        "source repository is shallow; use --update-shallow to accept shallow boundaries from '{}'",
+                        source.git_dir.display()
+                    ),
+                });
+            }
+            copy_reachable_objects_from_shallow_source_into(
+                &source_store,
+                &destination_store,
+                &roots,
+                &shallow_boundaries,
+                &mut seen,
+            )?;
+            write_shallow_file(
+                destination_repo,
+                sorted_object_ids_from_set(&shallow_boundaries),
+            )?;
+        } else {
+            copy_reachable_objects_into_many(
+                &source_repo,
+                &source_store,
+                &destination_store,
+                &roots,
+                &excluded_roots,
+                &mut seen,
+                PackEncodeOptions::delta(10, 50),
+                PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
+            )?;
+        }
     }
     Ok(())
 }
@@ -15056,6 +15161,7 @@ fn fetch_with_repo_and_remote_deepen(
             atomic,
             &[],
             false,
+            false,
             None,
         );
     };
@@ -15142,6 +15248,7 @@ fn fetch_with_repo_and_remote_unshallow(
         tags,
         atomic,
         &[],
+        false,
         false,
         None,
     )?;
