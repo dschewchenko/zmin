@@ -4406,10 +4406,7 @@ fn split_log_implicit_pathspecs(repo: &GitRepo, revs: Vec<String>) -> (Vec<Strin
             pathspecs.push(rev);
             continue;
         }
-        if !parsed_revs.is_empty()
-            && resolve_objectish(repo, &rev).is_err()
-            && repo.root.join(&rev).exists()
-        {
+        if resolve_objectish(repo, &rev).is_err() && repo.root.join(&rev).exists() {
             in_pathspecs = true;
             pathspecs.push(rev);
         } else {

@@ -234,6 +234,7 @@ compare_command config_remote_get_regexp config --get-regexp '^remote\.'
 compare_command config_branch_get_regexp config --get-regexp '^branch\.'
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
 compare_command log_date_iso_strict_z log -z --date=iso-strict --format=%H%x00%ad%x00%cd -1
+compare_command log_pathspec_dir_z log -z --format=%H%x00%s -1 -- dir
 
 printf 'nested changed\n' >"$stock_client/dir/nested.txt"
 printf 'nested changed\n' >"$zmin_client/dir/nested.txt"
