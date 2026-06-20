@@ -232,6 +232,10 @@ compare_command config_branch_remote config --get branch.main.remote
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
 compare_command log_date_iso_strict_z log -z --date=iso-strict --format=%H%x00%ad%x00%cd -1
 
+printf 'nested changed\n' >"$stock_client/dir/nested.txt"
+printf 'nested changed\n' >"$zmin_client/dir/nested.txt"
+compare_command status_pathspec_dir_z status --porcelain=v1 -z -- dir
+
 "$stock_git" -C "$stock_client" add tracked.txt new.txt
 "$stock_git" -C "$zmin_client" add tracked.txt new.txt
 compare_command diff_cached_name_status_z diff --cached --name-status -z

@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 773 written rows / 697 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 774 written rows / 698 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -172,11 +172,11 @@ updates, project-note update, commit and push.
 
 ### Current Next Slice Pointer
 
-The next slice should return to the first active lane: WebStorm replacement
-blockers. Pick one observed replacement-shim command shape from `status`,
-`log`, `diff`, `ls-files`, `rev-parse` or `config`, add or update exactly one
-matrix row, prove it through stock Git versus the temporary `git` shim, then
-refresh the generated counts and commit.
+The next slice stays in the first active lane: WebStorm replacement blockers.
+Pick one observed replacement-shim command shape from `status`, `log`, `diff`,
+`ls-files`, `rev-parse` or `config`, add or update exactly one matrix row,
+prove it through stock Git versus the temporary `git` shim, then refresh the
+generated counts and commit.
 
 Do not publish a support percentage just because open written rows are now
 `0/773`; the complete command matrices and complete doc-option matrices remain
@@ -240,6 +240,7 @@ until a full matrix is expanded and verified.
 | `status -z` implicit porcelain form | `1` | `0` | `git status -z` matches stock Git's NUL-terminated porcelain v1 output |
 | `status` replacement short output | `1` | `0` | `--short` through the `git` shim on a cloned repository with dirty and untracked files |
 | `status` replacement NUL output | `1` | `0` | `-z` through the `git` shim on a cloned repository with dirty and untracked files |
+| `status` replacement NUL pathspec output | `1` | `0` | `--porcelain=v1 -z -- dir` through the `git` shim on a cloned repository with a dirty nested tracked file |
 | `status` option evidence forms | `5` | `0` | `--null`, `--short`, `-unormal`, bare `--untracked-files`, `--ignored=traditional` |
 | `status` ahead-behind toggles | `2` | `0` | `--ahead-behind`, `--no-ahead-behind` with porcelain v1/v2 and equal/different upstream refs |
 | `status` stash display toggles | `2` | `0` | `--show-stash`, `--no-show-stash` with human, porcelain v2 and toggle order |
@@ -318,7 +319,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `441` verified variants.
+Tracked closed blocks in this table: `442` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
