@@ -8681,6 +8681,7 @@ pub(crate) fn run_fetch(
             upload_pack_command.as_deref(),
             deepen,
             unshallow,
+            update_shallow,
             shallow_since,
             &shallow_exclude,
         )?;
@@ -9198,6 +9199,7 @@ fn fetch_multiple_refspecs(
     upload_pack_command: Option<&str>,
     deepen: Option<usize>,
     unshallow: bool,
+    update_shallow: bool,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
@@ -9231,6 +9233,7 @@ fn fetch_multiple_refspecs(
             no_tags,
             deepen,
             unshallow,
+            update_shallow,
             shallow_since,
             shallow_exclude,
         );
@@ -9243,6 +9246,7 @@ fn fetch_multiple_refspecs(
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9281,6 +9285,7 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_git_daemon_transport_url(&url) {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9317,6 +9322,7 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_ssh_transport_url(&url) {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9439,7 +9445,7 @@ fn fetch_multiple_refspecs(
                 None,
                 &refspecs,
                 128,
-                false,
+                update_shallow,
             )?;
         }
     }
@@ -9869,6 +9875,7 @@ fn fetch_multiple_refspecs_from_location(
     no_tags: bool,
     deepen: Option<usize>,
     unshallow: bool,
+    update_shallow: bool,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
@@ -9876,6 +9883,7 @@ fn fetch_multiple_refspecs_from_location(
         return Err(unsupported_remote_helper_error(location, String::new()));
     };
     if source_path.is_file() {
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9978,7 +9986,7 @@ fn fetch_multiple_refspecs_from_location(
                 None,
                 refspecs,
                 128,
-                false,
+                update_shallow,
             )?;
         }
     }
@@ -11582,6 +11590,7 @@ fn fetch_with_repo_and_location(
                     prune,
                     no_tags,
                     None,
+                    false,
                     false,
                     None,
                     &[],
@@ -14052,6 +14061,7 @@ fn write_explicit_location_refspec_fetch_head_file(
 fn fetch_head_url_display(url: &str) -> String {
     url.strip_suffix("/.git/")
         .or_else(|| url.strip_suffix(".git/"))
+        .or_else(|| url.strip_suffix(".git"))
         .unwrap_or(url)
         .to_owned()
 }
