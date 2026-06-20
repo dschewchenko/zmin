@@ -9631,6 +9631,23 @@ fn fetch_server_option_separate_protocol_v2_smart_http_branch_matches_stock_git(
 }
 
 #[test]
+fn fetch_server_option_separate_protocol_v2_smart_http_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+        "separate-branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option",
+            "trace",
+            "origin",
+        ],
+        &["fetch", "--server-option", "trace", "origin"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
 fn fetch_server_option_repeated_protocol_v2_smart_http_branch_matches_stock_git() {
     assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
         "repeated",
@@ -9649,6 +9666,28 @@ fn fetch_server_option_repeated_protocol_v2_smart_http_branch_matches_stock_git(
             "--server-option=mode=full",
             "origin",
             "main",
+        ],
+        &["server-option=trace", "server-option=mode=full"],
+    );
+}
+
+#[test]
+fn fetch_server_option_repeated_protocol_v2_smart_http_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+        "repeated-branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+        ],
+        &[
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
         ],
         &["server-option=trace", "server-option=mode=full"],
     );
@@ -9706,6 +9745,23 @@ fn fetch_server_option_separate_protocol_v2_ssh_branch_matches_stock_git() {
 }
 
 #[test]
+fn fetch_server_option_separate_protocol_v2_ssh_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
+        "separate-branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option",
+            "trace",
+            "origin",
+        ],
+        &["fetch", "--server-option", "trace", "origin"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
 fn fetch_server_option_repeated_protocol_v2_ssh_branch_matches_stock_git() {
     assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
         "repeated",
@@ -9724,6 +9780,28 @@ fn fetch_server_option_repeated_protocol_v2_ssh_branch_matches_stock_git() {
             "--server-option=mode=full",
             "origin",
             "main",
+        ],
+        &["server-option=trace", "server-option=mode=full"],
+    );
+}
+
+#[test]
+fn fetch_server_option_repeated_protocol_v2_ssh_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_ssh_branch_matches_stock_git(
+        "repeated-branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+        ],
+        &[
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
         ],
         &["server-option=trace", "server-option=mode=full"],
     );
