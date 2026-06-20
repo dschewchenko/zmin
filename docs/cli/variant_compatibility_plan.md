@@ -179,6 +179,14 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
+Current candidate: probe `git bisect visualize --bad` only after starting a
+real bisect session, compare stock Git and Zmin stdout, stderr and exit code,
+then either add a focused invalid-input row/test for the existing
+`bisect visualize` unsupported-option guard or discard the candidate and move
+to the next guard. If the row is closed, create a command matrix for
+`bisect_v2_47.tsv`, update counts and project notes, commit and push before
+classifying another guard.
+
 Do not publish a support percentage just because open written rows are now
 `0/820`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
@@ -188,6 +196,9 @@ local path and file URL branch fetches, including the file URL shallow-client
 `--depth=1` combination. Do not return to that lane unless a new stock-Git
 trace, upstream test or dogfood flow exposes a missing value, mode or side
 effect.
+
+After each committed slice, update this pointer in the same docs/counts commit.
+The pointer is the durable handoff source; chat history is not the plan.
 
 ### Count Update Gates
 
