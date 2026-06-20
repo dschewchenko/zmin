@@ -386,7 +386,12 @@ pub(crate) fn parse_git_date(value: &str) -> Result<(i64, String)> {
 }
 
 fn parse_git_absolute_date(value: &str) -> Result<(i64, String)> {
-    let formats_with_timezone = ["%Y-%m-%d %H:%M:%S %z", "%Y-%m-%d %H:%M %z"];
+    let formats_with_timezone = [
+        "%Y-%m-%d %H:%M:%S %z",
+        "%Y-%m-%d %H:%M %z",
+        "%Y-%m-%dT%H:%M:%S %z",
+        "%Y-%m-%dT%H:%M %z",
+    ];
     for format in formats_with_timezone {
         if let Ok(datetime) = chrono::DateTime::parse_from_str(value, format) {
             return Ok((datetime.timestamp(), datetime.format("%z").to_string()));

@@ -162,7 +162,7 @@ Current accounting:
 | --- | ---: | ---: | --- |
 | Git command names | `151` | `151` | command can be routed to Zmin code |
 | Git doc option spellings | `2500` | not reported | raw option seed from Git `2.47.1` docs |
-| Written behavior rows | `121` | `106` | exact rows already checked against stock Git |
+| Written behavior rows | `123` | `108` | exact rows already checked against stock Git |
 | Full Git behavior denominator | incomplete | not reported | still being expanded from docs, upstream tests and real tool traces |
 
 Only audited behavior variants count as supported. Option spellings are not
@@ -181,7 +181,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `61` | `50` | `9` | `2` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `63` | `52` | `9` | `2` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `52` |
@@ -191,7 +191,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `76` |
 | Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`2500`** | **`121`** | **`106`** | **`9`** | **`6`** | **`253`** |
+| **Git `2.47` unique total** | **`151`** | **`2500`** | **`123`** | **`108`** | **`9`** | **`6`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -206,7 +206,7 @@ Current command-level matrices. This is audit coverage, not command support:
 | Command | Git doc option seed rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `status` | `28` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `13` | `61` | `50` | `0` | `9` | `2` |
+| `fetch` | `13` | `63` | `52` | `0` | `9` | `2` |
 
 `status` having `0` open rows here does not mean full `git status`
 compatibility. It means no open row remains among the currently written rows.
