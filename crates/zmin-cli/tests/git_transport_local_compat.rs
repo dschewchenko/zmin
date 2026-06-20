@@ -2854,6 +2854,152 @@ fn fetch_upload_pack_shallow_since_local_transports_match_stock_git() {
 }
 
 #[test]
+fn fetch_upload_pack_shallow_exclude_local_transports_match_stock_git() {
+    let cases = [
+        ("local-path-upload-equals-exclude-equals", false, true, true),
+        (
+            "local-path-upload-separate-exclude-equals",
+            false,
+            false,
+            true,
+        ),
+        ("file-url-upload-equals-exclude-equals", true, true, true),
+        ("file-url-upload-separate-exclude-equals", true, false, true),
+        (
+            "local-path-upload-equals-exclude-separate",
+            false,
+            true,
+            false,
+        ),
+        (
+            "local-path-upload-separate-exclude-separate",
+            false,
+            false,
+            false,
+        ),
+        ("file-url-upload-equals-exclude-separate", true, true, false),
+        (
+            "file-url-upload-separate-exclude-separate",
+            true,
+            false,
+            false,
+        ),
+    ];
+
+    for (label, file_url, upload_equals_form, exclude_equals_form) in cases {
+        let dir = TempDir::new().expect("temp dir");
+        let source = dir.path().join(format!("source-{label}"));
+        let git_client = dir.path().join(format!("git-client-{label}"));
+        let zmin_client = dir.path().join(format!("zmin-client-{label}"));
+        let wrapper = dir
+            .path()
+            .join(format!("upload-pack-shallow-exclude-{label}.sh"));
+        let log = wrapper.with_extension("sh.log");
+
+        fs::write(
+            &wrapper,
+            b"#!/bin/sh\nprintf 'invoked %s\\n' \"$*\" >> \"$0.log\"\nexec git-upload-pack \"$@\"\n",
+        )
+        .expect("write upload-pack wrapper");
+        chmod_executable(&wrapper);
+
+        git(
+            dir.path(),
+            ["init", "-b", "main", source.to_str().expect("source path")],
+        );
+        configure_identity(&source);
+        for name in ["base 1", "base 2"] {
+            fs::write(source.join("file"), format!("{name}\n")).expect("write source");
+            git(&source, ["add", "-A"]);
+            git_with_env(&source, ["commit", "-m", name]);
+        }
+        git(&source, ["branch", "base"]);
+        for name in ["main 3", "main 4"] {
+            fs::write(source.join("file"), format!("{name}\n")).expect("write source");
+            git(&source, ["add", "-A"]);
+            git_with_env(&source, ["commit", "-m", name]);
+        }
+
+        git(
+            dir.path(),
+            [
+                "init",
+                "-b",
+                "main",
+                git_client.to_str().expect("git client"),
+            ],
+        );
+        run_zmin(
+            dir.path(),
+            [
+                "init",
+                "-b",
+                "main",
+                zmin_client.to_str().expect("zmin client"),
+            ],
+        );
+        let remote_url = if file_url {
+            format!("file://{}", source.display())
+        } else {
+            source.to_string_lossy().into_owned()
+        };
+        git(&git_client, ["remote", "add", "origin", &remote_url]);
+        git(&zmin_client, ["remote", "add", "origin", &remote_url]);
+
+        let wrapper_command = shell_command_path(wrapper.to_str().expect("wrapper path"));
+        let mut args = vec!["fetch".to_owned(), "--quiet".to_owned()];
+        if exclude_equals_form {
+            args.push("--shallow-exclude=refs/heads/base".to_owned());
+        } else {
+            args.push("--shallow-exclude".to_owned());
+            args.push("refs/heads/base".to_owned());
+        }
+        if upload_equals_form {
+            args.push(format!("--upload-pack={wrapper_command}"));
+        } else {
+            args.push("--upload-pack".to_owned());
+            args.push(wrapper_command);
+        }
+        args.push("origin".to_owned());
+        args.push("main".to_owned());
+        let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+        let git_output = command_any_output("git", &git_client, &arg_refs, "git");
+        let zmin_output = command_any_output(zmin_bin(), &zmin_client, &arg_refs, "zmin");
+
+        assert_eq!(zmin_output.0, git_output.0, "{label}");
+        assert_eq!(zmin_output.1, git_output.1, "{label}");
+        assert_eq!(zmin_output.2, git_output.2, "{label}");
+        assert_eq!(
+            git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
+            git(&git_client, ["rev-parse", "refs/remotes/origin/main"]),
+            "{label}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{label}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+            fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow"),
+            "{label}"
+        );
+        assert_eq!(
+            git(&zmin_client, ["rev-list", "--count", "FETCH_HEAD"]),
+            git(&git_client, ["rev-list", "--count", "FETCH_HEAD"]),
+            "{label}"
+        );
+        let invocations = fs::read_to_string(&log).expect("upload-pack log");
+        assert_eq!(
+            invocations.lines().count(),
+            2,
+            "expected stock Git and Zmin to invoke upload-pack for {label}: {invocations}"
+        );
+    }
+}
+
+#[test]
 fn fetch_uses_first_configured_remote_url_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let url1 = dir.path().join("url1");

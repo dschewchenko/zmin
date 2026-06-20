@@ -8517,12 +8517,6 @@ pub(crate) fn run_fetch(
             message: "fetch --deepen currently supports one named remote branch".into(),
         });
     }
-    if upload_pack_command.is_some() && !shallow_exclude.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --upload-pack currently supports one named local or file remote".into(),
-        });
-    }
     let no_tags = fetch_no_tags(raw_args, no_tags, tags);
     let refspecs = force_fetch_refspecs(force, refspecs);
     if !refmap.is_empty() && refspecs.is_empty() {
@@ -10750,6 +10744,7 @@ fn fetch_with_depth(
             shallow_exclude,
             append,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     if let Some(deepen) = deepen {
@@ -14907,6 +14902,7 @@ fn fetch_with_repo_and_remote_shallow_exclude(
     exclude_revs: &[String],
     append: bool,
     write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -14943,6 +14939,29 @@ fn fetch_with_repo_and_remote_shallow_exclude(
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, false)?;
+    }
+    if let Some(command) = upload_pack_command {
+        let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
+        let shallow_boundaries = fetch_pack_with_local_upload_pack_command_with_deepen_not(
+            command,
+            source_path.to_string_lossy().as_ref(),
+            &repo.objects_dir,
+            std::slice::from_ref(&id),
+            &haves,
+            exclude_revs,
+            &[],
+        )?;
+        write_shallow_file(
+            &repo,
+            boundaries_or_local_exclusion_fallback(
+                &source_repo,
+                &source_store,
+                std::slice::from_ref(&id),
+                exclude_revs,
+                shallow_boundaries,
+            )?,
+        )?;
+        return Ok(());
     }
     let commit_cache = CommitObjectCache::new(&source_store);
     let exclude_roots = Vec::new();
@@ -15350,6 +15369,36 @@ fn boundaries_or_local_since_fallback(
         ..UploadPackRequest::default()
     };
     upload_pack_since_shallow_boundaries(source_repo, source_store, roots, since, &request)
+}
+
+fn boundaries_or_local_exclusion_fallback(
+    source_repo: &GitRepo,
+    source_store: &LooseObjectStore,
+    roots: &[ObjectId],
+    exclude_revs: &[String],
+    remote_boundaries: Vec<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    if !remote_boundaries.is_empty() {
+        return Ok(remote_boundaries);
+    }
+    let commit_cache = CommitObjectCache::new(source_store);
+    let exclude_roots = Vec::new();
+    let commits = collect_commits_from_ids_with_id_exclusions_cached(
+        source_repo,
+        source_store,
+        &commit_cache,
+        roots,
+        &exclude_roots,
+        exclude_revs,
+        None,
+    )?;
+    upload_pack_exclusion_shallow_boundaries(
+        source_repo,
+        source_store,
+        &commits,
+        &exclude_roots,
+        exclude_revs,
+    )
 }
 
 fn clone_shallow_roots(repo: &GitRepo, roots: &[ObjectId]) -> Result<Vec<ObjectId>> {
@@ -15828,7 +15877,7 @@ fn build_upload_pack_request_with_shallows(
     depth: Option<usize>,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(roots, haves, depth, None, shallows)
+    build_upload_pack_request_with_shallow_options(roots, haves, depth, None, &[], shallows)
 }
 
 fn build_upload_pack_request_with_since(
@@ -15837,7 +15886,16 @@ fn build_upload_pack_request_with_since(
     since: i64,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(roots, haves, None, Some(since), shallows)
+    build_upload_pack_request_with_shallow_options(roots, haves, None, Some(since), &[], shallows)
+}
+
+fn build_upload_pack_request_with_deepen_not(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    deepen_not: &[String],
+    shallows: &[ObjectId],
+) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options(roots, haves, None, None, deepen_not, shallows)
 }
 
 fn build_upload_pack_request_with_shallow_options(
@@ -15845,10 +15903,11 @@ fn build_upload_pack_request_with_shallow_options(
     haves: &[ObjectId],
     depth: Option<usize>,
     since: Option<i64>,
+    deepen_not: &[String],
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
     let mut request = Vec::with_capacity(upload_pack_request_capacity(
-        roots, haves, depth, since, shallows,
+        roots, haves, depth, since, deepen_not, shallows,
     ));
     let first_extra = b" side-band-64k thin-pack ofs-delta no-progress include-tag";
     for (idx, root) in roots.iter().enumerate() {
@@ -15890,6 +15949,12 @@ fn build_upload_pack_request_with_shallow_options(
         request.extend_from_slice(since.as_bytes());
         request.push(b'\n');
     }
+    for rev in deepen_not {
+        append_pkt_line_len(&mut request, b"deepen-not ".len() + rev.len() + 1)?;
+        request.extend_from_slice(b"deepen-not ");
+        request.extend_from_slice(rev.as_bytes());
+        request.push(b'\n');
+    }
     request.extend_from_slice(b"0000");
     for have in haves {
         append_pkt_line_len(&mut request, b"have ".len() + have.hex_len() + 1)?;
@@ -15907,6 +15972,7 @@ fn upload_pack_request_capacity(
     haves: &[ObjectId],
     depth: Option<usize>,
     since: Option<i64>,
+    deepen_not: &[String],
     shallows: &[ObjectId],
 ) -> usize {
     let first_extra = " side-band-64k thin-pack ofs-delta no-progress include-tag".len();
@@ -15923,6 +15989,10 @@ fn upload_pack_request_capacity(
     let deepen_since = since
         .map(|since| 4 + "deepen-since ".len() + since.to_string().len() + 1)
         .unwrap_or(0);
+    let deepen_not = deepen_not
+        .iter()
+        .map(|rev| 4 + "deepen-not ".len() + rev.len() + 1)
+        .sum::<usize>();
     let shallows = shallows
         .iter()
         .map(|id| 4 + "shallow ".len() + id.hex_len() + 1)
@@ -15931,7 +16001,7 @@ fn upload_pack_request_capacity(
         .iter()
         .map(|have| 4 + "have ".len() + have.hex_len() + 1)
         .sum::<usize>();
-    wants + shallows + deepen + deepen_since + haves + 4 + 4 + "done\n".len()
+    wants + shallows + deepen + deepen_since + deepen_not + haves + 4 + 4 + "done\n".len()
 }
 
 fn decimal_len(mut value: usize) -> usize {
@@ -16405,6 +16475,60 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
         return Ok(Vec::new());
     }
     let request = build_upload_pack_request_with_since(roots, haves, since, shallows)?;
+    session
+        .stdin
+        .as_mut()
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdin is unavailable".into(),
+        })?
+        .write_all(&request)?;
+    drop(session.stdin.take());
+
+    let temp_pack = temp_http_pack_path(objects_dir)?;
+    let pack_result = parse_upload_pack_sideband_response_to_file(
+        session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdout is unavailable".into(),
+        })?,
+        &temp_pack,
+        roots.len(),
+    )?;
+    if pack_result.is_none() {
+        let _ = fs::remove_file(&temp_pack);
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "local upload-pack response did not contain a pack".into(),
+        });
+    }
+    write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
+    session.finish()?;
+    Ok(pack_result.unwrap_or_default())
+}
+
+fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    deepen_not: &[String],
+    shallows: &[ObjectId],
+) -> Result<Vec<ObjectId>> {
+    let mut session = spawn_local_upload_pack_command(command, repository_path)?;
+    {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdout is unavailable".into(),
+        })?;
+        let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+        while read_pkt_line_payload_into(stdout, &mut line)? {}
+    }
+    if roots.is_empty() {
+        session.finish()?;
+        return Ok(Vec::new());
+    }
+    let request = build_upload_pack_request_with_deepen_not(roots, haves, deepen_not, shallows)?;
     session
         .stdin
         .as_mut()
@@ -19336,7 +19460,7 @@ mod transport_request_tests {
 
         assert_eq!(
             request.len(),
-            upload_pack_request_capacity(&roots, &[], Some(123_456), None, &[])
+            upload_pack_request_capacity(&roots, &[], Some(123_456), None, &[], &[])
         );
         assert!(
             request
