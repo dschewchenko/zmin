@@ -176,9 +176,9 @@ Do not collapse these layers into one percentage.
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `15/151` | no | audit rows exist for `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` |
-| Git doc option pairs represented by rows | `217/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `659` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `584/659` | yes, row by row | exact written rows with parity evidence |
+| Git doc option pairs represented by rows | `218/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `665` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `590/665` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -219,9 +219,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` | `0` | `17` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `146` | `118` | `0` | `0` | `28` | `76` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `152` | `124` | `0` | `0` | `28` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `0` | `1` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`659`** | **`584`** | **`0`** | **`4`** | **`71`** | **`358`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`665`** | **`590`** | **`0`** | **`4`** | **`71`** | **`358`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -231,9 +231,9 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `217/4632`
-represented option pairs or `584/659` passing written rows as a Git support
-percentage. The `584/659` number is audit progress for rows already written
+Never use `151/151` command presence, `4632` option spellings, `218/4632`
+represented option pairs or `590/665` passing written rows as a Git support
+percentage. The `590/665` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -257,7 +257,7 @@ variants.
 | `ls-files` | `42` | `0` | `27` | `docs/cli/matrices/ls_files_v2_47.tsv` | `53` | `45` | `0` | `0` | `8` | no |
 | `ls-tree` | `15` | `0` | `2` | `docs/cli/matrices/ls_tree_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `docs/cli/matrices/merge_base_v2_47.tsv` | `12` | `10` | `0` | `0` | `2` | no |
-| `rev-parse` | `72` | `0` | `20` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `25` | `23` | `0` | `0` | `2` | no |
+| `rev-parse` | `72` | `0` | `21` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `31` | `29` | `0` | `0` | `2` | no |
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `docs/cli/matrices/symbolic_ref_v2_47.tsv` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `docs/cli/matrices/tag_v2_47.tsv` | `27` | `17` | `0` | `0` | `10` | no |
