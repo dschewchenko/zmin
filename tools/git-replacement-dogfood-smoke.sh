@@ -224,6 +224,7 @@ printf 'ignored.log\n' >"$zmin_client/.gitignore"
 printf 'ignored\n' >"$stock_client/ignored.log"
 printf 'ignored\n' >"$zmin_client/ignored.log"
 compare_command status_ignored_porcelain_z status --ignored --porcelain=v1 -z
+compare_command status_ignored_v2_z_branch status --ignored --porcelain=v2 -z --branch
 rm "$stock_client/.gitignore" "$zmin_client/.gitignore" \
   "$stock_client/ignored.log" "$zmin_client/ignored.log"
 compare_command ls_files_z ls-files -z --cached --others --exclude-standard
