@@ -105,10 +105,45 @@ pub(crate) fn fetch_submodules_on_demand(repo: &GitRepo, remote: &str) -> Result
         }
         Ok::<(), CliError>(())
     })?;
+    fetch_submodule_targets(repo, modules, targets)
+}
+
+pub(crate) fn fetch_submodules_for_commits_on_demand(
+    repo: &GitRepo,
+    commits: &[ObjectId],
+) -> Result<()> {
+    let modules = read_gitmodules(repo)?;
+    if modules.is_empty() {
+        return Ok(());
+    }
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let tree_cache = TreeObjectCache::new(&store);
+    let mut targets = BTreeMap::<String, ObjectId>::new();
+    for id in commits {
+        let Ok(tree) = read_commit_tree_uncached(&store, id) else {
+            continue;
+        };
+        let index = tree_cache.read_tree_to_index(&tree)?;
+        for module in &modules {
+            let Some(entry) = submodule_gitlink_entry(&index, &module.path) else {
+                continue;
+            };
+            targets
+                .entry(module.path.clone())
+                .or_insert_with(|| entry.id.clone());
+        }
+    }
+    fetch_submodule_targets(repo, modules, targets)
+}
+
+fn fetch_submodule_targets(
+    repo: &GitRepo,
+    modules: Vec<GitmodulesEntry>,
+    targets: BTreeMap<String, ObjectId>,
+) -> Result<()> {
     if targets.is_empty() {
         return Ok(());
     }
-
     let parent_repository = submodule_parent_repository(repo);
     for module in modules {
         let Some(target) = targets.get(&module.path) else {

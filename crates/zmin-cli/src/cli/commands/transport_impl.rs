@@ -11455,6 +11455,8 @@ fn fetch_with_depth(
         prefetch,
         update_shallow,
         write_fetch_head,
+        dry_run,
+        dry_run && fetch_should_recurse_submodules(recurse_submodules_mode),
         upload_pack_command,
     );
     if result.is_ok() && !dry_run && fetch_should_recurse_submodules(recurse_submodules_mode) {
@@ -11491,6 +11493,8 @@ fn fetch_with_missing_ref_code(
         false,
         false,
         true,
+        false,
+        false,
         None,
     )
 }
@@ -11533,6 +11537,8 @@ pub(crate) fn fetch_with_repo_and_remote(
     prefetch: bool,
     update_shallow: bool,
     write_fetch_head: bool,
+    dry_run: bool,
+    dry_run_recurse_submodules: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
@@ -11569,6 +11575,8 @@ pub(crate) fn fetch_with_repo_and_remote(
             &url,
             append,
             write_fetch_head,
+            dry_run,
+            dry_run_recurse_submodules,
         );
     }
     if is_git_daemon_transport_url(&url) {
@@ -15397,6 +15405,8 @@ fn fetch_with_http_remote(
     url: &str,
     append: bool,
     write_fetch_head: bool,
+    dry_run: bool,
+    dry_run_recurse_submodules: bool,
 ) -> Result<()> {
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
@@ -15497,6 +15507,12 @@ fn fetch_with_http_remote(
         for id in request_roots {
             http_fetch_object_recursive(&mut fetch_context, &id)?;
         }
+    }
+    if dry_run {
+        if dry_run_recurse_submodules {
+            fetch_submodules_for_commits_on_demand(&repo, &roots)?;
+        }
+        return Ok(());
     }
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
@@ -17681,6 +17697,8 @@ fn fetch_with_repo_and_remote_deepen(
             false,
             false,
             write_fetch_head,
+            false,
+            false,
             None,
         );
     };
@@ -17874,6 +17892,8 @@ fn fetch_with_repo_and_remote_unshallow(
         false,
         false,
         write_fetch_head,
+        false,
+        false,
         None,
     )?;
     if let Some(command) = upload_pack_command {
