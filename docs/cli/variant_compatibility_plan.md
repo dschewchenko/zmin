@@ -27,6 +27,28 @@ Examples:
   `docs/cli/git_audit_primary_groups.tsv` in sync when adding a command group
   or moving a closed behavior block between reference groups.
 
+## Completion Rule
+
+`100%` compatibility can only be claimed for a command after its matrix covers:
+
+- every documented option spelling for the Git baseline
+- every documented value or mode for those options
+- positive and negative toggle forms where Git has them
+- repeated options and last-one-wins cases
+- order-sensitive option combinations
+- positional modes and pathspec forms
+- clean, dirty, conflicted, bare, submodule, shallow and worktree states where
+  the command behaves differently
+- local/file, smart HTTP, SSH and git-daemon transports where the command uses
+  transport
+- macOS, Linux and Windows behavior where paths, process spawning, hooks,
+  line endings or permissions can differ
+- upstream Git tests and real tool traces that expose behavior not obvious from
+  documentation
+
+Each row needs stock Git evidence for stdout, stderr, exit code and repository
+state when those are observable. Parser acceptance does not close a row.
+
 ## Current Burn-Down
 
 | Block | Closed | Open | Evidence |

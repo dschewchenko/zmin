@@ -84,6 +84,21 @@ that are hard to parse mechanically from prose. Command matrices may therefore
 contain rows, such as `fetch --depth`, before the seed extractor learns that
 spelling.
 
+## Denominator Layers
+
+Do not collapse these layers into one percentage.
+
+| Layer | Known total | Closed | Counts as support |
+| --- | ---: | ---: | --- |
+| Git command names | `151` | `151` | no, dispatch only |
+| Git doc option spellings | `2500` | not reported | no, seed only |
+| Audited behavior variants | `107` | `93` | yes, for those rows only |
+| Full Git behavior denominator | incomplete | not reported | yes, after expansion |
+
+The full denominator must include command, option, value, option combination,
+repository state, transport and platform. It also needs rows from Git docs,
+upstream Git tests and real tool traces such as IDE or GUI invocations.
+
 ## Generated Summary
 
 Run:
@@ -118,6 +133,11 @@ from docs, upstream tests and real traces. Closed block variants are focused
 parity blocks from `docs/cli/variant_compatibility_plan.md`; they are not a
 full denominator. Reference group rows follow git-scm sections and can
 duplicate command names. The total row is unique.
+
+Never use `151/151` command presence or `2500` option spellings as a support
+percentage. A command is complete only after its documented options, values,
+negations, repeated forms, order-sensitive combinations, repository states,
+transports and platforms have behavior rows with stock-Git evidence.
 
 ## Command Matrices
 

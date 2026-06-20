@@ -148,15 +148,30 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-Zmin wires all `151` Git `2.47` command names to a command handler. That only
-proves dispatch. Real compatibility is counted by behavior variants: command,
-option, value, option combination, repository state, transport and platform.
-The table below is audit progress, not a support percentage. Matrix rows are
-the variants written down so far. A command can have no open rows in the
-current matrix and still need more rows from Git docs, upstream tests and real
-tool traces before it is complete.
+Zmin has handlers for all `151` Git `2.47` command names. That is dispatch
+coverage only. It does not mean full Git behavior compatibility.
 
-| Git reference group | Git commands | Git doc option seed rows | Audited matrix rows | Closed audited | Open audited | Invalid input | Closed block variants |
+Real compatibility is counted by behavior variants:
+
+`command + option + value + option combination + repository state + transport + platform`
+
+Current accounting:
+
+| Layer | Known total | Closed | Meaning |
+| --- | ---: | ---: | --- |
+| Git command names | `151` | `151` | command can be dispatched |
+| Git doc option spellings | `2500` | not reported | seed list from Git `2.47.1` docs |
+| Audited behavior variants | `107` | `93` | rows checked against stock Git |
+| Full Git behavior denominator | not complete | not reported | still being expanded from docs, upstream tests and tool traces |
+
+Only audited behavior variants count as supported. Option spellings are not
+support until they are split into values, negations, repeated forms,
+order-sensitive combinations, repository states, transports and platforms, then
+checked against stock Git.
+
+Audit progress by git-scm reference group:
+
+| Git reference group | Git commands | Git doc option seed rows | Audited behavior rows | Closed behavior rows | Open behavior rows | Invalid input rows | Extra closed behavior blocks |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
@@ -179,11 +194,8 @@ the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
 Do not read command inventory, doc option rows or a closed current matrix as
-complete support. The option rows are a seed extracted from Git `2.47.1` docs.
-They still need to be split into values, negations, repeated options,
-order-sensitive combinations, repository states, transports and platforms, then
-checked against stock Git. Reference group rows follow the git-scm command
-sections and are not meant to be added together; the total row is unique.
+complete support. Reference group rows follow the git-scm command sections and
+are not meant to be added together; the total row is unique.
 
 Current command-level matrices. Closed rate is only for audited rows:
 
