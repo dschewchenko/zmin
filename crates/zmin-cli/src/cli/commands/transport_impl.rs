@@ -10686,13 +10686,6 @@ fn fetch_with_depth(
                 message: "fetch --unshallow currently supports named local and file remotes".into(),
             });
         }
-        if shallow_since.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-since currently supports named local and file remotes"
-                    .into(),
-            });
-        }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -10719,6 +10712,7 @@ fn fetch_with_depth(
             update_head_ok,
             write_fetch_head,
             update_shallow,
+            shallow_since,
         );
     }
     validate_remote_name(&remote)?;
@@ -11341,6 +11335,7 @@ fn fetch_with_repo_and_location(
     update_head_ok: bool,
     write_fetch_head: bool,
     update_shallow: bool,
+    shallow_since: Option<i64>,
 ) -> Result<()> {
     if is_http_transport_url(&location)
         || is_git_daemon_transport_url(&location)
@@ -11358,6 +11353,14 @@ fn fetch_with_repo_and_location(
         });
     }
     if let Some(refspec) = branch.as_deref() {
+        if shallow_since.is_some() && refspec.contains(':') {
+            return Err(CliError::Fatal {
+                code: 128,
+                message:
+                    "fetch --shallow-since currently supports explicit local and file branches"
+                        .into(),
+            });
+        }
         if let Some((source_name, destination)) = refspec.split_once(':')
             && !source_name.is_empty()
             && !destination.is_empty()
@@ -11468,6 +11471,17 @@ fn fetch_with_repo_and_location(
         if !prune && !refspec.contains(':') {
             let source = local_clone_source(&source_path)?;
             let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+            if let Some(since) = shallow_since {
+                return fetch_branch_without_destination_ref_since(
+                    &repo,
+                    &source,
+                    &source_refs,
+                    refspec,
+                    &location,
+                    no_tags,
+                    since,
+                );
+            }
             if let Some(depth) = depth {
                 return fetch_branch_without_destination_ref_depth(
                     &repo,
@@ -11493,6 +11507,13 @@ fn fetch_with_repo_and_location(
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --update-shallow currently supports explicit local and file branches"
+                .into(),
+        });
+    }
+    if shallow_since.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-since currently supports explicit local and file branches"
                 .into(),
         });
     }
@@ -11920,6 +11941,68 @@ fn fetch_branch_without_destination_ref_depth(
         std::slice::from_ref(&id),
         depth,
         no_tags,
+    )?;
+    write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
+}
+
+fn fetch_branch_without_destination_ref_since(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    source_refs: &RefStore,
+    branch: &str,
+    url: &str,
+    no_tags: bool,
+    since: i64,
+) -> Result<()> {
+    let ref_name = branch_ref_name(branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(branch, 128))?;
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let excluded = HashSet::new();
+    let limited_commits = upload_pack_since_limited_commits(
+        &source_store,
+        std::slice::from_ref(&id),
+        since,
+        &excluded,
+    )?;
+    let mut fetched_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        limited_commits.len(),
+    ));
+    copy_reachable_objects_for_depth_into(
+        &source_store,
+        &destination_store,
+        &limited_commits,
+        &mut fetched_objects,
+    )?;
+    if !no_tags {
+        copy_fetch_pack_included_tags(
+            source_refs,
+            &source_store,
+            &destination_store,
+            &source_repo,
+            &mut fetched_objects,
+            None,
+        )?;
+    }
+    let request = UploadPackRequest {
+        wants: vec![id.clone()],
+        deepen_since: Some(since),
+        ..UploadPackRequest::default()
+    };
+    write_shallow_file(
+        repo,
+        upload_pack_since_shallow_boundaries(
+            &source_repo,
+            &source_store,
+            &request.wants,
+            since,
+            &request,
+        )?,
     )?;
     write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
 }
