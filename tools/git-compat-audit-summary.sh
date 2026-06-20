@@ -167,9 +167,9 @@ awk -F'\t' '
 } >"$tmp_dir/unique-summary.tsv"
 
 if [[ "$format" == "--tsv" ]]; then
-  printf 'group\tgit_commands\tgit_doc_option_seed_rows\tmatrix_rows\tmatrix_matching_stock_git\tmatrix_partial\tmatrix_open\tmatrix_invalid_input\tclosed_block_variants\n'
+  printf 'group\tgit_commands\tgit_doc_option_seed_rows\tmatrix_rows\twritten_rows_matching_stock_git\tmatrix_partial\tmatrix_open\tmatrix_invalid_input\tclosed_block_variants\n'
 else
-  printf '| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |\n'
+  printf '| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Written rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |\n'
   printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
 fi
 

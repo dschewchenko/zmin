@@ -115,12 +115,12 @@ awk -F'\t' -v format="$format" '
       printf "commands_with_matrix_rows\t%d\t%d\tcommands with any written behavior rows\n", matrix_command_count + 0, command_count + 0
       printf "doc_option_pairs_represented_by_rows\t%d\t%d\tdocumented command-option pairs with at least one behavior row\n", represented_total + 0, option_total + 0
       printf "behavior_rows_written\t%d\t%d\tcurrent written command option value combination state transport platform rows\n", rows_total + 0, rows_total + 0
-      printf "behavior_rows_matching_stock_git\t%d\t%d\tclosed rows only\n", closed_total + 0, rows_total + 0
+      printf "written_rows_matching_stock_git\t%d\t%d\tclosed written rows only\n", closed_total + 0, rows_total + 0
       printf "behavior_rows_partial\t%d\t%d\twritten rows with incomplete parity\n", partial_total + 0, rows_total + 0
       printf "behavior_rows_open\t%d\t%d\twritten rows not implemented or not matching yet\n", open_total + 0, rows_total + 0
       printf "invalid_input_rows\t%d\t%d\trows where stock Git rejects the input\n", invalid_total + 0, rows_total + 0
       print ""
-      print "command\tdoc_option_pairs\trepresented_doc_option_pairs\tbehavior_rows_written\tmatching_stock_git\tpartial\topen\tinvalid_input\tcomplete_matrix"
+      print "command\tdoc_option_pairs\trepresented_doc_option_pairs\tbehavior_rows_written\twritten_rows_matching_stock_git\tpartial\topen\tinvalid_input\tcomplete_matrix"
       for (i = 1; i <= command_order_count; i++) {
         command = command_order[i]
         if (!(command in commands_with_matrix)) continue
@@ -137,12 +137,12 @@ awk -F'\t' -v format="$format" '
       printf "| Commands with any matrix rows | `%d/%d` | audit has started for the command |\n", matrix_command_count + 0, command_count + 0
       printf "| Doc option pairs represented by rows | `%d/%d` | documented command-option pairs with at least one behavior row |\n", represented_total + 0, option_total + 0
       printf "| Behavior rows written | `%d` | command + option + value + combination + state + transport + platform rows |\n", rows_total + 0
-      printf "| Behavior rows matching stock Git | `%d/%d` | closed rows only |\n", closed_total + 0, rows_total + 0
+      printf "| Written rows matching stock Git | `%d/%d` | closed written rows only |\n", closed_total + 0, rows_total + 0
       printf "| Partial rows | `%d/%d` | written rows with incomplete parity |\n", partial_total + 0, rows_total + 0
       printf "| Open rows | `%d/%d` | written rows not implemented or not matching yet |\n", open_total + 0, rows_total + 0
       printf "| Invalid input rows | `%d/%d` | rows where stock Git rejects the input |\n", invalid_total + 0, rows_total + 0
       print ""
-      print "| Command | Git doc option pairs | Represented doc option pairs | Behavior rows written | Matching stock Git | Partial | Open | Invalid input | Complete matrix |"
+      print "| Command | Git doc option pairs | Represented doc option pairs | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |"
       print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
       for (i = 1; i <= command_order_count; i++) {
         command = command_order[i]

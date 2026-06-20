@@ -148,40 +148,42 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-This preview is not 100% Git-compatible yet. Zmin has handlers for all `151`
-Git `2.47.1` command names, but command routing is only the entry point. A
-command is complete only after its documented options, option values, option
-combinations, repository states, transports and platform cases match stock Git.
+Zmin is not 100% Git-compatible yet. It has handlers for all `151` Git `2.47.1`
+command names, but a handler only proves that the command can be routed.
 
-Real compatibility is counted by behavior variants:
+Real compatibility is measured at behavior-row level:
 
 `command + option + value + option combination + repository state + transport + platform`
 
-Current audit state. These numbers must not be combined into one percentage:
+Examples that count as different rows: `status -z`, `status --porcelain=v2 -z
+--branch`, `fetch --depth=1 origin main`, `fetch --depth=1 origin main next`,
+`blame --date=relative -L 1,3 file`.
+
+Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete command matrices | `0/151` | no command has a finished Git behavior matrix yet |
-| Commands with any matrix rows | `2/151` | `status` and `fetch` have started behavior matrices |
-| Git doc option pairs represented by rows | `50/4632` | documented command-option pairs that have at least one behavior row |
-| Behavior rows written | `191` | explicit command/option/value/combination/state/transport/platform rows written so far |
-| Behavior rows matching stock Git | `176/191` | exact written rows with focused parity evidence |
-| Open written rows | `9/191` | known written rows that are not implemented or not matching yet |
+| Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
+| Commands with any matrix rows | `2/151` | only `status` and `fetch` have started behavior matrices |
+| Git doc option pairs represented by rows | `50/4632` | option spellings that have at least one row |
+| Written behavior rows | `191` | rows written in the current matrices |
+| Written rows matching stock Git | `176/191` | exact rows with focused parity evidence |
+| Open written rows | `9/191` | written rows that still do not match stock Git |
 | Invalid input rows | `6/191` | rows where stock Git rejects the input |
-| Full Git behavior denominator | incomplete | still being expanded from docs, upstream tests and real tool traces |
+| Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests and real tool traces |
 
-Only closed behavior variants count as supported for that exact row. Option
-spellings are input for the matrix until they are split into values,
-negations, repeated forms, order-sensitive combinations, repository states,
-transports and platforms, then checked against stock Git.
+Do not read `176/191` as Git compatibility. It only means `176` of the `191`
+rows already written down match stock Git. The larger unexpanded surface is not
+counted yet.
 
-A command with no open row in the current matrix is not complete. It only means
-the rows written down so far have no open item.
+Option spellings are only seed data. Each spelling still has to be expanded
+into values, negations, repeated forms, option order, positional modes,
+repository states, transports and platforms. A command is complete only after
+that matrix is finished and every supported row has stock Git evidence.
 
-Audit progress by git-scm reference group. This is inventory progress, not
-Git compatibility percent:
+Audit progress by git-scm reference group:
 
-| Git reference group | Git commands | Git doc option seed | Behavior rows written | Matching stock Git | Open rows | Invalid input rows |
+| Git reference group | Git commands | Git doc option seed | Behavior rows written | Written rows matching stock Git | Open written rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` |
@@ -203,27 +205,23 @@ The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
-Do not read command inventory, option spelling inventory or a closed current
-matrix as complete support. Reference group rows follow the git-scm command
-sections and are not meant to be added together; the total row is unique.
+Reference group rows follow the git-scm command sections. The total row is
+unique. These rows are audit progress, not support percentages.
 
-Current command-level matrices. This is audit coverage, not complete command
-support:
+Current command-level matrices:
 
-| Command | Git doc option seed | Doc spellings represented by rows | Behavior rows written | Matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
+| Command | Git doc option seed | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `28` | `131` | `120` | `0` | `9` | `2` | no |
 
-Doc spellings represented by rows means at least one matrix row mentions that
-documented option. It does not mean every value, negation, repeated form,
-order-sensitive combination, repository state, transport or platform is
-covered.
+`status` having `0` open rows does not mean full `git status` compatibility. It
+means no open item remains among the rows currently written for `status`.
+Unwritten values, option combinations, repository states, transports and
+platform cases are still unknown.
 
-`status` having `0` open rows here does not mean full `git status`
-compatibility. It means no open row remains among the currently written rows.
 A global percentage will be published only after every Git `2.47.1` command has
-a complete option/value/combination/state/transport/platform matrix.
+a complete matrix built from Git docs, upstream Git tests and real tool traces.
 
 <details>
 <summary>Commands counted in each group</summary>

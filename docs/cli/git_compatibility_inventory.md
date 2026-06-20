@@ -4,6 +4,7 @@ This is the source of truth for counting Git compatibility work.
 
 Command presence is not enough. Parser presence is not enough. Test presence is
 not enough. A closed item is one behavior variant checked against stock Git.
+Everything else is inventory or audit progress.
 
 ## Baseline
 
@@ -35,6 +36,14 @@ The option seed is not this denominator. A single documented spelling such as
 rows once values, repeated forms, option order, repository state, transport and
 platform behavior are included.
 
+Example expansion for one option:
+
+| Seed option | Expansion examples |
+| --- | --- |
+| `status -z` | implicit porcelain v1, explicit porcelain v1, porcelain v2, with and without branch headers, clean/dirty/staged/untracked states |
+| `blame --date` | documented date modes, invalid values, custom format values, locale/timezone effects where stock Git exposes them |
+| `fetch --depth` | named remote, explicit path, `file://`, smart HTTP, SSH, git daemon, single refspec, multiple refspecs, branchless HEAD, shallow source, repeated options |
+
 ## Audit Workflow
 
 Compatibility work must start from the inventory, not from the current parser.
@@ -52,6 +61,8 @@ Compatibility work must start from the inventory, not from the current parser.
    exact row.
 7. Implement missing behavior only after the row is classified; do not count
    parser acceptance, command dispatch or a broad smoke test as support.
+8. Add focused tests for each closed row. Prefer stock Git as the expected
+   result, not hand-written expected output, when the behavior is observable.
 
 Current matrices are still being expanded. A command with no open rows in the
 current matrix is not automatically complete; it only has no open row among the
@@ -126,12 +137,16 @@ Do not collapse these layers into one percentage.
 | Commands with any matrix rows | `2/151` | no | audit rows exist only for `status` and `fetch` |
 | Git doc option pairs represented by rows | `50/4632` | no | documented command-option pairs with at least one behavior row |
 | Written behavior rows | `191` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Behavior rows matching stock Git | `176/191` | yes, row by row | exact written rows with parity evidence |
-| Full Git behavior denominator | incomplete | not yet | still being expanded |
+| Written rows matching stock Git | `176/191` | yes, row by row | exact written rows with parity evidence |
+| Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The full denominator must include command, option, value, option combination,
 repository state, transport and platform. It also needs rows from Git docs,
 upstream Git tests and real tool traces such as IDE or GUI invocations.
+
+Unknown rows are not allowed to disappear from reporting. If a command matrix is
+not fully expanded, the command remains incomplete even when every written row
+is closed.
 
 Until a command's matrix has all of those rows, that command remains
 incomplete even if every currently written row is closed.
@@ -147,7 +162,7 @@ tools/git-compat-command-summary.sh
 
 Current generated summary:
 
-| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
+| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Written rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `0` | `2` |
@@ -175,10 +190,10 @@ The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings or `176/191`
 passing written rows as a Git support percentage. The `176/191` number is audit
-progress for rows already written down. A command is complete only after its
-documented options, values, negations, repeated forms, order-sensitive
-combinations, repository states, transports and platforms have behavior rows
-with stock-Git evidence.
+progress for rows already written down. It says nothing about the still
+unexpanded rows. A command is complete only after its documented options,
+values, negations, repeated forms, order-sensitive combinations, repository
+states, transports and platforms have behavior rows with stock-Git evidence.
 
 ## Command Matrices
 
@@ -186,7 +201,7 @@ These counts are for written rows only. A command can show no open row and
 still be incomplete if the matrix has not expanded all Git-documented
 variants.
 
-| Command | Git doc option seed | Doc spellings represented by rows | Matrix | Behavior rows written | Matching stock Git | Partial | Open | Invalid input | Complete matrix |
+| Command | Git doc option seed | Doc spellings represented by rows | Matrix | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `131` | `120` | `0` | `9` | `2` | no |
