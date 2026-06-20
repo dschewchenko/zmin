@@ -4771,6 +4771,77 @@ fn fetch_update_shallow_from_shallow_remote_matches_stock_git() {
 }
 
 #[test]
+fn fetch_update_shallow_explicit_location_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let shallow_remote = dir.path().join("shallow");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    for idx in 1..=4 {
+        fs::write(source.join("file.txt"), format!("commit {idx}\n")).expect("write source file");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", &format!("commit {idx}")]);
+    }
+
+    let source_url = format!("file://{}", source.display());
+    git(
+        dir.path(),
+        [
+            "clone",
+            "--bare",
+            "--depth=2",
+            &source_url,
+            shallow_remote.to_str().expect("shallow remote path"),
+        ],
+    );
+
+    let file_url = format!("file://{}", shallow_remote.display());
+    for (label, remote_url) in [
+        (
+            "local-path",
+            shallow_remote.to_str().expect("shallow remote path"),
+        ),
+        ("file-url", file_url.as_str()),
+    ] {
+        let git_client = dir.path().join(format!("git-explicit-{label}"));
+        let zmin_client = dir.path().join(format!("zmin-explicit-{label}"));
+        for client in [&git_client, &zmin_client] {
+            git(
+                dir.path(),
+                ["init", "-b", "main", client.to_str().expect("client path")],
+            );
+        }
+
+        let args = ["fetch", "--quiet", "--update-shallow", remote_url, "main"];
+        let git_output = command_any_output("git", &git_client, &args, "git");
+        let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin");
+
+        assert_eq!(zmin_output.0, git_output.0, "{label}");
+        assert_eq!(zmin_output.1, git_output.1, "{label}");
+        assert_eq!(zmin_output.2, git_output.2, "{label}");
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+            fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow"),
+            "{label}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{label}"
+        );
+        assert_eq!(
+            git(&zmin_client, ["rev-list", "--count", "FETCH_HEAD"]),
+            git(&git_client, ["rev-list", "--count", "FETCH_HEAD"]),
+            "{label}"
+        );
+    }
+}
+
+#[test]
 fn fetch_unshallow_local_remote_matches_stock_git() {
     for (label, args) in [
         (

@@ -10718,6 +10718,7 @@ fn fetch_with_depth(
             tags,
             update_head_ok,
             write_fetch_head,
+            update_shallow,
         );
     }
     validate_remote_name(&remote)?;
@@ -11033,7 +11034,14 @@ pub(crate) fn fetch_with_repo_and_remote(
                 command,
             )?;
         } else {
-            fetch_branch_without_destination_ref(&repo, &source, &source_refs, branch, &url)?;
+            fetch_branch_without_destination_ref(
+                &repo,
+                &source,
+                &source_refs,
+                branch,
+                &url,
+                false,
+            )?;
         }
         if set_upstream {
             set_fetch_upstream_config(&repo, &remote, branch)?;
@@ -11332,6 +11340,7 @@ fn fetch_with_repo_and_location(
     tags: bool,
     update_head_ok: bool,
     write_fetch_head: bool,
+    update_shallow: bool,
 ) -> Result<()> {
     if is_http_transport_url(&location)
         || is_git_daemon_transport_url(&location)
@@ -11476,8 +11485,16 @@ fn fetch_with_repo_and_location(
                 &source_refs,
                 refspec,
                 &location,
+                update_shallow,
             );
         }
+    }
+    if update_shallow {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --update-shallow currently supports explicit local and file branches"
+                .into(),
+        });
     }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
@@ -11836,6 +11853,7 @@ fn fetch_branch_without_destination_ref(
     source_refs: &RefStore,
     branch: &str,
     url: &str,
+    update_shallow: bool,
 ) -> Result<()> {
     let ref_name = branch_ref_name(branch)?;
     let id = source_refs
@@ -11850,15 +11868,35 @@ fn fetch_branch_without_destination_ref(
         source_store.object_id_capacity_hint()?,
         1,
     ));
-    copy_reachable_objects_inner(
-        &source_repo,
-        &source_store,
-        &destination_store,
-        &id,
-        &mut seen,
-        PackEncodeOptions::delta(10, 50),
-        pack_missing_threshold,
-    )?;
+    if let Some(shallow_boundaries) = read_repo_shallow_boundaries(&source_repo)? {
+        if !update_shallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "source repository is shallow; use --update-shallow to accept shallow boundaries from '{}'",
+                    source.git_dir.display()
+                ),
+            });
+        }
+        copy_reachable_objects_from_shallow_source_into(
+            &source_store,
+            &destination_store,
+            std::slice::from_ref(&id),
+            &shallow_boundaries,
+            &mut seen,
+        )?;
+        write_shallow_file(repo, sorted_object_ids_from_set(&shallow_boundaries))?;
+    } else {
+        copy_reachable_objects_inner(
+            &source_repo,
+            &source_store,
+            &destination_store,
+            &id,
+            &mut seen,
+            PackEncodeOptions::delta(10, 50),
+            pack_missing_threshold,
+        )?;
+    }
     write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
 }
 
