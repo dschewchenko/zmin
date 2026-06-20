@@ -5126,8 +5126,8 @@ fn parse_log_decoration_mode(value: Option<&str>) -> Result<Option<LogDecoration
         "full" => Ok(Some(LogDecorationMode::Full)),
         "no" | "false" | "off" | "0" => Ok(None),
         other => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported --decorate value '{other}'"),
+            code: 128,
+            message: format!("invalid --decorate option: {other}"),
         }),
     }
 }
