@@ -1165,7 +1165,14 @@ fn write_upload_pack_v2_sideband_pack_to_open_file<R: Read>(
                 trace.record_frame_read(frame_start);
                 break;
             }
-            PktLineFrame::Flush | PktLineFrame::Delim => {
+            PktLineFrame::Flush => {
+                trace.record_frame_read(frame_start);
+                if first_bytes_len == first_bytes.len() && first_bytes == *b"PACK" {
+                    break;
+                }
+                continue;
+            }
+            PktLineFrame::Delim => {
                 trace.record_frame_read(frame_start);
                 continue;
             }
@@ -11476,6 +11483,8 @@ fn fetch_with_depth(
             branch.as_deref().is_none_or(|value| !value.contains(':'))
         } else if is_ssh_transport_url(&url) {
             branch.as_deref().is_none_or(|value| !value.contains(':'))
+        } else if is_git_daemon_transport_url(&url) {
+            branch.as_deref().is_none_or(|value| !value.contains(':'))
         } else {
             false
         };
@@ -11830,6 +11839,52 @@ pub(crate) fn fetch_with_repo_and_remote(
         );
     }
     if is_git_daemon_transport_url(&url) {
+        if !server_options.is_empty() {
+            let Some(branch) = branch.as_deref() else {
+                if !refmap.is_empty()
+                    || prefetch
+                    || update_shallow
+                    || dry_run
+                    || upload_pack_command.is_some()
+                {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "fetch --server-option currently supports one git-daemon branch or configured fetch".into(),
+                    });
+                }
+                return fetch_configured_daemon_remote_v2_server_options(
+                    repo,
+                    remote,
+                    missing_ref_code,
+                    &url,
+                    append,
+                    write_fetch_head,
+                    server_options,
+                );
+            };
+            if branch.contains(':')
+                || !refmap.is_empty()
+                || prefetch
+                || update_shallow
+                || dry_run
+                || upload_pack_command.is_some()
+            {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --server-option currently supports one git-daemon branch or configured fetch".into(),
+                });
+            };
+            return fetch_with_daemon_remote_v2_server_options(
+                repo,
+                remote,
+                branch,
+                missing_ref_code,
+                &url,
+                append,
+                write_fetch_head,
+                server_options,
+            );
+        }
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_daemon_remote(
                 &repo,
@@ -16090,6 +16145,114 @@ fn fetch_configured_ssh_remote_v2_server_options(
     Ok(())
 }
 
+fn fetch_with_daemon_remote_v2_server_options(
+    repo: GitRepo,
+    remote: String,
+    branch: &str,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    server_options: &[String],
+) -> Result<()> {
+    let (mut stream, mut reader) = daemon_open_upload_pack_v2(url)?;
+    let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    stream.write_all(&request)?;
+    stream.flush()?;
+    let rows = parse_upload_pack_v2_ls_refs_response(&mut reader)?;
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let ref_name = branch_ref_name(branch)?;
+    let id = rows
+        .iter()
+        .find(|row| row.name == ref_name)
+        .map(|row| row.id.clone())
+        .ok_or_else(|| missing_remote_ref_error(branch, missing_ref_code))?;
+    let roots = [id.clone()];
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let pack_fetched = daemon_fetch_smart_pack_v2_on_connection(
+        &mut stream,
+        &mut reader,
+        &repo.objects_dir,
+        &request_roots,
+        &haves,
+        server_options,
+    )?;
+    if !pack_fetched {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    }
+    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
+fn fetch_configured_daemon_remote_v2_server_options(
+    repo: GitRepo,
+    remote: String,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    server_options: &[String],
+) -> Result<()> {
+    let (mut stream, mut reader) = daemon_open_upload_pack_v2(url)?;
+    let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
+    stream.write_all(&request)?;
+    stream.flush()?;
+    let rows = parse_upload_pack_v2_ls_refs_response(&mut reader)?;
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
+    sort_dedup_object_ids(&mut roots);
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let pack_fetched = daemon_fetch_smart_pack_v2_on_connection(
+        &mut stream,
+        &mut reader,
+        &repo.objects_dir,
+        &request_roots,
+        &haves,
+        server_options,
+    )?;
+    if !pack_fetched && !request_roots.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    }
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = unique_head_branch_from_rows(&rows) {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file(
+            &repo,
+            &rows,
+            &remote,
+            url,
+            &fetch_refspecs,
+            append,
+            false,
+        )?;
+    }
+    Ok(())
+}
+
 fn ssh_upload_pack_v2_ls_refs(
     url: &str,
     branch: &str,
@@ -16158,6 +16321,29 @@ fn ssh_fetch_smart_pack_v2(
     Ok(true)
 }
 
+fn daemon_fetch_smart_pack_v2_on_connection(
+    stream: &mut std::net::TcpStream,
+    reader: &mut io::BufReader<std::net::TcpStream>,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    server_options: &[String],
+) -> Result<bool> {
+    if roots.is_empty() {
+        return Ok(true);
+    }
+    let request = build_upload_pack_v2_fetch_request(roots, haves, server_options)?;
+    stream.write_all(&request)?;
+    stream.flush()?;
+    let (temp_pack, file) = temp_http_pack_file(objects_dir)?;
+    let Some(pack_path) = parse_upload_pack_v2_pack_to_open_file(reader, &temp_pack, file)? else {
+        let _ = fs::remove_file(&temp_pack);
+        return Ok(false);
+    };
+    write_indexed_pack_file(objects_dir, &pack_path, !haves.is_empty())?;
+    Ok(true)
+}
+
 fn ssh_open_upload_pack_v2(url: &str) -> Result<RemoteCommandSession> {
     let parsed = ParsedSshUrl::parse(url)?;
     let mut session =
@@ -16170,6 +16356,22 @@ fn ssh_open_upload_pack_v2(url: &str) -> Result<RemoteCommandSession> {
         parse_upload_pack_v2_capabilities(stdout)?;
     }
     Ok(session)
+}
+
+fn daemon_open_upload_pack_v2(
+    url: &str,
+) -> Result<(std::net::TcpStream, io::BufReader<std::net::TcpStream>)> {
+    let url = ParsedDaemonUrl::parse(url)?;
+    let mut stream = daemon_transport_connect(&url)?;
+    daemon_transport_service_handshake_with_extra_params(
+        &mut stream,
+        &url,
+        "git-upload-pack",
+        &["version=2"],
+    )?;
+    let mut reader = daemon_transport_reader(stream.try_clone()?);
+    parse_upload_pack_v2_capabilities(&mut reader)?;
+    Ok((stream, reader))
 }
 
 fn write_ssh_v2_request_and_close_stdin(
@@ -21698,27 +21900,57 @@ fn daemon_transport_service_handshake(
     url: &ParsedDaemonUrl,
     service: &str,
 ) -> Result<()> {
+    daemon_transport_service_handshake_with_extra_params(stream, url, service, &[])
+}
+
+fn daemon_transport_service_handshake_with_extra_params(
+    stream: &mut std::net::TcpStream,
+    url: &ParsedDaemonUrl,
+    service: &str,
+    extra_params: &[&str],
+) -> Result<()> {
     let mut request = Vec::with_capacity(daemon_service_request_capacity(url, service));
-    write_daemon_service_request(&mut request, url, service)?;
+    write_daemon_service_request(&mut request, url, service, extra_params)?;
     stream.write_all(&request)?;
     stream.flush()?;
     Ok(())
 }
 
 fn daemon_service_request_capacity(url: &ParsedDaemonUrl, service: &str) -> usize {
-    4 + daemon_service_request_payload_len(url, service)
+    4 + daemon_service_request_payload_len(url, service, &[])
 }
 
-fn daemon_service_request_payload_len(url: &ParsedDaemonUrl, service: &str) -> usize {
-    service.len() + 1 + url.path.len() + "\0host=".len() + url.host_header_len() + 1
+fn daemon_service_request_payload_len(
+    url: &ParsedDaemonUrl,
+    service: &str,
+    extra_params: &[&str],
+) -> usize {
+    service.len()
+        + 1
+        + url.path.len()
+        + "\0host=".len()
+        + url.host_header_len()
+        + 1
+        + if extra_params.is_empty() {
+            0
+        } else {
+            1 + extra_params
+                .iter()
+                .map(|param| param.len() + 1)
+                .sum::<usize>()
+        }
 }
 
 fn write_daemon_service_request(
     out: &mut Vec<u8>,
     url: &ParsedDaemonUrl,
     service: &str,
+    extra_params: &[&str],
 ) -> Result<()> {
-    write_pkt_line_header(out, daemon_service_request_payload_len(url, service))?;
+    write_pkt_line_header(
+        out,
+        daemon_service_request_payload_len(url, service, extra_params),
+    )?;
     out.extend_from_slice(service.as_bytes());
     out.push(b' ');
     out.extend_from_slice(url.path.as_bytes());
@@ -21729,6 +21961,13 @@ fn write_daemon_service_request(
         append_decimal_usize(out, usize::from(url.port));
     }
     out.push(0);
+    if !extra_params.is_empty() {
+        out.push(0);
+        for param in extra_params {
+            out.extend_from_slice(param.as_bytes());
+            out.push(0);
+        }
+    }
     Ok(())
 }
 

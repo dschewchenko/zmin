@@ -1193,6 +1193,15 @@ impl StockGitDaemon {
     }
 
     fn spawn_with_args(root: &std::path::Path, port: u16, extra_args: &[&str]) -> Self {
+        Self::spawn_with_args_and_env(root, port, extra_args, &[])
+    }
+
+    fn spawn_with_args_and_env(
+        root: &std::path::Path,
+        port: u16,
+        extra_args: &[&str],
+        envs: &[(&str, &str)],
+    ) -> Self {
         let port_arg = format!("--port={port}");
         let base_path = format!("--base-path={}", root.display());
         let mut command = Command::new(stock_git_bin());
@@ -1204,6 +1213,9 @@ impl StockGitDaemon {
             base_path.as_str(),
         ]);
         command.args(extra_args);
+        for (key, value) in envs {
+            command.env(key, value);
+        }
         let child = command
             .arg(root.to_str().expect("root path"))
             .stdin(Stdio::null())
@@ -9805,6 +9817,102 @@ fn fetch_server_option_repeated_protocol_v2_ssh_branchless_matches_stock_git() {
         ],
         &["server-option=trace", "server-option=mode=full"],
     );
+}
+
+#[test]
+fn fetch_server_option_protocol_v2_git_daemon_branchless_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    let git_client = dir.path().join("git-server-option-daemon-branchless");
+    let zmin_client = dir.path().join("zmin-server-option-daemon-branchless");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("alpha.txt"), b"alpha\n").expect("write alpha");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&remote);
+
+    let port = unused_local_port();
+    let trace = dir.path().join("daemon-packet.trace");
+    let trace_value = trace.to_str().expect("trace path");
+    let _daemon = StockGitDaemon::spawn_with_args_and_env(
+        dir.path(),
+        port,
+        &[],
+        &[("GIT_TRACE_PACKET", trace_value)],
+    );
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    git(
+        dir.path(),
+        ["init", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", zmin_client.to_str().expect("zmin client")],
+    );
+    git(&git_client, ["remote", "add", "origin", url.as_str()]);
+    run_zmin(&zmin_client, ["remote", "add", "origin", url.as_str()]);
+
+    let stock = command_output(
+        stock_git_bin().to_str().expect("stock git path"),
+        &git_client,
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+        ],
+        "git fetch --server-option over git-daemon",
+    );
+    assert_eq!(stock.0, 0);
+    let stock_trace = fs::read_to_string(&trace).expect("stock daemon packet trace");
+    let stock_option_count = stock_trace.matches("server-option=trace").count();
+    assert!(
+        stock_option_count >= 2,
+        "stock Git should send server-option during ls-refs and fetch:\n{stock_trace}"
+    );
+
+    let zmin = command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--server-option=trace", "origin"],
+        "zmin fetch --server-option over git-daemon",
+    );
+    assert_eq!(zmin.0, 0);
+    assert_eq!(zmin.1, stock.1);
+    let full_trace = fs::read_to_string(&trace).expect("zmin daemon packet trace");
+    let full_option_count = full_trace.matches("server-option=trace").count();
+    assert!(
+        full_option_count >= stock_option_count + 2,
+        "Zmin should send server-option during ls-refs and fetch:\n{full_trace}"
+    );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "origin/main:alpha.txt"]),
+        git(&git_client, ["cat-file", "-p", "origin/main:alpha.txt"])
+    );
+    git(&zmin_client, ["fsck", "--strict"]);
 }
 
 fn assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
