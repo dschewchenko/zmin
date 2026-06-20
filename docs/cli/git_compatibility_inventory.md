@@ -9,7 +9,7 @@ a behavior variant checked against stock Git.
 
 - Git baseline: `v2.47.1`
 - Command source: upstream `command-list.txt`
-- Option source: upstream `Documentation/git-*.txt`
+- Option source: upstream `Documentation/git-*.txt` plus included option files
 - Behavior source: stock Git output, exit code and repository state
 - Test source: local parity tests plus selected upstream Git tests
 
@@ -72,11 +72,11 @@ variants written down so far.
 
 ## Current Seed
 
-The first documentation seed run on 2026-06-19 found:
+The current documentation seed run found:
 
-- `2500` command-option rows
+- `4632` command-option rows
 - `143` commands with extracted option rows
-- `2500` unique command-option pairs
+- `4632` unique command-option pairs
 
 This is not the final denominator. It does not yet split option values,
 negations, repeated options, order-sensitive combinations, repository states,
@@ -90,12 +90,13 @@ spelling.
 
 Do not collapse these layers into one percentage.
 
-| Layer | Known total | Closed | Counts as support |
-| --- | ---: | ---: | --- |
-| Git command names | `151` | `151` | no, dispatch only |
-| Git doc option spellings | `2500` | not reported | no, seed only |
-| Written behavior rows | `125` | `110` | yes, for those rows only |
-| Full Git behavior denominator | incomplete | not reported | yes, after expansion |
+| Layer | Count | Counts as support | Meaning |
+| --- | ---: | --- | --- |
+| Command routing | `151/151` | no | dispatch only |
+| Git doc option spellings | `4632` | no | seed only |
+| Written behavior rows | `125` | yes, row by row | `110` exact rows already match stock Git |
+| Fully certified command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
+| Full Git behavior denominator | incomplete | not yet | still being expanded |
 
 The full denominator must include command, option, value, option combination,
 repository state, transport and platform. It also needs rows from Git docs,
@@ -113,21 +114,21 @@ Current generated summary:
 
 | Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `0` | `2` |
-| Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `0` | `4` | `64` |
-| Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `65` | `54` | `0` | `9` | `2` | `0` |
-| Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `0` | `8` |
-| Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `0` | `52` |
-| Email | `6` | `229` | `0` | `0` | `0` | `0` | `0` | `0` |
-| External Systems | `2` | `95` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `134` | `0` | `0` | `0` | `0` | `0` | `17` |
-| Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `76` |
-| Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`2500`** | **`125`** | **`110`** | **`0`** | **`9`** | **`6`** | **`253`** |
+| Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `0` | `2` |
+| Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `0` | `4` | `64` |
+| Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` | `0` | `30` |
+| Sharing and Updating Projects | `5` | `309` | `65` | `54` | `0` | `9` | `2` | `0` |
+| Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` | `0` | `8` |
+| Patching | `5` | `333` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Debugging | `3` | `132` | `0` | `0` | `0` | `0` | `0` | `52` |
+| Email | `6` | `361` | `0` | `0` | `0` | `0` | `0` | `0` |
+| External Systems | `2` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `147` | `0` | `0` | `0` | `0` | `0` | `17` |
+| Server Admin | `2` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
+| Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` | `0` | `76` |
+| Other Git 2.47 commands | `71` | `1075` | `0` | `0` | `0` | `0` | `0` | `4` |
+| **Git 2.47 unique total** | **`151`** | **`4632`** | **`125`** | **`110`** | **`0`** | **`9`** | **`6`** | **`253`** |
 
 The matrix columns are the written subset of explicit option/value/state rows.
 They are not the final denominator until each command matrix has been expanded
@@ -136,7 +137,7 @@ parity blocks from `docs/cli/variant_compatibility_plan.md`; they are not a
 full denominator. Reference group rows follow git-scm sections and can
 duplicate command names. The total row is unique.
 
-Never use `151/151` command presence or `2500` option spellings as a support
+Never use `151/151` command presence or `4632` option spellings as a support
 percentage. A command is complete only after its documented options, values,
 negations, repeated forms, order-sensitive combinations, repository states,
 transports and platforms have behavior rows with stock-Git evidence.
@@ -147,10 +148,10 @@ These counts are for written rows only. A command can show no open row and
 still be incomplete if the matrix has not expanded all Git-documented
 variants.
 
-| Command | Git doc option seed rows | Matrix | Behavior rows written | Closed | Partial | Open | Invalid input |
-| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| `status` | `28` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `13` | `docs/cli/matrices/fetch_v2_47.tsv` | `65` | `54` | `0` | `9` | `2` |
+| Command | Git doc option spellings | Doc spellings represented by rows | Matrix | Behavior rows written | Closed | Partial | Open | Invalid input | Complete matrix |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `status` | `26` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
+| `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `65` | `54` | `0` | `9` | `2` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted

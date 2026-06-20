@@ -158,17 +158,18 @@ Real compatibility is counted by behavior variants:
 
 Current accounting:
 
-| Layer | Known total | Closed | Meaning |
-| --- | ---: | ---: | --- |
-| Git command names | `151` | `151` | command can be routed to Zmin code |
-| Git doc option spellings | `2500` | not reported | raw option seed from Git `2.47.1` docs |
-| Written behavior rows | `125` | `110` | exact rows already checked against stock Git |
-| Full Git behavior denominator | incomplete | not reported | still being expanded from docs, upstream tests and real tool traces |
+| Layer | Count | Counts as support | Meaning |
+| --- | ---: | --- | --- |
+| Command routing | `151/151` | no | every Git `2.47` command name reaches Zmin code |
+| Git doc option spelling seed | `4632` | no | raw option spellings found in Git `2.47.1` docs and include files |
+| Written behavior rows | `125` | yes, row by row | `110` exact rows already match stock Git |
+| Fully certified command matrices | `0/151` | yes, when complete | no command has a complete option/value/state/transport/platform matrix yet |
+| Full Git behavior denominator | incomplete | not yet | still being expanded from docs, upstream tests and real tool traces |
 
-Only audited behavior variants count as supported. Option spellings are not
-support until they are split into values, negations, repeated forms,
-order-sensitive combinations, repository states, transports and platforms, then
-checked against stock Git.
+Only audited behavior variants count as supported. Option spellings are just
+input for the matrix until they are split into values, negations, repeated
+forms, order-sensitive combinations, repository states, transports and
+platforms, then checked against stock Git.
 
 A command with no open row in the current matrix is not complete. It only means
 the rows written down so far have no open item.
@@ -177,21 +178,21 @@ Audit progress by git-scm reference group:
 
 | Git reference group | Git commands | Git doc option seed rows | Behavior rows written | Closed rows | Open rows | Invalid input rows | Closed blocks without full matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` |
-| Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
-| Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `4` | `64` |
-| Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `65` | `54` | `9` | `2` | `0` |
-| Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `8` |
-| Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` |
-| Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `52` |
-| Email | `6` | `229` | `0` | `0` | `0` | `0` | `0` |
-| External Systems | `2` | `95` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `134` | `0` | `0` | `0` | `0` | `17` |
-| Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `76` |
-| Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`2500`** | **`125`** | **`110`** | **`9`** | **`6`** | **`253`** |
+| Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` | `0` |
+| Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `2` |
+| Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `4` | `64` |
+| Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` | `30` |
+| Sharing and Updating Projects | `5` | `309` | `65` | `54` | `9` | `2` | `0` |
+| Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` | `8` |
+| Patching | `5` | `333` | `0` | `0` | `0` | `0` | `0` |
+| Debugging | `3` | `132` | `0` | `0` | `0` | `0` | `52` |
+| Email | `6` | `361` | `0` | `0` | `0` | `0` | `0` |
+| External Systems | `2` | `120` | `0` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `147` | `0` | `0` | `0` | `0` | `17` |
+| Server Admin | `2` | `30` | `0` | `0` | `0` | `0` | `0` |
+| Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` | `76` |
+| Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` | `4` |
+| **Git `2.47` unique total** | **`151`** | **`4632`** | **`125`** | **`110`** | **`9`** | **`6`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -203,10 +204,14 @@ are not meant to be added together; the total row is unique.
 
 Current command-level matrices. This is audit coverage, not command support:
 
-| Command | Git doc option seed rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `status` | `28` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `13` | `65` | `54` | `0` | `9` | `2` |
+| Command | Git doc option spellings | Doc spellings represented by rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows | Complete matrix |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
+| `fetch` | `73` | `28` | `65` | `54` | `0` | `9` | `2` | no |
+
+Doc spellings represented by rows means at least one matrix row mentions that
+documented option. It does not mean every value, negation, order-sensitive
+combination, repository state, transport or platform is covered.
 
 `status` having `0` open rows here does not mean full `git status`
 compatibility. It means no open row remains among the currently written rows.
