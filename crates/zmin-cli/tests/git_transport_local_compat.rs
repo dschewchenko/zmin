@@ -2031,18 +2031,22 @@ fn fetch_recurse_submodules_local_changed_submodule_modes_match_stock_git() {
         (
             "implicit-yes",
             ["fetch", "--quiet", "--recurse-submodules", "origin"],
+            true,
         ),
         (
             "explicit-yes",
             ["fetch", "--quiet", "--recurse-submodules=yes", "origin"],
+            true,
         ),
         (
             "explicit-true",
             ["fetch", "--quiet", "--recurse-submodules=true", "origin"],
+            true,
         ),
         (
             "explicit-one",
             ["fetch", "--quiet", "--recurse-submodules=1", "origin"],
+            true,
         ),
         (
             "on-demand",
@@ -2052,16 +2056,42 @@ fn fetch_recurse_submodules_local_changed_submodule_modes_match_stock_git() {
                 "--recurse-submodules=on-demand",
                 "origin",
             ],
+            true,
+        ),
+        (
+            "explicit-no",
+            ["fetch", "--quiet", "--recurse-submodules=no", "origin"],
+            false,
+        ),
+        (
+            "explicit-false",
+            ["fetch", "--quiet", "--recurse-submodules=false", "origin"],
+            false,
+        ),
+        (
+            "explicit-zero",
+            ["fetch", "--quiet", "--recurse-submodules=0", "origin"],
+            false,
+        ),
+        (
+            "no-recurse",
+            ["fetch", "--quiet", "--no-recurse-submodules", "origin"],
+            false,
         ),
     ];
-    for (label, args) in cases {
-        assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(label, &args);
+    for (label, args, expect_submodule_fetch) in cases {
+        assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(
+            label,
+            &args,
+            expect_submodule_fetch,
+        );
     }
 }
 
 fn assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(
     label: &str,
     args: &[&str],
+    expect_submodule_fetch: bool,
 ) {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
@@ -2182,17 +2212,26 @@ fn assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(
         git(&git_client, ["rev-parse", "refs/remotes/origin/main"]),
         "{label}"
     );
-    assert_eq!(
-        git(
-            &zmin_client.join("deps/sub"),
-            ["cat-file", "-t", &second_submodule_head]
-        ),
-        git(
-            &git_client.join("deps/sub"),
-            ["cat-file", "-t", &second_submodule_head]
-        ),
-        "{label}"
-    );
+    if expect_submodule_fetch {
+        assert_eq!(
+            git(
+                &zmin_client.join("deps/sub"),
+                ["cat-file", "-t", &second_submodule_head]
+            ),
+            git(
+                &git_client.join("deps/sub"),
+                ["cat-file", "-t", &second_submodule_head]
+            ),
+            "{label}"
+        );
+    } else {
+        let args = ["cat-file", "-e", &second_submodule_head];
+        assert_eq!(
+            git_status_args(&zmin_client.join("deps/sub"), &args),
+            git_status_args(&git_client.join("deps/sub"), &args),
+            "{label}"
+        );
+    }
     assert_eq!(
         git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
         first_submodule_head,
