@@ -272,6 +272,7 @@ compare_command log_pathspec_dir_z log -z --format=%H%x00%s -1 -- dir
 printf 'nested changed\n' >"$stock_client/dir/nested.txt"
 printf 'nested changed\n' >"$zmin_client/dir/nested.txt"
 compare_command diff_pathspec_dir_name_status_z diff --name-status -z -- dir
+compare_command diff_pathspec_dir_name_only_z diff --name-only -z -- dir
 compare_command status_short_pathspec_dir status --short -- dir
 compare_command status_pathspec_dir_z status --porcelain=v1 -z -- dir
 
