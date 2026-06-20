@@ -155,23 +155,23 @@ The table below is audit progress, not a full support percentage. A group with
 no matrix rows still needs a command-level option/value/state matrix before it
 can be called complete.
 
-| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix invalid input | Closed block variants |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` |
-| Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `2` |
-| Basic Snapshotting | `9` | `252` | `60` | `56` | `4` | `64` |
-| Branching and Merging | `9` | `267` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `0` | `0` | `0` | `0` |
-| Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `8` |
-| Patching | `5` | `179` | `0` | `0` | `0` | `0` |
-| Debugging | `3` | `127` | `0` | `0` | `0` | `52` |
-| Email | `6` | `229` | `0` | `0` | `0` | `0` |
-| External Systems | `2` | `95` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `134` | `0` | `0` | `0` | `17` |
-| Server Admin | `2` | `28` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `76` |
-| Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`2500`** | **`60`** | **`56`** | **`4`** | **`253`** |
+| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Matrix closed | Matrix open | Matrix invalid input | Closed block variants |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Setup and Config | `6` | `76` | `0` | `0` | `0` | `0` | `0` |
+| Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `2` |
+| Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `4` | `64` |
+| Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `30` |
+| Sharing and Updating Projects | `5` | `119` | `44` | `30` | `14` | `0` | `0` |
+| Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `8` |
+| Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` |
+| Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `52` |
+| Email | `6` | `229` | `0` | `0` | `0` | `0` | `0` |
+| External Systems | `2` | `95` | `0` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `134` | `0` | `0` | `0` | `0` | `17` |
+| Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` |
+| Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `76` |
+| Other Git `2.47` commands | `71` | `600` | `0` | `0` | `0` | `0` | `4` |
+| **Git `2.47` unique total** | **`151`** | **`2500`** | **`104`** | **`86`** | **`14`** | **`4`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -189,6 +189,7 @@ Current command-level matrices:
 | Command | Rows | Closed | Partial | Open | Invalid input | Closed rate |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `status` | `60` | `56` | `0` | `0` | `4` | `93.3%` |
+| `fetch` | `44` | `30` | `0` | `14` | `0` | `68.2%` |
 
 A global percentage will be published only after every Git `2.47.1` command has
 the same option/value/state matrix.
