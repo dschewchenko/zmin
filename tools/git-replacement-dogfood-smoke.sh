@@ -235,6 +235,7 @@ compare_readonly_same_repo \
 compare_command config_null_list config --null --list
 compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
+compare_command config_missing_commit_template config --get commit.template
 compare_command config_remote_get_regexp config --get-regexp '^remote\.'
 compare_command config_branch_get_regexp config --get-regexp '^branch\.'
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
