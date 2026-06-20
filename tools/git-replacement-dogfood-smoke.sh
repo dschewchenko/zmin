@@ -67,6 +67,7 @@ mkdir -p "$capture_dir"
 "$stock_git" -C "$source_repo" config user.email "zmin-dogfood@example.invalid"
 "$stock_git" -C "$source_repo" config commit.gpgsign false
 printf 'one\n' >"$source_repo/tracked.txt"
+printf 'remove me\n' >"$source_repo/deleted.txt"
 mkdir -p "$source_repo/dir"
 printf 'nested\n' >"$source_repo/dir/nested.txt"
 "$stock_git" -C "$source_repo" add -A
@@ -79,6 +80,7 @@ printf 'changed\n' >"$stock_client/tracked.txt"
 printf 'changed\n' >"$zmin_client/tracked.txt"
 printf 'new\n' >"$stock_client/new.txt"
 printf 'new\n' >"$zmin_client/new.txt"
+rm "$stock_client/deleted.txt" "$zmin_client/deleted.txt"
 
 run_capture() {
   local tool="$1"
@@ -230,6 +232,7 @@ printf 'loose\n' >"$stock_client/dir/loose.txt"
 printf 'loose\n' >"$zmin_client/dir/loose.txt"
 compare_command ls_files_others_pathspec_z ls-files -z --others --exclude-standard -- dir
 rm "$stock_client/dir/loose.txt" "$zmin_client/dir/loose.txt"
+compare_command ls_files_deleted_modified_z ls-files -z --deleted --modified
 compare_command diff_name_status_z diff --name-status -z
 compare_command rev_parse_git_dir rev-parse --git-dir
 compare_command rev_parse_inside rev-parse --is-inside-work-tree
