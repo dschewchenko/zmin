@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 735 written rows / 659 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 736 written rows / 660 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -122,6 +122,55 @@ requires values, negations, repeated forms, order-sensitive combinations,
 repository states, transports and platforms with stock-Git evidence. The final
 denominator exists only after the expansion plan above is done for that
 command.
+
+## Stepwise Operating Plan
+
+Use this as the working queue. Each step should land as a small commit with its
+own stock-Git evidence row instead of bundling unrelated commands.
+
+### Slice Definition of Done
+
+Every compatibility slice must finish these items:
+
+1. Add or update the matrix row with command, option, value, combination,
+   repository state, transport or workflow, platform, example invocation,
+   status, evidence and notes.
+2. Add a focused oracle test against stock Git, or name the upstream Git test or
+   dogfood trace that proves stdout, stderr, exit code and repository side
+   effects.
+3. Implement only the row being closed, unless the failing behavior shares the
+   same narrow parser or transport path.
+4. Run the focused test first, then the smallest relevant build or summary
+   gates.
+5. Update README, `git_compatibility_inventory.md`, this plan and project notes
+   with the generated counts.
+6. Commit and push before starting a different command or option class.
+
+### Active Queue
+
+| Order | Lane | Next slices | Done when |
+| ---: | --- | --- | --- |
+| 1 | `fetch --filter` values | branch and branchless network rows for `combine:` and `sparse:oid=` over smart HTTP, SSH and git-daemon | each value/mode has stock-oracle object-presence proof and promisor config parity |
+| 2 | `fetch --server-option` protocol v2 | remaining repeated/separate SSH and smart HTTP combinations, then decide git-daemon applicability from stock Git | forwarded server options and refs/FETCH_HEAD match stock Git |
+| 3 | WebStorm replacement blockers | `status`, `log`, `diff`, `ls-files`, `rev-parse`, `config` rows observed from IDE dogfood, especially `-z` and date/format values | replacement smoke and focused rows pass through the `git` shim |
+| 4 | Unsupported-guard classification | classify each `unsupported`/`not supported` Rust hit as Git-supported gap, invalid input, intentional deferral or Zmin-only behavior | every hit maps to a matrix row, deferral note or invalid-input test |
+| 5 | Command inventory expansion | expand high-use commands from docs into option values, negations, repeated forms, order-sensitive combinations and repo states | command state reaches at least `expanding`; no support percentage is published |
+| 6 | Platform and upstream evidence | macOS/Linux/Windows checks plus selected upstream Git test slices for rows already implemented | rows that depend on platform behavior have platform evidence before being called closed |
+| 7 | Zmin-only extensions | keep hooks staged-file runner and other extensions below Git compatibility reporting | extension rows stay in the Zmin-only inventory, not the Git 2.47 denominator |
+
+### Count Update Gates
+
+After each slice, run:
+
+```bash
+tools/git-cli-readiness-status.sh
+tools/git-compat-command-summary.sh
+tools/git-compat-audit-summary.sh
+```
+
+The public counts should change only in the rows the slice touched. Complete
+command matrices and complete doc-option matrices remain `0/151` and `0/4632`
+until a full matrix is expanded and verified.
 
 ## Closed Evidence Blocks
 
