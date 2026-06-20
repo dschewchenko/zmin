@@ -11,7 +11,7 @@ surface.
 - complete documented command-option behavior matrices: `0/4632`
 - commands with any written behavior matrix rows: `2/151`
 - documented command-option pairs represented by at least one row: `50/4632`
-  audit progress only, not argument support
+  audit progress only, not option support
 
 ## Current state
 

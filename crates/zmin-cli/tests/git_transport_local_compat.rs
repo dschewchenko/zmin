@@ -1982,7 +1982,35 @@ fn fetch_recurse_submodules_no_submodule_modes_match_stock_git() {
 }
 
 #[test]
-fn fetch_recurse_submodules_on_demand_local_changed_submodule_matches_stock_git() {
+fn fetch_recurse_submodules_local_changed_submodule_modes_match_stock_git() {
+    let cases = [
+        (
+            "implicit-yes",
+            ["fetch", "--quiet", "--recurse-submodules", "origin"],
+        ),
+        (
+            "explicit-yes",
+            ["fetch", "--quiet", "--recurse-submodules=yes", "origin"],
+        ),
+        (
+            "on-demand",
+            [
+                "fetch",
+                "--quiet",
+                "--recurse-submodules=on-demand",
+                "origin",
+            ],
+        ),
+    ];
+    for (label, args) in cases {
+        assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(label, &args);
+    }
+}
+
+fn assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(
+    label: &str,
+    args: &[&str],
+) {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
     let source = dir.path().join("source");
@@ -2072,22 +2100,12 @@ fn fetch_recurse_submodules_on_demand_local_changed_submodule_matches_stock_git(
 
     let git_output = Command::new("git")
         .args(["-c", "protocol.file.allow=always"])
-        .args([
-            "fetch",
-            "--quiet",
-            "--recurse-submodules=on-demand",
-            "origin",
-        ])
+        .args(args)
         .current_dir(&git_client)
         .output()
         .expect("git fetch");
     let zmin_output = Command::new(zmin_bin())
-        .args([
-            "fetch",
-            "--quiet",
-            "--recurse-submodules=on-demand",
-            "origin",
-        ])
+        .args(args)
         .current_dir(&zmin_client)
         .output()
         .expect("zmin fetch");
@@ -2098,18 +2116,19 @@ fn fetch_recurse_submodules_on_demand_local_changed_submodule_matches_stock_git(
         String::from_utf8_lossy(&zmin_output.stderr),
         String::from_utf8_lossy(&git_output.stderr)
     );
-    assert_eq!(zmin_output.stdout, git_output.stdout);
+    assert_eq!(zmin_output.stdout, git_output.stdout, "{label}");
     assert_eq!(
         zmin_output.stderr,
         git_output.stderr,
-        "zmin stderr: {}\ngit stderr: {}",
+        "{label}\nzmin stderr: {}\ngit stderr: {}",
         String::from_utf8_lossy(&zmin_output.stderr),
         String::from_utf8_lossy(&git_output.stderr)
     );
 
     assert_eq!(
         git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
-        git(&git_client, ["rev-parse", "refs/remotes/origin/main"])
+        git(&git_client, ["rev-parse", "refs/remotes/origin/main"]),
+        "{label}"
     );
     assert_eq!(
         git(
@@ -2119,15 +2138,18 @@ fn fetch_recurse_submodules_on_demand_local_changed_submodule_matches_stock_git(
         git(
             &git_client.join("deps/sub"),
             ["cat-file", "-t", &second_submodule_head]
-        )
+        ),
+        "{label}"
     );
     assert_eq!(
         git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
-        first_submodule_head
+        first_submodule_head,
+        "{label}"
     );
     assert_eq!(
         git(&git_client.join("deps/sub"), ["rev-parse", "HEAD"]),
-        first_submodule_head
+        first_submodule_head,
+        "{label}"
     );
 }
 

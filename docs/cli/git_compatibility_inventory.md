@@ -68,6 +68,16 @@ Current matrices are still being expanded. A command with no open rows in the
 current matrix is not automatically complete; it only has no open row among the
 variants written down so far.
 
+The important distinction is this:
+
+- `151` command names are the command-entrypoint inventory.
+- `4632` documented command-option pairs are a seed extracted from Git docs.
+- The real argument denominator is larger than `4632` because every option
+  must split into values, missing-value defaults, negations, repeated forms,
+  option ordering, positional arguments, repository states, transports and
+  platforms.
+- Zmin support is counted only row by row after stock Git parity evidence.
+
 ## Completion Rule
 
 Do not call a command complete until all of these inputs have been reconciled:
@@ -137,8 +147,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `2/151` | no | audit rows exist only for `status` and `fetch` |
 | Git doc option pairs represented by rows | `50/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `231` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `216/231` | yes, row by row | exact written rows with parity evidence |
+| Written behavior rows | `233` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `218/233` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The full denominator must include command, option, value, option combination,
@@ -169,7 +179,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `171` | `160` | `0` | `9` | `2` | `60` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `173` | `162` | `0` | `9` | `2` | `62` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -179,7 +189,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`231`** | **`216`** | **`0`** | **`9`** | **`6`** | **`313`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`233`** | **`218`** | **`0`** | **`9`** | **`6`** | **`315`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -190,8 +200,8 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `50/4632`
-represented option pairs or `216/231` passing written rows as a Git support
-percentage. The `216/231` number is audit progress for rows already written
+represented option pairs or `218/233` passing written rows as a Git support
+percentage. The `218/233` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -206,7 +216,7 @@ variants.
 | Command | Git doc option seed | Complete doc option pairs | Doc spellings represented by rows | Matrix | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `0` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `171` | `160` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `0` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `173` | `162` | `0` | `9` | `2` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
@@ -261,11 +271,11 @@ file, directory, default glob, explicit magic, exclude magic, human output and
 global pathspec flags.
 
 The latest `fetch --recurse-submodules` slice closed initialized local/file
-`--recurse-submodules=on-demand` for a changed submodule gitlink: Zmin fetches
-the target submodule commit into the initialized submodule object database
-without checking it out, matching stock Git. Remaining submodule recursion
-modes, non-local submodule remotes, nested recursion, path-limited recursion
-and uninitialized submodule behavior remain open.
+implicit yes, explicit yes and on-demand forms for a changed submodule gitlink:
+Zmin fetches the target submodule commit into the initialized submodule object
+database without checking it out, matching stock Git. Remaining submodule
+recursion modes, non-local submodule remotes, nested recursion, path-limited
+recursion and uninitialized submodule behavior remain open.
 The latest `fetch --server-option` slice closed equals and separate-value forms
 for local path and file URL remotes, where stock Git accepts the option as a
 no-op. Smart HTTP/SSH protocol-v2 passthrough remains open.

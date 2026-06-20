@@ -159,39 +159,55 @@ Examples that count as different rows: `status -z`, `status --porcelain=v2 -z
 --branch`, `fetch --depth=1 origin main`, `fetch --depth=1 origin main next`,
 `blame --date=relative -L 1,3 file`.
 
+The real denominator is still being built from Git docs, upstream Git tests and
+real tool traces. A command or option is not counted as supported just because
+Zmin parses it or because one example row works.
+
 Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
-| Fully complete argument matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
+| Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `2/151` | only `status` and `fetch` have started behavior matrices |
-| Argument spellings represented by rows | `50/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `231` | rows written in the current matrices |
-| Written rows matching stock Git | `216/231` | exact rows with focused parity evidence |
-| Open written rows | `9/231` | written rows that still do not match stock Git |
-| Invalid input rows | `6/231` | rows where stock Git rejects the input |
-| Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests and real tool traces |
+| Documented option spellings represented by rows | `50/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `233` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `218/233` | exact written rows with focused parity evidence |
+| Open written rows | `9/233` | written rows that still do not match stock Git |
+| Invalid input rows | `6/233` | rows where stock Git rejects the input |
+| Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `216/231` as Git compatibility. It only means `216` of the `231`
+Do not read `218/233` as Git compatibility. It only means `218` of the `233`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `50/4632` as argument support either; it only means
+counted yet. Do not read `50/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
-Option spellings are only seed data. Each spelling still has to be expanded
-into values, negations, repeated forms, option order, positional modes,
-repository states, transports and platforms. A command is complete only after
-that matrix is finished and every supported row has stock Git evidence.
+Option spellings are only seed data. Each spelling still has to be expanded into
+values, missing-value defaults, negations, repeated forms, option order,
+positional modes, repository states, transports and platforms. A command is
+complete only after that matrix is finished and every supported row has stock
+Git evidence.
+
+The compatibility audit now proceeds in this order:
+
+1. Seed all Git `2.47.1` command names and documented option spellings.
+2. Expand each option into values, negations, repeats, ordering and positional
+   forms.
+3. Add repository states, transports, platforms, upstream Git tests and real IDE
+   or GUI command traces.
+4. Use stock Git as the expected result for each row.
+5. Mark a row closed only when Zmin matches that exact output, exit code and
+   repository state.
 
 Audit progress by git-scm reference group:
 
-| Git reference group | Git commands | Complete command matrices | Git doc option seed | Complete argument matrices | Behavior rows written | Written rows matching stock Git | Open written rows | Invalid input rows |
+| Git reference group | Git commands | Complete command matrices | Git doc option seed | Complete documented option matrices | Behavior rows written | Written rows matching stock Git | Open written rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `0` | `0` | `0` | `0` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `60` | `56` | `0` | `4` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `0` | `0` | `0` | `0` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `171` | `160` | `9` | `2` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `173` | `162` | `9` | `2` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `0` | `0` | `0` | `0` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` |
@@ -201,7 +217,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `0` | `0` | `0` | `0` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`231`** | **`216`** | **`9`** | **`6`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`233`** | **`218`** | **`9`** | **`6`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -212,10 +228,10 @@ unique. These rows are audit progress, not support percentages.
 
 Current command-level matrices:
 
-| Command | Git doc option seed | Complete argument matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
+| Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `0` | `22` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `0` | `28` | `171` | `160` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `0` | `28` | `173` | `162` | `0` | `9` | `2` | no |
 
 `status` having `0` open rows does not mean full `git status` compatibility. It
 means no open item remains among the rows currently written for `status`.
