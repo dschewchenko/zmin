@@ -1982,6 +1982,156 @@ fn fetch_recurse_submodules_no_submodule_modes_match_stock_git() {
 }
 
 #[test]
+fn fetch_recurse_submodules_on_demand_local_changed_submodule_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = dir.path().join("submodule");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    fs::write(submodule.join("lib.txt"), b"one\n").expect("write submodule one");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "submodule one"]);
+    let first_submodule_head = git(&submodule, ["rev-parse", "HEAD"]);
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    command_output_with_env(
+        "git",
+        &source,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.to_str().expect("submodule path"),
+            "deps/sub",
+        ],
+        &[],
+        "git",
+    );
+    git_with_env(&source, ["commit", "-m", "add submodule"]);
+
+    command_output_with_env(
+        "git",
+        dir.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "--recurse-submodules",
+            source.to_str().expect("source path"),
+            git_client.to_str().expect("git client path"),
+        ],
+        &[],
+        "git",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        dir.path(),
+        &[
+            "clone",
+            "--recurse-submodules",
+            source.to_str().expect("source path"),
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+        &[],
+        "zmin",
+    );
+
+    fs::write(submodule.join("lib.txt"), b"two\n").expect("write submodule two");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "submodule two"]);
+    let second_submodule_head = git(&submodule, ["rev-parse", "HEAD"]);
+    command_output_with_env(
+        "git",
+        &source.join("deps/sub"),
+        &["-c", "protocol.file.allow=always", "fetch", "origin"],
+        &[],
+        "git",
+    );
+    git(
+        &source.join("deps/sub"),
+        ["checkout", &second_submodule_head],
+    );
+    git(&source, ["add", "deps/sub"]);
+    git_with_env(&source, ["commit", "-m", "update submodule"]);
+
+    let git_output = Command::new("git")
+        .args(["-c", "protocol.file.allow=always"])
+        .args([
+            "fetch",
+            "--quiet",
+            "--recurse-submodules=on-demand",
+            "origin",
+        ])
+        .current_dir(&git_client)
+        .output()
+        .expect("git fetch");
+    let zmin_output = Command::new(zmin_bin())
+        .args([
+            "fetch",
+            "--quiet",
+            "--recurse-submodules=on-demand",
+            "origin",
+        ])
+        .current_dir(&zmin_client)
+        .output()
+        .expect("zmin fetch");
+    assert_eq!(
+        zmin_output.status.code(),
+        git_output.status.code(),
+        "zmin stderr: {}\ngit stderr: {}",
+        String::from_utf8_lossy(&zmin_output.stderr),
+        String::from_utf8_lossy(&git_output.stderr)
+    );
+    assert_eq!(zmin_output.stdout, git_output.stdout);
+    assert_eq!(
+        zmin_output.stderr,
+        git_output.stderr,
+        "zmin stderr: {}\ngit stderr: {}",
+        String::from_utf8_lossy(&zmin_output.stderr),
+        String::from_utf8_lossy(&git_output.stderr)
+    );
+
+    assert_eq!(
+        git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
+        git(&git_client, ["rev-parse", "refs/remotes/origin/main"])
+    );
+    assert_eq!(
+        git(
+            &zmin_client.join("deps/sub"),
+            ["cat-file", "-t", &second_submodule_head]
+        ),
+        git(
+            &git_client.join("deps/sub"),
+            ["cat-file", "-t", &second_submodule_head]
+        )
+    );
+    assert_eq!(
+        git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        first_submodule_head
+    );
+    assert_eq!(
+        git(&git_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        first_submodule_head
+    );
+}
+
+#[test]
 fn fetch_server_option_local_transports_match_stock_git_noop() {
     let cases = [
         (

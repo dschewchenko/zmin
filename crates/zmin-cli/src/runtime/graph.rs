@@ -1777,7 +1777,7 @@ where
         for entry in entries.iter() {
             if matches!(
                 entry.mode,
-                TreeMode::File | TreeMode::Executable | TreeMode::Symlink | TreeMode::Gitlink
+                TreeMode::File | TreeMode::Executable | TreeMode::Symlink
             ) {
                 visit_rev_list_object_id(&entry.id, seen, visit)?;
             }

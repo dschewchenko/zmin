@@ -78,6 +78,51 @@ pub(crate) fn clone_submodules(
     Ok(())
 }
 
+pub(crate) fn fetch_submodules_on_demand(repo: &GitRepo, remote: &str) -> Result<()> {
+    let modules = read_gitmodules(repo)?;
+    if modules.is_empty() {
+        return Ok(());
+    }
+
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let tree_cache = TreeObjectCache::new(&store);
+    let mut targets = BTreeMap::<String, ObjectId>::new();
+    let prefix = format!("refs/remotes/{remote}/");
+    refs.for_each_resolved_ref(&prefix, |ref_name, id| {
+        if ref_name == format!("{prefix}HEAD") {
+            return Ok::<(), CliError>(());
+        }
+        let tree = read_commit_tree_uncached(&store, id)?;
+        let index = tree_cache.read_tree_to_index(&tree)?;
+        for module in &modules {
+            let Some(entry) = submodule_gitlink_entry(&index, &module.path) else {
+                continue;
+            };
+            targets
+                .entry(module.path.clone())
+                .or_insert_with(|| entry.id.clone());
+        }
+        Ok::<(), CliError>(())
+    })?;
+    if targets.is_empty() {
+        return Ok(());
+    }
+
+    let parent_repository = submodule_parent_repository(repo);
+    for module in modules {
+        let Some(target) = targets.get(&module.path) else {
+            continue;
+        };
+        let path = repo.root.join(&module.path);
+        if exact_repo_at(&path).is_none() {
+            continue;
+        }
+        fetch_submodule_target(repo, &module, &path, &parent_repository, target)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn init_submodules(args: &[String]) -> Result<()> {
     let (quiet, paths) = parse_submodule_quiet_paths(args);
     let repo = find_repo()?;
@@ -876,6 +921,57 @@ fn update_submodule_remote_head(
             message: format!(
                 "Unable to find refs/remotes/origin/{branch} revision in submodule path '{}'",
                 module.path
+            ),
+        })
+}
+
+fn fetch_submodule_target(
+    repo: &GitRepo,
+    module: &GitmodulesEntry,
+    path: &std::path::Path,
+    parent_repository: &str,
+    target: &ObjectId,
+) -> Result<()> {
+    let submodule_repo = find_repo_at(path)?;
+    let submodule_store =
+        LooseObjectStore::new(submodule_repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    if submodule_store.read_object(target).is_ok() {
+        return Ok(());
+    }
+    let remote_url = submodule_remote_url(repo, &submodule_repo, module, parent_repository)?;
+    let Some(remote_path) = local_repository_path_from_location(&remote_url)? else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "fetch --recurse-submodules cannot fetch non-local submodule remote '{remote_url}' yet"
+            ),
+        });
+    };
+    let source = local_clone_source(&remote_path)?;
+    copy_dir_contents(
+        &source.common_dir.join("objects"),
+        &submodule_repo.objects_dir,
+    )?;
+    let source_refs = RefStore::new(&source.git_dir, GitHashAlgorithm::Sha1);
+    let submodule_refs = RefStore::new(&submodule_repo.git_dir, GitHashAlgorithm::Sha1);
+    let branch = configured_submodule_remote_branch(repo, module)?
+        .or_else(|| default_submodule_remote_branch(&source_refs).ok());
+    copy_remote_refs(
+        &source_refs,
+        &submodule_refs,
+        "origin",
+        branch.as_deref(),
+        true,
+    )?;
+    submodule_store
+        .read_object(target)
+        .map(|_| ())
+        .map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!(
+                "Fetched in submodule path '{}', but it did not contain {}",
+                module.path,
+                target.to_hex()
             ),
         })
 }

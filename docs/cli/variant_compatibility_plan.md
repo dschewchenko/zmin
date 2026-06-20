@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 230 written rows / 215 written rows matching stock Git / 9 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 231 written rows / 216 written rows matching stock Git / 9 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -178,6 +178,7 @@ command.
 | `fetch --unshallow` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs in existing shallow repos |
 | `fetch --update-shallow` local/file remote forms | `6` | `0` | named and explicit local path/file URL branch plus explicit HEAD fetches where the remote itself is shallow |
 | `fetch --update-shallow` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs where the remote itself is shallow |
+| `fetch --recurse-submodules on-demand local/file changed submodule` | `1` | `0` | initialized submodule, changed gitlink commit fetched into submodule object database without checkout |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
@@ -192,7 +193,7 @@ command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `312` verified variants.
+Tracked closed blocks in this table: `313` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

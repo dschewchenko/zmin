@@ -8894,6 +8894,7 @@ fn ensure_fetch_server_options_supported_for_location(location: &str, enabled: b
 fn ensure_fetch_recurse_submodules_supported(
     repo: &GitRepo,
     mode: FetchRecurseSubmodulesMode,
+    location: Option<&str>,
 ) -> Result<()> {
     if matches!(
         mode,
@@ -8904,10 +8905,25 @@ fn ensure_fetch_recurse_submodules_supported(
     if !fetch_repo_declares_submodules(repo)? {
         return Ok(());
     }
+    if location
+        .map(local_repository_path_from_location)
+        .transpose()?
+        .flatten()
+        .is_some()
+    {
+        return Ok(());
+    }
     Err(CliError::Fatal {
         code: 128,
         message: "fetch submodule recursion needs a dedicated implementation before use".into(),
     })
+}
+
+fn fetch_should_recurse_submodules(mode: FetchRecurseSubmodulesMode) -> bool {
+    matches!(
+        mode,
+        FetchRecurseSubmodulesMode::Yes | FetchRecurseSubmodulesMode::OnDemand
+    )
 }
 
 fn fetch_repo_declares_submodules(repo: &GitRepo) -> Result<bool> {
@@ -10856,10 +10872,10 @@ fn fetch_with_depth(
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode)?;
     let explicit_remote = remote.clone();
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
+        ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode, None)?;
         ensure_fetch_server_options_supported_for_location(&remote, has_server_options)?;
         if upload_pack_command.is_some() {
             return Err(CliError::Fatal {
@@ -10900,6 +10916,7 @@ fn fetch_with_depth(
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     let prune_tags = prune && effective_fetch_prune_tags(&repo, Some(&remote), prune_tags)?;
     let url = fetch_remote_url(&repo, &remote)?;
+    ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode, Some(&url))?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     if upload_pack_command.is_some()
         && (is_http_transport_url(&url)
@@ -11023,9 +11040,9 @@ fn fetch_with_depth(
             false,
         );
     }
-    fetch_with_repo_and_remote(
-        repo,
-        remote,
+    let result = fetch_with_repo_and_remote(
+        repo.clone(),
+        remote.clone(),
         branch,
         missing_ref_code,
         quiet,
@@ -11040,7 +11057,15 @@ fn fetch_with_depth(
         prefetch,
         update_shallow,
         upload_pack_command,
-    )
+    );
+    if result.is_ok()
+        && !dry_run
+        && fetch_should_recurse_submodules(recurse_submodules_mode)
+        && local_repository_path_from_location(&url)?.is_some()
+    {
+        fetch_submodules_on_demand(&repo, &remote)?;
+    }
+    result
 }
 
 fn fetch_with_missing_ref_code(
