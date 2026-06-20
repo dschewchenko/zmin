@@ -1754,7 +1754,7 @@ fn collect_untracked_files(
             continue;
         }
         if metadata.is_dir() {
-            if tracked_paths.contains(relative.as_slice()) {
+            if mode != UntrackedMode::All && tracked_paths.contains(relative.as_slice()) {
                 continue;
             }
             if mode == UntrackedMode::All || tracked_paths_under(tracked_paths, &relative) {
