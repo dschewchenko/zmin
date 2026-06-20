@@ -4602,6 +4602,89 @@ fn fetch_filter_object_type_blob_network_branchless_transports_match_stock_git()
     );
 }
 
+#[test]
+fn fetch_filter_tree_depth_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_filter_remote(dir.path());
+    let root_blob = git(&remote, ["rev-parse", "main:small.txt"]);
+    let dir_tree = git(&remote, ["rev-parse", "main:dir"]);
+    let child_blob = git(&remote, ["rev-parse", "main:dir/b.txt"]);
+    let sub_tree = git(&remote, ["rev-parse", "main:dir/sub"]);
+    let args = ["fetch", "--quiet", "--filter=tree:2", "origin", "main"];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-tree-depth-http", url.as_str());
+    command_output("git", &git_client, &args, "git filter tree depth http");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter tree depth http",
+    );
+    assert_tree_depth_filter_fetch_matches_stock_git(
+        "smart-http filter tree:2",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        dir_tree.as_str(),
+        child_blob.as_str(),
+        sub_tree.as_str(),
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-tree-depth-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter tree depth ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter tree depth ssh",
+    );
+    assert_tree_depth_filter_fetch_matches_stock_git(
+        "ssh filter tree:2",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        dir_tree.as_str(),
+        child_blob.as_str(),
+        sub_tree.as_str(),
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-tree-depth-daemon", url.as_str());
+    command_output("git", &git_client, &args, "git filter tree depth daemon");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter tree depth daemon",
+    );
+    assert_tree_depth_filter_fetch_matches_stock_git(
+        "git-daemon filter tree:2",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        dir_tree.as_str(),
+        child_blob.as_str(),
+        sub_tree.as_str(),
+    );
+}
+
 fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("filter.git");
     let work = root.join("filter-work");
@@ -4613,8 +4696,9 @@ fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     fs::write(work.join("a.txt"), b"hello\n").expect("write a");
     fs::write(work.join("small.txt"), b"tiny\n").expect("write small");
     fs::write(work.join("large.txt"), b"large blob payload\n").expect("write large");
-    fs::create_dir_all(work.join("dir")).expect("create dir");
+    fs::create_dir_all(work.join("dir/sub")).expect("create dir");
     fs::write(work.join("dir/b.txt"), b"nested\n").expect("write b");
+    fs::write(work.join("dir/sub/deep.txt"), b"deep\n").expect("write deep");
     git(&work, ["add", "-A"]);
     git_with_env(&work, ["commit", "-m", "initial"]);
     git(
@@ -5761,6 +5845,50 @@ fn assert_object_type_blob_filter_fetch_matches_stock_git(
         ),
         "{label}"
     );
+}
+
+fn assert_tree_depth_filter_fetch_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+    root_blob: &str,
+    dir_tree: &str,
+    child_blob: &str,
+    sub_tree: &str,
+) {
+    assert_filter_fetch_common_matches_stock_git(label, git_client, zmin_client);
+    for object in [root_blob, dir_tree] {
+        assert_eq!(
+            filtered_object_local_presence(zmin_bin(), zmin_client, object),
+            0,
+            "{label}"
+        );
+        assert_eq!(
+            filtered_object_local_presence(
+                stock_git_bin().to_str().expect("stock git path"),
+                git_client,
+                object,
+            ),
+            0,
+            "{label}"
+        );
+    }
+    for object in [child_blob, sub_tree] {
+        assert_ne!(
+            filtered_object_local_presence(zmin_bin(), zmin_client, object),
+            0,
+            "{label}"
+        );
+        assert_eq!(
+            filtered_object_local_presence(zmin_bin(), zmin_client, object),
+            filtered_object_local_presence(
+                stock_git_bin().to_str().expect("stock git path"),
+                git_client,
+                object,
+            ),
+            "{label}"
+        );
+    }
 }
 
 fn filtered_blob_local_presence(command: &str, repo: &std::path::Path, path: &str) -> i32 {
