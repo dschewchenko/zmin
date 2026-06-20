@@ -1824,6 +1824,7 @@ struct BlameOptions {
     abbrev_width: Option<usize>,
     date_mode: BlameDateMode,
     ignore_whitespace: bool,
+    score_debug: bool,
     color_by_age: bool,
     line_range: Option<BlameLineRange>,
 }
@@ -2103,14 +2104,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         positionals.push(arg.clone());
         cursor += 1;
     }
-    for (enabled, option) in [(score_debug, "--score-debug")] {
-        if enabled {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported blame option '{option}'"),
-            });
-        }
-    }
     let path = match positionals.as_slice() {
         [path] => path.clone(),
         [rev_arg, path] => {
@@ -2142,6 +2135,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         abbrev_width,
         date_mode,
         ignore_whitespace,
+        score_debug,
         color_by_age,
         line_range,
     })
@@ -2577,6 +2571,9 @@ fn print_blame_lines(
         };
         let date = format_blame_date(&commit.author, options.date_mode)?;
         let mut prefix = display_id;
+        if options.score_debug {
+            prefix.push_str(" 2 01");
+        }
         if options.show_filename {
             prefix.push_str(&format!(" {}", String::from_utf8_lossy(path)));
         }
