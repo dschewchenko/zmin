@@ -101,6 +101,7 @@ pub(crate) fn dispatch(
         } => run_ls_remote(heads, tags, refs_only, repository, patterns),
         runtime::Command::Fetch {
             all,
+            multiple,
             quiet,
             verbose,
             dry_run,
@@ -125,6 +126,7 @@ pub(crate) fn dispatch(
             branch: refspecs,
         } => run_fetch(
             all,
+            multiple,
             quiet,
             verbose,
             dry_run,
@@ -330,6 +332,7 @@ pub(crate) fn run_ls_remote(
 
 pub(crate) fn run_fetch(
     all: bool,
+    multiple: bool,
     quiet: bool,
     verbose: bool,
     dry_run: bool,
@@ -355,6 +358,7 @@ pub(crate) fn run_fetch(
 ) -> std::result::Result<(), runtime::CliError> {
     super::transport_commands::run_fetch(
         all,
+        multiple,
         quiet,
         verbose,
         dry_run,

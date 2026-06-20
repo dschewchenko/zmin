@@ -8413,6 +8413,7 @@ pub(crate) fn run_ls_remote(
 
 pub(crate) fn run_fetch(
     all: bool,
+    multiple: bool,
     quiet: bool,
     verbose: bool,
     dry_run: bool,
@@ -8464,6 +8465,35 @@ pub(crate) fn run_fetch(
         for (idx, remote) in configured_remotes(&repo)?.into_iter().enumerate() {
             fetch_with_depth(
                 Some(remote),
+                None,
+                depth.as_deref(),
+                128,
+                quiet,
+                dry_run,
+                append || idx > 0,
+                set_upstream,
+                prune,
+                no_prune,
+                prune_tags,
+                no_tags,
+                tags,
+                _atomic,
+                update_head_ok,
+                write_fetch_head,
+                &refmap,
+            )?;
+        }
+        if !dry_run {
+            write_fetch_commit_graph_if_enabled()?;
+            write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+        }
+        return Ok(());
+    }
+    if multiple {
+        let remote_names = remote.into_iter().chain(refspecs).collect::<Vec<_>>();
+        for (idx, remote_name) in remote_names.into_iter().enumerate() {
+            fetch_with_depth(
+                Some(remote_name),
                 None,
                 depth.as_deref(),
                 128,
