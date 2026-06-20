@@ -94,7 +94,7 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Command routing | `151/151` | no | dispatch only |
 | Git doc option spellings | `4632` | no | seed only |
-| Written behavior rows | `129` | yes, row by row | `114` exact rows already match stock Git |
+| Written behavior rows | `133` | yes, row by row | `118` exact rows already match stock Git |
 | Fully certified command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Full Git behavior denominator | incomplete | not yet | still being expanded |
 
@@ -118,7 +118,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `309` | `69` | `58` | `0` | `9` | `2` | `0` |
+| Sharing and Updating Projects | `5` | `309` | `73` | `62` | `0` | `9` | `2` | `0` |
 | Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `333` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `132` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -128,7 +128,7 @@ Current generated summary:
 | Server Admin | `2` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `1075` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`4632`** | **`129`** | **`114`** | **`0`** | **`9`** | **`6`** | **`253`** |
+| **Git 2.47 unique total** | **`151`** | **`4632`** | **`133`** | **`118`** | **`0`** | **`9`** | **`6`** | **`253`** |
 
 The matrix columns are the written subset of explicit option/value/state rows.
 They are not the final denominator until each command matrix has been expanded
@@ -151,7 +151,7 @@ variants.
 | Command | Git doc option spellings | Doc spellings represented by rows | Matrix | Behavior rows written | Closed | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `69` | `58` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `73` | `62` | `0` | `9` | `2` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
@@ -212,11 +212,12 @@ updates changed submodule commits like stock Git.
 The latest `fetch --server-option` slice closed equals and separate-value forms
 for local path and file URL remotes, where stock Git accepts the option as a
 no-op. Smart HTTP/SSH protocol-v2 passthrough remains open.
-The latest `fetch --upload-pack` slice closed equals and separate-value forms
-for named local path and file URL remotes. Zmin invokes the external
-upload-pack command, indexes the returned pack, then updates refs and
-`FETCH_HEAD` like stock Git. SSH upload-pack override plus shallow,
-multiple-refspec, `--all` and `--multiple` combinations remain open.
+The latest `fetch --upload-pack` slices closed equals and separate-value forms
+for named local path and file URL remotes, both configured fetch and explicit
+branch `FETCH_HEAD` modes. Zmin invokes the external upload-pack command,
+indexes the returned pack, then updates refs and `FETCH_HEAD` like stock Git.
+SSH upload-pack override plus shallow, multiple-refspec, `--all` and
+`--multiple` combinations remain open.
 
 ## Required Matrix Columns
 

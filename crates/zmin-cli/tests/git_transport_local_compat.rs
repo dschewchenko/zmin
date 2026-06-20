@@ -1908,13 +1908,17 @@ fn fetch_server_option_local_transports_match_stock_git_noop() {
 #[test]
 fn fetch_upload_pack_local_transports_use_external_command_like_stock_git() {
     let cases = [
-        ("local-path-equals", false, true),
-        ("local-path-separate", false, false),
-        ("file-url-equals", true, true),
-        ("file-url-separate", true, false),
+        ("local-path-equals", false, true, false),
+        ("local-path-separate", false, false, false),
+        ("local-path-branch-equals", false, true, true),
+        ("local-path-branch-separate", false, false, true),
+        ("file-url-equals", true, true, false),
+        ("file-url-separate", true, false, false),
+        ("file-url-branch-equals", true, true, true),
+        ("file-url-branch-separate", true, false, true),
     ];
 
-    for (label, file_url, equals_form) in cases {
+    for (label, file_url, equals_form, explicit_branch) in cases {
         let dir = TempDir::new().expect("temp dir");
         let source = dir.path().join(format!("source-{label}"));
         let git_client = dir.path().join(format!("git-client-{label}"));
@@ -1966,20 +1970,28 @@ fn fetch_upload_pack_local_transports_use_external_command_like_stock_git() {
 
         let wrapper_command = shell_command_path(wrapper.to_str().expect("wrapper path"));
         let args = if equals_form {
-            vec![
+            let mut args = vec![
                 "fetch".to_owned(),
                 "--quiet".to_owned(),
                 format!("--upload-pack={wrapper_command}"),
                 "origin".to_owned(),
-            ]
+            ];
+            if explicit_branch {
+                args.push("main".to_owned());
+            }
+            args
         } else {
-            vec![
+            let mut args = vec![
                 "fetch".to_owned(),
                 "--quiet".to_owned(),
                 "--upload-pack".to_owned(),
                 wrapper_command,
                 "origin".to_owned(),
-            ]
+            ];
+            if explicit_branch {
+                args.push("main".to_owned());
+            }
+            args
         };
         let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
 
@@ -1997,6 +2009,16 @@ fn fetch_upload_pack_local_transports_use_external_command_like_stock_git() {
         assert_eq!(
             fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
             fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{label}"
+        );
+        assert_eq!(
+            git(&zmin_client, ["rev-parse", "FETCH_HEAD"]),
+            git(&git_client, ["rev-parse", "FETCH_HEAD"]),
+            "{label}"
+        );
+        assert_eq!(
+            git(&zmin_client, ["cat-file", "-p", "FETCH_HEAD:file"]),
+            git(&git_client, ["cat-file", "-p", "FETCH_HEAD:file"]),
             "{label}"
         );
         let invocations = fs::read_to_string(&log).expect("upload-pack log");
