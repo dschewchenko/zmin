@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 17/151 commands with matrix rows / 225/4632 represented doc-option pairs / 809 written rows / 727 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 18/151 commands with matrix rows / 225/4632 represented doc-option pairs / 810 written rows / 727 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -172,14 +172,15 @@ updates, project-note update, commit and push.
 
 ### Current Next Slice Pointer
 
-The next slice stays in the first active lane: WebStorm replacement blockers.
-Pick one observed replacement-shim command shape from `status`, `log`, `diff`,
-`ls-files`, `rev-parse` or `config`, add or update exactly one matrix row,
-prove it through stock Git versus the temporary `git` shim, then refresh the
-generated counts and commit.
+The replacement smoke currently has matrix evidence for every command label in
+`tools/git-replacement-dogfood-smoke.sh`. The next default slice is therefore
+the second active lane: classify one remaining `unsupported` or `not supported`
+Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
+deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
+appear, add those rows before continuing guard classification.
 
 Do not publish a support percentage just because open written rows are now
-`0/809`; the complete command matrices and complete doc-option matrices remain
+`0/810`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -229,6 +230,7 @@ until a full matrix is expanded and verified.
 | `config` replacement branch regexp query | `1` | `0` | `--get-regexp ^branch\\.` through the `git` shim on cloned repository config |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
+| `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
 | `log --decorate` boolean value forms | `5` | `0` | `yes`, `on`, `1`, `off`, `0` |
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |

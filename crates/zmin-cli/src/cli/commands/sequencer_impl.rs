@@ -108,10 +108,7 @@ pub(crate) fn rerere(args: Vec<String>) -> Result<()> {
         "forget" => rerere_forget(&args[1..]),
         "gc" => rerere_gc(),
         "record" => rerere_usage(),
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported rerere operation '{operation}'"),
-        }),
+        _ => rerere_usage(),
     }
 }
 
