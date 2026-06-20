@@ -9313,7 +9313,6 @@ fn fetch_multiple_refspecs(
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
-        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9348,11 +9347,16 @@ fn fetch_multiple_refspecs(
             });
         }
         return fetch_multiple_refspecs_from_http_remote(
-            &repo, &remote, &url, &refspecs, depth, quiet,
+            &repo,
+            &remote,
+            &url,
+            &refspecs,
+            depth,
+            quiet,
+            update_shallow,
         );
     }
     if is_git_daemon_transport_url(&url) {
-        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9385,11 +9389,17 @@ fn fetch_multiple_refspecs(
             });
         }
         return fetch_multiple_refspecs_from_daemon_remote(
-            &repo, &remote, &url, &refspecs, depth, quiet, prune,
+            &repo,
+            &remote,
+            &url,
+            &refspecs,
+            depth,
+            quiet,
+            prune,
+            update_shallow,
         );
     }
     if is_ssh_transport_url(&url) {
-        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9422,7 +9432,14 @@ fn fetch_multiple_refspecs(
             });
         }
         return fetch_multiple_refspecs_from_ssh_remote(
-            &repo, &remote, &url, &refspecs, depth, quiet, prune,
+            &repo,
+            &remote,
+            &url,
+            &refspecs,
+            depth,
+            quiet,
+            prune,
+            update_shallow,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -9570,6 +9587,7 @@ fn fetch_multiple_refspecs_from_http_remote(
     refspecs: &[String],
     depth: Option<usize>,
     quiet: bool,
+    update_shallow: bool,
 ) -> Result<()> {
     let parsed_url = parsed_http_url_with_extra_headers(Some(repo), url)?;
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
@@ -9577,7 +9595,7 @@ fn fetch_multiple_refspecs_from_http_remote(
     } else {
         None
     };
-    let (rows, _) = discover_http_refs_with_helper(
+    let (rows, _, advertised_shallow_boundaries) = discover_http_refs_with_helper_and_shallows(
         &parsed_url,
         helper.as_mut().map(std::convert::identity),
         false,
@@ -9623,46 +9641,82 @@ fn fetch_multiple_refspecs_from_http_remote(
         )?;
     } else {
         let request_roots = missing_fetch_roots(&store, &roots)?;
-        let pack_fetched = if let Some(helper) = helper.as_mut() {
-            http_fetch_smart_pack_with_helper(
-                &parsed_url,
-                helper,
-                &repo.objects_dir,
-                &request_roots,
-                &haves,
-            )?
+        if update_shallow {
+            let shallow_options = UploadPackShallowOptions::depth(None);
+            let shallow_boundaries = if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_with_shallow_options_with_helper(
+                    &parsed_url,
+                    helper,
+                    &repo.objects_dir,
+                    &request_roots,
+                    &haves,
+                    shallow_options,
+                )?
+            } else {
+                http_fetch_smart_pack_with_shallow_options_direct(
+                    &parsed_url,
+                    &repo.objects_dir,
+                    &request_roots,
+                    &haves,
+                    shallow_options,
+                )?
+            };
+            write_shallow_file(
+                repo,
+                upload_pack_response_or_advertised_shallows(
+                    shallow_options,
+                    shallow_boundaries,
+                    &advertised_shallow_boundaries,
+                ),
+            )?;
         } else {
-            http_fetch_smart_pack_direct(&parsed_url, &repo.objects_dir, &request_roots, &haves)?
-        };
-        if !pack_fetched {
-            let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
-            let fetch_options = HttpFetchOptions {
-                commit: false,
-                tags: false,
-                all: true,
-                verbose: false,
-                recover: false,
-                write_ref: Vec::new(),
-                stdin: false,
-                packfile: None,
-                index_pack_args: Vec::new(),
-                args: Vec::new(),
+            let pack_fetched = if let Some(helper) = helper.as_mut() {
+                http_fetch_smart_pack_with_helper(
+                    &parsed_url,
+                    helper,
+                    &repo.objects_dir,
+                    &request_roots,
+                    &haves,
+                )?
+            } else {
+                http_fetch_smart_pack_direct(
+                    &parsed_url,
+                    &repo.objects_dir,
+                    &request_roots,
+                    &haves,
+                )?
             };
-            let commit_cache = CommitObjectCache::new(&store);
-            let tree_cache = TreeObjectCache::new(&store);
-            let mut seen = HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
-            let mut fetch_context = HttpFetchObjectContext {
-                url: &parsed_url,
-                helper,
-                store: &store,
-                commit_cache: &commit_cache,
-                tree_cache: &tree_cache,
-                options: &fetch_options,
-                seen: &mut seen,
-                suffix_buffer: String::new(),
-            };
-            for id in &request_roots {
-                http_fetch_object_recursive(&mut fetch_context, id)?;
+            if !pack_fetched {
+                let helper = helper.get_or_insert(RemoteHttpHelperSession::spawn(&parsed_url)?);
+                let fetch_options = HttpFetchOptions {
+                    commit: false,
+                    tags: false,
+                    all: true,
+                    verbose: false,
+                    recover: false,
+                    write_ref: Vec::new(),
+                    stdin: false,
+                    packfile: None,
+                    index_pack_args: Vec::new(),
+                    args: Vec::new(),
+                };
+                let commit_cache = CommitObjectCache::new(&store);
+                let tree_cache = TreeObjectCache::new(&store);
+                let mut seen =
+                    HashSet::with_capacity(transport_ref_collection_capacity(roots.len()));
+                let mut fetch_context = HttpFetchObjectContext {
+                    url: &parsed_url,
+                    helper,
+                    store: &store,
+                    commit_cache: &commit_cache,
+                    tree_cache: &tree_cache,
+                    options: &fetch_options,
+                    seen: &mut seen,
+                    suffix_buffer: String::new(),
+                };
+                for id in &request_roots {
+                    http_fetch_object_recursive(&mut fetch_context, id)?;
+                }
             }
         }
     }
@@ -9689,8 +9743,10 @@ fn fetch_multiple_refspecs_from_daemon_remote(
     depth: Option<usize>,
     quiet: bool,
     prune: bool,
+    update_shallow: bool,
 ) -> Result<()> {
-    let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
+    let (rows, advertised_shallow_boundaries) =
+        daemon_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
     let objects_dir = repo.objects_dir.clone();
     fetch_multiple_refspecs_from_advertised_remote(
         repo,
@@ -9701,8 +9757,16 @@ fn fetch_multiple_refspecs_from_daemon_remote(
         quiet,
         prune,
         &rows,
-        |request_roots, haves, depth| {
-            daemon_fetch_pack_with_depth_and_haves(url, &objects_dir, request_roots, haves, depth)
+        &advertised_shallow_boundaries,
+        update_shallow,
+        |request_roots, haves, options| {
+            daemon_fetch_pack_with_shallow_options_and_haves(
+                url,
+                &objects_dir,
+                request_roots,
+                haves,
+                options,
+            )
         },
     )
 }
@@ -9715,8 +9779,10 @@ fn fetch_multiple_refspecs_from_ssh_remote(
     depth: Option<usize>,
     quiet: bool,
     prune: bool,
+    update_shallow: bool,
 ) -> Result<()> {
-    let rows = ssh_ls_remote_rows(url, false, false, false, &[])?;
+    let (rows, advertised_shallow_boundaries) =
+        ssh_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
     let objects_dir = repo.objects_dir.clone();
     fetch_multiple_refspecs_from_advertised_remote(
         repo,
@@ -9727,8 +9793,16 @@ fn fetch_multiple_refspecs_from_ssh_remote(
         quiet,
         prune,
         &rows,
-        |request_roots, haves, depth| {
-            ssh_fetch_pack_with_depth_and_haves(url, &objects_dir, request_roots, haves, depth)
+        &advertised_shallow_boundaries,
+        update_shallow,
+        |request_roots, haves, options| {
+            ssh_fetch_pack_with_shallow_options_and_haves(
+                url,
+                &objects_dir,
+                request_roots,
+                haves,
+                options,
+            )
         },
     )
 }
@@ -9742,10 +9816,12 @@ fn fetch_multiple_refspecs_from_advertised_remote<F>(
     quiet: bool,
     prune: bool,
     rows: &[LsRemoteRow],
+    advertised_shallow_boundaries: &[ObjectId],
+    update_shallow: bool,
     mut fetch_pack: F,
 ) -> Result<()>
 where
-    F: FnMut(&[ObjectId], &[ObjectId], Option<usize>) -> Result<Vec<ObjectId>>,
+    F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
 {
     let mut resolved = Vec::with_capacity(refspecs.len());
     for refspec in refspecs {
@@ -9764,12 +9840,22 @@ where
     } else {
         missing_fetch_roots(&store, &roots)?
     };
-    let shallow_boundaries = fetch_pack(&request_roots, &haves, depth)?;
+    let shallow_options = UploadPackShallowOptions::depth(depth);
+    let shallow_boundaries = fetch_pack(&request_roots, &haves, shallow_options)?;
     if let Some(depth) = depth {
         let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
         write_shallow_file(
             repo,
             boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
+        )?;
+    } else if update_shallow {
+        write_shallow_file(
+            repo,
+            upload_pack_response_or_advertised_shallows(
+                shallow_options,
+                shallow_boundaries,
+                advertised_shallow_boundaries,
+            ),
         )?;
     }
 
@@ -9917,6 +10003,15 @@ fn write_http_explicit_fetch_head_file(
     let display_url = fetch_head_url_display(url);
     let mut rows = Vec::with_capacity(resolved.len());
     for (_, row) in resolved {
+        if let Some(branch) = row.name.strip_prefix("refs/heads/") {
+            rows.push(format!(
+                "{}\t\tbranch '{}' of {}\n",
+                row.id.to_hex(),
+                branch,
+                display_url
+            ));
+            continue;
+        }
         let description = if let Some(tag) = row.name.strip_prefix("refs/tags/") {
             format!("tag '{tag}'")
         } else {
@@ -11214,7 +11309,6 @@ pub(crate) fn fetch_with_repo_and_remote(
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
-        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_http_remote(
                 &repo,
@@ -11223,18 +11317,25 @@ pub(crate) fn fetch_with_repo_and_remote(
                 std::slice::from_ref(refspec),
                 None,
                 quiet,
+                update_shallow,
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
             let refspecs = fetch_refspecs_from_refmap(branch, refmap)?;
             return fetch_multiple_refspecs_from_http_remote(
-                &repo, &remote, &url, &refspecs, None, quiet,
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                None,
+                quiet,
+                update_shallow,
             );
         }
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         return fetch_with_http_remote(repo, remote, branch, missing_ref_code, &url);
     }
     if is_git_daemon_transport_url(&url) {
-        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_daemon_remote(
                 &repo,
@@ -11244,18 +11345,26 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
+                update_shallow,
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
             let refspecs = fetch_refspecs_from_refmap(branch, refmap)?;
             return fetch_multiple_refspecs_from_daemon_remote(
-                &repo, &remote, &url, &refspecs, None, quiet, prune,
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                None,
+                quiet,
+                prune,
+                update_shallow,
             );
         }
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         return fetch_with_daemon_remote(repo, remote, branch, missing_ref_code, &url);
     }
     if is_ssh_transport_url(&url) {
-        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
             return fetch_multiple_refspecs_from_ssh_remote(
                 &repo,
@@ -11265,14 +11374,23 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
+                update_shallow,
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
             let refspecs = fetch_refspecs_from_refmap(branch, refmap)?;
             return fetch_multiple_refspecs_from_ssh_remote(
-                &repo, &remote, &url, &refspecs, None, quiet, prune,
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                None,
+                quiet,
+                prune,
+                update_shallow,
             );
         }
+        ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
         return fetch_with_ssh_remote(repo, remote, branch, missing_ref_code, &url);
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {

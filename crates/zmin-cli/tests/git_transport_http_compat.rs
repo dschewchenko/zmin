@@ -486,6 +486,40 @@ fn prepare_update_shallow_remote(root: &std::path::Path) -> std::path::PathBuf {
     remote
 }
 
+fn prepare_two_branch_update_shallow_remote(root: &std::path::Path) -> std::path::PathBuf {
+    let source = root.join("source-two-branch");
+    let remote = root.join("shallow-two-branch.git");
+    git(root, ["init", "-b", "main", "source-two-branch"]);
+    configure_identity(&source);
+    for idx in 1..=4 {
+        fs::write(source.join("main.txt"), format!("main {idx}\n")).expect("write main");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", &format!("main {idx}")]);
+    }
+    git(&source, ["switch", "-c", "feature", "HEAD~2"]);
+    for idx in 1..=3 {
+        fs::write(source.join("feature.txt"), format!("feature {idx}\n")).expect("write feature");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", &format!("feature {idx}")]);
+    }
+    git(&source, ["switch", "main"]);
+    let source_url = format!("file://{}", source.display());
+    git(
+        root,
+        [
+            "clone",
+            "--bare",
+            "--depth=2",
+            "--no-single-branch",
+            &source_url,
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    set_bare_head_to_main(&remote);
+    remote
+}
+
 fn init_network_fetch_clients(
     root: &std::path::Path,
     label: &str,
@@ -2622,6 +2656,90 @@ fn fetch_update_shallow_network_branch_transports_match_stock_git() {
     );
     assert_network_branch_shallow_fetch_matches_stock_git(
         "git-daemon update-shallow",
+        &git_client,
+        &zmin_client,
+    );
+}
+
+#[test]
+fn fetch_update_shallow_network_multiple_refspecs_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_two_branch_update_shallow_remote(dir.path());
+    let args = [
+        "fetch",
+        "--quiet",
+        "--update-shallow",
+        "origin",
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/shallow-two-branch.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-multi-http", url.as_str());
+    command_output("git", &git_client, &args, "git update-shallow multi http");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin update-shallow multi http",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "smart-http update-shallow multi",
+        &git_client,
+        &zmin_client,
+    );
+    assert_eq!(
+        git(
+            &zmin_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        ),
+        git(
+            &git_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        )
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-multi-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git update-shallow multi ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin update-shallow multi ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh update-shallow multi",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/shallow-two-branch.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-multi-daemon", url.as_str());
+    command_output("git", &git_client, &args, "git update-shallow multi daemon");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin update-shallow multi daemon",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "git-daemon update-shallow multi",
         &git_client,
         &zmin_client,
     );
