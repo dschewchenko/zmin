@@ -11543,13 +11543,6 @@ fn fetch_with_repo_and_location(
             );
         }
     }
-    if !shallow_exclude.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --shallow-exclude currently supports explicit local and file branches"
-                .into(),
-        });
-    }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
         if update_shallow {
@@ -11560,6 +11553,18 @@ fn fetch_with_repo_and_location(
                 quiet,
                 dry_run,
                 write_fetch_head,
+            );
+        }
+        if !shallow_exclude.is_empty() {
+            return fetch_direct_location_head_shallow_exclude(
+                &repo,
+                &source,
+                &location,
+                quiet,
+                dry_run,
+                write_fetch_head,
+                no_tags,
+                shallow_exclude,
             );
         }
         if let Some(since) = shallow_since {
@@ -11626,6 +11631,14 @@ fn fetch_with_repo_and_location(
                         .into(),
             });
         }
+        if !shallow_exclude.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message:
+                    "fetch --shallow-exclude currently supports explicit local and file branches"
+                        .into(),
+            });
+        }
         if update_shallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -11678,6 +11691,13 @@ fn fetch_with_repo_and_location(
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --shallow-since currently supports explicit local and file branches"
+                .into(),
+        });
+    }
+    if !shallow_exclude.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude currently supports explicit local and file branches"
                 .into(),
         });
     }
@@ -11979,6 +11999,80 @@ fn fetch_direct_location_head_since(
             &request.wants,
             since,
             &request,
+        )?,
+    )?;
+    if write_fetch_head {
+        write_direct_location_head_fetch_head_file(repo, &head, location)?;
+    }
+    if !quiet && write_fetch_head {
+        eprintln!("From {}", fetch_head_url_display(location));
+        eprintln!(" * branch            HEAD       -> FETCH_HEAD");
+    }
+    Ok(())
+}
+
+fn fetch_direct_location_head_shallow_exclude(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    quiet: bool,
+    dry_run: bool,
+    write_fetch_head: bool,
+    no_tags: bool,
+    exclude_revs: &[String],
+) -> Result<()> {
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let head = source_refs.resolve("HEAD")?;
+    if dry_run {
+        if !quiet && write_fetch_head {
+            eprintln!("From {}", fetch_head_url_display(location));
+            eprintln!(" * branch            HEAD       -> FETCH_HEAD");
+        }
+        return Ok(());
+    }
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
+    let commit_cache = CommitObjectCache::new(&source_store);
+    let exclude_roots = Vec::new();
+    let commits = collect_commits_from_ids_with_id_exclusions_cached(
+        &source_repo,
+        &source_store,
+        &commit_cache,
+        std::slice::from_ref(&head),
+        &exclude_roots,
+        exclude_revs,
+        None,
+    )?;
+    let mut fetched_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        commits.len(),
+    ));
+    copy_reachable_objects_for_depth_into(
+        &source_store,
+        &destination_store,
+        &commits,
+        &mut fetched_objects,
+    )?;
+    if !no_tags {
+        copy_fetch_pack_included_tags(
+            &source_refs,
+            &source_store,
+            &destination_store,
+            &source_repo,
+            &mut fetched_objects,
+            None,
+        )?;
+    }
+    write_shallow_file(
+        repo,
+        upload_pack_exclusion_shallow_boundaries(
+            &source_repo,
+            &source_store,
+            &commits,
+            &exclude_roots,
+            exclude_revs,
         )?,
     )?;
     if write_fetch_head {

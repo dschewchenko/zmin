@@ -136,8 +136,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Commands with any matrix rows | `2/151` | no | audit rows exist only for `status` and `fetch` |
 | Git doc option pairs represented by rows | `50/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `201` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `186/201` | yes, row by row | exact written rows with parity evidence |
+| Written behavior rows | `205` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `190/205` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The full denominator must include command, option, value, option combination,
@@ -168,7 +168,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `309` | `141` | `130` | `0` | `9` | `2` | `30` |
+| Sharing and Updating Projects | `5` | `309` | `145` | `134` | `0` | `9` | `2` | `34` |
 | Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `333` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `132` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -178,7 +178,7 @@ Current generated summary:
 | Server Admin | `2` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `1075` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`4632`** | **`201`** | **`186`** | **`0`** | **`9`** | **`6`** | **`283`** |
+| **Git 2.47 unique total** | **`151`** | **`4632`** | **`205`** | **`190`** | **`0`** | **`9`** | **`6`** | **`287`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -188,8 +188,8 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings or `186/201`
-passing written rows as a Git support percentage. The `186/201` number is audit
+Never use `151/151` command presence, `4632` option spellings or `190/205`
+passing written rows as a Git support percentage. The `190/205` number is audit
 progress for rows already written down. It says nothing about the still
 unexpanded rows. A command is complete only after its documented options,
 values, negations, repeated forms, order-sensitive combinations, repository
@@ -204,7 +204,7 @@ variants.
 | Command | Git doc option seed | Doc spellings represented by rows | Matrix | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `141` | `130` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `145` | `134` | `0` | `9` | `2` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
@@ -277,8 +277,8 @@ remotes plus explicit local path/file URL branch fetches where the source
 remote itself is shallow. The latest update-shallow slice also closed explicit local path/file URL HEAD fetches from shallow sources.
 The latest `fetch --shallow-since` slices closed explicit local path/file URL
 branch and HEAD fetches for equals and separate-value forms.
-The latest `fetch --shallow-exclude` slice closed explicit local path/file URL
-branch fetches for equals and separate-value forms.
+The latest `fetch --shallow-exclude` slices closed explicit local path/file URL
+branch and HEAD fetches for equals and separate-value forms.
 The latest `fetch --deepen` slices closed explicit local path/file URL branch
 and HEAD fetches for equals and separate-value forms.
 The latest `fetch --unshallow` slices closed explicit local path/file URL HEAD
