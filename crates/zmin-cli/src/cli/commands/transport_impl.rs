@@ -11081,17 +11081,18 @@ fn fetch_with_depth(
     {
         if prefetch
             || !refmap.is_empty()
-            || branch.as_deref().is_none_or(|value| value.contains(':'))
+            || branch.as_deref().is_some_and(|value| value.contains(':'))
         {
             return Err(CliError::Fatal {
                 code: 128,
-                message: "fetch --update-shallow currently supports one named remote branch".into(),
+                message: "fetch --update-shallow currently supports named network remote fetches"
+                    .into(),
             });
         }
         return fetch_with_repo_and_remote_update_shallow(
             repo,
             remote,
-            branch.expect("checked above"),
+            branch,
             missing_ref_code,
             append,
             write_fetch_head,
@@ -15758,6 +15759,304 @@ where
     write_shallow_file(&repo, shallow_boundaries)
 }
 
+fn fetch_network_configured_update_shallow(
+    repo: GitRepo,
+    remote: String,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url) {
+        let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
+        let mut helper = if parsed_url.scheme == HttpScheme::Https {
+            Some(RemoteHttpHelperSession::spawn(&parsed_url)?)
+        } else {
+            None
+        };
+        let (rows, head_branch, advertised_shallow_boundaries) =
+            discover_http_refs_with_helper_and_shallows(
+                &parsed_url,
+                helper.as_mut().map(std::convert::identity),
+                false,
+                false,
+                false,
+                &[],
+            )?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_update_shallow(
+            repo,
+            remote,
+            &url,
+            &rows,
+            &advertised_shallow_boundaries,
+            head_branch,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+            |roots, haves, options| {
+                if let Some(helper) = helper.as_mut() {
+                    http_fetch_smart_pack_with_shallow_options_with_helper(
+                        &parsed_url,
+                        helper,
+                        &objects_dir,
+                        roots,
+                        haves,
+                        options,
+                    )
+                } else {
+                    http_fetch_smart_pack_with_shallow_options_direct(
+                        &parsed_url,
+                        &objects_dir,
+                        roots,
+                        haves,
+                        options,
+                    )
+                }
+            },
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        let (rows, advertised_shallow_boundaries) =
+            daemon_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
+        let head_branch = daemon_head_branch(&url)?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_update_shallow(
+            repo,
+            remote,
+            &url,
+            &rows,
+            &advertised_shallow_boundaries,
+            head_branch,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+            |roots, haves, options| {
+                daemon_fetch_pack_with_shallow_options_and_haves(
+                    &url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            },
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        let (rows, advertised_shallow_boundaries) =
+            ssh_ls_remote_rows_with_shallows(&url, false, false, false, &[])?;
+        let head_branch = ssh_head_branch(&url)?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_update_shallow(
+            repo,
+            remote,
+            &url,
+            &rows,
+            &advertised_shallow_boundaries,
+            head_branch,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+            |roots, haves, options| {
+                ssh_fetch_pack_with_shallow_options_and_haves(
+                    &url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            },
+        );
+    }
+    Err(unsupported_remote_helper_error(&url, String::new()))
+}
+
+fn fetch_configured_advertised_remote_update_shallow<F>(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    rows: &[LsRemoteRow],
+    advertised_shallow_boundaries: &[ObjectId],
+    head_branch: Option<String>,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+    mut fetch_pack: F,
+) -> Result<()>
+where
+    F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
+{
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, rows)?;
+    sort_dedup_object_ids(&mut roots);
+    let options = UploadPackShallowOptions::depth(None);
+    let shallow_boundaries = if roots.is_empty() {
+        Vec::new()
+    } else {
+        fetch_pack(&roots, &haves, options)?
+    };
+    let shallow_boundaries = upload_pack_response_or_advertised_shallows(
+        options,
+        shallow_boundaries,
+        advertised_shallow_boundaries,
+    );
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = head_branch {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file(
+            &repo,
+            rows,
+            &remote,
+            url,
+            &fetch_refspecs,
+            append,
+            false,
+        )?;
+    }
+    write_shallow_file(&repo, shallow_boundaries)
+}
+
+fn configured_network_fetch_roots_and_updates(
+    remote: &str,
+    rows: &[LsRemoteRow],
+) -> Result<(Vec<ObjectId>, Vec<(String, ObjectId)>)> {
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
+    let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
+    for row in rows
+        .iter()
+        .filter(|row| row.name.starts_with("refs/heads/"))
+    {
+        let branch = row
+            .name
+            .strip_prefix("refs/heads/")
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("invalid source branch ref '{}'", row.name),
+            })?;
+        ref_updates.push((format!("refs/remotes/{remote}/{branch}"), row.id.clone()));
+        roots.push(row.id.clone());
+    }
+    for row in rows.iter().filter(|row| row.name.starts_with("refs/tags/")) {
+        if !row.name.ends_with("^{}") {
+            ref_updates.push((row.name.clone(), row.id.clone()));
+            roots.push(row.id.clone());
+        }
+    }
+    Ok((roots, ref_updates))
+}
+
+fn write_network_configured_fetch_head_file(
+    repo: &GitRepo,
+    rows: &[LsRemoteRow],
+    remote: &str,
+    url: &str,
+    refspecs: &[String],
+    append: bool,
+    explicit_refspec_fetch: bool,
+) -> Result<()> {
+    let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1))?
+        .and_then(|current| {
+            let branch = branch_display_name(&current);
+            read_config_section_value(repo, "branch", &branch, "remote")
+                .ok()
+                .flatten()
+                .filter(|configured_remote| configured_remote == remote)
+                .and_then(|_| {
+                    read_config_section_value(repo, "branch", &branch, "merge")
+                        .ok()
+                        .flatten()
+                })
+        });
+    let mut rows_out = Vec::new();
+    let mut merge_rows = Vec::new();
+    for refspec in refspecs {
+        let refspec = refspec.trim_start_matches('+');
+        let Some((source, _)) = refspec.split_once(':') else {
+            continue;
+        };
+        if let Some((source_prefix, source_suffix)) = source.split_once('*') {
+            if source_suffix.contains('*') {
+                continue;
+            }
+            for row in rows
+                .iter()
+                .filter(|row| row.name.starts_with(source_prefix))
+            {
+                let Some(captured) = row
+                    .name
+                    .strip_prefix(source_prefix)
+                    .and_then(|rest| rest.strip_suffix(source_suffix))
+                else {
+                    continue;
+                };
+                let branch = if source_prefix == "refs/heads/" && source_suffix.is_empty() {
+                    captured
+                } else {
+                    row.name.strip_prefix("refs/heads/").unwrap_or(&row.name)
+                };
+                let marker =
+                    if explicit_refspec_fetch || current_merge.as_deref() == Some(&row.name) {
+                        ""
+                    } else {
+                        "not-for-merge"
+                    };
+                let fetch_head_row = format!(
+                    "{}\t{}\tbranch '{}' of {}\n",
+                    row.id.to_hex(),
+                    marker,
+                    branch,
+                    fetch_head_url_display(url)
+                );
+                if marker.is_empty() {
+                    merge_rows.push(fetch_head_row);
+                } else {
+                    rows_out.push(fetch_head_row);
+                }
+            }
+            continue;
+        }
+        if source.contains('*') {
+            continue;
+        }
+        let Some(row) = rows.iter().find(|row| row.name == source) else {
+            continue;
+        };
+        let branch = source.strip_prefix("refs/heads/").unwrap_or(source);
+        let marker = if explicit_refspec_fetch || current_merge.as_deref() == Some(source) {
+            ""
+        } else {
+            "not-for-merge"
+        };
+        let fetch_head_row = format!(
+            "{}\t{}\tbranch '{}' of {}\n",
+            row.id.to_hex(),
+            marker,
+            branch,
+            fetch_head_url_display(url)
+        );
+        if marker.is_empty() {
+            merge_rows.push(fetch_head_row);
+        } else {
+            rows_out.push(fetch_head_row);
+        }
+    }
+    merge_rows.extend(rows_out);
+    write_fetch_head_content(repo, merge_rows.concat().as_bytes(), append)
+}
+
 fn upload_pack_response_or_advertised_shallows(
     options: UploadPackShallowOptions<'_>,
     response_boundaries: Vec<ObjectId>,
@@ -16858,12 +17157,22 @@ fn fetch_with_repo_and_remote_unshallow(
 fn fetch_with_repo_and_remote_update_shallow(
     repo: GitRepo,
     remote: String,
-    branch: String,
+    branch: Option<String>,
     missing_ref_code: i32,
     append: bool,
     write_fetch_head: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
+    if branch.is_none() {
+        return fetch_network_configured_update_shallow(
+            repo,
+            remote,
+            missing_ref_code,
+            append,
+            write_fetch_head,
+        );
+    }
+    let branch = branch.expect("checked branchless above");
     if is_http_transport_url(&url) {
         return fetch_with_http_remote_shallow_options(
             repo,

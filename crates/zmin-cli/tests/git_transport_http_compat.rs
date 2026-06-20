@@ -2746,6 +2746,93 @@ fn fetch_update_shallow_network_multiple_refspecs_match_stock_git() {
 }
 
 #[test]
+fn fetch_update_shallow_network_branchless_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_two_branch_update_shallow_remote(dir.path());
+    let args = ["fetch", "--quiet", "--update-shallow", "origin"];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/shallow-two-branch.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-branchless-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git update-shallow branchless http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin update-shallow branchless http",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "smart-http update-shallow branchless",
+        &git_client,
+        &zmin_client,
+    );
+    assert_eq!(
+        git(
+            &zmin_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        ),
+        git(
+            &git_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        )
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-branchless-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git update-shallow branchless ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin update-shallow branchless ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh update-shallow branchless",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/shallow-two-branch.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-branchless-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git update-shallow branchless daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin update-shallow branchless daemon",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "git-daemon update-shallow branchless",
+        &git_client,
+        &zmin_client,
+    );
+}
+
+#[test]
 fn fetch_reads_shallow_ssh_remote_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
