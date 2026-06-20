@@ -16411,18 +16411,6 @@ fn fetch_with_repo_and_remote_deepen(
             message: "fetch --deepen currently supports one named remote branch".into(),
         });
     };
-    if is_http_transport_url(&url)
-        || is_git_daemon_transport_url(&url)
-        || is_ssh_transport_url(&url)
-    {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --deepen currently supports local and file remotes".into(),
-        });
-    }
-    let Some(source_path) = local_repository_path_from_location(&url)? else {
-        return Err(unsupported_remote_helper_error(&url, String::new()));
-    };
     let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
         return fetch_with_repo_and_remote(
             repo,
@@ -16442,6 +16430,48 @@ fn fetch_with_repo_and_remote_deepen(
             false,
             None,
         );
+    };
+    if is_http_transport_url(&url) {
+        let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+        return fetch_with_http_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::depth_with_shallows(deepen, &shallows),
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+        return fetch_with_daemon_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::depth_with_shallows(deepen, &shallows),
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+        return fetch_with_ssh_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::depth_with_shallows(deepen, &shallows),
+            append,
+            write_fetch_head,
+        );
+    }
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let source = local_clone_source(&source_path)?;
     let source_refs = refs_adapter_from_git_dir(&source.git_dir);
@@ -17262,6 +17292,7 @@ struct UploadPackShallowOptions<'a> {
     since: Option<i64>,
     deepen_not: &'a [String],
     shallows: &'a [ObjectId],
+    deepen_relative: bool,
 }
 
 impl<'a> UploadPackShallowOptions<'a> {
@@ -17271,6 +17302,17 @@ impl<'a> UploadPackShallowOptions<'a> {
             since: None,
             deepen_not: &[],
             shallows: &[],
+            deepen_relative: false,
+        }
+    }
+
+    fn depth_with_shallows(depth: usize, shallows: &'a [ObjectId]) -> Self {
+        Self {
+            depth: Some(depth),
+            since: None,
+            deepen_not: &[],
+            shallows,
+            deepen_relative: true,
         }
     }
 
@@ -17280,6 +17322,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             since: Some(since),
             deepen_not: &[],
             shallows: &[],
+            deepen_relative: false,
         }
     }
 
@@ -17289,6 +17332,7 @@ impl<'a> UploadPackShallowOptions<'a> {
             since: None,
             deepen_not,
             shallows: &[],
+            deepen_relative: false,
         }
     }
 }
@@ -17299,7 +17343,7 @@ fn build_upload_pack_request_with_shallows(
     depth: Option<usize>,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(roots, haves, depth, None, &[], shallows)
+    build_upload_pack_request_with_shallow_options(roots, haves, depth, None, &[], shallows, false)
 }
 
 fn build_upload_pack_request_with_since(
@@ -17308,7 +17352,15 @@ fn build_upload_pack_request_with_since(
     since: i64,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(roots, haves, None, Some(since), &[], shallows)
+    build_upload_pack_request_with_shallow_options(
+        roots,
+        haves,
+        None,
+        Some(since),
+        &[],
+        shallows,
+        false,
+    )
 }
 
 fn build_upload_pack_request_with_deepen_not(
@@ -17317,7 +17369,9 @@ fn build_upload_pack_request_with_deepen_not(
     deepen_not: &[String],
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(roots, haves, None, None, deepen_not, shallows)
+    build_upload_pack_request_with_shallow_options(
+        roots, haves, None, None, deepen_not, shallows, false,
+    )
 }
 
 fn build_upload_pack_request_with_shallow_options(
@@ -17327,17 +17381,24 @@ fn build_upload_pack_request_with_shallow_options(
     since: Option<i64>,
     deepen_not: &[String],
     shallows: &[ObjectId],
+    deepen_relative: bool,
 ) -> Result<Vec<u8>> {
     let mut request = Vec::with_capacity(upload_pack_request_capacity(
-        roots, haves, depth, since, deepen_not, shallows,
+        roots,
+        haves,
+        depth,
+        since,
+        deepen_not,
+        shallows,
+        deepen_relative,
     ));
-    let first_extra = b" side-band-64k thin-pack ofs-delta no-progress include-tag";
+    let first_extra = if deepen_relative {
+        b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative".as_slice()
+    } else {
+        b" side-band-64k thin-pack ofs-delta no-progress include-tag".as_slice()
+    };
     for (idx, root) in roots.iter().enumerate() {
-        let extra = if idx == 0 {
-            first_extra.as_slice()
-        } else {
-            &[]
-        };
+        let extra: &[u8] = if idx == 0 { first_extra } else { &[] };
         append_pkt_line_len(
             &mut request,
             b"want ".len() + root.hex_len() + extra.len() + 1,
@@ -17401,6 +17462,7 @@ fn build_upload_pack_request_from_shallow_options(
         options.since,
         options.deepen_not,
         options.shallows,
+        options.deepen_relative,
     )
 }
 
@@ -17411,8 +17473,13 @@ fn upload_pack_request_capacity(
     since: Option<i64>,
     deepen_not: &[String],
     shallows: &[ObjectId],
+    deepen_relative: bool,
 ) -> usize {
-    let first_extra = " side-band-64k thin-pack ofs-delta no-progress include-tag".len();
+    let first_extra = if deepen_relative {
+        " side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative".len()
+    } else {
+        " side-band-64k thin-pack ofs-delta no-progress include-tag".len()
+    };
     let wants = roots
         .iter()
         .enumerate()
@@ -20963,7 +21030,7 @@ mod transport_request_tests {
 
         assert_eq!(
             request.len(),
-            upload_pack_request_capacity(&roots, &[], Some(123_456), None, &[], &[])
+            upload_pack_request_capacity(&roots, &[], Some(123_456), None, &[], &[], false)
         );
         assert!(
             request

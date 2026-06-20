@@ -2263,6 +2263,116 @@ fn fetch_shallow_exclude_network_branch_transports_match_stock_git() {
 }
 
 #[test]
+fn fetch_deepen_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_shallow_since_remote(dir.path());
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "deepen-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "git depth http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "zmin depth http",
+    );
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--deepen=1", "origin", "main"],
+        "git deepen http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--deepen=1", "origin", "main"],
+        "zmin deepen http",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "smart-http deepen",
+        &git_client,
+        &zmin_client,
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "deepen-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git depth ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin depth ssh",
+    );
+    command_output_with_env(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--deepen=1", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git deepen ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--deepen=1", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin deepen ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git("ssh deepen", &git_client, &zmin_client);
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "deepen-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "git depth daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--depth=1", "origin", "main"],
+        "zmin depth daemon",
+    );
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--deepen=1", "origin", "main"],
+        "git deepen daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--deepen=1", "origin", "main"],
+        "zmin deepen daemon",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "git-daemon deepen",
+        &git_client,
+        &zmin_client,
+    );
+}
+
+#[test]
 fn fetch_reads_shallow_ssh_remote_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
