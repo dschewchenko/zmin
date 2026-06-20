@@ -9337,11 +9337,15 @@ fn fetch_multiple_refspecs(
             );
         }
         if !shallow_exclude.is_empty() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-exclude needs smart HTTP transport support before use"
-                    .into(),
-            });
+            return fetch_multiple_refspecs_from_http_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                Some(UploadPackShallowOptions::deepen_not(shallow_exclude)),
+            );
         }
         if upload_pack_command.is_some() {
             return Err(CliError::Fatal {
@@ -9386,10 +9390,16 @@ fn fetch_multiple_refspecs(
             );
         }
         if !shallow_exclude.is_empty() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-exclude currently supports local and file remotes".into(),
-            });
+            return fetch_multiple_refspecs_from_daemon_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::deepen_not(shallow_exclude)),
+            );
         }
         if upload_pack_command.is_some() {
             return Err(CliError::Fatal {
@@ -9435,10 +9445,16 @@ fn fetch_multiple_refspecs(
             );
         }
         if !shallow_exclude.is_empty() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-exclude currently supports local and file remotes".into(),
-            });
+            return fetch_multiple_refspecs_from_ssh_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::deepen_not(shallow_exclude)),
+            );
         }
         if upload_pack_command.is_some() {
             return Err(CliError::Fatal {

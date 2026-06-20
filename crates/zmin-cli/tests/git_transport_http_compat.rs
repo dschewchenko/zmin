@@ -523,6 +523,45 @@ fn prepare_shallow_exclude_remote(root: &std::path::Path) -> std::path::PathBuf 
     remote
 }
 
+fn prepare_two_branch_shallow_exclude_remote(root: &std::path::Path) -> std::path::PathBuf {
+    let remote = root.join("remote.git");
+    let work = root.join("work");
+    git(root, ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(root, ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+
+    for name in ["base 1", "base 2"] {
+        fs::write(work.join("base.txt"), format!("{name}\n")).expect("write base file");
+        git(&work, ["add", "-A"]);
+        git_with_env(&work, ["commit", "-m", name]);
+    }
+    git(&work, ["branch", "base"]);
+    let base = git(&work, ["rev-parse", "HEAD"]);
+
+    fs::write(work.join("main.txt"), b"main tip\n").expect("write main tip");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "main tip"]);
+
+    git(&work, ["switch", "-c", "feature", &base]);
+    fs::write(work.join("feature.txt"), b"feature tip\n").expect("write feature tip");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "feature tip"]);
+
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "base"]);
+    set_bare_head_to_main(&remote);
+    remote
+}
+
 fn prepare_update_shallow_remote(root: &std::path::Path) -> std::path::PathBuf {
     let source = root.join("source");
     let remote = root.join("shallow.git");
@@ -2505,6 +2544,95 @@ fn fetch_shallow_exclude_network_branch_transports_match_stock_git() {
     );
     assert_network_branch_shallow_fetch_matches_stock_git(
         "git-daemon shallow-exclude",
+        &git_client,
+        &zmin_client,
+    );
+}
+
+#[test]
+fn fetch_shallow_exclude_network_multiple_refspecs_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_two_branch_shallow_exclude_remote(dir.path());
+    let args = [
+        "fetch",
+        "--quiet",
+        "--shallow-exclude=refs/heads/base",
+        "origin",
+        "refs/heads/main:refs/remotes/origin/main",
+        "refs/heads/feature:refs/remotes/origin/feature",
+    ];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "exclude-multi-http", url.as_str());
+    command_output("git", &git_client, &args, "git shallow-exclude multi http");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin shallow-exclude multi http",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "smart-http shallow-exclude multi",
+        &git_client,
+        &zmin_client,
+    );
+    assert_eq!(
+        git(
+            &zmin_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        ),
+        git(
+            &git_client,
+            ["cat-file", "-p", "origin/feature:feature.txt"]
+        )
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "exclude-multi-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git shallow-exclude multi ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin shallow-exclude multi ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh shallow-exclude multi",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "exclude-multi-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git shallow-exclude multi daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin shallow-exclude multi daemon",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "git-daemon shallow-exclude multi",
         &git_client,
         &zmin_client,
     );
