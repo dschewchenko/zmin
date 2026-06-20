@@ -921,9 +921,9 @@ fn parse_status_column_value(value: &str) -> Result<bool> {
             }
             "never" => enabled = false,
             other => {
-                return Err(CliError::Fatal {
+                return Err(CliError::Stderr {
                     code: 129,
-                    message: format!("unsupported option '{other}'"),
+                    text: format!("error: unsupported option '{other}'\n"),
                 });
             }
         }

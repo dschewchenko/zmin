@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 24/151 commands with matrix rows / 231/4632 represented doc-option pairs / 836 written rows / 732 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 24/151 commands with matrix rows / 231/4632 represented doc-option pairs / 837 written rows / 732 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,7 +195,7 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git status --ignored=bogus`.
+The latest closed guard classification is `git status --column=bogus`.
 The next default slice remains the second
 active lane: run a fresh `unsupported` / `not supported` code scan, choose one
 small remaining guard that is not entangled with unrelated staged changes, then
@@ -203,7 +203,7 @@ classify it as Git-supported behavior, stock-compatible invalid input,
 intentional deferral or Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/836`; the complete command matrices and complete doc-option matrices remain
+`0/837`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -304,6 +304,7 @@ until a full matrix is expanded and verified.
 | `status` long mode toggles | `2` | `0` | `--long`, `--no-long` with short/long order-sensitive forms |
 | `status` verbose modes | `2` | `0` | `--verbose`, `--no-verbose`, `-v`, `-vv`, reset order and machine-readable combinations |
 | `status` column modes | `2` | `0` | `--column`, `--no-column`, `--column=always/never`, `column.status=always` and machine-readable combinations |
+| `status` invalid column mode usage | `1` | `0` | `git status --column=bogus` exits `129` with stock error diagnostic instead of a fatal unsupported-option diagnostic |
 | `status` global no-op option | `1` | `0` | `--no-optional-locks status --short` via leading global option parser |
 | `status` rename modes | `4` | `0` | `--renames`, `--no-renames`, `--find-renames`, `--find-renames=<n>` for staged exact rename output |
 | `status` ignore-submodules modes | `4` | `0` | `--ignore-submodules`, `=all`, `=dirty`, `=untracked` with dirty, untracked and new-commit submodule states |
@@ -396,7 +397,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `500` verified variants.
+Tracked closed blocks in this table: `501` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

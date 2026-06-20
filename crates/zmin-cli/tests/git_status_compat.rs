@@ -653,6 +653,17 @@ fn status_invalid_ignored_mode_matches_stock_git() {
 }
 
 #[test]
+fn status_invalid_column_mode_matches_stock_git() {
+    let repo = committed_repo();
+    let args = ["status", "--column=bogus"];
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[test]
 fn status_invalid_ignore_submodules_mode_matches_stock_git() {
     let repo = committed_repo();
     let args = ["status", "--ignore-submodules=bogus"];
