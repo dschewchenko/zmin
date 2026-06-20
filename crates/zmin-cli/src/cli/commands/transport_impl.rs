@@ -11543,13 +11543,6 @@ fn fetch_with_repo_and_location(
             );
         }
     }
-    if update_shallow {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --update-shallow currently supports explicit local and file branches"
-                .into(),
-        });
-    }
     if shallow_since.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -11566,6 +11559,16 @@ fn fetch_with_repo_and_location(
     }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
+        if update_shallow {
+            return fetch_direct_location_head_update_shallow(
+                &repo,
+                &source,
+                &location,
+                quiet,
+                dry_run,
+                write_fetch_head,
+            );
+        }
         if unshallow {
             return fetch_direct_location_head_unshallow(
                 &repo,
@@ -11610,6 +11613,14 @@ fn fetch_with_repo_and_location(
         );
     }
     if prune && branch.is_none() {
+        if update_shallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message:
+                    "fetch --update-shallow currently supports explicit local and file branches"
+                        .into(),
+            });
+        }
         if deepen.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -11821,6 +11832,59 @@ fn fetch_direct_location_head_unshallow(
     fetch_direct_location_head(repo, source, location, quiet, dry_run, write_fetch_head)?;
     if !dry_run {
         write_shallow_file(repo, Vec::new())?;
+    }
+    Ok(())
+}
+
+fn fetch_direct_location_head_update_shallow(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    location: &str,
+    quiet: bool,
+    dry_run: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let head = source_refs.resolve("HEAD")?;
+    let source_repo = local_clone_source_repo(source);
+    let Some(shallow_boundaries) = read_repo_shallow_boundaries(&source_repo)? else {
+        return fetch_direct_location_head(
+            repo,
+            source,
+            location,
+            quiet,
+            dry_run,
+            write_fetch_head,
+        );
+    };
+    if dry_run {
+        if !quiet && write_fetch_head {
+            eprintln!("From {}", fetch_head_url_display(location));
+            eprintln!(" * branch            HEAD       -> FETCH_HEAD");
+        }
+        return Ok(());
+    }
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        1,
+    ));
+    copy_reachable_objects_from_shallow_source_into(
+        &source_store,
+        &destination_store,
+        std::slice::from_ref(&head),
+        &shallow_boundaries,
+        &mut seen,
+    )?;
+    write_shallow_file(repo, sorted_object_ids_from_set(&shallow_boundaries))?;
+    if write_fetch_head {
+        write_direct_location_head_fetch_head_file(repo, &head, location)?;
+    }
+    if !quiet && write_fetch_head {
+        eprintln!("From {}", fetch_head_url_display(location));
+        eprintln!(" * branch            HEAD       -> FETCH_HEAD");
     }
     Ok(())
 }
