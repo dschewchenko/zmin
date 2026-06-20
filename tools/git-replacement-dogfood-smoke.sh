@@ -208,6 +208,7 @@ compare_readonly_same_repo \
   rev_parse_nested_paths \
   "$zmin_client/dir" \
   rev-parse --show-prefix --show-cdup --show-toplevel
+compare_command config_null_list config --null --list
 compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
