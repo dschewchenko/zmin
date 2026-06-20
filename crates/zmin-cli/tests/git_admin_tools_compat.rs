@@ -2013,6 +2013,16 @@ fn config_type_path_expiry_and_color_match_stock_git() {
             &["config", "--type=color", "demo.bad", "bright blue"],
         )
     );
+    assert_eq!(
+        run_zmin_failure_output(
+            zmin_repo.path(),
+            &["config", "--type=bogus", "demo.bad", "value"],
+        ),
+        git_failure_output(
+            git_repo.path(),
+            &["config", "--type=bogus", "demo.bad", "value"],
+        )
+    );
 }
 
 #[test]

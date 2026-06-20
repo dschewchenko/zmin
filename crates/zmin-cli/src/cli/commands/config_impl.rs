@@ -388,8 +388,8 @@ fn config_value_type(args: &ConfigArgs) -> Result<Option<ConfigValueType>> {
         Some("color") => Some(ConfigValueType::Color),
         Some(value_type) => {
             return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported config type '{value_type}'"),
+                code: 128,
+                message: format!("unrecognized --type argument, {value_type}"),
             });
         }
         None if args.bool_value => Some(ConfigValueType::Bool),
