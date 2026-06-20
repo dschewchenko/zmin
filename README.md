@@ -171,15 +171,15 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `17/151` | `archive`, `branch`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `225/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `805` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `726/805` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/805` | written rows that still do not match stock Git |
-| Invalid input rows | `79/805` | rows where stock Git rejects the input |
+| Written behavior rows | `806` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `726/806` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/806` | written rows that still do not match stock Git |
+| Invalid input rows | `80/806` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `726/805` as Git compatibility. It only means `726` of the `805`
+Do not read `726/806` as Git compatibility. It only means `726` of the `806`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `79/805` additional rows are
+unexpanded surface is not counted yet, and `80/806` additional rows are
 stock-compatible invalid inputs. Do not read `225/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -217,8 +217,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `1` | `0` | `0` | `1` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `173` | `143` | `0` | `30` |
-| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `4` | `2` | `0` | `2` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`805`** | **`726`** | **`0`** | **`79`** |
+| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `5` | `2` | `0` | `3` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`806`** | **`726`** | **`0`** | **`80`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -247,7 +247,7 @@ Current command-level matrices:
 | `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
-| `version` | `2` | `0` | `2` | `3` | `2` | `0` | `0` | `1` | no |
+| `version` | `2` | `0` | `2` | `4` | `2` | `0` | `0` | `2` | no |
 
 `archive`, `branch`, `column`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files`,
 `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` or

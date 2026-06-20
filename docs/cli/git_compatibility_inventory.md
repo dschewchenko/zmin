@@ -177,8 +177,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `17/151` | no | audit rows exist for `archive`, `branch`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` |
 | Git doc option pairs represented by rows | `225/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `805` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `726/805` | yes, row by row | supported-behavior rows with parity evidence |
+| Written behavior rows | `806` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `726/806` | yes, row by row | supported-behavior rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -220,8 +220,8 @@ Current generated summary:
 | Administration | `8` | `0` | `147` | `0` | `1` | `0` | `0` | `0` | `1` | `17` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `173` | `143` | `0` | `0` | `30` | `97` |
-| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `4` | `2` | `0` | `0` | `2` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`805`** | **`726`** | **`0`** | **`0`** | **`79`** | **`470`** |
+| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `5` | `2` | `0` | `0` | `3` | `4` |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`806`** | **`726`** | **`0`** | **`0`** | **`80`** | **`470`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -232,9 +232,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `225/4632`
-represented option pairs or `726/805` passing written rows as a Git support
-percentage. The `726/805` number is audit progress for supported rows already
-written down; `79/805` additional rows are stock-compatible invalid inputs. It
+represented option pairs or `726/806` passing written rows as a Git support
+percentage. The `726/806` number is audit progress for supported rows already
+written down; `80/806` additional rows are stock-compatible invalid inputs. It
 says nothing about the still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -264,7 +264,7 @@ variants.
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `docs/cli/matrices/symbolic_ref_v2_47.tsv` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `docs/cli/matrices/tag_v2_47.tsv` | `27` | `17` | `0` | `0` | `10` | no |
-| `version` | `2` | `0` | `2` | `docs/cli/matrices/version_v2_47.tsv` | `3` | `2` | `0` | `0` | `1` | no |
+| `version` | `2` | `0` | `2` | `docs/cli/matrices/version_v2_47.tsv` | `4` | `2` | `0` | `0` | `2` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
