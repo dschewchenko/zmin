@@ -252,6 +252,7 @@ compare_readonly_same_repo \
   "$zmin_client/dir" \
   rev-parse --show-toplevel
 compare_command config_null_list config --null --list
+compare_command config_core_filemode config --get core.filemode
 compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
 compare_command config_missing_commit_template config --get commit.template
