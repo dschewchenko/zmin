@@ -709,7 +709,7 @@ fn find_ref_file(root: &Path, name: &str) -> Option<PathBuf> {
 fn stock_filter_branch(repo: &Path, args: &[&str], label: &str) {
     let mut git_args = vec!["-c", "commit.gpgsign=false", "filter-branch"];
     git_args.extend_from_slice(args);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(git_args)
         .env("FILTER_BRANCH_SQUELCH_WARNING", "1")
         .current_dir(repo)

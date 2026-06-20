@@ -99,7 +99,7 @@ fn optional_gitk_and_gitweb_match_stock_unavailable_shape() {
 }
 
 fn command_with_home(command: &str, home: &std::path::Path, args: &[&str]) -> String {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .env("HOME", home)
         .output()
@@ -120,7 +120,7 @@ fn command_failure_with_home(
     home: &std::path::Path,
     args: &[&str],
 ) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .env("HOME", home)
         .output()
@@ -150,7 +150,7 @@ fn command_with_isolated_config(
     args: &[&str],
 ) -> String {
     let xdg = home.join(".config");
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
@@ -176,7 +176,7 @@ fn command_failure_with_isolated_config(
     args: &[&str],
 ) -> (i32, String, String) {
     let xdg = home.join(".config");
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
@@ -210,7 +210,7 @@ fn command_any_with_isolated_config_and_env(
     args: &[&str],
 ) -> (i32, String, String) {
     let xdg = home.join(".config");
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home)
@@ -260,7 +260,7 @@ fn command_any_with_git_editor(
     cwd: &std::path::Path,
     args: &[&str],
 ) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("GIT_EDITOR", "true")
@@ -285,7 +285,7 @@ fn command_any_with_git_editor_and_env(
     args: &[&str],
     envs: &[(&str, &str)],
 ) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("GIT_EDITOR", "true")
@@ -312,7 +312,7 @@ fn command_any_with_git_editor_env_and_stdin(
     envs: &[(&str, &str)],
     stdin: &str,
 ) -> (i32, String, String) {
-    let mut child = Command::new(command)
+    let mut child = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("GIT_EDITOR", "true")
@@ -351,7 +351,7 @@ fn for_each_repo_matches_stock_git_for_configured_repositories() {
     let second = git_init();
     for repo in [first.path(), second.path()] {
         let repo = repo.to_str().expect("repo path");
-        Command::new("git")
+        Command::new(common::stock_git_bin())
             .args(["config", "--global", "--add", "test.repos", repo])
             .env("HOME", home.path())
             .output()
@@ -377,7 +377,7 @@ fn for_each_repo_missing_repo_failures_match_stock_git() {
     let missing = home.path().join("missing-repo");
     for repo in [existing.path(), missing.as_path()] {
         let repo = repo.to_str().expect("repo path");
-        Command::new("git")
+        Command::new(common::stock_git_bin())
             .args(["config", "--global", "--add", "test.repos", repo])
             .env("HOME", home.path())
             .output()
@@ -2279,7 +2279,7 @@ fn remote_show_and_prune_match_stock_git_for_local_remote() {
     let git_clone = fixture.path().join("git-local");
     let zmin_clone = fixture.path().join("zmin-local");
 
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(["init", remote.to_str().expect("remote path")])
         .output()
         .expect("git init remote");
@@ -2296,7 +2296,7 @@ fn remote_show_and_prune_match_stock_git_for_local_remote() {
     git(&remote, ["branch", "feature"]);
 
     for destination in [&git_clone, &zmin_clone] {
-        let output = Command::new("git")
+        let output = Command::new(common::stock_git_bin())
             .args([
                 "clone",
                 remote.to_str().expect("remote path"),
@@ -2605,7 +2605,7 @@ fn remote_update_matches_stock_git_for_local_remotes() {
     let git_clone = fixture.path().join("git-local");
     let zmin_clone = fixture.path().join("zmin-local");
 
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(["init", remote.to_str().expect("remote path")])
         .output()
         .expect("git init remote");
@@ -2622,7 +2622,7 @@ fn remote_update_matches_stock_git_for_local_remotes() {
     git(&remote, ["branch", "feature"]);
 
     for destination in [&git_clone, &zmin_clone] {
-        let output = Command::new("git")
+        let output = Command::new(common::stock_git_bin())
             .args([
                 "clone",
                 remote.to_str().expect("remote path"),

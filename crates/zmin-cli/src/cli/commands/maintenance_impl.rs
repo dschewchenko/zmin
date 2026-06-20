@@ -2097,6 +2097,7 @@ fn collect_reachable_objects(
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
     use std::process::Command;
 
     use tempfile::TempDir;
@@ -2216,9 +2217,71 @@ mod tests {
         repo.join(".git/objects").join(&id[..2]).join(&id[2..])
     }
 
+    fn stock_git_bin() -> PathBuf {
+        for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
+            if let Ok(value) = std::env::var(key)
+                && !value.trim().is_empty()
+            {
+                let path = PathBuf::from(value);
+                assert!(is_stock_git(&path), "{key} does not point to stock Git");
+                return path;
+            }
+        }
+        for path in stock_git_candidates() {
+            if is_stock_git(&path) {
+                return path;
+            }
+        }
+        for path in std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+            .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+        {
+            if is_stock_git(&path) {
+                return path;
+            }
+        }
+        panic!("could not find stock Git; set ZMIN_STOCK_GIT to a Git binary");
+    }
+
+    fn stock_git_candidates() -> Vec<PathBuf> {
+        #[cfg(windows)]
+        {
+            vec![
+                PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+                PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+                PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+                PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+            ]
+        }
+        #[cfg(not(windows))]
+        {
+            vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
+        }
+    }
+
+    fn stock_git_names() -> Vec<&'static str> {
+        if cfg!(windows) {
+            vec!["git.exe", "git"]
+        } else {
+            vec!["git"]
+        }
+    }
+
+    fn is_stock_git(path: &Path) -> bool {
+        let Ok(output) = Command::new(path).arg("--version").output() else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+        let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        version.starts_with("git version ") && !version.contains("zmin")
+    }
+
     fn git_init() -> TempDir {
         let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
+        let output = Command::new(stock_git_bin())
             .arg("init")
             .args(["-b", "main"])
             .arg("--quiet")
@@ -2234,7 +2297,7 @@ mod tests {
     }
 
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new("git")
+        let output = Command::new(stock_git_bin())
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(repo.path())
@@ -2252,7 +2315,7 @@ mod tests {
     }
 
     fn git_env<const N: usize>(repo: &TempDir, args: [&str; N]) {
-        let output = Command::new("git")
+        let output = Command::new(stock_git_bin())
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .env("GIT_AUTHOR_NAME", "Zmin Test")

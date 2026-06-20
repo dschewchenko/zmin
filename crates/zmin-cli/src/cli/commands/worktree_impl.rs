@@ -359,7 +359,8 @@ pub(crate) fn status(
     let porcelain_version = match porcelain {
         None => PorcelainVersion::V1,
         Some("v1") => PorcelainVersion::V1,
-        Some("v2") if !short => PorcelainVersion::V2,
+        Some("v2") if short => PorcelainVersion::V1,
+        Some("v2") => PorcelainVersion::V2,
         Some(value) => {
             return Err(CliError::Fatal {
                 code: 128,

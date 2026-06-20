@@ -80,6 +80,20 @@ fn status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees() {
         git(repo.path(), ["status", "--porcelain=v2", "-z", "--branch"])
     );
     assert_eq!(
+        run_zmin(repo.path(), ["status", "--porcelain=v2", "--short"]),
+        git(repo.path(), ["status", "--porcelain=v2", "--short"])
+    );
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            ["status", "--porcelain=v2", "--short", "--branch"]
+        ),
+        git(
+            repo.path(),
+            ["status", "--porcelain=v2", "--short", "--branch"]
+        )
+    );
+    assert_eq!(
         run_zmin(
             repo.path(),
             ["status", "--porcelain=v1", "--branch", "-uno"]

@@ -12,7 +12,7 @@ use common::{
 };
 
 fn command_output(command: &str, cwd: &Path, args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -722,7 +722,7 @@ fn diff_pairs_matches_stock_git_for_raw_diff_input() {
 
     let old = git(repo.path(), ["rev-parse", "HEAD~1"]);
     let new = git(repo.path(), ["rev-parse", "HEAD"]);
-    let raw = Command::new("git")
+    let raw = Command::new(common::stock_git_bin())
         .args(["diff-tree", "-z", "-r", "--raw", &old, &new])
         .current_dir(repo.path())
         .output()
@@ -748,7 +748,7 @@ fn diff_pairs_matches_stock_git_for_raw_diff_input() {
         );
     }
 
-    let raw = Command::new("git")
+    let raw = Command::new(common::stock_git_bin())
         .args(["diff-tree", "-r", "--raw", &old, &new])
         .current_dir(repo.path())
         .output()
@@ -1719,7 +1719,7 @@ fn diff_submodule_gitlink_patch_matches_stock_git() {
     fs::create_dir(&super_repo).expect("create super");
     git(&super_repo, ["init"]);
     configure_identity(&super_repo);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",

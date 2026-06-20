@@ -1551,7 +1551,7 @@ fn command_any_output_with_env(
     envs: &[(&str, &str)],
     label: &str,
 ) -> (i32, String, String) {
-    let output = std::process::Command::new(command)
+    let output = std::process::Command::new(common::test_command_program(command))
         .args(args)
         .envs(envs.iter().copied())
         .current_dir(cwd)

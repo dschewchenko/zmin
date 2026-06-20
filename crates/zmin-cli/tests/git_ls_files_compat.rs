@@ -15,7 +15,7 @@ fn command_output_any(
     cwd: &std::path::Path,
     args: &[&str],
 ) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -483,7 +483,7 @@ fn ls_files_recurse_submodules_matches_stock_git() {
     fs::write(repo.join(".gitignore"), b"*.root\n").expect("write root ignore");
     fs::write(repo.join("ignored.root"), b"ignored\n").expect("write ignored root");
     git(&repo, ["add", "-f", ".gitignore", "ignored.root"]);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",

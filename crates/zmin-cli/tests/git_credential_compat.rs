@@ -190,7 +190,7 @@ fn command_with_home_stdin(
     args: &[&str],
     stdin: &str,
 ) -> String {
-    let mut child = Command::new(command)
+    let mut child = Command::new(common::test_command_program(command))
         .args(args)
         .env("HOME", home)
         .stdin(Stdio::piped())
@@ -224,7 +224,7 @@ fn command_with_stdin(
     stdin: &str,
     label: &str,
 ) -> String {
-    let mut child = Command::new(command)
+    let mut child = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())

@@ -50,7 +50,7 @@ fn run_scalar_command_with_timeout(
     let xdg_config_home = home.path().join(".config");
     let stdout_file = tempfile::NamedTempFile::new().expect("stdout temp file");
     let stderr_file = tempfile::NamedTempFile::new().expect("stderr temp file");
-    let mut child = match Command::new(command)
+    let mut child = match Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .env("HOME", home.path())
@@ -152,7 +152,7 @@ fn bare_remote_with_main_branch() -> (TempDir, std::path::PathBuf) {
     common::git_with_env(&source, ["commit", "-m", "initial"]);
     common::git(&source, ["branch", "-m", "main"]);
     common::git(&source, ["tag", "v1"]);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(["clone", "--bare"])
         .arg(&source)
         .arg(&remote)

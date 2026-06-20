@@ -11627,9 +11627,14 @@ fn fetch_with_repo_and_location(
         return Err(unsupported_remote_helper_error(&location, String::new()));
     };
     if !source_path.exists() {
-        return Err(CliError::Fatal {
+        return Err(CliError::Stderr {
             code: 128,
-            message: format!("'{location}' does not appear to be a git repository"),
+            text: format!(
+                "fatal: '{location}' does not appear to be a git repository\n\
+                 fatal: Could not read from remote repository.\n\n\
+                 Please make sure you have the correct access rights\n\
+                 and the repository exists.\n"
+            ),
         });
     }
     if let Some(refspec) = branch.as_deref() {

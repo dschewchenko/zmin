@@ -522,7 +522,7 @@ fn unix_now() -> u64 {
 }
 
 fn command_string(command: &str, cwd: &std::path::Path, args: &[&str]) -> String {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()

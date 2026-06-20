@@ -572,7 +572,7 @@ fn stash_uses_git_stash_identity_when_user_identity_is_missing_like_stock_git() 
         cwd: &std::path::Path,
         args: &[&str],
     ) -> (i32, String, String) {
-        let output = Command::new(command)
+        let output = Command::new(common::test_command_program(command))
             .args(args)
             .current_dir(cwd)
             .env(

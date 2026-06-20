@@ -1,3 +1,5 @@
+mod common;
+
 use std::fs;
 use std::process::Command;
 
@@ -2137,7 +2139,7 @@ fn command_output_with_env(
     envs: &[(&str, &str)],
     label: &str,
 ) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .envs(envs.iter().copied())
         .current_dir(cwd)
@@ -2159,7 +2161,7 @@ fn command_output_with_env(
 fn git_with_stdin(cwd: &std::path::Path, args: &[&str], input: &str) -> String {
     use std::io::Write;
 
-    let mut child = Command::new("git")
+    let mut child = Command::new(common::stock_git_bin())
         .args(args)
         .current_dir(cwd)
         .stdin(std::process::Stdio::piped())
@@ -2195,7 +2197,7 @@ fn case_insensitive_filesystem(root: &std::path::Path) -> bool {
 }
 
 fn git_with_env<const N: usize>(cwd: &std::path::Path, args: [&str; N]) -> String {
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(args)
         .env("GIT_AUTHOR_NAME", "Bench")
         .env("GIT_AUTHOR_EMAIL", "bench@example.test")
@@ -2222,7 +2224,7 @@ fn git<const N: usize>(cwd: &std::path::Path, args: [&str; N]) -> String {
 }
 
 fn git_args(cwd: &std::path::Path, args: &[&str]) -> String {
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(args)
         .current_dir(cwd)
         .output()

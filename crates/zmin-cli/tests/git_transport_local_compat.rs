@@ -1253,7 +1253,7 @@ fn fetch_local_remote_does_not_copy_unreachable_objects() {
     fs::write(source.join("README.md"), b"main\n").expect("write main");
     git(&source, ["add", "-A"]);
     git_with_env(&source, ["commit", "-m", "main"]);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(["hash-object", "-w", "--stdin"])
         .current_dir(&source)
         .output()
@@ -2098,7 +2098,7 @@ fn assert_fetch_recurse_submodules_changed_submodule_mode_matches_stock_git(
     git(&source, ["add", "deps/sub"]);
     git_with_env(&source, ["commit", "-m", "update submodule"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args(["-c", "protocol.file.allow=always"])
         .args(args)
         .current_dir(&git_client)
@@ -3837,7 +3837,7 @@ fn fetch_stdin_refspecs_match_stock_git() {
 
     let stdin_refspecs =
         b"refs/heads/main:refs/remotes/origin/main\nrefs/heads/feature:refs/remotes/origin/feature\n";
-    let mut git_child = Command::new("git")
+    let mut git_child = Command::new(common::stock_git_bin())
         .args(["fetch", "--stdin", "origin"])
         .current_dir(&git_client)
         .stdin(std::process::Stdio::piped())
@@ -8671,7 +8671,7 @@ fn push_local_remote_does_not_copy_unreachable_objects() {
     fs::write(work.join("README.md"), b"main\n").expect("write main");
     run_zmin(&work, ["add", "-A"]);
     run_zmin_with_env(&work, ["commit", "-m", "main"]);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args(["hash-object", "-w", "--stdin"])
         .current_dir(&work)
         .output()
@@ -8918,7 +8918,7 @@ fn receive_pack_accepts_stock_git_send_pack() {
     git_with_env(&work, ["commit", "-m", "initial"]);
 
     let receive_pack = format!("{} receive-pack", shell_command_path(zmin_bin()));
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "send-pack",
             "--receive-pack",
@@ -8948,7 +8948,7 @@ fn receive_pack_accepts_stock_git_send_pack() {
     fs::write(work.join("feature.txt"), b"feature\n").expect("write feature");
     git(&work, ["add", "-A"]);
     git_with_env(&work, ["commit", "-m", "feature"]);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "send-pack",
             "--receive-pack",
@@ -8970,7 +8970,7 @@ fn receive_pack_accepts_stock_git_send_pack() {
         git(&work, ["rev-parse", "feature"])
     );
 
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "send-pack",
             "--receive-pack",
@@ -9018,7 +9018,7 @@ fn upload_pack_advertisement_serves_stock_git_ls_remote() {
     git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
 
     let upload_pack = format!("{} upload-pack", shell_command_path(zmin_bin()));
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "ls-remote",
             "--upload-pack",
@@ -9066,7 +9066,7 @@ fn upload_pack_serves_stock_git_clone_protocol_v1() {
     git(&remote, ["symbolic-ref", "HEAD", "refs/heads/main"]);
 
     let upload_pack = format!("{} upload-pack", shell_command_path(zmin_bin()));
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.version=0",
@@ -9127,7 +9127,7 @@ fn shell_dispatches_stock_git_upload_pack_command() {
         "{} shell -c git-upload-pack",
         shell_command_path(zmin_bin())
     );
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.version=0",

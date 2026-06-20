@@ -6766,7 +6766,7 @@ fn daemon_unknown_service_matches_stock_git_inetd_failure() {
 }
 
 fn daemon_inetd_failure(command: &str, args: &[&str], stdin: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
-    let mut child = Command::new(command)
+    let mut child = backend_command(command)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

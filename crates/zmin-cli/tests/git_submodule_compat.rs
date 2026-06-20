@@ -76,7 +76,7 @@ fn submodule_add_branch_name_reference_and_quiet_match_stock_git() {
     configure_identity(&git_repo);
     configure_identity(&zmin_repo);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -176,7 +176,7 @@ fn add_submodule_path_updates_gitlink_without_staging_nested_files() {
         ],
     );
     configure_identity(&super_repo);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -241,7 +241,7 @@ fn submodule_status_cached_and_changed_head_match_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -261,7 +261,7 @@ fn submodule_status_cached_and_changed_head_match_stock_git() {
     git_with_env(&source, ["commit", "-m", "submodule"]);
     git(&submodule, ["checkout", "main"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -351,7 +351,7 @@ fn clone_remote_submodules_checks_out_remote_head_like_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -371,7 +371,7 @@ fn clone_remote_submodules_checks_out_remote_head_like_stock_git() {
     git_with_env(&source, ["commit", "-m", "submodule"]);
     git(&submodule, ["checkout", "main"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -449,7 +449,7 @@ fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -468,7 +468,7 @@ fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
     );
     git_with_env(&source, ["commit", "-m", "submodule"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -502,7 +502,7 @@ fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
 
     let git_clone = dir.path().join("git-update-remote");
     let zmin_clone = dir.path().join("zmin-update-remote");
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -540,7 +540,7 @@ fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
     git(&git_clone.join("deps/sub"), ["checkout", &initial_head]);
     git(&zmin_clone.join("deps/sub"), ["checkout", &initial_head]);
 
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "submodule",
             "--quiet",
@@ -586,7 +586,7 @@ fn submodule_set_branch_and_set_url_match_stock_git() {
             ["init", "-b", "main", repo.to_str().expect("repo path")],
         );
         configure_identity(repo);
-        let output = Command::new("git")
+        let output = Command::new(common::stock_git_bin())
             .args([
                 "-c",
                 "protocol.file.allow=always",
@@ -687,7 +687,7 @@ fn submodule_summary_modes_match_stock_git() {
             ["init", "-b", "main", repo.to_str().expect("repo path")],
         );
         configure_identity(repo);
-        let output = Command::new("git")
+        let output = Command::new(common::stock_git_bin())
             .args([
                 "-c",
                 "protocol.file.allow=always",
@@ -819,7 +819,7 @@ fn clone_shallow_submodules_matches_stock_git_for_file_urls() {
     );
     configure_identity(&source);
     let submodule_url = format!("file://{}", submodule.display());
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -838,7 +838,7 @@ fn clone_shallow_submodules_matches_stock_git_for_file_urls() {
     );
     git_with_env(&source, ["commit", "-m", "submodule"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -902,7 +902,7 @@ fn clone_checks_out_uninitialized_submodule_gitlinks_like_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -958,7 +958,7 @@ fn clone_recurse_submodules_initializes_local_submodules_like_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -977,7 +977,7 @@ fn clone_recurse_submodules_initializes_local_submodules_like_stock_git() {
     );
     git_with_env(&source, ["commit", "-m", "submodule"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -1035,7 +1035,7 @@ fn clone_recurse_submodules_pathspec_matches_stock_git() {
     );
     configure_identity(&source);
     for (repo, path) in [(&one, "deps/one"), (&two, "deps/two")] {
-        let output = Command::new("git")
+        let output = Command::new(common::stock_git_bin())
             .args([
                 "-c",
                 "protocol.file.allow=always",
@@ -1055,7 +1055,7 @@ fn clone_recurse_submodules_pathspec_matches_stock_git() {
     }
     git_with_env(&source, ["commit", "-m", "submodules"]);
 
-    let git_output = Command::new("git")
+    let git_output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -1169,7 +1169,7 @@ fn clone_recurse_submodules_order_matches_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -1264,7 +1264,7 @@ fn clone_recurse_submodules_handles_nested_pathspecs_like_stock_git() {
         ["init", "-b", "main", child.to_str().expect("child path")],
     );
     configure_identity(&child);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -1289,7 +1289,7 @@ fn clone_recurse_submodules_handles_nested_pathspecs_like_stock_git() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",
@@ -1326,7 +1326,7 @@ fn clone_recurse_submodules_handles_nested_pathspecs_like_stock_git() {
             "zmin-nested-grand",
         ),
     ] {
-        let git_output = Command::new("git")
+        let git_output = Command::new(common::stock_git_bin())
             .args([
                 "-c",
                 "protocol.file.allow=always",
@@ -1375,7 +1375,7 @@ fn submodule_update_init_sync_foreach_deinit_match_stock_git_state() {
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    let output = Command::new("git")
+    let output = Command::new(common::stock_git_bin())
         .args([
             "-c",
             "protocol.file.allow=always",

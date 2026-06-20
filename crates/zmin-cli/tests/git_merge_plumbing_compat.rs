@@ -25,7 +25,7 @@ fn git_output_for_args<const N: usize>(cwd: &Path, args: [&str; N]) -> CommandTe
 }
 
 fn command_text_output(command: &str, cwd: &Path, args: &[&str]) -> CommandTextOutput {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()
@@ -40,7 +40,7 @@ fn command_text_output(command: &str, cwd: &Path, args: &[&str]) -> CommandTextO
 }
 
 fn command_all_output(command: &str, cwd: &Path, args: &[&str]) -> (i32, String, String) {
-    let output = Command::new(command)
+    let output = Command::new(common::test_command_program(command))
         .args(args)
         .current_dir(cwd)
         .output()

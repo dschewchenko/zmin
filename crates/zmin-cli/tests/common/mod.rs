@@ -497,7 +497,7 @@ fn command_with_test_envs(
     command
 }
 
-fn test_command_program(command: &str) -> OsString {
+pub fn test_command_program(command: &str) -> OsString {
     if command == "git" {
         return stock_git_bin().as_os_str().to_owned();
     }
