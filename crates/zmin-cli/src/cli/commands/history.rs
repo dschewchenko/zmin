@@ -163,6 +163,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             format,
             max_count,
             since,
+            date,
             pretty,
             revs,
         } => super::history_commands::log(super::history_commands::LogOptions {
@@ -201,6 +202,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             format: format.as_deref(),
             max_count: max_count.as_deref(),
             since: since.as_deref(),
+            date: date.as_deref(),
             pretty: pretty.as_deref(),
             revs,
         }),
@@ -228,6 +230,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             format,
             max_count,
             since,
+            date,
             pretty,
             i_still_use_this,
             revs,
@@ -282,6 +285,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 format: format.as_deref(),
                 max_count: max_count.as_deref(),
                 since: since.as_deref(),
+                date: date.as_deref(),
                 pretty: pretty.as_deref(),
                 revs,
             })

@@ -2127,6 +2127,28 @@ fn parse_blame_date_mode(value: &str) -> Result<BlameDateMode> {
     }
 }
 
+fn parse_log_date_mode(value: Option<&str>) -> Result<BlameDateMode> {
+    let Some(value) = value else {
+        return Ok(BlameDateMode::Default);
+    };
+    match value {
+        "iso" => Ok(BlameDateMode::Iso),
+        "iso-strict" => Ok(BlameDateMode::IsoStrict),
+        "default" => Ok(BlameDateMode::Default),
+        "short" => Ok(BlameDateMode::Short),
+        "raw" => Ok(BlameDateMode::Raw),
+        "unix" => Ok(BlameDateMode::Unix),
+        "rfc" | "rfc2822" => Ok(BlameDateMode::Rfc2822),
+        "local" => Ok(BlameDateMode::Local),
+        "relative" => Ok(BlameDateMode::Relative),
+        "human" => Ok(BlameDateMode::Human),
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: format!("unsupported log date mode '{value}'"),
+        }),
+    }
+}
+
 fn parse_blame_abbrev(value: &str) -> Result<usize> {
     let abbrev = value.parse::<usize>().map_err(|_| CliError::Fatal {
         code: 129,
@@ -3786,6 +3808,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) format: Option<&'a str>,
     pub(crate) max_count: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
+    pub(crate) date: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
     pub(crate) revs: Vec<String>,
 }
@@ -3939,6 +3962,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let Some(since) = parse_log_since(options.since) else {
         return Ok(());
     };
+    let date_mode = parse_log_date_mode(options.date)?;
     let repo = find_repo()?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
     let diff_format = options.diff_format(parsed_log_revs.patch);
@@ -4088,6 +4112,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     abbrev_len,
                     &decorations,
                     &notes,
+                    date_mode,
                 )?;
                 out.write_all(rendered.as_bytes())?;
                 if let Some(diff_format) = diff_format {
@@ -4151,6 +4176,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             abbrev_len,
             &decorations,
             &notes,
+            date_mode,
         )?;
         out.write_all(rendered.as_bytes())?;
         let root_patch_separator =
@@ -5183,10 +5209,10 @@ impl<'a> LogFormat<'a> {
     ) -> Result<String> {
         let decorations = LogDecorations::empty();
         let notes = LogNotes::empty();
-        self.render_with_context(id, commit, parents, abbrev_len, &decorations, &notes)
+        self.render_with_context_default_date(id, commit, parents, abbrev_len, &decorations, &notes)
     }
 
-    pub(crate) fn render_with_context(
+    pub(crate) fn render_with_context_default_date(
         &self,
         id: &ObjectId,
         commit: &zmin_git_core::CommitObject,
@@ -5195,10 +5221,37 @@ impl<'a> LogFormat<'a> {
         decorations: &LogDecorations,
         notes: &LogNotes,
     ) -> Result<String> {
+        self.render_with_context(
+            id,
+            commit,
+            parents,
+            abbrev_len,
+            decorations,
+            notes,
+            BlameDateMode::Default,
+        )
+    }
+
+    fn render_with_context(
+        &self,
+        id: &ObjectId,
+        commit: &zmin_git_core::CommitObject,
+        parents: bool,
+        abbrev_len: usize,
+        decorations: &LogDecorations,
+        notes: &LogNotes,
+        date_mode: BlameDateMode,
+    ) -> Result<String> {
         match self {
-            Self::Default => {
-                render_default_log(id, commit, parents, abbrev_len, decorations, notes)
-            }
+            Self::Default => render_default_log(
+                id,
+                commit,
+                parents,
+                abbrev_len,
+                decorations,
+                notes,
+                date_mode,
+            ),
             Self::ShortOneline => Ok(format!(
                 "{}{}{} {}",
                 short_object_id_len(id, abbrev_len),
@@ -5213,9 +5266,15 @@ impl<'a> LogFormat<'a> {
                 render_oneline_decorations(decorations, id),
                 commit_subject(&commit.message)
             )),
-            Self::Custom { pattern, .. } => {
-                render_log_format(pattern, id, commit, abbrev_len, decorations, notes)
-            }
+            Self::Custom { pattern, .. } => render_log_format(
+                pattern,
+                id,
+                commit,
+                abbrev_len,
+                decorations,
+                notes,
+                date_mode,
+            ),
         }
     }
 
@@ -5228,12 +5287,21 @@ impl<'a> LogFormat<'a> {
         abbrev_len: usize,
         decorations: &LogDecorations,
         notes: &LogNotes,
+        date_mode: BlameDateMode,
     ) -> Result<String> {
         match (self, from_parent) {
             (Self::Default, Some(parent)) => {
-                render_default_log_from_parent(id, commit, parent, parents, abbrev_len)
+                render_default_log_from_parent(id, commit, parent, parents, abbrev_len, date_mode)
             }
-            _ => self.render_with_context(id, commit, parents, abbrev_len, decorations, notes),
+            _ => self.render_with_context(
+                id,
+                commit,
+                parents,
+                abbrev_len,
+                decorations,
+                notes,
+                date_mode,
+            ),
         }
     }
 }
@@ -5256,6 +5324,7 @@ fn render_default_log(
     abbrev_len: usize,
     decorations: &LogDecorations,
     notes: &LogNotes,
+    date_mode: BlameDateMode,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -5285,7 +5354,7 @@ fn render_default_log(
     out.push_str(&signature_email(&commit.author));
     out.push_str(">\n");
     out.push_str("Date:   ");
-    out.push_str(&signature_log_date(&commit.author)?);
+    out.push_str(&format_blame_date(&commit.author, date_mode)?);
     out.push_str("\n\n");
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
@@ -5310,6 +5379,7 @@ fn render_default_log_from_parent(
     from_parent: &ObjectId,
     parents: bool,
     abbrev_len: usize,
+    date_mode: BlameDateMode,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
@@ -5335,7 +5405,7 @@ fn render_default_log_from_parent(
     out.push_str(&signature_email(&commit.author));
     out.push_str(">\n");
     out.push_str("Date:   ");
-    out.push_str(&signature_log_date(&commit.author)?);
+    out.push_str(&format_blame_date(&commit.author, date_mode)?);
     out.push_str("\n\n");
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
@@ -5400,6 +5470,7 @@ fn render_log_format(
     abbrev_len: usize,
     decorations: &LogDecorations,
     notes: &LogNotes,
+    date_mode: BlameDateMode,
 ) -> Result<String> {
     let mut out = String::new();
     let mut chars = pattern.chars();
@@ -5469,7 +5540,7 @@ fn render_log_format(
                 match next {
                     'n' => out.push_str(&signature_name(&commit.author)),
                     'e' => out.push_str(&signature_email(&commit.author)),
-                    'd' => out.push_str(&signature_log_date(&commit.author)?),
+                    'd' => out.push_str(&format_blame_date(&commit.author, date_mode)?),
                     't' => {
                         out.push_str(&signature_timestamp(&commit.author).unwrap_or(0).to_string())
                     }
@@ -5490,7 +5561,7 @@ fn render_log_format(
                 match next {
                     'n' => out.push_str(&signature_name(&commit.committer)),
                     'e' => out.push_str(&signature_email(&commit.committer)),
-                    'd' => out.push_str(&signature_log_date(&commit.committer)?),
+                    'd' => out.push_str(&format_blame_date(&commit.committer, date_mode)?),
                     't' => out.push_str(
                         &signature_timestamp(&commit.committer)
                             .unwrap_or(0)
@@ -5724,6 +5795,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         format: options.format,
         max_count: None,
         since: None,
+        date: None,
         pretty: options.pretty,
         revs: options.args,
     })
@@ -5745,7 +5817,7 @@ fn show_name_only_multi(options: ShowOptions<'_>) -> Result<()> {
     for rev in revs {
         let id = resolve_objectish(&repo, &rev).map_err(|_| ambiguous_revision_error(&rev))?;
         let commit = commit_cache.read_commit(&id)?;
-        let rendered = format.render_with_context(
+        let rendered = format.render_with_context_default_date(
             &id,
             &commit,
             false,
@@ -5859,6 +5931,7 @@ fn show_object(
                         abbrev_len,
                         &decorations,
                         &notes,
+                        BlameDateMode::Default,
                     )?;
                     out.write_all(rendered.as_bytes())?;
                     if format.separates_patch()

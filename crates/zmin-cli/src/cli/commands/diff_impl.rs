@@ -1913,7 +1913,7 @@ fn print_diff_tree_log_format(
     emit_patch_separator: bool,
     stat_patch_separator: bool,
 ) -> Result<()> {
-    let rendered = format.render_with_context(
+    let rendered = format.render_with_context_default_date(
         id,
         commit,
         false,

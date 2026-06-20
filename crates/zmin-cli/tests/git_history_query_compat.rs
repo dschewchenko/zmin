@@ -976,6 +976,40 @@ fn log_no_walk_author_date_matches_stock_git() {
 }
 
 #[test]
+fn log_date_formats_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    write_file(git_repo.path(), "a.txt", "one\n");
+    write_file(zmin_repo.path(), "a.txt", "one\n");
+    git(git_repo.path(), ["add", "-A"]);
+    git(zmin_repo.path(), ["add", "-A"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "one"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "one"]);
+
+    for mode in [
+        "default",
+        "local",
+        "iso",
+        "iso-strict",
+        "rfc",
+        "rfc2822",
+        "short",
+        "unix",
+        "raw",
+    ] {
+        let date_arg = format!("--date={mode}");
+        let args = ["log", "-1", date_arg.as_str(), "--format=%ad|%cd"];
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), &args),
+            git_args(git_repo.path(), &args),
+            "date mode: {mode}"
+        );
+    }
+}
+
+#[test]
 fn rev_list_accepts_dashdash_separator_like_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

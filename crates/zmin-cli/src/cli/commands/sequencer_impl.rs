@@ -896,6 +896,7 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         format,
         max_count,
         since,
+        date: None,
         pretty,
         revs,
     })

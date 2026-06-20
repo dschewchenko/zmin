@@ -2370,6 +2370,8 @@ pub enum Command {
         max_count: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
+        #[arg(long = "date")]
+        date: Option<String>,
         #[arg(long = "pretty")]
         pretty: Option<String>,
         #[arg(allow_hyphen_values = true)]
@@ -2671,6 +2673,8 @@ pub enum Command {
         max_count: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
+        #[arg(long = "date")]
+        date: Option<String>,
         #[arg(long = "pretty")]
         pretty: Option<String>,
         #[arg(long = "i-still-use-this", hide = true, action = ArgAction::SetTrue)]
