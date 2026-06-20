@@ -2600,7 +2600,7 @@ fn validate_batch_format(format: &str) -> Result<()> {
             _ => {
                 return Err(CliError::Fatal {
                     code: 128,
-                    message: format!("unsupported cat-file batch atom: {atom}"),
+                    message: format!("bad cat-file format: {format}"),
                 });
             }
         }
