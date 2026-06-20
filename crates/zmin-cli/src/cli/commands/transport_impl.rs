@@ -19829,10 +19829,86 @@ fn fetch_with_repo_and_remote_filter(
             write_fetch_head,
         );
     }
-    Err(CliError::Fatal {
-        code: 128,
-        message: "fetch --filter currently supports network remotes".into(),
-    })
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports network remotes".into(),
+        });
+    };
+    let Some(branch) = branch else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports one named network remote branch".into(),
+        });
+    };
+    if filter != "blob:none" {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports network remotes".into(),
+        });
+    }
+    fetch_with_local_remote_filter_blob_none(
+        repo,
+        remote,
+        &url,
+        &source_path,
+        &branch,
+        filter,
+        missing_ref_code,
+        append,
+        write_fetch_head,
+    )
+}
+
+fn fetch_with_local_remote_filter_blob_none(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    source_path: &std::path::Path,
+    branch: &str,
+    filter: &str,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let source = local_clone_source(source_path)?;
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let ref_name = branch_ref_name(branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(branch, missing_ref_code))?;
+    let destination_ref = format!("refs/remotes/{remote}/{branch}");
+    let old_id = destination_refs.resolve(&destination_ref).ok();
+    copy_local_fetch_objects(
+        &source,
+        &repo,
+        &source_refs,
+        &destination_refs,
+        &remote,
+        Some(branch),
+        &[],
+        missing_ref_code,
+        false,
+    )?;
+    eprintln!("warning: filtering not recognized by server, ignoring");
+    eprintln!("From {}", fetch_head_url_display(url));
+    eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    if let Some(old_id) = old_id {
+        if old_id != id {
+            eprintln!(
+                "{}",
+                fetch_fast_forward_update_row(&ref_name, &destination_ref, &old_id, &id)
+            );
+        }
+    } else {
+        eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
+    }
+    write_fetch_destination_ref(&destination_refs, &destination_ref, &id, Some(&remote))?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    record_fetch_filter_promisor_config(&repo, &remote, filter)
 }
 
 fn fetch_local_unshallow_objects_via_upload_pack(

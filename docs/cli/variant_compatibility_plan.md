@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 773 written rows / 694 written rows matching stock Git / 3 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 773 written rows / 696 written rows matching stock Git / 1 open written row`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -173,23 +173,23 @@ updates, project-note update, commit and push.
 ### Current Next Slice Pointer
 
 The next slice is one implementation pass:
-`git fetch --filter=blob:none origin main` for named local path and file URL
-remotes.
+`git fetch --filter=blob:none --depth=1 origin main` for a named file URL
+remote from an existing shallow client.
 
 Do not broaden this slice to unrelated `fetch` behavior. It is done only
 after these steps complete:
 
 1. Reuse `git_fetch_filter_guard_inventory::fetch_filter_local_file_and_shallow_guards_are_git_supported_gaps`
-   as the stock-Git oracle and convert the named local path and file URL rows
-   from open to closed only after stdout/stderr/status, refs and
-   `.git/FETCH_HEAD` match stock Git.
-2. Do not close the `--filter=blob:none --depth=1` shallow-mode row in the
-   same slice unless the same local/file implementation naturally proves it.
+   as the stock-Git oracle and convert the remaining shallow-mode row from
+   open to closed only after stdout/stderr/status, refs, `.git/FETCH_HEAD`,
+   `.git/shallow` and promisor filter config match stock Git.
+2. Keep complete command matrices at `0/151` and complete doc-option matrices
+   at `0/4632` unless the full fetch matrix is expanded and verified.
 3. Run the count gates from this document.
 4. Refresh README, `git_compatibility_inventory.md`, this plan and project
    notes with generated counts.
-5. Commit and push the classification slice before moving to the next guard
-   cluster.
+5. Commit and push the slice before moving to a different command or option
+   class.
 
 The most recent closed transport lane is `fetch --server-option` protocol v2
 for smart HTTP, SSH and git-daemon, covering explicit branch and branchless
@@ -300,6 +300,7 @@ until a full matrix is expanded and verified.
 | `fetch --update-shallow` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --update-shallow` network multiple explicit refspec forms | `3` | `0` | smart HTTP, SSH and git daemon fetches with two destination refspecs from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --update-shallow` network branchless configured fetch forms | `3` | `0` | smart HTTP, SSH and git daemon configured fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
+| `fetch --filter=blob:none` local/file branch forms | `2` | `0` | named local path and file URL remotes match stock stdout/stderr, FETCH_HEAD, remote-tracking ref, fetched content and promisor filter config |
 | `fetch` replacement prune/no-tags | `1` | `0` | `--prune --no-tags` through the `git` shim updates `origin/main`, prunes stale `origin/gone`, skips a newly reachable tag and matches stock stdout/stderr/FETCH_HEAD |
 | `fetch --recurse-submodules local/file no-submodule value modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true, on-demand, no, boolean false, numeric false and `--no-recurse-submodules` for repositories without submodules |
 | `fetch --recurse-submodules local/file changed submodule modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed gitlink commit into the initialized submodule object database without checkout; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
@@ -325,7 +326,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `438` verified variants.
+Tracked closed blocks in this table: `440` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
