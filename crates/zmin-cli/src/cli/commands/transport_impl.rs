@@ -5466,6 +5466,12 @@ fn sort_dedup_object_ids(ids: &mut Vec<ObjectId>) {
     ids.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
 }
 
+fn sorted_object_ids_from_set(ids: &HashSet<ObjectId>) -> Vec<ObjectId> {
+    let mut ids = ids.iter().cloned().collect::<Vec<_>>();
+    sort_dedup_object_ids(&mut ids);
+    ids
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ObjectIdOrder {
     SortedUnique,
@@ -8512,7 +8518,7 @@ pub(crate) fn run_fetch(
         });
     }
     if upload_pack_command.is_some()
-        && (deepen.is_some() || unshallow || shallow_since.is_some() || !shallow_exclude.is_empty())
+        && (unshallow || shallow_since.is_some() || !shallow_exclude.is_empty())
     {
         return Err(CliError::Fatal {
             code: 128,
@@ -10771,6 +10777,7 @@ fn fetch_with_depth(
             tags,
             atomic,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     if let Some(depth) = depth.map(validate_positive_depth).transpose()? {
@@ -10783,6 +10790,8 @@ fn fetch_with_depth(
             append,
             write_fetch_head,
             upload_pack_command,
+            &[],
+            false,
         );
     }
     fetch_with_repo_and_remote(
@@ -14641,6 +14650,8 @@ fn fetch_with_repo_and_remote_depth(
     append: bool,
     write_fetch_head: bool,
     upload_pack_command: Option<&str>,
+    upload_pack_shallows: &[ObjectId],
+    force_upload_pack_roots: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -14679,7 +14690,11 @@ fn fetch_with_repo_and_remote_depth(
         }
         if let Some(command) = upload_pack_command {
             let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
-            let request_roots = missing_fetch_roots(&destination_store, std::slice::from_ref(&id))?;
+            let request_roots = if force_upload_pack_roots {
+                vec![id.clone()]
+            } else {
+                missing_fetch_roots(&destination_store, std::slice::from_ref(&id))?
+            };
             let shallow_boundaries = fetch_pack_with_local_upload_pack_command_with_depth(
                 command,
                 source_path.to_string_lossy().as_ref(),
@@ -14687,6 +14702,7 @@ fn fetch_with_repo_and_remote_depth(
                 &request_roots,
                 &haves,
                 Some(depth),
+                upload_pack_shallows,
             )?;
             roots.push(id);
             write_shallow_file(
@@ -14960,6 +14976,7 @@ fn fetch_with_repo_and_remote_deepen(
     tags: bool,
     atomic: bool,
     write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     let Some(branch) = branch else {
@@ -15020,7 +15037,9 @@ fn fetch_with_repo_and_remote_deepen(
         current_depth.saturating_add(deepen),
         append,
         write_fetch_head,
-        None,
+        upload_pack_command,
+        &sorted_object_ids_from_set(&shallow_boundaries),
+        upload_pack_command.is_some(),
     )
 }
 
@@ -15710,7 +15729,17 @@ fn build_upload_pack_request(
     haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<u8>> {
-    let mut request = Vec::with_capacity(upload_pack_request_capacity(roots, haves, depth));
+    build_upload_pack_request_with_shallows(roots, haves, depth, &[])
+}
+
+fn build_upload_pack_request_with_shallows(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    shallows: &[ObjectId],
+) -> Result<Vec<u8>> {
+    let mut request =
+        Vec::with_capacity(upload_pack_request_capacity(roots, haves, depth, shallows));
     let first_extra = b" side-band-64k thin-pack ofs-delta no-progress include-tag";
     for (idx, root) in roots.iter().enumerate() {
         let extra = if idx == 0 {
@@ -15725,6 +15754,12 @@ fn build_upload_pack_request(
         request.extend_from_slice(b"want ");
         root.write_hex_bytes(&mut request);
         request.extend_from_slice(extra);
+        request.push(b'\n');
+    }
+    for shallow in shallows {
+        append_pkt_line_len(&mut request, b"shallow ".len() + shallow.hex_len() + 1)?;
+        request.extend_from_slice(b"shallow ");
+        shallow.write_hex_bytes(&mut request);
         request.push(b'\n');
     }
     if let Some(depth) = depth {
@@ -15754,6 +15789,7 @@ fn upload_pack_request_capacity(
     roots: &[ObjectId],
     haves: &[ObjectId],
     depth: Option<usize>,
+    shallows: &[ObjectId],
 ) -> usize {
     let first_extra = " side-band-64k thin-pack ofs-delta no-progress include-tag".len();
     let wants = roots
@@ -15766,11 +15802,15 @@ fn upload_pack_request_capacity(
     let deepen = depth
         .map(|depth| 4 + "deepen ".len() + decimal_len(depth) + 1)
         .unwrap_or(0);
+    let shallows = shallows
+        .iter()
+        .map(|id| 4 + "shallow ".len() + id.hex_len() + 1)
+        .sum::<usize>();
     let haves = haves
         .iter()
         .map(|have| 4 + "have ".len() + have.hex_len() + 1)
         .sum::<usize>();
-    wants + deepen + haves + 4 + 4 + "done\n".len()
+    wants + shallows + deepen + haves + 4 + 4 + "done\n".len()
 }
 
 fn decimal_len(mut value: usize) -> usize {
@@ -15813,6 +15853,9 @@ fn parse_upload_pack_sideband_response_to_open_file<R: Read>(
             shallow_boundaries.push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
             continue;
         }
+        if upload_pack_unshallow_id_from_payload(&payload).is_some() {
+            continue;
+        }
         if payload != b"NAK\n" && !payload.starts_with(b"ACK ") {
             return Ok(None);
         }
@@ -15828,6 +15871,13 @@ fn parse_upload_pack_sideband_response_to_open_file<R: Read>(
 fn upload_pack_shallow_id_from_payload(payload: &[u8]) -> Option<&[u8]> {
     payload
         .strip_prefix(b"shallow ")
+        .map(|id| trim_ascii_whitespace(trim_lf_payload(id)))
+        .filter(|id| !id.is_empty())
+}
+
+fn upload_pack_unshallow_id_from_payload(payload: &[u8]) -> Option<&[u8]> {
+    payload
+        .strip_prefix(b"unshallow ")
         .map(|id| trim_ascii_whitespace(trim_lf_payload(id)))
         .filter(|id| !id.is_empty())
 }
@@ -16152,6 +16202,7 @@ fn fetch_pack_with_local_upload_pack_command(
         roots,
         haves,
         None,
+        &[],
     )
     .map(|_| ())
 }
@@ -16163,6 +16214,7 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
     roots: &[ObjectId],
     haves: &[ObjectId],
     depth: Option<usize>,
+    shallows: &[ObjectId],
 ) -> Result<Vec<ObjectId>> {
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
@@ -16177,7 +16229,7 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
         session.finish()?;
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request(roots, haves, depth)?;
+    let request = build_upload_pack_request_with_shallows(roots, haves, depth, shallows)?;
     session
         .stdin
         .as_mut()
@@ -19109,7 +19161,7 @@ mod transport_request_tests {
 
         assert_eq!(
             request.len(),
-            upload_pack_request_capacity(&roots, &[], Some(123_456))
+            upload_pack_request_capacity(&roots, &[], Some(123_456), &[])
         );
         assert!(
             request
