@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `24/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
+| Commands with any matrix rows | `25/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `231/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `837` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `732/837` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/837` | written rows that still do not match stock Git |
-| Invalid input rows | `105/837` | rows where stock Git rejects the input |
+| Written behavior rows | `838` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `732/838` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/838` | written rows that still do not match stock Git |
+| Invalid input rows | `106/838` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `732/837` as Git compatibility. It only means `732` of the `837`
+Do not read `732/838` as Git compatibility. It only means `732` of the `838`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `105/837` additional rows are
+unexpanded surface is not counted yet, and `106/838` additional rows are
 stock-compatible invalid inputs. Do not read `231/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -214,11 +214,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `8` | `5` | `0` | `3` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `2` | `0` | `0` | `2` |
+| Administration | `8` | `0` | `147` | `0` | `3` | `0` | `0` | `3` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `177` | `144` | `0` | `33` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`837`** | **`732`** | **`0`** | **`105`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`838`** | **`732`** | **`0`** | **`106`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -236,6 +236,7 @@ Current command-level matrices:
 | `blame` | `39` | `0` | `5` | `7` | `5` | `0` | `0` | `2` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `cat-file` | `21` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
+| `clean` | `13` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
 | `status` | `26` | `0` | `22` | `75` | `66` | `0` | `0` | `9` | no |
@@ -256,7 +257,7 @@ Current command-level matrices:
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
 | `version` | `2` | `0` | `2` | `4` | `2` | `0` | `0` | `2` | no |
 
-`archive`, `bisect`, `blame`, `branch`, `cat-file`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`,
+`archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`,
 `ls-tree`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`,
 `tag` or `version`
 having `0` open rows does not mean full command compatibility. It means no open

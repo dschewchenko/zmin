@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Administration	clean	<unknown>	--bad	invalid option	clean repository	local	all	git clean --bad	invalid-input	git_clean_compat::clean_unknown_option_matches_stock_git	unsupported clean option guard is classified as stock-compatible invalid input with exit code, empty stdout and usage diagnostic parity

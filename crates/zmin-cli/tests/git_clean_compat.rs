@@ -236,3 +236,14 @@ fn clean_invalid_require_force_bool_matches_stock_git() {
         command_any_output("git", git_repo.path(), &["clean"], "git")
     );
 }
+
+#[test]
+fn clean_unknown_option_matches_stock_git() {
+    let git_repo = clean_fixture_repo();
+    let zmin_repo = clean_fixture_repo();
+
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &["clean", "--bad"], "zmin"),
+        command_any_output("git", git_repo.path(), &["clean", "--bad"], "git")
+    );
+}

@@ -26,6 +26,22 @@ struct CleanOptions {
     paths: Vec<PathBuf>,
 }
 
+const CLEAN_USAGE: &str = "\
+usage: git clean [-d] [-f] [-i] [-n] [-q] [-e <pattern>] [-x | -X] [--] [<pathspec>...]
+
+    -q, --[no-]quiet      do not print names of files removed
+    -n, --[no-]dry-run    dry run
+    -f, --[no-]force      force
+    -i, --[no-]interactive
+                          interactive cleaning
+    -d                    remove whole directories
+    -e, --exclude <pattern>
+                          add <pattern> to ignore rules
+    -x                    remove ignored files, too
+    -X                    remove only ignored files
+
+";
+
 pub(crate) fn clean(args: Vec<String>) -> Result<()> {
     let options = parse_clean_args(args)?;
     let repo = find_repo_or_bare()?;
@@ -155,10 +171,7 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
                 parse_clean_short_cluster(value, &mut options)?;
             }
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported clean option '{value}'"),
-                });
+                return Err(clean_unknown_option(value));
             }
             value => options.paths.push(PathBuf::from(value)),
         }
@@ -171,6 +184,16 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
         });
     }
     Ok(options)
+}
+
+fn clean_unknown_option(option: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown option `{}'\n{CLEAN_USAGE}",
+            option.trim_start_matches('-')
+        ),
+    }
 }
 
 fn clean_require_force(repo: &GitRepo) -> Result<bool> {
