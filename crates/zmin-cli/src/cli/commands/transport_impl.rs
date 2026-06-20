@@ -8439,6 +8439,7 @@ pub(crate) fn run_fetch(
     write_fetch_head: bool,
     refmap: Vec<String>,
     depth: Option<String>,
+    unshallow: bool,
     negotiation_tips: Vec<String>,
     negotiate_only: bool,
     stdin: bool,
@@ -8462,6 +8463,18 @@ pub(crate) fn run_fetch(
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --depth and --deepen cannot be used together".into(),
+        });
+    }
+    if unshallow && (depth.is_some() || deepen.is_some()) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --unshallow cannot be used with --depth or --deepen".into(),
+        });
+    }
+    if unshallow && (all || multiple || refspecs.len() > 1) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --unshallow currently supports one named remote".into(),
         });
     }
     if deepen.is_some() && (all || multiple || refspecs.len() > 1) {
@@ -8495,6 +8508,7 @@ pub(crate) fn run_fetch(
                 None,
                 depth.as_deref(),
                 deepen,
+                false,
                 128,
                 quiet,
                 dry_run,
@@ -8528,6 +8542,7 @@ pub(crate) fn run_fetch(
                 None,
                 depth.as_deref(),
                 deepen,
+                false,
                 128,
                 quiet,
                 dry_run,
@@ -8580,6 +8595,7 @@ pub(crate) fn run_fetch(
         branch,
         depth.as_deref(),
         deepen,
+        unshallow,
         128,
         quiet,
         dry_run,
@@ -9740,6 +9756,7 @@ pub(crate) fn run_pull(
                 Some(branch.clone()),
                 None,
                 None,
+                false,
                 1,
                 false,
                 false,
@@ -10404,6 +10421,7 @@ fn fetch_with_depth(
     branch: Option<String>,
     depth: Option<&str>,
     deepen: Option<usize>,
+    unshallow: bool,
     missing_ref_code: i32,
     quiet: bool,
     dry_run: bool,
@@ -10434,6 +10452,12 @@ fn fetch_with_depth(
                 message: "fetch --deepen currently supports one named remote branch".into(),
             });
         }
+        if unshallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports named local and file remotes".into(),
+            });
+        }
         let prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         let prune_tags = prune && effective_fetch_prune_tags(&repo, None, prune_tags)?;
         let depth = depth.map(validate_positive_depth).transpose()?;
@@ -10462,6 +10486,32 @@ fn fetch_with_depth(
     let prune_tags = prune && effective_fetch_prune_tags(&repo, Some(&remote), prune_tags)?;
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
+    if unshallow {
+        if prefetch
+            || !refmap.is_empty()
+            || branch.as_deref().is_some_and(|value| value.contains(':'))
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports one named remote branch".into(),
+            });
+        }
+        return fetch_with_repo_and_remote_unshallow(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            quiet,
+            append,
+            set_upstream,
+            prune,
+            prune_tags,
+            no_tags,
+            tags,
+            atomic,
+            write_fetch_head,
+        );
+    }
     if let Some(deepen) = deepen {
         if prefetch
             || !refmap.is_empty()
@@ -14409,6 +14459,165 @@ fn fetch_with_repo_and_remote_deepen(
         append,
         write_fetch_head,
     )
+}
+
+fn fetch_with_repo_and_remote_unshallow(
+    repo: GitRepo,
+    remote: String,
+    branch: Option<String>,
+    missing_ref_code: i32,
+    quiet: bool,
+    append: bool,
+    set_upstream: bool,
+    prune: bool,
+    prune_tags: bool,
+    no_tags: bool,
+    tags: bool,
+    atomic: bool,
+    _write_fetch_head: bool,
+) -> Result<()> {
+    let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url)
+        || is_git_daemon_transport_url(&url)
+        || is_ssh_transport_url(&url)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --unshallow currently supports local and file remotes".into(),
+        });
+    }
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(unsupported_remote_helper_error(&url, String::new()));
+    };
+    if read_repo_shallow_boundaries(&repo)?.is_none() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--unshallow on a complete repository does not make sense".into(),
+        });
+    }
+    let source = local_clone_source(&source_path)?;
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let fetch_refspecs = if branch.is_none() {
+        configured_fetch_refspecs(&repo, &remote)?
+    } else {
+        Vec::new()
+    };
+    fetch_with_repo_and_remote(
+        repo.clone(),
+        remote,
+        branch.clone(),
+        missing_ref_code,
+        quiet,
+        append,
+        set_upstream,
+        prune,
+        prune_tags,
+        no_tags,
+        tags,
+        atomic,
+        &[],
+        false,
+    )?;
+    copy_local_unshallow_objects(
+        &source,
+        &repo,
+        &source_refs,
+        branch.as_deref(),
+        &fetch_refspecs,
+        missing_ref_code,
+    )?;
+    write_shallow_file(&repo, Vec::new())
+}
+
+fn copy_local_unshallow_objects(
+    source: &LocalCloneSource,
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    branch: Option<&str>,
+    fetch_refspecs: &[String],
+    missing_ref_code: i32,
+) -> Result<()> {
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
+    collect_unshallow_roots(
+        source_refs,
+        branch,
+        fetch_refspecs,
+        missing_ref_code,
+        &mut roots,
+    )?;
+    sort_dedup_object_ids(&mut roots);
+    let excluded_roots: Vec<ObjectId> = Vec::new();
+    let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        roots.len(),
+    ));
+    copy_reachable_objects_into_many(
+        &source_repo,
+        &source_store,
+        &destination_store,
+        &roots,
+        &excluded_roots,
+        &mut seen,
+        PackEncodeOptions::delta(10, 50),
+        PACK_MISSING_REACHABLE_OBJECT_THRESHOLD,
+    )
+}
+
+fn collect_unshallow_roots(
+    source_refs: &RefStore,
+    branch: Option<&str>,
+    fetch_refspecs: &[String],
+    missing_ref_code: i32,
+    roots: &mut Vec<ObjectId>,
+) -> Result<()> {
+    if let Some(branch) = branch {
+        let ref_name = branch_ref_name(branch)?;
+        roots.push(
+            source_refs
+                .resolve(&ref_name)
+                .map_err(|_| missing_remote_ref_error(branch, missing_ref_code))?,
+        );
+        return Ok(());
+    }
+    if fetch_refspecs.is_empty() {
+        source_refs.for_each_resolved_ref("refs/heads/", |_, id| {
+            roots.push(id.clone());
+            Ok::<(), CliError>(())
+        })?;
+        return Ok(());
+    }
+    for refspec in fetch_refspecs {
+        let refspec = refspec.trim_start_matches('+');
+        let Some((source, _)) = refspec.split_once(':') else {
+            continue;
+        };
+        if let Some((source_prefix, source_suffix)) = source.split_once('*') {
+            if source_suffix.contains('*') {
+                continue;
+            }
+            source_refs.for_each_resolved_ref(source_prefix, |ref_name, id| {
+                if ref_name
+                    .strip_prefix(source_prefix)
+                    .and_then(|rest| rest.strip_suffix(source_suffix))
+                    .is_some()
+                {
+                    roots.push(id.clone());
+                }
+                Ok::<(), CliError>(())
+            })?;
+            continue;
+        }
+        match source_refs.resolve(source) {
+            Ok(id) => roots.push(id),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(CliError::Io(error)),
+        }
+    }
+    Ok(())
 }
 
 fn read_repo_shallow_boundaries(repo: &GitRepo) -> Result<Option<HashSet<ObjectId>>> {

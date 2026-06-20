@@ -1126,6 +1126,8 @@ pub enum Command {
         depth: Option<String>,
         #[arg(long = "deepen")]
         deepen: Option<String>,
+        #[arg(long = "unshallow", action = ArgAction::SetTrue)]
+        unshallow: bool,
         #[arg(long = "negotiation-tip")]
         negotiation_tip: Vec<String>,
         #[arg(long = "negotiate-only", action = ArgAction::SetTrue)]
