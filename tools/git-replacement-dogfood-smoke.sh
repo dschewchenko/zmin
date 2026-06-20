@@ -217,6 +217,7 @@ compare_command status_z status -z
 compare_command status_v2_z_branch status --porcelain=v2 -z --branch
 compare_command ls_files_z ls-files -z --cached --others --exclude-standard
 compare_command ls_files_stage_z ls-files --stage -z
+compare_command ls_files_cached_pathspec_z ls-files -z --cached -- dir
 compare_command diff_name_status_z diff --name-status -z
 compare_command rev_parse_git_dir rev-parse --git-dir
 compare_command rev_parse_inside rev-parse --is-inside-work-tree
