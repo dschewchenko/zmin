@@ -3903,6 +3903,39 @@ fn fetch_recurse_submodules_git_daemon_parent_local_submodule_matches_stock_git(
 
 #[test]
 fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock_git() {
+    assert_fetch_recurse_submodules_smart_http_parent_network_submodule_matches_stock_git(
+        "smart-http-submodule",
+        FetchRecurseSubmodulesSubmoduleTransport::SmartHttp,
+    );
+}
+
+#[test]
+fn fetch_recurse_submodules_smart_http_parent_ssh_submodule_matches_stock_git() {
+    assert_fetch_recurse_submodules_smart_http_parent_network_submodule_matches_stock_git(
+        "ssh-submodule",
+        FetchRecurseSubmodulesSubmoduleTransport::Ssh,
+    );
+}
+
+#[test]
+fn fetch_recurse_submodules_smart_http_parent_git_daemon_submodule_matches_stock_git() {
+    assert_fetch_recurse_submodules_smart_http_parent_network_submodule_matches_stock_git(
+        "git-daemon-submodule",
+        FetchRecurseSubmodulesSubmoduleTransport::GitDaemon,
+    );
+}
+
+#[derive(Clone, Copy)]
+enum FetchRecurseSubmodulesSubmoduleTransport {
+    SmartHttp,
+    Ssh,
+    GitDaemon,
+}
+
+fn assert_fetch_recurse_submodules_smart_http_parent_network_submodule_matches_stock_git(
+    label: &str,
+    submodule_transport: FetchRecurseSubmodulesSubmoduleTransport,
+) {
     let dir = TempDir::new().expect("temp dir");
     let submodule_remote = dir.path().join("submodule.git");
     let submodule_work = dir.path().join("submodule-work");
@@ -3910,10 +3943,10 @@ fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock
     let parent_remote = dir.path().join("parent.git");
     let git_client = dir
         .path()
-        .join("git-client-submodule-http-parent-http-submodule");
+        .join(format!("git-client-submodule-http-parent-{label}"));
     let zmin_client = dir
         .path()
-        .join("zmin-client-submodule-http-parent-http-submodule");
+        .join(format!("zmin-client-submodule-http-parent-{label}"));
 
     git(dir.path(), ["init", "--bare", "submodule.git"]);
     fs::write(submodule_remote.join("git-daemon-export-ok"), "").expect("submodule export marker");
@@ -3946,19 +3979,43 @@ fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock
     git(dir.path(), ["init", "--bare", "parent.git"]);
     fs::write(parent_remote.join("git-daemon-export-ok"), "").expect("parent export marker");
     let server = SmartHttpServer::new(dir.path().to_path_buf());
-    let submodule_url = format!("http://127.0.0.1:{}/submodule.git", server.port);
+    let mut _submodule_daemon = None;
+    let mut command_envs = Vec::<(String, String)>::new();
+    let submodule_url = match submodule_transport {
+        FetchRecurseSubmodulesSubmoduleTransport::SmartHttp => {
+            format!("http://127.0.0.1:{}/submodule.git", server.port)
+        }
+        FetchRecurseSubmodulesSubmoduleTransport::Ssh => {
+            let fake_ssh = write_fake_ssh(dir.path());
+            command_envs.push((
+                "GIT_SSH_COMMAND".to_owned(),
+                fake_ssh_command_arg(&fake_ssh),
+            ));
+            ssh_url_for_remote(&submodule_remote)
+        }
+        FetchRecurseSubmodulesSubmoduleTransport::GitDaemon => {
+            let port = unused_local_port();
+            _submodule_daemon = Some(StockGitDaemon::spawn(dir.path(), port));
+            format!("git://127.0.0.1:{port}/submodule.git")
+        }
+    };
     let parent_url = format!("http://127.0.0.1:{}/parent.git", server.port);
+    let command_envs = command_envs
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
 
     git(
         dir.path(),
         ["init", "-b", "main", source.to_str().expect("source path")],
     );
     configure_identity(&source);
-    command_output(
+    command_output_with_env(
         "git",
         &source,
         &["submodule", "add", &submodule_url, "deps/sub"],
-        "git submodule add http",
+        &command_envs,
+        "git submodule add network",
     );
     git_with_env(&source, ["commit", "-m", "add submodule"]);
     git(
@@ -3974,7 +4031,7 @@ fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock
     set_bare_head_to_main(&parent_remote);
 
     for (client, label) in [(&git_client, "git"), (&zmin_client, "zmin")] {
-        command_output(
+        command_output_with_env(
             "git",
             dir.path(),
             &[
@@ -3983,6 +4040,7 @@ fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock
                 &parent_url,
                 client.to_str().expect("client path"),
             ],
+            &command_envs,
             &format!("{label} recursive clone"),
         );
     }
@@ -3992,10 +4050,11 @@ fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock
     git_with_env(&submodule_work, ["commit", "-m", "submodule two"]);
     let second_submodule_head = git(&submodule_work, ["rev-parse", "HEAD"]);
     git(&submodule_work, ["push", "-q", "origin", "main"]);
-    command_output(
+    command_output_with_env(
         "git",
         &source.join("deps/sub"),
         &["fetch", "origin"],
+        &command_envs,
         "git source submodule fetch",
     );
     git(
@@ -4012,8 +4071,9 @@ fn fetch_recurse_submodules_smart_http_parent_smart_http_submodule_matches_stock
         "--recurse-submodules=on-demand",
         "origin",
     ];
-    let git_output = command_output("git", &git_client, &args, "git fetch");
-    let zmin_output = command_output(zmin_bin(), &zmin_client, &args, "zmin fetch");
+    let git_output = command_output_with_env("git", &git_client, &args, &command_envs, "git fetch");
+    let zmin_output =
+        command_output_with_env(zmin_bin(), &zmin_client, &args, &command_envs, "zmin fetch");
     assert_eq!(zmin_output, git_output);
     assert_eq!(
         git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
