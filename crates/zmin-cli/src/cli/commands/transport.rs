@@ -129,6 +129,7 @@ pub(crate) fn dispatch(
             negotiation_tip,
             negotiate_only,
             server_option: _,
+            upload_pack: _,
             stdin,
             remote,
             branch: refspecs,

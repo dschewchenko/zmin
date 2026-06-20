@@ -8453,6 +8453,7 @@ pub(crate) fn run_fetch(
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     let has_server_options = fetch_has_server_options(raw_args);
+    let upload_pack_command = fetch_upload_pack_command(raw_args)?;
     let deepen = fetch_deepen_amount(raw_args)?;
     let shallow_since = fetch_shallow_since(raw_args)?;
     let shallow_exclude = fetch_shallow_exclude(raw_args);
@@ -8510,6 +8511,21 @@ pub(crate) fn run_fetch(
             message: "fetch --deepen currently supports one named remote branch".into(),
         });
     }
+    if upload_pack_command.is_some()
+        && (all
+            || multiple
+            || refspecs.len() > 1
+            || depth.is_some()
+            || deepen.is_some()
+            || unshallow
+            || shallow_since.is_some()
+            || !shallow_exclude.is_empty())
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --upload-pack currently supports one named local or file remote".into(),
+        });
+    }
     let no_tags = fetch_no_tags(raw_args, no_tags, tags);
     let refspecs = force_fetch_refspecs(force, refspecs);
     if !refmap.is_empty() && refspecs.is_empty() {
@@ -8555,6 +8571,7 @@ pub(crate) fn run_fetch(
                 prefetch,
                 recurse_submodules_mode,
                 has_server_options,
+                None,
             )?;
         }
         if !dry_run {
@@ -8591,6 +8608,7 @@ pub(crate) fn run_fetch(
                 prefetch,
                 recurse_submodules_mode,
                 has_server_options,
+                None,
             )?;
         }
         if !dry_run {
@@ -8613,6 +8631,7 @@ pub(crate) fn run_fetch(
             no_tags,
             prefetch,
             has_server_options,
+            None,
         )?;
         if !dry_run {
             write_fetch_commit_graph_if_enabled()?;
@@ -8646,6 +8665,7 @@ pub(crate) fn run_fetch(
         prefetch,
         recurse_submodules_mode,
         has_server_options,
+        upload_pack_command.as_deref(),
     )?;
     if !dry_run {
         write_fetch_commit_graph_if_enabled()?;
@@ -8704,6 +8724,28 @@ fn fetch_has_server_options(raw_args: &[String]) -> bool {
         }
     }
     false
+}
+
+fn fetch_upload_pack_command(raw_args: &[String]) -> Result<Option<String>> {
+    let mut args = raw_args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--upload-pack" {
+            let Some(value) = args.next() else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "option '--upload-pack' requires a value".into(),
+                });
+            };
+            return Ok(Some(value.clone()));
+        }
+        if let Some(value) = arg.strip_prefix("--upload-pack=") {
+            return Ok(Some(value.to_owned()));
+        }
+    }
+    Ok(None)
 }
 
 fn fetch_deepen_amount(raw_args: &[String]) -> Result<Option<usize>> {
@@ -9101,6 +9143,7 @@ fn fetch_multiple_refspecs(
     no_tags: bool,
     prefetch: bool,
     has_server_options: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let depth = depth.map(validate_positive_depth).transpose()?;
     if prefetch {
@@ -9114,6 +9157,13 @@ fn fetch_multiple_refspecs(
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
         ensure_fetch_server_options_supported_for_location(&remote, has_server_options)?;
+        if upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --upload-pack currently supports one named local or file remote"
+                    .into(),
+            });
+        }
         let effective_prune = effective_fetch_prune(&repo, None, prune, no_prune)?;
         return fetch_multiple_refspecs_from_location(
             &repo,
@@ -9131,6 +9181,12 @@ fn fetch_multiple_refspecs(
     }
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
+    if upload_pack_command.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --upload-pack currently supports one named local or file remote".into(),
+        });
+    }
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
         return fetch_multiple_refspecs_from_http_remote(
@@ -9853,6 +9909,7 @@ pub(crate) fn run_pull(
                 false,
                 FetchRecurseSubmodulesMode::Default,
                 false,
+                None,
             )?;
         }
         "FETCH_HEAD".to_owned()
@@ -10520,6 +10577,7 @@ fn fetch_with_depth(
     prefetch: bool,
     recurse_submodules_mode: FetchRecurseSubmodulesMode,
     has_server_options: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode)?;
@@ -10527,6 +10585,13 @@ fn fetch_with_depth(
     let remote = default_fetch_remote(&repo, remote)?;
     if explicit_remote.is_some() && !remote_exists(&repo, &remote)? {
         ensure_fetch_server_options_supported_for_location(&remote, has_server_options)?;
+        if upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --upload-pack currently supports one named local or file remote"
+                    .into(),
+            });
+        }
         if deepen.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -10581,6 +10646,16 @@ fn fetch_with_depth(
     let prune_tags = prune && effective_fetch_prune_tags(&repo, Some(&remote), prune_tags)?;
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
+    if upload_pack_command.is_some()
+        && (is_http_transport_url(&url)
+            || is_git_daemon_transport_url(&url)
+            || is_ssh_transport_url(&url))
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --upload-pack currently supports local and file remotes".into(),
+        });
+    }
     if unshallow {
         if prefetch
             || !refmap.is_empty()
@@ -10701,6 +10776,7 @@ fn fetch_with_depth(
         atomic,
         refmap,
         prefetch,
+        upload_pack_command,
     )
 }
 
@@ -10730,6 +10806,7 @@ fn fetch_with_missing_ref_code(
         false,
         &[],
         false,
+        None,
     )
 }
 
@@ -10769,6 +10846,7 @@ pub(crate) fn fetch_with_repo_and_remote(
     atomic: bool,
     refmap: &[String],
     prefetch: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -10850,7 +10928,18 @@ pub(crate) fn fetch_with_repo_and_remote(
         .as_deref()
         .filter(|value| !value.contains(':') && is_empty_fetch_refmap(refmap))
     {
-        fetch_branch_without_destination_ref(&repo, &source, &source_refs, branch, &url)?;
+        if let Some(command) = upload_pack_command {
+            fetch_branch_without_destination_ref_via_upload_pack(
+                &repo,
+                &source_refs,
+                branch,
+                &url,
+                source_path.to_string_lossy().as_ref(),
+                command,
+            )?;
+        } else {
+            fetch_branch_without_destination_ref(&repo, &source, &source_refs, branch, &url)?;
+        }
         if set_upstream {
             set_fetch_upstream_config(&repo, &remote, branch)?;
         }
@@ -10883,20 +10972,41 @@ pub(crate) fn fetch_with_repo_and_remote(
     }
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        copy_local_fetch_objects(
-            &source,
-            &repo,
-            &source_refs,
-            &destination_refs,
-            &remote,
-            if explicit_refspec_fetch {
-                None
-            } else {
-                branch.as_deref()
-            },
-            &fetch_refspecs,
-            missing_ref_code,
-        )?;
+        if let Some(command) = upload_pack_command {
+            fetch_local_objects_via_upload_pack(
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                LocalFetchRootRequest {
+                    remote: &remote,
+                    branch: if explicit_refspec_fetch {
+                        None
+                    } else {
+                        branch.as_deref()
+                    },
+                    fetch_refspecs: &fetch_refspecs,
+                    missing_ref_code,
+                },
+                command,
+                source_path.to_string_lossy().as_ref(),
+            )?;
+        } else {
+            copy_local_fetch_objects(
+                &source,
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &remote,
+                if explicit_refspec_fetch {
+                    None
+                } else {
+                    branch.as_deref()
+                },
+                &fetch_refspecs,
+                missing_ref_code,
+            )?;
+        }
     }
     if explicit_refspec_fetch {
         if prune && !atomic {
@@ -13222,6 +13332,105 @@ fn copy_local_fetch_objects(
     Ok(())
 }
 
+fn fetch_branch_without_destination_ref_via_upload_pack(
+    repo: &GitRepo,
+    source_refs: &RefStore,
+    branch: &str,
+    url: &str,
+    repository_path: &str,
+    upload_pack_command: &str,
+) -> Result<()> {
+    let ref_name = branch_ref_name(branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(branch, 128))?;
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
+    let request_roots = missing_fetch_roots(&destination_store, std::slice::from_ref(&id))?;
+    fetch_pack_with_local_upload_pack_command(
+        upload_pack_command,
+        repository_path,
+        &repo.objects_dir,
+        &request_roots,
+        &haves,
+    )?;
+    write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
+}
+
+struct LocalFetchRootRequest<'a> {
+    remote: &'a str,
+    branch: Option<&'a str>,
+    fetch_refspecs: &'a [String],
+    missing_ref_code: i32,
+}
+
+fn fetch_local_objects_via_upload_pack(
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    destination_refs: &RefStore,
+    destination_store: &LooseObjectStore,
+    request: LocalFetchRootRequest<'_>,
+    upload_pack_command: &str,
+    repository_path: &str,
+) -> Result<()> {
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(1));
+    if let Some(branch) = request.branch {
+        let ref_name = branch_ref_name(branch)?;
+        let id = source_refs
+            .resolve(&ref_name)
+            .map_err(|_| missing_remote_ref_error(branch, request.missing_ref_code))?;
+        let destination_ref = format!("refs/remotes/{}/{branch}", request.remote);
+        if !destination_ref_has_object(destination_refs, destination_store, &destination_ref, &id)?
+        {
+            roots.push(id);
+        }
+    } else if !request.fetch_refspecs.is_empty() {
+        collect_configured_fetch_roots(
+            source_refs,
+            destination_refs,
+            destination_store,
+            request.fetch_refspecs,
+            &mut roots,
+        )?;
+    } else {
+        source_refs.for_each_resolved_ref("refs/heads/", |ref_name, id| {
+            let branch = ref_name
+                .strip_prefix("refs/heads/")
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid source branch ref '{ref_name}'"),
+                })?;
+            let destination_ref = format!("refs/remotes/{}/{branch}", request.remote);
+            if !destination_ref_has_object(
+                destination_refs,
+                destination_store,
+                &destination_ref,
+                id,
+            )? {
+                roots.push(id.clone());
+            }
+            Ok::<(), CliError>(())
+        })?;
+        source_refs.for_each_resolved_ref("refs/tags/", |ref_name, id| {
+            if !destination_ref_has_object(destination_refs, destination_store, ref_name, id)? {
+                roots.push(id.clone());
+            }
+            Ok::<(), CliError>(())
+        })?;
+    }
+    sort_dedup_object_ids(&mut roots);
+    let request_roots = missing_fetch_roots(destination_store, &roots)?;
+    let haves = collect_upload_pack_haves(destination_store, destination_refs)?;
+    fetch_pack_with_local_upload_pack_command(
+        upload_pack_command,
+        repository_path,
+        &destination_repo.objects_dir,
+        &request_roots,
+        &haves,
+    )
+}
+
 fn copy_local_fetch_objects_for_depth_refspecs(
     source: &LocalCloneSource,
     destination_repo: &GitRepo,
@@ -14744,6 +14953,7 @@ fn fetch_with_repo_and_remote_deepen(
             atomic,
             &[],
             false,
+            None,
         );
     };
     let source = local_clone_source(&source_path)?;
@@ -14826,6 +15036,7 @@ fn fetch_with_repo_and_remote_unshallow(
         atomic,
         &[],
         false,
+        None,
     )?;
     copy_local_unshallow_objects(
         &source,
@@ -15881,6 +16092,88 @@ fn ssh_fetch_pack_from_advertised_session(
         session.finish()?;
     }
     Ok(shallow_boundaries)
+}
+
+fn fetch_pack_with_local_upload_pack_command(
+    command: &str,
+    repository_path: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+) -> Result<()> {
+    let mut session = spawn_local_upload_pack_command(command, repository_path)?;
+    {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdout is unavailable".into(),
+        })?;
+        let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
+        while read_pkt_line_payload_into(stdout, &mut line)? {}
+    }
+    if roots.is_empty() {
+        return session.finish();
+    }
+    let request = build_upload_pack_request(roots, haves, None)?;
+    session
+        .stdin
+        .as_mut()
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdin is unavailable".into(),
+        })?
+        .write_all(&request)?;
+    drop(session.stdin.take());
+
+    let temp_pack = temp_http_pack_path(objects_dir)?;
+    let pack_result = parse_upload_pack_sideband_response_to_file(
+        session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdout is unavailable".into(),
+        })?,
+        &temp_pack,
+        roots.len(),
+    )?;
+    if pack_result.is_none() {
+        let _ = fs::remove_file(&temp_pack);
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "local upload-pack response did not contain a pack".into(),
+        });
+    }
+    write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
+    session.finish()
+}
+
+fn spawn_local_upload_pack_command(
+    command: &str,
+    repository_path: &str,
+) -> Result<RemoteCommandSession> {
+    let mut words = split_shell_words(command)?;
+    if words.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --upload-pack command is empty".into(),
+        });
+    }
+    let program = words.remove(0);
+    let mut command = ssh_transport_command(program, words);
+    command
+        .arg(repository_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn()?;
+    Ok(RemoteCommandSession {
+        stdin: child.stdin.take(),
+        stdout: Some(io::BufReader::new(child.stdout.take().ok_or_else(
+            || CliError::Fatal {
+                code: 128,
+                message: "local upload-pack did not provide stdout".into(),
+            },
+        )?)),
+        stderr: child.stderr.take(),
+        child,
+    })
 }
 
 fn ssh_send_receive_pack(

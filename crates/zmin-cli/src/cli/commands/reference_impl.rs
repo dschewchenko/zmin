@@ -4018,6 +4018,7 @@ fn remote_update(repo: &GitRepo, prune: bool, remotes: Vec<String>) -> Result<()
             false,
             &[],
             false,
+            None,
         )?;
         if prune {
             prune_remote_tracking_refs_silent(repo, &target.name)?;

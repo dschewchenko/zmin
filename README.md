@@ -162,7 +162,7 @@ Current accounting:
 | --- | ---: | --- | --- |
 | Command routing | `151/151` | no | every Git `2.47` command name reaches Zmin code |
 | Git doc option spelling seed | `4632` | no | raw option spellings found in Git `2.47.1` docs and include files |
-| Written behavior rows | `125` | yes, row by row | `110` exact rows already match stock Git |
+| Written behavior rows | `129` | yes, row by row | `114` exact rows already match stock Git |
 | Fully certified command matrices | `0/151` | yes, when complete | no command has a complete option/value/state/transport/platform matrix yet |
 | Full Git behavior denominator | incomplete | not yet | still being expanded from docs, upstream tests and real tool traces |
 
@@ -182,7 +182,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `309` | `65` | `54` | `9` | `2` | `0` |
+| Sharing and Updating Projects | `5` | `309` | `69` | `58` | `9` | `2` | `0` |
 | Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `333` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `132` | `0` | `0` | `0` | `0` | `52` |
@@ -192,7 +192,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` | `76` |
 | Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`4632`** | **`125`** | **`110`** | **`9`** | **`6`** | **`253`** |
+| **Git `2.47` unique total** | **`151`** | **`4632`** | **`129`** | **`114`** | **`9`** | **`6`** | **`253`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -207,7 +207,7 @@ Current command-level matrices. This is audit coverage, not command support:
 | Command | Git doc option spellings | Doc spellings represented by rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `28` | `65` | `54` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `69` | `58` | `0` | `9` | `2` | no |
 
 Doc spellings represented by rows means at least one matrix row mentions that
 documented option. It does not mean every value, negation, order-sensitive

@@ -1138,6 +1138,8 @@ pub enum Command {
         negotiate_only: bool,
         #[arg(long = "server-option")]
         server_option: Vec<String>,
+        #[arg(long = "upload-pack")]
+        upload_pack: Option<String>,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
         remote: Option<String>,
