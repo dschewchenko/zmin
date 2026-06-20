@@ -3880,6 +3880,28 @@ fn fetch_recurse_submodules_smart_http_parent_uninitialized_submodule_matches_st
 }
 
 #[test]
+fn fetch_recurse_submodules_ssh_parent_local_submodule_matches_stock_git() {
+    assert_fetch_recurse_submodules_network_parent_local_submodule_matches_stock_git(
+        "ssh-on-demand",
+        &["--recurse-submodules=on-demand"],
+        true,
+        true,
+        FetchRecurseSubmodulesParentTransport::Ssh,
+    );
+}
+
+#[test]
+fn fetch_recurse_submodules_git_daemon_parent_local_submodule_matches_stock_git() {
+    assert_fetch_recurse_submodules_network_parent_local_submodule_matches_stock_git(
+        "git-daemon-on-demand",
+        &["--recurse-submodules=on-demand"],
+        true,
+        true,
+        FetchRecurseSubmodulesParentTransport::GitDaemon,
+    );
+}
+
+#[test]
 fn fetch_jobs_invalid_value_matches_stock_git_failure() {
     let dir = TempDir::new().expect("temp dir");
     let repo = dir.path().join("repo");
@@ -4357,6 +4379,29 @@ fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_sto
     initialize_submodule: bool,
     expect_submodule_fetch: bool,
 ) {
+    assert_fetch_recurse_submodules_network_parent_local_submodule_matches_stock_git(
+        label,
+        mode_args,
+        initialize_submodule,
+        expect_submodule_fetch,
+        FetchRecurseSubmodulesParentTransport::SmartHttp,
+    );
+}
+
+#[derive(Clone, Copy)]
+enum FetchRecurseSubmodulesParentTransport {
+    SmartHttp,
+    Ssh,
+    GitDaemon,
+}
+
+fn assert_fetch_recurse_submodules_network_parent_local_submodule_matches_stock_git(
+    label: &str,
+    mode_args: &[&str],
+    initialize_submodule: bool,
+    expect_submodule_fetch: bool,
+    parent_transport: FetchRecurseSubmodulesParentTransport,
+) {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
     let source = dir.path().join("source");
@@ -4470,8 +4515,30 @@ fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_sto
         );
     }
 
-    let server = SmartHttpServer::new(dir.path().to_path_buf());
-    let parent_url = format!("http://127.0.0.1:{}/parent.git", server.port);
+    let mut _server = None;
+    let mut _daemon = None;
+    let mut command_envs = Vec::<(String, String)>::new();
+    let parent_url = match parent_transport {
+        FetchRecurseSubmodulesParentTransport::SmartHttp => {
+            let server = SmartHttpServer::new(dir.path().to_path_buf());
+            let url = format!("http://127.0.0.1:{}/parent.git", server.port);
+            _server = Some(server);
+            url
+        }
+        FetchRecurseSubmodulesParentTransport::Ssh => {
+            let fake_ssh = write_fake_ssh(dir.path());
+            command_envs.push((
+                "GIT_SSH_COMMAND".to_owned(),
+                fake_ssh_command_arg(&fake_ssh),
+            ));
+            ssh_url_for_remote(&parent_remote)
+        }
+        FetchRecurseSubmodulesParentTransport::GitDaemon => {
+            let port = unused_local_port();
+            _daemon = Some(StockGitDaemon::spawn(dir.path(), port));
+            format!("git://127.0.0.1:{port}/parent.git")
+        }
+    };
     git(&git_client, ["remote", "set-url", "origin", &parent_url]);
     git(&zmin_client, ["remote", "set-url", "origin", &parent_url]);
 
@@ -4497,8 +4564,13 @@ fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_sto
     let mut args = vec!["-c", "protocol.file.allow=always", "fetch", "--quiet"];
     args.extend_from_slice(mode_args);
     args.push("origin");
-    let git_output = command_output_with_env("git", &git_client, &args, &[], "git fetch");
-    let zmin_output = command_output_with_env(zmin_bin(), &zmin_client, &args, &[], "zmin fetch");
+    let command_envs = command_envs
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let git_output = command_output_with_env("git", &git_client, &args, &command_envs, "git fetch");
+    let zmin_output =
+        command_output_with_env(zmin_bin(), &zmin_client, &args, &command_envs, "zmin fetch");
     assert_eq!(zmin_output, git_output);
     assert_eq!(
         git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
