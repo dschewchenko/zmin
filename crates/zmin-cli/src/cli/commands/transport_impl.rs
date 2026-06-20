@@ -8553,7 +8553,7 @@ pub(crate) fn run_fetch(
             message: "fetch --unshallow currently supports one named remote".into(),
         });
     }
-    if shallow_since.is_some() && (all || multiple || refspecs.len() > 1) {
+    if shallow_since.is_some() && (all || multiple) {
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --shallow-since currently supports one named remote branch".into(),
@@ -8679,6 +8679,7 @@ pub(crate) fn run_fetch(
             prefetch,
             has_server_options,
             upload_pack_command.as_deref(),
+            shallow_since,
             &shallow_exclude,
         )?;
         if !dry_run {
@@ -9193,6 +9194,7 @@ fn fetch_multiple_refspecs(
     prefetch: bool,
     has_server_options: bool,
     upload_pack_command: Option<&str>,
+    shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
     let depth = depth.map(validate_positive_depth).transpose()?;
@@ -9223,6 +9225,7 @@ fn fetch_multiple_refspecs(
             quiet,
             effective_prune,
             no_tags,
+            shallow_since,
             shallow_exclude,
         );
     }
@@ -9234,6 +9237,13 @@ fn fetch_multiple_refspecs(
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
+        if shallow_since.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --shallow-since needs smart HTTP transport support before use"
+                    .into(),
+            });
+        }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9253,6 +9263,12 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_git_daemon_transport_url(&url) {
+        if shallow_since.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --shallow-since currently supports local and file remotes".into(),
+            });
+        }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9271,6 +9287,12 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_ssh_transport_url(&url) {
+        if shallow_since.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --shallow-since currently supports local and file remotes".into(),
+            });
+        }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9305,7 +9327,16 @@ fn fetch_multiple_refspecs(
     };
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        if !shallow_exclude.is_empty() {
+        if let Some(since) = shallow_since {
+            copy_local_fetch_objects_for_since_refspecs(
+                &source,
+                &repo,
+                &source_refs,
+                &refspecs,
+                since,
+                no_tags,
+            )?;
+        } else if !shallow_exclude.is_empty() {
             copy_local_fetch_objects_for_shallow_exclude_refspecs(
                 &source,
                 &repo,
@@ -9776,12 +9807,19 @@ fn fetch_multiple_refspecs_from_location(
     quiet: bool,
     prune: bool,
     no_tags: bool,
+    shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
     let Some(source_path) = local_repository_path_from_location(location)? else {
         return Err(unsupported_remote_helper_error(location, String::new()));
     };
     if source_path.is_file() {
+        if shallow_since.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --shallow-since currently supports local and file remotes".into(),
+            });
+        }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9811,7 +9849,16 @@ fn fetch_multiple_refspecs_from_location(
     };
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        if !shallow_exclude.is_empty() {
+        if let Some(since) = shallow_since {
+            copy_local_fetch_objects_for_since_refspecs(
+                &source,
+                repo,
+                &source_refs,
+                refspecs,
+                since,
+                no_tags,
+            )?;
+        } else if !shallow_exclude.is_empty() {
             copy_local_fetch_objects_for_shallow_exclude_refspecs(
                 &source,
                 repo,
@@ -11442,6 +11489,7 @@ fn fetch_with_repo_and_location(
                     quiet,
                     prune,
                     no_tags,
+                    None,
                     &[],
                 );
             }
@@ -14274,6 +14322,69 @@ fn copy_local_fetch_objects_for_depth_refspecs(
         &roots,
         depth,
         no_tags,
+    )
+}
+
+fn copy_local_fetch_objects_for_since_refspecs(
+    source: &LocalCloneSource,
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    fetch_refspecs: &[String],
+    since: i64,
+    no_tags: bool,
+) -> Result<()> {
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(fetch_refspecs.len()));
+    {
+        let _trace = phase_trace("fetch.local.collect_since_roots");
+        collect_local_fetch_refspec_roots(source_refs, fetch_refspecs, &mut roots)?;
+    }
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    sort_dedup_object_ids(&mut roots);
+    phase_trace_emit(
+        "fetch.local.since_roots",
+        0.0,
+        &[("count", roots.len().to_string())],
+    );
+    let excluded = HashSet::new();
+    let limited_commits =
+        upload_pack_since_limited_commits(&source_store, &roots, since, &excluded)?;
+    let mut fetched_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        limited_commits.len(),
+    ));
+    copy_reachable_objects_for_depth_into(
+        &source_store,
+        &destination_store,
+        &limited_commits,
+        &mut fetched_objects,
+    )?;
+    if !no_tags {
+        copy_fetch_pack_included_tags(
+            source_refs,
+            &source_store,
+            &destination_store,
+            &source_repo,
+            &mut fetched_objects,
+            None,
+        )?;
+    }
+    let request = UploadPackRequest {
+        wants: roots,
+        deepen_since: Some(since),
+        ..UploadPackRequest::default()
+    };
+    write_shallow_file(
+        destination_repo,
+        upload_pack_since_shallow_boundaries(
+            &source_repo,
+            &source_store,
+            &request.wants,
+            since,
+            &request,
+        )?,
     )
 }
 
