@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 220/4632 represented doc-option pairs / 700 written rows / 624 written rows matching stock Git / 3 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 220/4632 represented doc-option pairs / 700 written rows / 625 written rows matching stock Git / 2 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,7 +195,7 @@ command.
 | `fetch --recurse-submodules smart HTTP uninitialized submodule modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true, on-demand, no, boolean false, numeric false and `--no-recurse-submodules` for smart HTTP parent fetches where the submodule is present in the index but not initialized locally |
 | `fetch --recurse-submodules smart HTTP nested initialized submodule` | `1` | `0` | implicit yes for smart HTTP parent fetches with initialized local submodule remotes and initialized nested submodule remotes |
 | `fetch --jobs submodule recursion values` | `2` | `1` | accepted `--jobs=2` and `-j -1` with smart HTTP parent/local submodule recursion, plus invalid non-integer `--jobs`/`-j` diagnostics |
-| `fetch --dry-run smart HTTP submodule recursion` | `1` | `0` | smart HTTP parent/local-submodule recursion leaves parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
+| `fetch --dry-run smart HTTP submodule recursion` | `2` | `0` | default/on-demand and explicit `--recurse-submodules` smart HTTP parent/local-submodule dry-runs leave parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
@@ -210,7 +210,7 @@ command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `350` verified variants.
+Tracked closed blocks in this table: `351` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

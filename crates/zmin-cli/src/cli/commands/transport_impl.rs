@@ -9046,7 +9046,9 @@ fn ensure_fetch_recurse_submodules_supported(
 fn fetch_should_recurse_submodules(mode: FetchRecurseSubmodulesMode) -> bool {
     matches!(
         mode,
-        FetchRecurseSubmodulesMode::Yes | FetchRecurseSubmodulesMode::OnDemand
+        FetchRecurseSubmodulesMode::Default
+            | FetchRecurseSubmodulesMode::Yes
+            | FetchRecurseSubmodulesMode::OnDemand
     )
 }
 

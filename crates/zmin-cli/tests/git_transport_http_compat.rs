@@ -3773,13 +3773,23 @@ fn fetch_jobs_invalid_value_matches_stock_git_failure() {
 }
 
 #[test]
-fn fetch_dry_run_recurse_submodules_smart_http_parent_matches_stock_git() {
+fn fetch_dry_run_submodule_smart_http_parent_modes_match_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
     let source = dir.path().join("source");
     let parent_remote = dir.path().join("parent.git");
-    let git_client = dir.path().join("git-client-dry-run-submodule-http-parent");
-    let zmin_client = dir.path().join("zmin-client-dry-run-submodule-http-parent");
+    let git_default_client = dir
+        .path()
+        .join("git-client-dry-run-default-submodule-http-parent");
+    let zmin_default_client = dir
+        .path()
+        .join("zmin-client-dry-run-default-submodule-http-parent");
+    let git_recurse_client = dir
+        .path()
+        .join("git-client-dry-run-recurse-submodule-http-parent");
+    let zmin_recurse_client = dir
+        .path()
+        .join("zmin-client-dry-run-recurse-submodule-http-parent");
 
     git(
         dir.path(),
@@ -3832,8 +3842,10 @@ fn fetch_dry_run_recurse_submodules_smart_http_parent_matches_stock_git() {
     set_bare_head_to_main(&parent_remote);
 
     for (client, label, command) in [
-        (&git_client, "git", "git"),
-        (&zmin_client, "zmin", zmin_bin()),
+        (&git_default_client, "git default", "git"),
+        (&zmin_default_client, "zmin default", zmin_bin()),
+        (&git_recurse_client, "git recurse", "git"),
+        (&zmin_recurse_client, "zmin recurse", zmin_bin()),
     ] {
         command_output_with_env(
             command,
@@ -3853,12 +3865,38 @@ fn fetch_dry_run_recurse_submodules_smart_http_parent_matches_stock_git() {
 
     let server = SmartHttpServer::new(dir.path().to_path_buf());
     let parent_url = format!("http://127.0.0.1:{}/parent.git", server.port);
-    git(&git_client, ["remote", "set-url", "origin", &parent_url]);
-    git(&zmin_client, ["remote", "set-url", "origin", &parent_url]);
-    let git_before_remote = git(&git_client, ["rev-parse", "refs/remotes/origin/main"]);
-    let zmin_before_remote = git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]);
-    let git_before_fetch_head = fs::read_to_string(git_client.join(".git/FETCH_HEAD")).ok();
-    let zmin_before_fetch_head = fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).ok();
+    for client in [
+        &git_default_client,
+        &zmin_default_client,
+        &git_recurse_client,
+        &zmin_recurse_client,
+    ] {
+        git(client, ["remote", "set-url", "origin", &parent_url]);
+    }
+    let git_default_before_remote = git(
+        &git_default_client,
+        ["rev-parse", "refs/remotes/origin/main"],
+    );
+    let zmin_default_before_remote = git(
+        &zmin_default_client,
+        ["rev-parse", "refs/remotes/origin/main"],
+    );
+    let git_recurse_before_remote = git(
+        &git_recurse_client,
+        ["rev-parse", "refs/remotes/origin/main"],
+    );
+    let zmin_recurse_before_remote = git(
+        &zmin_recurse_client,
+        ["rev-parse", "refs/remotes/origin/main"],
+    );
+    let git_default_before_fetch_head =
+        fs::read_to_string(git_default_client.join(".git/FETCH_HEAD")).ok();
+    let zmin_default_before_fetch_head =
+        fs::read_to_string(zmin_default_client.join(".git/FETCH_HEAD")).ok();
+    let git_recurse_before_fetch_head =
+        fs::read_to_string(git_recurse_client.join(".git/FETCH_HEAD")).ok();
+    let zmin_recurse_before_fetch_head =
+        fs::read_to_string(zmin_recurse_client.join(".git/FETCH_HEAD")).ok();
 
     fs::write(submodule.join("lib.txt"), b"two\n").expect("write submodule two");
     git(&submodule, ["add", "-A"]);
@@ -3879,6 +3917,57 @@ fn fetch_dry_run_recurse_submodules_smart_http_parent_matches_stock_git() {
     git_with_env(&source, ["commit", "-m", "update submodule"]);
     git(&source, ["push", "-q", "origin", "main"]);
 
+    let default_args = ["fetch", "--quiet", "--dry-run", "origin"];
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            &zmin_default_client,
+            &default_args,
+            "zmin default dry-run fetch",
+        ),
+        command_any_output(
+            "git",
+            &git_default_client,
+            &default_args,
+            "git default dry-run fetch",
+        )
+    );
+    assert_eq!(
+        git(
+            &zmin_default_client,
+            ["rev-parse", "refs/remotes/origin/main"]
+        ),
+        zmin_default_before_remote
+    );
+    assert_eq!(
+        git(
+            &git_default_client,
+            ["rev-parse", "refs/remotes/origin/main"]
+        ),
+        git_default_before_remote
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_default_client.join(".git/FETCH_HEAD")).ok(),
+        zmin_default_before_fetch_head
+    );
+    assert_eq!(
+        fs::read_to_string(git_default_client.join(".git/FETCH_HEAD")).ok(),
+        git_default_before_fetch_head
+    );
+    assert_eq!(
+        git(&zmin_default_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        first_submodule_head
+    );
+    assert_eq!(
+        git(&git_default_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        first_submodule_head
+    );
+    let args = ["cat-file", "-e", &second_submodule_head];
+    assert_eq!(
+        git_status_args(&zmin_default_client.join("deps/sub"), &args),
+        git_status_args(&git_default_client.join("deps/sub"), &args)
+    );
+
     let recurse_args = [
         "-c",
         "protocol.file.allow=always",
@@ -3891,45 +3980,50 @@ fn fetch_dry_run_recurse_submodules_smart_http_parent_matches_stock_git() {
     assert_eq!(
         command_any_output(
             zmin_bin(),
-            &zmin_client,
+            &zmin_recurse_client,
             &recurse_args,
             "zmin dry-run fetch with submodule recursion",
         ),
         command_any_output(
             "git",
-            &git_client,
+            &git_recurse_client,
             &recurse_args,
             "git dry-run fetch with submodule recursion",
         )
     );
     assert_eq!(
-        git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
-        zmin_before_remote
+        git(
+            &zmin_recurse_client,
+            ["rev-parse", "refs/remotes/origin/main"]
+        ),
+        zmin_recurse_before_remote
     );
     assert_eq!(
-        git(&git_client, ["rev-parse", "refs/remotes/origin/main"]),
-        git_before_remote
+        git(
+            &git_recurse_client,
+            ["rev-parse", "refs/remotes/origin/main"]
+        ),
+        git_recurse_before_remote
     );
     assert_eq!(
-        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).ok(),
-        zmin_before_fetch_head
+        fs::read_to_string(zmin_recurse_client.join(".git/FETCH_HEAD")).ok(),
+        zmin_recurse_before_fetch_head
     );
     assert_eq!(
-        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).ok(),
-        git_before_fetch_head
+        fs::read_to_string(git_recurse_client.join(".git/FETCH_HEAD")).ok(),
+        git_recurse_before_fetch_head
     );
     assert_eq!(
-        git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        git(&zmin_recurse_client.join("deps/sub"), ["rev-parse", "HEAD"]),
         first_submodule_head
     );
     assert_eq!(
-        git(&git_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        git(&git_recurse_client.join("deps/sub"), ["rev-parse", "HEAD"]),
         first_submodule_head
     );
-    let args = ["cat-file", "-e", &second_submodule_head];
     assert_eq!(
-        git_status_args(&zmin_client.join("deps/sub"), &args),
-        git_status_args(&git_client.join("deps/sub"), &args)
+        git_status_args(&zmin_recurse_client.join("deps/sub"), &args),
+        git_status_args(&git_recurse_client.join("deps/sub"), &args)
     );
 }
 
