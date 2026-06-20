@@ -8565,7 +8565,7 @@ pub(crate) fn run_fetch(
             message: "fetch --shallow-exclude currently supports one named remote branch".into(),
         });
     }
-    if deepen.is_some() && (all || multiple || refspecs.len() > 1) {
+    if deepen.is_some() && (all || multiple) {
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --deepen currently supports one named remote branch".into(),
@@ -8679,6 +8679,7 @@ pub(crate) fn run_fetch(
             prefetch,
             has_server_options,
             upload_pack_command.as_deref(),
+            deepen,
             shallow_since,
             &shallow_exclude,
         )?;
@@ -9194,6 +9195,7 @@ fn fetch_multiple_refspecs(
     prefetch: bool,
     has_server_options: bool,
     upload_pack_command: Option<&str>,
+    deepen: Option<usize>,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
@@ -9225,6 +9227,7 @@ fn fetch_multiple_refspecs(
             quiet,
             effective_prune,
             no_tags,
+            deepen,
             shallow_since,
             shallow_exclude,
         );
@@ -9237,6 +9240,12 @@ fn fetch_multiple_refspecs(
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
+        if deepen.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports local and file remotes".into(),
+            });
+        }
         if shallow_since.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9263,6 +9272,12 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_git_daemon_transport_url(&url) {
+        if deepen.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports local and file remotes".into(),
+            });
+        }
         if shallow_since.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9287,6 +9302,12 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_ssh_transport_url(&url) {
+        if deepen.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports local and file remotes".into(),
+            });
+        }
         if shallow_since.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9327,7 +9348,16 @@ fn fetch_multiple_refspecs(
     };
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        if let Some(since) = shallow_since {
+        if let Some(deepen) = deepen {
+            copy_local_fetch_objects_for_deepen_refspecs(
+                &source,
+                &repo,
+                &source_refs,
+                &refspecs,
+                deepen,
+                no_tags,
+            )?;
+        } else if let Some(since) = shallow_since {
             copy_local_fetch_objects_for_since_refspecs(
                 &source,
                 &repo,
@@ -9807,6 +9837,7 @@ fn fetch_multiple_refspecs_from_location(
     quiet: bool,
     prune: bool,
     no_tags: bool,
+    deepen: Option<usize>,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
@@ -9814,6 +9845,12 @@ fn fetch_multiple_refspecs_from_location(
         return Err(unsupported_remote_helper_error(location, String::new()));
     };
     if source_path.is_file() {
+        if deepen.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports local and file remotes".into(),
+            });
+        }
         if shallow_since.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9849,7 +9886,16 @@ fn fetch_multiple_refspecs_from_location(
     };
     {
         let _trace = phase_trace("fetch.local.copy_objects");
-        if let Some(since) = shallow_since {
+        if let Some(deepen) = deepen {
+            copy_local_fetch_objects_for_deepen_refspecs(
+                &source,
+                repo,
+                &source_refs,
+                refspecs,
+                deepen,
+                no_tags,
+            )?;
+        } else if let Some(since) = shallow_since {
             copy_local_fetch_objects_for_since_refspecs(
                 &source,
                 repo,
@@ -11489,6 +11535,7 @@ fn fetch_with_repo_and_location(
                     quiet,
                     prune,
                     no_tags,
+                    None,
                     None,
                     &[],
                 );
@@ -14323,6 +14370,86 @@ fn copy_local_fetch_objects_for_depth_refspecs(
         depth,
         no_tags,
     )
+}
+
+fn copy_local_fetch_objects_for_deepen_refspecs(
+    source: &LocalCloneSource,
+    destination_repo: &GitRepo,
+    source_refs: &RefStore,
+    fetch_refspecs: &[String],
+    deepen: usize,
+    no_tags: bool,
+) -> Result<()> {
+    let Some(existing_shallow_boundaries) = read_repo_shallow_boundaries(destination_repo)? else {
+        let destination_refs = refs_adapter_from_git_dir(&destination_repo.git_dir);
+        return copy_local_fetch_objects(
+            source,
+            destination_repo,
+            source_refs,
+            &destination_refs,
+            "FETCH_HEAD",
+            None,
+            fetch_refspecs,
+            128,
+            false,
+        );
+    };
+    let mut roots = Vec::with_capacity(transport_ref_collection_capacity(fetch_refspecs.len()));
+    {
+        let _trace = phase_trace("fetch.local.collect_deepen_roots");
+        collect_local_fetch_refspec_roots(source_refs, fetch_refspecs, &mut roots)?;
+    }
+    let source_repo = local_clone_source_repo(source);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&destination_repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(destination_repo.objects_dir.clone());
+    sort_dedup_object_ids(&mut roots);
+    phase_trace_emit(
+        "fetch.local.deepen_roots",
+        0.0,
+        &[("count", roots.len().to_string())],
+    );
+    let mut fetched_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        roots.len(),
+    ));
+    let mut next_shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(roots.len()));
+    for root in &roots {
+        let Some(current_depth) =
+            shallow_depth_from_source_tip(&source_store, root, &existing_shallow_boundaries)?
+        else {
+            return Err(CliError::Fatal {
+                code: 128,
+                message:
+                    "fetch --deepen could not match the local shallow boundary to remote history"
+                        .into(),
+            });
+        };
+        let depth = current_depth.saturating_add(deepen);
+        let depth_limited_commits =
+            upload_pack_depth_limited_commits(&source_store, std::slice::from_ref(root), depth)?;
+        copy_reachable_objects_for_depth_into(
+            &source_store,
+            &destination_store,
+            &depth_limited_commits,
+            &mut fetched_objects,
+        )?;
+        let mut root_boundaries =
+            shallow_boundaries(&source_store, std::slice::from_ref(root), depth)?;
+        next_shallow_roots.append(&mut root_boundaries);
+    }
+    if !no_tags {
+        copy_fetch_pack_included_tags(
+            source_refs,
+            &source_store,
+            &destination_store,
+            &source_repo,
+            &mut fetched_objects,
+            None,
+        )?;
+    }
+    sort_dedup_object_ids(&mut next_shallow_roots);
+    write_shallow_file(destination_repo, next_shallow_roots)
 }
 
 fn copy_local_fetch_objects_for_since_refspecs(
