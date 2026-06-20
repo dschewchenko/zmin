@@ -2008,8 +2008,21 @@ enum SimpleForEachRefFormatPart<'a> {
     Literal(&'a str),
     RefName,
     RefNameShort,
+    RefNameStrip(RefNameStripModifier),
     ObjectName,
     ObjectNameShort(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RefNameStripModifier {
+    mode: RefNameStripMode,
+    count: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum RefNameStripMode {
+    Lstrip,
+    Rstrip,
 }
 
 fn collect_for_each_ref_rows(
@@ -2137,6 +2150,9 @@ fn simple_for_each_ref_format_parts(format: &str) -> Option<Vec<SimpleForEachRef
         let atom = match atom_name {
             "refname" => SimpleForEachRefFormatPart::RefName,
             "refname:short" => SimpleForEachRefFormatPart::RefNameShort,
+            atom if for_each_ref_refname_strip_modifier(atom).is_some() => {
+                SimpleForEachRefFormatPart::RefNameStrip(for_each_ref_refname_strip_modifier(atom)?)
+            }
             "objectname" => SimpleForEachRefFormatPart::ObjectName,
             atom if for_each_ref_objectname_short_len(atom).is_some() => {
                 SimpleForEachRefFormatPart::ObjectNameShort(for_each_ref_objectname_short_len(
@@ -2166,6 +2182,9 @@ fn write_simple_for_each_ref_row<W: Write>(
             SimpleForEachRefFormatPart::RefName => out.write_all(ref_name.as_bytes())?,
             SimpleForEachRefFormatPart::RefNameShort => {
                 out.write_all(short_ref_name_str(ref_name).as_bytes())?
+            }
+            SimpleForEachRefFormatPart::RefNameStrip(modifier) => {
+                out.write_all(strip_for_each_ref_refname(ref_name, *modifier).as_bytes())?
             }
             SimpleForEachRefFormatPart::ObjectName => out.write_all(object_id.as_bytes())?,
             SimpleForEachRefFormatPart::ObjectNameShort(len) => {
@@ -2334,6 +2353,7 @@ fn apply_for_each_ref_atom_requirements(
 ) -> Result<()> {
     match atom {
         "refname" | "refname:short" | "objectname" | "HEAD" => {}
+        atom if for_each_ref_refname_strip_modifier(atom).is_some() => {}
         atom if for_each_ref_objectname_short_len(atom).is_some() => {}
         atom if for_each_ref_objectname_short_invalid_value(atom).is_some() => {
             return Err(for_each_ref_objectname_short_value_error(atom));
@@ -2429,6 +2449,11 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             .unwrap_or((false, key.as_str()));
         let compare = |left: &ForEachRefRow, right: &ForEachRefRow| match key {
             "refname" => left.ref_name.cmp(&right.ref_name),
+            key if for_each_ref_refname_strip_modifier(key).is_some() => {
+                let modifier = for_each_ref_refname_strip_modifier(key).unwrap();
+                strip_for_each_ref_refname(&left.ref_name, modifier)
+                    .cmp(&strip_for_each_ref_refname(&right.ref_name, modifier))
+            }
             "objectname" => left.object_id.to_hex().cmp(&right.object_id.to_hex()),
             "objecttype" => left.object_kind.as_str().cmp(right.object_kind.as_str()),
             "objectsize" => left.object_size.cmp(&right.object_size),
@@ -2444,6 +2469,13 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             "refname" | "objectname" | "objecttype" | "objectsize" | "subject"
             | "contents:subject" | "authordate" | "creatordate" | "taggerdate"
             | "committerdate" => {
+                if descending {
+                    rows.sort_by(|left, right| compare(right, left));
+                } else {
+                    rows.sort_by(compare);
+                }
+            }
+            key if for_each_ref_refname_strip_modifier(key).is_some() => {
                 if descending {
                     rows.sort_by(|left, right| compare(right, left));
                 } else {
@@ -2517,6 +2549,12 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
     match atom {
         "refname" => Ok(row.ref_name.clone()),
         "refname:short" => Ok(short_ref_name(&row.ref_name)),
+        atom if for_each_ref_refname_strip_modifier(atom).is_some() => {
+            Ok(strip_for_each_ref_refname(
+                &row.ref_name,
+                for_each_ref_refname_strip_modifier(atom).unwrap(),
+            ))
+        }
         "objectname" => Ok(row.object_id.to_hex()),
         atom if for_each_ref_objectname_short_len(atom).is_some() => Ok(short_object_id_len(
             &row.object_id,
@@ -2591,6 +2629,52 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
             code: 128,
             message: format!("unknown field name: {atom}"),
         }),
+    }
+}
+
+fn for_each_ref_refname_strip_modifier(atom: &str) -> Option<RefNameStripModifier> {
+    let (mode, value) = atom
+        .strip_prefix("refname:lstrip=")
+        .map(|value| (RefNameStripMode::Lstrip, value))
+        .or_else(|| {
+            atom.strip_prefix("refname:rstrip=")
+                .map(|value| (RefNameStripMode::Rstrip, value))
+        })?;
+    let count = value.parse::<i32>().ok()?;
+    Some(RefNameStripModifier { mode, count })
+}
+
+fn strip_for_each_ref_refname(ref_name: &str, modifier: RefNameStripModifier) -> String {
+    let parts = ref_name.split('/').collect::<Vec<_>>();
+    let len = parts.len();
+    match (modifier.mode, modifier.count.cmp(&0)) {
+        (RefNameStripMode::Lstrip, std::cmp::Ordering::Equal)
+        | (RefNameStripMode::Rstrip, std::cmp::Ordering::Equal) => ref_name.to_owned(),
+        (RefNameStripMode::Lstrip, std::cmp::Ordering::Greater) => {
+            let skip = usize::try_from(modifier.count).unwrap_or(usize::MAX);
+            parts.get(skip..).unwrap_or(&[]).join("/")
+        }
+        (RefNameStripMode::Rstrip, std::cmp::Ordering::Greater) => {
+            let strip = usize::try_from(modifier.count).unwrap_or(usize::MAX);
+            let keep = len.saturating_sub(strip);
+            parts[..keep].join("/")
+        }
+        (RefNameStripMode::Lstrip, std::cmp::Ordering::Less) => {
+            let keep = usize::try_from(modifier.count.saturating_abs()).unwrap_or(usize::MAX);
+            if keep >= len {
+                ref_name.to_owned()
+            } else {
+                parts[len - keep..].join("/")
+            }
+        }
+        (RefNameStripMode::Rstrip, std::cmp::Ordering::Less) => {
+            let keep = usize::try_from(modifier.count.saturating_abs()).unwrap_or(usize::MAX);
+            if keep >= len {
+                ref_name.to_owned()
+            } else {
+                parts[..keep].join("/")
+            }
+        }
     }
 }
 

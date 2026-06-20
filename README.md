@@ -144,15 +144,16 @@ zmin clone --instant --background-fetch https://github.com/example/project.git
 zmin clone --instant --demand-hydrate https://github.com/example/project.git
 ```
 
-## Command Reference
+## Compatibility Audit
 
 Use commands as `zmin <command>`.
 
-Zmin exposes every command entry point from Git `2.47`. That is not full Git
-compatibility. Full compatibility is counted by behavior variants: command,
-option, value, option combination, repository state, transport and platform.
+The first table counts dispatch surface only: whether a Git `2.47` command name
+is wired to a Zmin command handler. It is not a support percentage. Real
+compatibility is counted by behavior variants: command, option, value, option
+combination, repository state, transport and platform.
 
-| Git reference group | Git commands | Zmin entry points wired | Git doc option seed rows | Audited closed behavior variants |
+| Git reference group | Git commands | Zmin dispatch entry points | Git doc option seed rows | Audited closed behavior variants |
 | --- | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `6` | `76` | `0` |
 | Getting and Creating Projects | `2` | `2` | `57` | `2` |
@@ -166,18 +167,18 @@ option, value, option combination, repository state, transport and platform.
 | External Systems | `2` | `2` | `95` | `0` |
 | Administration | `8` | `8` | `134` | `17` |
 | Server Admin | `2` | `2` | `28` | `0` |
-| Plumbing Commands | `20` | `20` | `332` | `60` |
+| Plumbing Commands | `20` | `20` | `332` | `70` |
 | Other Git `2.47` commands | `71` | `71` | `600` | `4` |
-| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`237`** |
+| **Git `2.47` total** | **`151`** | **`151`** | **`2500`** | **`247`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
-Do not read command inventory or doc option rows as a support percentage. The
+Do not read command inventory or doc option rows as implemented support. The
 option rows are a seed extracted from Git `2.47.1` docs. They still need to be
 split into values, negations, repeated options, order-sensitive combinations,
-repository states, transports and platforms.
+repository states, transports and platforms, then checked against stock Git.
 
 Current command-level matrices:
 

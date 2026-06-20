@@ -15,7 +15,8 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
     write_file(repo.path(), "a.txt", "hello\n");
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "initial subject"]);
-    git(repo.path(), ["branch", "feature"]);
+    git(repo.path(), ["branch", "feature-flat"]);
+    git(repo.path(), ["branch", "feature/topic"]);
     git_with_env(
         repo.path(),
         ["tag", "-a", "v1", "-m", "tag subject\nsecond line\n\nbody"],
@@ -150,6 +151,50 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
                 "for-each-ref",
                 "--sort=-refname",
                 "--format=%(refname:short)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=refname:lstrip=2",
+                "--format=%(refname:lstrip=0)|%(refname:lstrip=1)|%(refname:lstrip=2)|%(refname:lstrip=-1)|%(refname:rstrip=0)|%(refname:rstrip=1)|%(refname:rstrip=2)|%(refname:rstrip=-1)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        ),
+        git(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=refname:lstrip=2",
+                "--format=%(refname:lstrip=0)|%(refname:lstrip=1)|%(refname:lstrip=2)|%(refname:lstrip=-1)|%(refname:rstrip=0)|%(refname:rstrip=1)|%(refname:rstrip=2)|%(refname:rstrip=-1)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=refname:rstrip=1",
+                "--format=%(refname)",
+                "refs/heads",
+                "refs/tags",
+            ],
+        ),
+        git(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=refname:rstrip=1",
+                "--format=%(refname)",
                 "refs/heads",
                 "refs/tags",
             ],

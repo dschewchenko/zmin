@@ -78,6 +78,8 @@ Recently closed replacement gaps:
 - `for-each-ref` supports stock `objectsize` for commit, annotated tag, blob
   and tree refs
 - `for-each-ref` supports stock `--sort=objectsize` ordering for those refs
+- `for-each-ref` supports stock `refname:lstrip=<n>` and
+  `refname:rstrip=<n>` format and sort modifiers for valid integer values
 - `for-each-ref` supports `creator` and `creatordate` for commit refs and
   annotated tag refs
 - `for-each-ref` supports stock `objectname:short=<n>` abbreviation lengths
