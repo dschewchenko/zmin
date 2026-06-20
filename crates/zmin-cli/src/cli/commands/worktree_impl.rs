@@ -1205,8 +1205,8 @@ impl UntrackedMode {
             Some("no") => Ok(Self::No),
             Some("all") => Ok(Self::All),
             Some(value) => Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported untracked-files mode: {value}"),
+                code: 128,
+                message: format!("Invalid untracked files mode '{value}'"),
             }),
         }
     }
