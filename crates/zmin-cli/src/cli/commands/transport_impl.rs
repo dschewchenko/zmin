@@ -8991,7 +8991,7 @@ fn ensure_fetch_server_options_supported_for_location(location: &str, enabled: b
 fn ensure_fetch_recurse_submodules_supported(
     repo: &GitRepo,
     mode: FetchRecurseSubmodulesMode,
-    location: Option<&str>,
+    _location: Option<&str>,
 ) -> Result<()> {
     if matches!(
         mode,
@@ -9002,18 +9002,7 @@ fn ensure_fetch_recurse_submodules_supported(
     if !fetch_repo_declares_submodules(repo)? {
         return Ok(());
     }
-    if location
-        .map(local_repository_path_from_location)
-        .transpose()?
-        .flatten()
-        .is_some()
-    {
-        return Ok(());
-    }
-    Err(CliError::Fatal {
-        code: 128,
-        message: "fetch submodule recursion needs a dedicated implementation before use".into(),
-    })
+    Ok(())
 }
 
 fn fetch_should_recurse_submodules(mode: FetchRecurseSubmodulesMode) -> bool {
@@ -11427,13 +11416,10 @@ fn fetch_with_depth(
         refmap,
         prefetch,
         update_shallow,
+        write_fetch_head,
         upload_pack_command,
     );
-    if result.is_ok()
-        && !dry_run
-        && fetch_should_recurse_submodules(recurse_submodules_mode)
-        && local_repository_path_from_location(&url)?.is_some()
-    {
+    if result.is_ok() && !dry_run && fetch_should_recurse_submodules(recurse_submodules_mode) {
         fetch_submodules_on_demand(&repo, &remote)?;
     }
     result
@@ -11466,6 +11452,7 @@ fn fetch_with_missing_ref_code(
         &[],
         false,
         false,
+        true,
         None,
     )
 }
@@ -11507,6 +11494,7 @@ pub(crate) fn fetch_with_repo_and_remote(
     refmap: &[String],
     prefetch: bool,
     update_shallow: bool,
+    write_fetch_head: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
@@ -11535,7 +11523,15 @@ pub(crate) fn fetch_with_repo_and_remote(
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
-        return fetch_with_http_remote(repo, remote, branch, missing_ref_code, &url);
+        return fetch_with_http_remote(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            append,
+            write_fetch_head,
+        );
     }
     if is_git_daemon_transport_url(&url) {
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
@@ -11564,7 +11560,15 @@ pub(crate) fn fetch_with_repo_and_remote(
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
-        return fetch_with_daemon_remote(repo, remote, branch, missing_ref_code, &url);
+        return fetch_with_daemon_remote(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            append,
+            write_fetch_head,
+        );
     }
     if is_ssh_transport_url(&url) {
         if let Some(refspec) = branch.as_ref().filter(|value| value.contains(':')) {
@@ -11599,6 +11603,8 @@ pub(crate) fn fetch_with_repo_and_remote(
             branch,
             missing_ref_code,
             &url,
+            append,
+            write_fetch_head,
             upload_pack_command,
         );
     }
@@ -15351,6 +15357,8 @@ fn fetch_with_http_remote(
     branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
+    append: bool,
+    write_fetch_head: bool,
 ) -> Result<()> {
     let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
@@ -15384,6 +15392,7 @@ fn fetch_with_http_remote(
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut symbolic_head = None::<String>;
+    let mut fetch_head_branch = None::<(ObjectId, String)>;
     if let Some(branch) = branch {
         let ref_name = branch_ref_name(&branch)?;
         let id = rows
@@ -15391,6 +15400,7 @@ fn fetch_with_http_remote(
             .find(|row| row.name == ref_name)
             .map(|row| row.id.clone())
             .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+        fetch_head_branch = Some((id.clone(), ref_name));
         ref_updates.push((format!("refs/remotes/{remote}/{branch}"), id.clone()));
         roots.push(id);
     } else {
@@ -15458,6 +15468,24 @@ fn fetch_with_http_remote(
             &format!("refs/remotes/{remote}/HEAD"),
             &format!("refs/remotes/{remote}/{branch}"),
         )?;
+    }
+    if write_fetch_head {
+        if let Some((id, ref_name)) = fetch_head_branch {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+        } else {
+            let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+            if !fetch_refspecs.is_empty() {
+                write_network_configured_fetch_head_file(
+                    &repo,
+                    &rows,
+                    &remote,
+                    url,
+                    &fetch_refspecs,
+                    append,
+                    false,
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -15683,6 +15711,8 @@ fn fetch_with_daemon_remote(
     branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
+    append: bool,
+    write_fetch_head: bool,
 ) -> Result<()> {
     let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
@@ -15691,6 +15721,7 @@ fn fetch_with_daemon_remote(
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut symbolic_head = None::<String>;
+    let mut fetch_head_branch = None::<(ObjectId, String)>;
     if let Some(branch) = branch {
         let ref_name = branch_ref_name(&branch)?;
         let id = rows
@@ -15698,6 +15729,7 @@ fn fetch_with_daemon_remote(
             .find(|row| row.name == ref_name)
             .map(|row| row.id.clone())
             .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+        fetch_head_branch = Some((id.clone(), ref_name));
         ref_updates.push((format!("refs/remotes/{remote}/{branch}"), id.clone()));
         roots.push(id);
     } else {
@@ -15735,6 +15767,24 @@ fn fetch_with_daemon_remote(
             &format!("refs/remotes/{remote}/HEAD"),
             &format!("refs/remotes/{remote}/{branch}"),
         )?;
+    }
+    if write_fetch_head {
+        if let Some((id, ref_name)) = fetch_head_branch {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+        } else {
+            let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+            if !fetch_refspecs.is_empty() {
+                write_network_configured_fetch_head_file(
+                    &repo,
+                    &rows,
+                    &remote,
+                    url,
+                    &fetch_refspecs,
+                    append,
+                    false,
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -15878,6 +15928,8 @@ fn fetch_with_ssh_remote(
     branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
+    append: bool,
+    write_fetch_head: bool,
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let rows =
@@ -15888,6 +15940,7 @@ fn fetch_with_ssh_remote(
     let mut roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut ref_updates = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut symbolic_head = None::<String>;
+    let mut fetch_head_branch = None::<(ObjectId, String)>;
     if let Some(branch) = branch {
         let ref_name = branch_ref_name(&branch)?;
         let id = rows
@@ -15895,6 +15948,7 @@ fn fetch_with_ssh_remote(
             .find(|row| row.name == ref_name)
             .map(|row| row.id.clone())
             .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
+        fetch_head_branch = Some((id.clone(), ref_name));
         ref_updates.push((format!("refs/remotes/{remote}/{branch}"), id.clone()));
         roots.push(id);
     } else {
@@ -15938,6 +15992,24 @@ fn fetch_with_ssh_remote(
             &format!("refs/remotes/{remote}/HEAD"),
             &format!("refs/remotes/{remote}/{branch}"),
         )?;
+    }
+    if write_fetch_head {
+        if let Some((id, ref_name)) = fetch_head_branch {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+        } else {
+            let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+            if !fetch_refspecs.is_empty() {
+                write_network_configured_fetch_head_file(
+                    &repo,
+                    &rows,
+                    &remote,
+                    url,
+                    &fetch_refspecs,
+                    append,
+                    false,
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -17570,6 +17642,7 @@ fn fetch_with_repo_and_remote_deepen(
             &[],
             false,
             false,
+            write_fetch_head,
             None,
         );
     };
@@ -17762,6 +17835,7 @@ fn fetch_with_repo_and_remote_unshallow(
         &[],
         false,
         false,
+        write_fetch_head,
         None,
     )?;
     if let Some(command) = upload_pack_command {

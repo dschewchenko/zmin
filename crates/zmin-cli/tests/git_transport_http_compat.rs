@@ -3695,6 +3695,155 @@ fn fetch_filter_blob_none_network_branch_transports_match_stock_git() {
     assert_filtered_fetch_matches_stock_git("git-daemon filter", &git_client, &zmin_client);
 }
 
+#[test]
+fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = dir.path().join("submodule");
+    let source = dir.path().join("source");
+    let parent_remote = dir.path().join("parent.git");
+    let git_client = dir.path().join("git-client-submodule-http-parent");
+    let zmin_client = dir.path().join("zmin-client-submodule-http-parent");
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    fs::write(submodule.join("lib.txt"), b"one\n").expect("write submodule one");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "submodule one"]);
+    let first_submodule_head = git(&submodule, ["rev-parse", "HEAD"]);
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    command_output_with_env(
+        "git",
+        &source,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.to_str().expect("submodule path"),
+            "deps/sub",
+        ],
+        &[],
+        "git submodule add",
+    );
+    git_with_env(&source, ["commit", "-m", "add submodule"]);
+
+    git(dir.path(), ["init", "--bare", "parent.git"]);
+    fs::write(parent_remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(
+        &source,
+        [
+            "remote",
+            "add",
+            "origin",
+            parent_remote.to_str().expect("parent remote path"),
+        ],
+    );
+    git(&source, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&parent_remote);
+
+    command_output_with_env(
+        "git",
+        dir.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "clone",
+            "--recurse-submodules",
+            source.to_str().expect("source path"),
+            git_client.to_str().expect("git client path"),
+        ],
+        &[],
+        "git recursive clone",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        dir.path(),
+        &[
+            "clone",
+            "--recurse-submodules",
+            source.to_str().expect("source path"),
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+        &[],
+        "zmin recursive clone",
+    );
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let parent_url = format!("http://127.0.0.1:{}/parent.git", server.port);
+    git(&git_client, ["remote", "set-url", "origin", &parent_url]);
+    git(&zmin_client, ["remote", "set-url", "origin", &parent_url]);
+
+    fs::write(submodule.join("lib.txt"), b"two\n").expect("write submodule two");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "submodule two"]);
+    let second_submodule_head = git(&submodule, ["rev-parse", "HEAD"]);
+    command_output_with_env(
+        "git",
+        &source.join("deps/sub"),
+        &["-c", "protocol.file.allow=always", "fetch", "origin"],
+        &[],
+        "git submodule source fetch",
+    );
+    git(
+        &source.join("deps/sub"),
+        ["checkout", &second_submodule_head],
+    );
+    git(&source, ["add", "deps/sub"]);
+    git_with_env(&source, ["commit", "-m", "update submodule"]);
+    git(&source, ["push", "-q", "origin", "main"]);
+
+    let args = [
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "--quiet",
+        "--recurse-submodules",
+        "origin",
+    ];
+    let git_output = command_output_with_env("git", &git_client, &args, &[], "git fetch");
+    let zmin_output = command_output_with_env(zmin_bin(), &zmin_client, &args, &[], "zmin fetch");
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
+        git(&git_client, ["rev-parse", "refs/remotes/origin/main"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(
+            &zmin_client.join("deps/sub"),
+            ["cat-file", "-t", &second_submodule_head]
+        ),
+        git(
+            &git_client.join("deps/sub"),
+            ["cat-file", "-t", &second_submodule_head]
+        )
+    );
+    assert_eq!(
+        git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        first_submodule_head
+    );
+    assert_eq!(
+        git(&git_client.join("deps/sub"), ["rev-parse", "HEAD"]),
+        first_submodule_head
+    );
+}
+
 fn assert_filtered_fetch_matches_stock_git(
     label: &str,
     git_client: &std::path::Path,
