@@ -460,6 +460,32 @@ fn prepare_shallow_exclude_remote(root: &std::path::Path) -> std::path::PathBuf 
     remote
 }
 
+fn prepare_update_shallow_remote(root: &std::path::Path) -> std::path::PathBuf {
+    let source = root.join("source");
+    let remote = root.join("shallow.git");
+    git(root, ["init", "-b", "main", "source"]);
+    configure_identity(&source);
+    for idx in 1..=4 {
+        fs::write(source.join("file.txt"), format!("commit {idx}\n")).expect("write source file");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", &format!("commit {idx}")]);
+    }
+    let source_url = format!("file://{}", source.display());
+    git(
+        root,
+        [
+            "clone",
+            "--bare",
+            "--depth=2",
+            &source_url,
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    set_bare_head_to_main(&remote);
+    remote
+}
+
 fn init_network_fetch_clients(
     root: &std::path::Path,
     label: &str,
@@ -2513,6 +2539,82 @@ fn fetch_unshallow_network_branch_transports_match_stock_git() {
     );
     assert_network_branch_unshallow_fetch_matches_stock_git(
         "git-daemon unshallow",
+        &git_client,
+        &zmin_client,
+    );
+}
+
+#[test]
+fn fetch_update_shallow_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_update_shallow_remote(dir.path());
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/shallow.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--update-shallow", "origin", "main"],
+        "git update-shallow http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--update-shallow", "origin", "main"],
+        "zmin update-shallow http",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "smart-http update-shallow",
+        &git_client,
+        &zmin_client,
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--update-shallow", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git update-shallow ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--update-shallow", "origin", "main"],
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin update-shallow ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh update-shallow",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/shallow.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "update-shallow-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &["fetch", "--quiet", "--update-shallow", "origin", "main"],
+        "git update-shallow daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--quiet", "--update-shallow", "origin", "main"],
+        "zmin update-shallow daemon",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "git-daemon update-shallow",
         &git_client,
         &zmin_client,
     );

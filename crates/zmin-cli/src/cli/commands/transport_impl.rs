@@ -7363,6 +7363,7 @@ fn http_head_branch_direct(url: &ParsedHttpUrl) -> Result<Option<String>> {
 struct SmartHttpDiscovery {
     rows: Vec<LsRemoteRow>,
     head_branch: Option<String>,
+    shallow_boundaries: Vec<ObjectId>,
 }
 
 enum HttpDiscoveryTransport<'a> {
@@ -7378,27 +7379,48 @@ fn discover_http_refs(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<(Vec<LsRemoteRow>, Option<String>)> {
+    let (rows, head_branch, _) =
+        discover_http_refs_with_shallows(url, transport, heads, tags, refs_only, patterns)?;
+    Ok((rows, head_branch))
+}
+
+fn discover_http_refs_with_shallows(
+    url: &ParsedHttpUrl,
+    transport: HttpDiscoveryTransport<'_>,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Option<String>, Vec<ObjectId>)> {
     match transport {
         HttpDiscoveryTransport::Direct => {
             if let Some(discovery) =
                 http_smart_discovery_direct(url, heads, tags, refs_only, patterns)?
             {
-                return Ok((discovery.rows, discovery.head_branch));
+                return Ok((
+                    discovery.rows,
+                    discovery.head_branch,
+                    discovery.shallow_boundaries,
+                ));
             }
             let rows = http_ls_remote_rows_direct(url, heads, tags, refs_only, patterns)?;
             let head_branch = http_head_branch_direct(url)?;
-            Ok((rows, head_branch))
+            Ok((rows, head_branch, Vec::new()))
         }
         HttpDiscoveryTransport::Helper(helper) => {
             if let Some(discovery) =
                 http_smart_discovery_with_helper(url, helper, heads, tags, refs_only, patterns)?
             {
-                return Ok((discovery.rows, discovery.head_branch));
+                return Ok((
+                    discovery.rows,
+                    discovery.head_branch,
+                    discovery.shallow_boundaries,
+                ));
             }
             let rows =
                 http_ls_remote_rows_with_helper(url, helper, heads, tags, refs_only, patterns)?;
             let head_branch = http_head_branch_with_helper(url, helper)?;
-            Ok((rows, head_branch))
+            Ok((rows, head_branch, Vec::new()))
         }
     }
 }
@@ -7416,6 +7438,21 @@ fn discover_http_refs_with_helper(
         None => HttpDiscoveryTransport::Direct,
     };
     discover_http_refs(url, transport, heads, tags, refs_only, patterns)
+}
+
+fn discover_http_refs_with_helper_and_shallows(
+    url: &ParsedHttpUrl,
+    helper: Option<&mut RemoteHttpHelperSession>,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Option<String>, Vec<ObjectId>)> {
+    let transport = match helper {
+        Some(helper) => HttpDiscoveryTransport::Helper(helper),
+        None => HttpDiscoveryTransport::Direct,
+    };
+    discover_http_refs_with_shallows(url, transport, heads, tags, refs_only, patterns)
 }
 
 fn http_clone_target(
@@ -8043,6 +8080,7 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
         return Ok(None);
     }
     let mut rows = Vec::with_capacity(rows_capacity);
+    let mut shallow_boundaries = Vec::new();
     let mut head_branch = None;
     let mut first = true;
     let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
@@ -8057,6 +8095,10 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
             &line[..]
         };
         first = false;
+        if let Some(id) = upload_pack_shallow_id_from_payload(payload) {
+            shallow_boundaries.push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+            continue;
+        }
         let Some((id, name)) = split_ls_remote_space_payload(payload) else {
             continue;
         };
@@ -8066,7 +8108,12 @@ fn parse_smart_http_discovery_from_reader_with_capacity<R: Read + ?Sized>(
         let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
         push_ls_remote_row_bytes(&mut rows, id, name, patterns);
     }
-    Ok(Some(SmartHttpDiscovery { rows, head_branch }))
+    sort_dedup_object_ids(&mut shallow_boundaries);
+    Ok(Some(SmartHttpDiscovery {
+        rows,
+        head_branch,
+        shallow_boundaries,
+    }))
 }
 
 fn reserve_http_remote_ref_rows_capacity(
@@ -8223,6 +8270,10 @@ fn parse_dumb_http_info_refs_rows_from_body(
 fn split_ls_remote_space_payload(line: &[u8]) -> Option<(&[u8], &[u8])> {
     let line = trim_lf_payload(line);
     split_once_byte(line, b' ').map(|(id, name)| (trim_ascii_whitespace(id), name))
+}
+
+fn is_upload_pack_shallow_advertisement(payload: &[u8]) -> bool {
+    payload.starts_with(b"shallow ")
 }
 
 fn split_ls_remote_tab_payload(line: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -10927,6 +10978,29 @@ fn fetch_with_depth(
             code: 128,
             message: "fetch --upload-pack currently supports local and file remotes".into(),
         });
+    }
+    if update_shallow
+        && (is_http_transport_url(&url)
+            || is_git_daemon_transport_url(&url)
+            || is_ssh_transport_url(&url))
+    {
+        if prefetch
+            || !refmap.is_empty()
+            || branch.as_deref().is_none_or(|value| value.contains(':'))
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --update-shallow currently supports one named remote branch".into(),
+            });
+        }
+        return fetch_with_repo_and_remote_update_shallow(
+            repo,
+            remote,
+            branch.expect("checked above"),
+            missing_ref_code,
+            append,
+            write_fetch_head,
+        );
     }
     if unshallow {
         if prefetch
@@ -15162,7 +15236,7 @@ fn fetch_with_http_remote_shallow_options(
     } else {
         None
     };
-    let (rows, _) = discover_http_refs_with_helper(
+    let (rows, _, advertised_shallow_boundaries) = discover_http_refs_with_helper_and_shallows(
         &parsed_url,
         helper.as_mut().map(std::convert::identity),
         false,
@@ -15198,6 +15272,11 @@ fn fetch_with_http_remote_shallow_options(
             options,
         )?
     };
+    let shallow_boundaries = upload_pack_response_or_advertised_shallows(
+        options,
+        shallow_boundaries,
+        &advertised_shallow_boundaries,
+    );
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
@@ -15338,7 +15417,8 @@ fn fetch_with_daemon_remote_shallow_options(
     append: bool,
     write_fetch_head: bool,
 ) -> Result<()> {
-    let rows = daemon_ls_remote_rows(url, false, false, false, &[])?;
+    let (rows, advertised_shallow_boundaries) =
+        daemon_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
     let objects_dir = repo.objects_dir.clone();
     fetch_with_advertised_remote_shallow_options(
         repo,
@@ -15348,6 +15428,7 @@ fn fetch_with_daemon_remote_shallow_options(
         url,
         options,
         &rows,
+        &advertised_shallow_boundaries,
         append,
         write_fetch_head,
         |roots, haves, options| {
@@ -15495,7 +15576,8 @@ fn fetch_with_ssh_remote_shallow_options(
     append: bool,
     write_fetch_head: bool,
 ) -> Result<()> {
-    let rows = ssh_ls_remote_rows(url, false, false, false, &[])?;
+    let (rows, advertised_shallow_boundaries) =
+        ssh_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
     let objects_dir = repo.objects_dir.clone();
     fetch_with_advertised_remote_shallow_options(
         repo,
@@ -15505,6 +15587,7 @@ fn fetch_with_ssh_remote_shallow_options(
         url,
         options,
         &rows,
+        &advertised_shallow_boundaries,
         append,
         write_fetch_head,
         |roots, haves, options| {
@@ -15521,6 +15604,7 @@ fn fetch_with_advertised_remote_shallow_options<F>(
     _url: &str,
     options: UploadPackShallowOptions<'_>,
     rows: &[LsRemoteRow],
+    advertised_shallow_boundaries: &[ObjectId],
     append: bool,
     write_fetch_head: bool,
     mut fetch_pack: F,
@@ -15539,11 +15623,27 @@ where
         .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
     let roots = [id.clone()];
     let shallow_boundaries = fetch_pack(&roots, &haves, options)?;
+    let shallow_boundaries = upload_pack_response_or_advertised_shallows(
+        options,
+        shallow_boundaries,
+        advertised_shallow_boundaries,
+    );
     destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, _url, append, false)?;
     }
     write_shallow_file(&repo, shallow_boundaries)
+}
+
+fn upload_pack_response_or_advertised_shallows(
+    options: UploadPackShallowOptions<'_>,
+    response_boundaries: Vec<ObjectId>,
+    advertised_boundaries: &[ObjectId],
+) -> Vec<ObjectId> {
+    if response_boundaries.is_empty() && options.uses_advertised_shallow_fallback() {
+        return advertised_boundaries.to_vec();
+    }
+    response_boundaries
 }
 
 fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
@@ -16632,6 +16732,54 @@ fn fetch_with_repo_and_remote_unshallow(
     write_shallow_file(&repo, Vec::new())
 }
 
+fn fetch_with_repo_and_remote_update_shallow(
+    repo: GitRepo,
+    remote: String,
+    branch: String,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let url = fetch_remote_url(&repo, &remote)?;
+    if is_http_transport_url(&url) {
+        return fetch_with_http_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::depth(None),
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_git_daemon_transport_url(&url) {
+        return fetch_with_daemon_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::depth(None),
+            append,
+            write_fetch_head,
+        );
+    }
+    if is_ssh_transport_url(&url) {
+        return fetch_with_ssh_remote_shallow_options(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            UploadPackShallowOptions::depth(None),
+            append,
+            write_fetch_head,
+        );
+    }
+    Err(unsupported_remote_helper_error(&url, String::new()))
+}
+
 fn fetch_local_unshallow_objects_via_upload_pack(
     destination_repo: &GitRepo,
     source_refs: &RefStore,
@@ -17289,6 +17437,9 @@ fn parse_receive_pack_advertisement<R: BufRead + ?Sized>(
                 message: String::from_utf8_lossy(message).trim().to_owned(),
             });
         }
+        if is_upload_pack_shallow_advertisement(payload) {
+            continue;
+        }
         let Some((id, name)) = split_ls_remote_space_payload(payload) else {
             continue;
         };
@@ -17392,6 +17543,14 @@ impl<'a> UploadPackShallowOptions<'a> {
             shallows: &[],
             deepen_relative: false,
         }
+    }
+
+    fn uses_advertised_shallow_fallback(self) -> bool {
+        self.depth.is_none()
+            && self.since.is_none()
+            && self.deepen_not.is_empty()
+            && self.shallows.is_empty()
+            && !self.deepen_relative
     }
 }
 
@@ -17754,21 +17913,33 @@ pub(crate) fn ssh_ls_remote_rows(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
+    ssh_ls_remote_rows_with_shallows(url, heads, tags, refs_only, patterns).map(|(rows, _)| rows)
+}
+
+fn ssh_ls_remote_rows_with_shallows(
+    url: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Vec<ObjectId>)> {
     let parsed = ParsedSshUrl::parse(url)?;
     let mut session = spawn_ssh_remote_command(&parsed, "git-upload-pack")?;
-    let (rows, _) = {
+    let (rows, _, shallow_boundaries) = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "ssh transport stdout is unavailable".into(),
         })?;
-        parse_upload_pack_advertisement_rows(stdout, heads, tags, refs_only, patterns)?
+        parse_upload_pack_advertisement_rows_with_shallows(
+            stdout, heads, tags, refs_only, patterns,
+        )?
     };
     if rows.is_empty() {
         session.finish()?;
     } else {
         session.abandon()?;
     }
-    Ok(rows)
+    Ok((rows, shallow_boundaries))
 }
 
 fn ssh_open_advertised_upload_pack(
@@ -17784,12 +17955,14 @@ fn ssh_open_advertised_upload_pack(
         spawn_ssh_remote_command(&parsed, "git-upload-pack")?
     };
     let advertisement_start = phase_trace_enabled().then(Instant::now);
-    let (rows, head_branch) = {
+    let (rows, head_branch, _) = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "ssh transport stdout is unavailable".into(),
         })?;
-        parse_upload_pack_advertisement_rows(stdout, heads, tags, refs_only, patterns)?
+        parse_upload_pack_advertisement_rows_with_shallows(
+            stdout, heads, tags, refs_only, patterns,
+        )?
     };
     if let Some(start) = advertisement_start {
         phase_trace_emit(
@@ -18446,11 +18619,28 @@ pub(crate) fn daemon_ls_remote_rows(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
+    daemon_ls_remote_rows_with_shallows(url, heads, tags, refs_only, patterns).map(|(rows, _)| rows)
+}
+
+fn daemon_ls_remote_rows_with_shallows(
+    url: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Vec<ObjectId>)> {
     let url = ParsedDaemonUrl::parse(url)?;
     let mut stream = daemon_transport_connect(&url)?;
     daemon_transport_handshake(&mut stream, &url)?;
     let mut reader = daemon_transport_reader(stream);
-    parse_daemon_upload_pack_rows(&mut reader, heads, tags, refs_only, patterns)
+    parse_upload_pack_advertisement_rows_with_shallows(
+        &mut reader,
+        heads,
+        tags,
+        refs_only,
+        patterns,
+    )
+    .map(|(rows, _, shallow_boundaries)| (rows, shallow_boundaries))
 }
 
 fn daemon_open_advertised_upload_pack(
@@ -18464,8 +18654,13 @@ fn daemon_open_advertised_upload_pack(
     let mut stream = daemon_transport_connect(&url)?;
     daemon_transport_handshake(&mut stream, &url)?;
     let mut reader = daemon_transport_reader(stream.try_clone()?);
-    let (rows, head_branch) =
-        parse_upload_pack_advertisement_rows(&mut reader, heads, tags, refs_only, patterns)?;
+    let (rows, head_branch, _) = parse_upload_pack_advertisement_rows_with_shallows(
+        &mut reader,
+        heads,
+        tags,
+        refs_only,
+        patterns,
+    )?;
     Ok(DaemonAdvertisedUploadPack {
         stream,
         reader,
@@ -18474,6 +18669,7 @@ fn daemon_open_advertised_upload_pack(
     })
 }
 
+#[cfg(test)]
 fn parse_daemon_upload_pack_rows<R: BufRead>(
     reader: &mut R,
     heads: bool,
@@ -18485,6 +18681,7 @@ fn parse_daemon_upload_pack_rows<R: BufRead>(
         .map(|(rows, _)| rows)
 }
 
+#[cfg(test)]
 fn parse_upload_pack_advertisement_rows<R: BufRead>(
     reader: &mut R,
     heads: bool,
@@ -18492,8 +18689,20 @@ fn parse_upload_pack_advertisement_rows<R: BufRead>(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<(Vec<LsRemoteRow>, Option<String>)> {
+    parse_upload_pack_advertisement_rows_with_shallows(reader, heads, tags, refs_only, patterns)
+        .map(|(rows, head_branch, _)| (rows, head_branch))
+}
+
+fn parse_upload_pack_advertisement_rows_with_shallows<R: BufRead>(
+    reader: &mut R,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<(Vec<LsRemoteRow>, Option<String>, Vec<ObjectId>)> {
     let mut rows = Vec::with_capacity(HTTP_REMOTE_REF_ROWS_CAPACITY_HINT);
     let mut head_branch = None;
+    let mut shallow_boundaries = Vec::new();
     let mut line = Vec::with_capacity(PKT_LINE_PAYLOAD_CAPACITY_HINT);
     while read_pkt_line_payload_into(reader, &mut line)? {
         if let Some(nul_pos) = line.iter().position(|byte| *byte == 0)
@@ -18510,6 +18719,10 @@ fn parse_upload_pack_advertisement_rows<R: BufRead>(
                 code: 128,
                 message: String::from_utf8_lossy(message).trim().to_owned(),
             });
+        }
+        if let Some(id) = upload_pack_shallow_id_from_payload(payload) {
+            shallow_boundaries.push(ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?);
+            continue;
         }
         let Some((id, name)) = split_ls_remote_space_payload(payload) else {
             continue;
@@ -18529,7 +18742,8 @@ fn parse_upload_pack_advertisement_rows<R: BufRead>(
         let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id)?;
         push_ls_remote_row_bytes(&mut rows, id, name, patterns);
     }
-    Ok((rows, head_branch))
+    sort_dedup_object_ids(&mut shallow_boundaries);
+    Ok((rows, head_branch, shallow_boundaries))
 }
 
 fn daemon_head_branch(url: &str) -> Result<Option<String>> {
