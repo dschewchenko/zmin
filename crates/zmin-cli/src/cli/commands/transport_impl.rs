@@ -8514,7 +8514,6 @@ pub(crate) fn run_fetch(
     if upload_pack_command.is_some()
         && (all
             || multiple
-            || refspecs.len() > 1
             || depth.is_some()
             || deepen.is_some()
             || unshallow
@@ -8631,7 +8630,7 @@ pub(crate) fn run_fetch(
             no_tags,
             prefetch,
             has_server_options,
-            None,
+            upload_pack_command.as_deref(),
         )?;
         if !dry_run {
             write_fetch_commit_graph_if_enabled()?;
@@ -9181,24 +9180,39 @@ fn fetch_multiple_refspecs(
     }
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
-    if upload_pack_command.is_some() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --upload-pack currently supports one named local or file remote".into(),
-        });
-    }
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
+        if upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --upload-pack currently supports named local or file remotes"
+                    .into(),
+            });
+        }
         return fetch_multiple_refspecs_from_http_remote(
             &repo, &remote, &url, &refspecs, depth, quiet,
         );
     }
     if is_git_daemon_transport_url(&url) {
+        if upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --upload-pack currently supports named local or file remotes"
+                    .into(),
+            });
+        }
         return fetch_multiple_refspecs_from_daemon_remote(
             &repo, &remote, &url, &refspecs, depth, quiet, prune,
         );
     }
     if is_ssh_transport_url(&url) {
+        if upload_pack_command.is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --upload-pack currently supports named local or file remotes"
+                    .into(),
+            });
+        }
         return fetch_multiple_refspecs_from_ssh_remote(
             &repo, &remote, &url, &refspecs, depth, quiet, prune,
         );
@@ -9228,6 +9242,21 @@ fn fetch_multiple_refspecs(
                 &refspecs,
                 depth,
                 no_tags,
+            )?;
+        } else if let Some(command) = upload_pack_command {
+            fetch_local_objects_via_upload_pack(
+                &repo,
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                LocalFetchRootRequest {
+                    remote: &remote,
+                    branch: None,
+                    fetch_refspecs: &refspecs,
+                    missing_ref_code: 128,
+                },
+                command,
+                source_path.to_string_lossy().as_ref(),
             )?;
         } else {
             copy_local_fetch_objects(

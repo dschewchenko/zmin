@@ -2031,6 +2031,140 @@ fn fetch_upload_pack_local_transports_use_external_command_like_stock_git() {
 }
 
 #[test]
+fn fetch_upload_pack_multiple_refspecs_local_transports_match_stock_git() {
+    let cases = [
+        ("local-path-equals", false, true),
+        ("local-path-separate", false, false),
+        ("file-url-equals", true, true),
+        ("file-url-separate", true, false),
+    ];
+
+    for (label, file_url, equals_form) in cases {
+        let dir = TempDir::new().expect("temp dir");
+        let source = dir.path().join(format!("source-{label}"));
+        let git_client = dir.path().join(format!("git-client-{label}"));
+        let zmin_client = dir.path().join(format!("zmin-client-{label}"));
+        let wrapper = dir.path().join(format!("upload-pack-multi-{label}.sh"));
+        let log = wrapper.with_extension("sh.log");
+
+        fs::write(
+            &wrapper,
+            b"#!/bin/sh\nprintf 'invoked %s\\n' \"$*\" >> \"$0.log\"\nexec git-upload-pack \"$@\"\n",
+        )
+        .expect("write upload-pack wrapper");
+        chmod_executable(&wrapper);
+
+        git(
+            dir.path(),
+            ["init", "-b", "main", source.to_str().expect("source path")],
+        );
+        configure_identity(&source);
+        fs::write(source.join("file"), b"main\n").expect("write source");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "main"]);
+
+        git(
+            dir.path(),
+            [
+                "clone",
+                source.to_str().expect("source path"),
+                git_client.to_str().expect("git client path"),
+            ],
+        );
+        run_zmin(
+            dir.path(),
+            [
+                "clone",
+                source.to_str().expect("source path"),
+                zmin_client.to_str().expect("zmin client path"),
+            ],
+        );
+        if file_url {
+            let url = format!("file://{}", source.display());
+            git(&git_client, ["remote", "set-url", "origin", &url]);
+            git(&zmin_client, ["remote", "set-url", "origin", &url]);
+        }
+
+        fs::write(source.join("file"), b"next\n").expect("write next");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "next"]);
+        git(&source, ["switch", "-c", "feature"]);
+        fs::write(source.join("feature.txt"), b"feature\n").expect("write feature");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "feature"]);
+        git(&source, ["switch", "main"]);
+
+        let wrapper_command = shell_command_path(wrapper.to_str().expect("wrapper path"));
+        let mut args = if equals_form {
+            vec![
+                "fetch".to_owned(),
+                "--quiet".to_owned(),
+                format!("--upload-pack={wrapper_command}"),
+                "origin".to_owned(),
+            ]
+        } else {
+            vec![
+                "fetch".to_owned(),
+                "--quiet".to_owned(),
+                "--upload-pack".to_owned(),
+                wrapper_command,
+                "origin".to_owned(),
+            ]
+        };
+        args.push("refs/heads/main:refs/remotes/origin/main".to_owned());
+        args.push("refs/heads/feature:refs/remotes/origin/feature".to_owned());
+        let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+        let git_output = command_any_output("git", &git_client, &arg_refs, "git");
+        let zmin_output = command_any_output(zmin_bin(), &zmin_client, &arg_refs, "zmin");
+
+        assert_eq!(zmin_output.0, git_output.0, "{label}");
+        assert_eq!(zmin_output.1, git_output.1, "{label}");
+        assert_eq!(zmin_output.2, git_output.2, "{label}");
+        for ref_name in ["refs/remotes/origin/main", "refs/remotes/origin/feature"] {
+            assert_eq!(
+                git(&zmin_client, ["rev-parse", ref_name]),
+                git(&git_client, ["rev-parse", ref_name]),
+                "{label}: {ref_name}"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{label}"
+        );
+        assert_eq!(
+            git(
+                &zmin_client,
+                ["cat-file", "-p", "refs/remotes/origin/main:file"]
+            ),
+            git(
+                &git_client,
+                ["cat-file", "-p", "refs/remotes/origin/main:file"]
+            ),
+            "{label}"
+        );
+        assert_eq!(
+            git(
+                &zmin_client,
+                ["cat-file", "-p", "refs/remotes/origin/feature:feature.txt"]
+            ),
+            git(
+                &git_client,
+                ["cat-file", "-p", "refs/remotes/origin/feature:feature.txt"]
+            ),
+            "{label}"
+        );
+        let invocations = fs::read_to_string(&log).expect("upload-pack log");
+        assert_eq!(
+            invocations.lines().count(),
+            2,
+            "expected stock Git and Zmin to invoke upload-pack for {label}: {invocations}"
+        );
+    }
+}
+
+#[test]
 fn fetch_uses_first_configured_remote_url_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let url1 = dir.path().join("url1");
