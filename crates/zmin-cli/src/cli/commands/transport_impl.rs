@@ -11472,19 +11472,25 @@ fn fetch_with_depth(
     let url = fetch_remote_url(&repo, &remote)?;
     ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode, Some(&url))?;
     if has_server_options {
-        if !(is_http_transport_url(&url) || is_ssh_transport_url(&url))
-            || branch.as_deref().is_none_or(|value| value.contains(':'))
-            || prefetch
-            || !refmap.is_empty()
-            || update_shallow
-            || dry_run
-            || deepen.is_some()
-            || unshallow
-            || shallow_since.is_some()
-            || !shallow_exclude.is_empty()
-            || depth.is_some()
-            || upload_pack_command.is_some()
-        {
+        let supported_ref_shape = if is_http_transport_url(&url) {
+            branch.as_deref().is_none_or(|value| !value.contains(':'))
+        } else if is_ssh_transport_url(&url) {
+            branch.as_deref().is_some_and(|value| !value.contains(':'))
+        } else {
+            false
+        };
+        let supported_option_shape = supported_ref_shape
+            && !prefetch
+            && refmap.is_empty()
+            && !update_shallow
+            && !dry_run
+            && deepen.is_none()
+            && !unshallow
+            && shallow_since.is_none()
+            && shallow_exclude.is_empty()
+            && depth.is_none()
+            && upload_pack_command.is_none();
+        if !supported_option_shape {
             ensure_fetch_server_options_supported_for_location(&url, true)?;
         }
     }
@@ -11742,11 +11748,26 @@ pub(crate) fn fetch_with_repo_and_remote(
     if is_http_transport_url(&url) {
         if !server_options.is_empty() {
             let Some(branch) = branch.as_deref() else {
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: "fetch --server-option currently supports one smart HTTP branch"
-                        .into(),
-                });
+                if !refmap.is_empty()
+                    || prefetch
+                    || update_shallow
+                    || dry_run
+                    || upload_pack_command.is_some()
+                {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "fetch --server-option currently supports one smart HTTP branch or configured fetch".into(),
+                    });
+                }
+                return fetch_configured_http_remote_v2_server_options(
+                    repo,
+                    remote,
+                    missing_ref_code,
+                    &url,
+                    append,
+                    write_fetch_head,
+                    server_options,
+                );
             };
             if branch.contains(':')
                 || !refmap.is_empty()
@@ -11757,10 +11778,10 @@ pub(crate) fn fetch_with_repo_and_remote(
             {
                 return Err(CliError::Fatal {
                     code: 128,
-                    message: "fetch --server-option currently supports one smart HTTP branch"
+                    message: "fetch --server-option currently supports one smart HTTP branch or configured fetch"
                         .into(),
                 });
-            }
+            };
             return fetch_with_http_remote_v2_server_options(
                 repo,
                 remote,
@@ -15872,6 +15893,89 @@ fn fetch_with_http_remote_v2_server_options(
     Ok(())
 }
 
+fn fetch_configured_http_remote_v2_server_options(
+    repo: GitRepo,
+    remote: String,
+    missing_ref_code: i32,
+    url: &str,
+    append: bool,
+    write_fetch_head: bool,
+    server_options: &[String],
+) -> Result<()> {
+    let parsed_url = parsed_http_url_with_extra_headers(Some(&repo), url)?;
+    let v2_url = http_url_with_git_protocol_v2(&parsed_url);
+    let mut helper = if v2_url.scheme == HttpScheme::Https {
+        Some(RemoteHttpHelperSession::spawn(&v2_url)?)
+    } else {
+        None
+    };
+    if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_capabilities_with_helper(&v2_url, helper)?;
+    } else {
+        http_upload_pack_v2_capabilities_direct(&v2_url)?;
+    }
+    let rows = if let Some(helper) = helper.as_mut() {
+        http_upload_pack_v2_ls_refs_configured_with_helper(&v2_url, helper, server_options)?
+    } else {
+        http_upload_pack_v2_ls_refs_configured_direct(&v2_url, server_options)?
+    };
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, &rows)?;
+    sort_dedup_object_ids(&mut roots);
+    let request_roots = missing_fetch_roots(&store, &roots)?;
+    let pack_fetched = if let Some(helper) = helper.as_mut() {
+        http_fetch_smart_pack_v2_with_helper(
+            &v2_url,
+            helper,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            server_options,
+        )?
+    } else {
+        http_fetch_smart_pack_v2_direct(
+            &v2_url,
+            &repo.objects_dir,
+            &request_roots,
+            &haves,
+            server_options,
+        )?
+    };
+    if !pack_fetched && !request_roots.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "remote upload-pack response did not contain a pack".into(),
+        });
+    }
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = unique_head_branch_from_rows(&rows) {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file(
+            &repo,
+            &rows,
+            &remote,
+            url,
+            &fetch_refspecs,
+            append,
+            false,
+        )?;
+    }
+    Ok(())
+}
+
 fn fetch_with_ssh_remote_v2_server_options(
     repo: GitRepo,
     remote: String,
@@ -16059,6 +16163,40 @@ fn http_upload_pack_v2_ls_refs_with_helper(
     server_options: &[String],
 ) -> Result<Vec<LsRemoteRow>> {
     let request = build_upload_pack_v2_ls_refs_request(branch, server_options)?;
+    let response =
+        helper.request_to_body(url, "POST", "git-upload-pack", &request, &PackBody::Empty)?;
+    if response.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", response.status_line),
+        });
+    }
+    response
+        .body
+        .with_reader(|reader| parse_upload_pack_v2_ls_refs_response(reader))
+}
+
+fn http_upload_pack_v2_ls_refs_configured_direct(
+    url: &ParsedHttpUrl,
+    server_options: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
+    let (head, mut body) = http_request_reader(url, "POST", "git-upload-pack", &request)?;
+    if head.status_code != 200 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("HTTP ref request failed: {}", head.status_line),
+        });
+    }
+    parse_upload_pack_v2_ls_refs_response(&mut body)
+}
+
+fn http_upload_pack_v2_ls_refs_configured_with_helper(
+    url: &ParsedHttpUrl,
+    helper: &mut RemoteHttpHelperSession,
+    server_options: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let request = build_upload_pack_v2_ls_refs_configured_fetch_request(server_options)?;
     let response =
         helper.request_to_body(url, "POST", "git-upload-pack", &request, &PackBody::Empty)?;
     if response.status_code != 200 {
@@ -20032,10 +20170,28 @@ fn build_upload_pack_v2_ls_refs_request(
     server_options: &[String],
 ) -> Result<Vec<u8>> {
     let ref_name = branch_ref_name(branch)?;
+    build_upload_pack_v2_ls_refs_prefix_request(&[ref_name.as_str()], server_options)
+}
+
+fn build_upload_pack_v2_ls_refs_configured_fetch_request(
+    server_options: &[String],
+) -> Result<Vec<u8>> {
+    build_upload_pack_v2_ls_refs_prefix_request(
+        &["HEAD", "refs/heads/", "refs/tags/"],
+        server_options,
+    )
+}
+
+fn build_upload_pack_v2_ls_refs_prefix_request(
+    prefixes: &[&str],
+    server_options: &[String],
+) -> Result<Vec<u8>> {
     let mut request =
         Vec::with_capacity(256 + server_options.iter().map(String::len).sum::<usize>());
     append_upload_pack_v2_command_header(&mut request, "ls-refs", server_options)?;
-    append_pkt_payload(&mut request, format!("ref-prefix {ref_name}\n").as_bytes())?;
+    for prefix in prefixes {
+        append_pkt_payload(&mut request, format!("ref-prefix {prefix}\n").as_bytes())?;
+    }
     request.extend_from_slice(b"0000");
     Ok(request)
 }

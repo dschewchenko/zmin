@@ -9597,6 +9597,22 @@ fn fetch_server_option_protocol_v2_smart_http_branch_matches_stock_git() {
 }
 
 #[test]
+fn fetch_server_option_protocol_v2_smart_http_branchless_matches_stock_git() {
+    assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+        "branchless",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+        ],
+        &["fetch", "--server-option=trace", "origin"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
 fn fetch_server_option_separate_protocol_v2_smart_http_branch_matches_stock_git() {
     assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
         "separate",
