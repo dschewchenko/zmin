@@ -1065,6 +1065,21 @@ fn log_invalid_date_format_matches_stock_git_failure() {
 }
 
 #[test]
+fn log_missing_date_value_matches_stock_git_failure() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+
+    let args = ["log", "-1", "--date", "--format=%ad"];
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[test]
 fn rev_list_accepts_dashdash_separator_like_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

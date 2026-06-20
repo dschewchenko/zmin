@@ -103,6 +103,7 @@ pub(crate) fn parse_cli_invocation(
     }
     let command_args = normalize_empty_init_template(command_args);
     let command_args = normalize_history_count_shorthand(command_args);
+    let command_args = normalize_log_date_hyphen_value(command_args);
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
@@ -149,6 +150,28 @@ fn normalize_history_count_shorthand(args: Vec<String>) -> Vec<String> {
             }
         }
         normalized.push(arg);
+    }
+    normalized
+}
+
+fn normalize_log_date_hyphen_value(args: Vec<String>) -> Vec<String> {
+    if args.first().map(String::as_str) != Some("log") {
+        return args;
+    }
+    let mut normalized = Vec::with_capacity(args.len());
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--date"
+            && let Some(value) = args.get(index + 1)
+            && value.starts_with('-')
+        {
+            normalized.push(format!("--date={value}"));
+            index += 2;
+            continue;
+        }
+        normalized.push(arg.clone());
+        index += 1;
     }
     normalized
 }
