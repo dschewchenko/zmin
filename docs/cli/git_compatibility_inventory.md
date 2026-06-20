@@ -121,6 +121,8 @@ focused parity evidence checks the same surface.
   Git `status`.
 - `docs/cli/matrices/fetch_v2_47.tsv` tracks the first `fetch` option,
   transport and repository-state variants.
+- `docs/cli/matrices/diff_v2_47.tsv` tracks the first `diff` output format,
+  patch, reverse, pickaxe, ordering, path, exit-code and binary-text variants.
 - `docs/cli/matrices/ls_files_v2_47.tsv` tracks the first `ls-files` cached,
   stage, NUL, EOL, ignored/others, unmerged and submodule variants.
 - `docs/cli/matrices/rev_parse_v2_47.tsv` tracks the first `rev-parse`
@@ -151,10 +153,10 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `5/151` | no | audit rows exist for `config`, `status`, `fetch`, `ls-files` and `rev-parse` |
-| Git doc option pairs represented by rows | `114/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `379` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `344/379` | yes, row by row | exact written rows with parity evidence |
+| Commands with any matrix rows | `6/151` | no | audit rows exist for `config`, `status`, `fetch`, `diff`, `ls-files` and `rev-parse` |
+| Git doc option pairs represented by rows | `145/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `432` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `397/432` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -188,7 +190,7 @@ Current generated summary:
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `0` | `0` | `0` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `189` | `177` | `0` | `9` | `3` | `77` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `0` | `0` | `0` | `0` | `0` | `8` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `53` | `53` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` | `0` | `52` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
@@ -197,7 +199,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `78` | `68` | `0` | `0` | `10` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`379`** | **`344`** | **`0`** | **`9`** | **`26`** | **`330`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`432`** | **`397`** | **`0`** | **`9`** | **`26`** | **`330`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -207,9 +209,9 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `114/4632`
-represented option pairs or `344/379` passing written rows as a Git support
-percentage. The `344/379` number is audit progress for rows already written
+Never use `151/151` command presence, `4632` option spellings, `145/4632`
+represented option pairs or `397/432` passing written rows as a Git support
+percentage. The `397/432` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -226,6 +228,7 @@ variants.
 | `config` | `243` | `0` | `17` | `docs/cli/matrices/config_v2_47.tsv` | `51` | `42` | `0` | `0` | `9` | no |
 | `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `61` | `57` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `0` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `189` | `177` | `0` | `9` | `3` | no |
+| `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `53` | `53` | `0` | `0` | `0` | no |
 | `ls-files` | `42` | `0` | `27` | `docs/cli/matrices/ls_files_v2_47.tsv` | `53` | `45` | `0` | `0` | `8` | no |
 | `rev-parse` | `72` | `0` | `20` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `25` | `23` | `0` | `0` | `2` | no |
 
