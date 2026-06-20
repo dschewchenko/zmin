@@ -212,6 +212,10 @@ compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
 
+"$stock_git" -C "$stock_client" add tracked.txt new.txt
+"$stock_git" -C "$zmin_client" add tracked.txt new.txt
+compare_command diff_cached_name_status_z diff --cached --name-status -z
+
 zmin_client_physical="$(cd "$zmin_client" && pwd -P)"
 assert_zmin_success_stdout \
   rev_parse_toplevel "$zmin_client" "$zmin_client_physical" rev-parse --show-toplevel
