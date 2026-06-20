@@ -620,6 +620,17 @@ fn status_cache_index_toggles_are_not_stock_git_options() {
 }
 
 #[test]
+fn status_invalid_porcelain_version_matches_stock_git() {
+    let repo = committed_repo();
+    let args = ["status", "--porcelain=v3"];
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[test]
 fn status_rename_modes_match_stock_git() {
     let repo = committed_repo();
     run_zmin(repo.path(), ["mv", "a.txt", "renamed.txt"]);
