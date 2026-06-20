@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 769 written rows / 693 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 770 written rows / 694 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -172,21 +172,22 @@ updates, project-note update, commit and push.
 
 ### Current Next Slice Pointer
 
-The next slice is a single WebStorm replacement row:
-`git fetch --prune --no-tags` through the temporary `git` shim on a cloned
-repository with an updated remote.
+The next slice is one unsupported-guard classification pass:
+`fetch --filter` local/file and shallow-mode guards in
+`crates/zmin-cli/src/cli/commands/transport_impl.rs`.
 
 Do not broaden this slice to unrelated `fetch` behavior. It is done only
 after these steps complete:
 
-1. Add a closed row to `docs/cli/matrices/fetch_v2_47.tsv` with focused
-   replacement-smoke evidence for the fetch command.
-2. Run `tools/git-replacement-dogfood-smoke.sh`.
+1. Inventory each matching guard as Git-supported gap, stock-compatible invalid
+   input, intentional deferral or Zmin-only behavior.
+2. Add or update rows in `docs/cli/matrices/fetch_v2_47.tsv` before runtime
+   changes.
 3. Run the count gates from this document.
 4. Refresh README, `git_compatibility_inventory.md`, this plan and project
    notes with generated counts.
-5. Commit and push the docs/matrix slice before moving to the next replacement
-   command line.
+5. Commit and push the classification slice before moving to the next guard
+   cluster.
 
 The most recent closed transport lane is `fetch --server-option` protocol v2
 for smart HTTP, SSH and git-daemon, covering explicit branch and branchless
@@ -297,6 +298,7 @@ until a full matrix is expanded and verified.
 | `fetch --update-shallow` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --update-shallow` network multiple explicit refspec forms | `3` | `0` | smart HTTP, SSH and git daemon fetches with two destination refspecs from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --update-shallow` network branchless configured fetch forms | `3` | `0` | smart HTTP, SSH and git daemon configured fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
+| `fetch` replacement prune/no-tags | `1` | `0` | `--prune --no-tags` through the `git` shim updates `origin/main`, prunes stale `origin/gone`, skips a newly reachable tag and matches stock stdout/stderr/FETCH_HEAD |
 | `fetch --recurse-submodules local/file no-submodule value modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true, on-demand, no, boolean false, numeric false and `--no-recurse-submodules` for repositories without submodules |
 | `fetch --recurse-submodules local/file changed submodule modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed gitlink commit into the initialized submodule object database without checkout; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
 | `fetch --recurse-submodules smart HTTP initialized local submodule modes` | `9` | `0` | smart HTTP parent fetch with an initialized local submodule remote: implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed submodule commit; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
@@ -321,7 +323,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `437` verified variants.
+Tracked closed blocks in this table: `438` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

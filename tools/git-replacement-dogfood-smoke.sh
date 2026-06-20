@@ -240,15 +240,31 @@ compare_root_path_command rev_parse_toplevel rev-parse --show-toplevel
 
 printf 'two\n' >"$source_repo/tracked.txt"
 "$stock_git" -C "$source_repo" commit -am second --quiet
+"$stock_git" -C "$source_repo" tag later-tag
 "$stock_git" -C "$source_repo" push "$remote_repo" main --quiet
+"$stock_git" -C "$source_repo" push "$remote_repo" later-tag --quiet
+"$stock_git" -C "$stock_client" update-ref refs/remotes/origin/gone HEAD
+"$stock_git" -C "$zmin_client" update-ref refs/remotes/origin/gone HEAD
 
-run_capture stock "$stock_client" "$capture_dir/fetch.stock" fetch --prune --no-tags
-run_capture zmin "$zmin_client" "$capture_dir/fetch.zmin" fetch --prune --no-tags
-if [[ "$(cat "$capture_dir/fetch.stock.status")" != "$(cat "$capture_dir/fetch.zmin.status")" ]]; then
-  echo "fetch exit mismatch" >&2
-  exit 1
-fi
+run_capture stock "$stock_client" "$capture_dir/fetch_prune_no_tags.stock" fetch --prune --no-tags
+run_capture zmin "$zmin_client" "$capture_dir/fetch_prune_no_tags.zmin" fetch --prune --no-tags
+for suffix in status stdout stderr; do
+  if ! cmp -s "$capture_dir/fetch_prune_no_tags.stock.$suffix" "$capture_dir/fetch_prune_no_tags.zmin.$suffix"; then
+    echo "fetch mismatch: $suffix" >&2
+    echo "--- stock $suffix" >&2
+    od -An -tx1c "$capture_dir/fetch_prune_no_tags.stock.$suffix" >&2
+    echo "--- zmin $suffix" >&2
+    od -An -tx1c "$capture_dir/fetch_prune_no_tags.zmin.$suffix" >&2
+    exit 1
+  fi
+done
 
 compare_command fetched_origin_main rev-parse refs/remotes/origin/main
+compare_command fetched_pruned_branch_missing rev-parse --verify refs/remotes/origin/gone
+compare_command fetched_no_tags_missing rev-parse --verify refs/tags/later-tag
+if ! cmp -s "$stock_client/.git/FETCH_HEAD" "$zmin_client/.git/FETCH_HEAD"; then
+  echo "FETCH_HEAD mismatch after fetch --prune --no-tags" >&2
+  exit 1
+fi
 
 printf 'git_replacement_dogfood_smoke=ok\n'

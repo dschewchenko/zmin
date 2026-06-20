@@ -9925,7 +9925,13 @@ fn fetch_multiple_refspecs(
         Vec::new()
     } else {
         let _trace = phase_trace("fetch.local.collect_update_rows");
-        collect_configured_fetch_update_rows(&source_refs, &destination_refs, &refspecs, !no_tags)?
+        collect_configured_fetch_update_rows(
+            &source_refs,
+            &destination_refs,
+            &refspecs,
+            !no_tags,
+            false,
+        )?
     };
     {
         let _trace = phase_trace("fetch.local.apply_refspecs");
@@ -10570,7 +10576,13 @@ fn fetch_multiple_refspecs_from_location(
         Vec::new()
     } else {
         let _trace = phase_trace("fetch.local.collect_update_rows");
-        collect_configured_fetch_update_rows(&source_refs, &destination_refs, refspecs, !no_tags)?
+        collect_configured_fetch_update_rows(
+            &source_refs,
+            &destination_refs,
+            refspecs,
+            !no_tags,
+            false,
+        )?
     };
     {
         let _trace = phase_trace("fetch.local.apply_refspecs");
@@ -12203,6 +12215,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &destination_refs,
                 &fetch_refspecs,
                 !no_tags,
+                prune,
             )?
         };
         if prune && !atomic {
@@ -12798,7 +12811,13 @@ fn fetch_direct_location_prune_tags(
     let fetch_update_rows = if quiet {
         Vec::new()
     } else {
-        collect_configured_fetch_update_rows(&source_refs, &destination_refs, &refspecs, true)?
+        collect_configured_fetch_update_rows(
+            &source_refs,
+            &destination_refs,
+            &refspecs,
+            true,
+            true,
+        )?
     };
     apply_configured_fetch_refspecs(
         repo,
@@ -13284,7 +13303,13 @@ fn fetch_direct_location_wildcard_refspec(
     let fetch_update_rows = if quiet {
         Vec::new()
     } else {
-        collect_configured_fetch_update_rows(&source_refs, &destination_refs, &refspecs, !no_tags)?
+        collect_configured_fetch_update_rows(
+            &source_refs,
+            &destination_refs,
+            &refspecs,
+            !no_tags,
+            prune,
+        )?
     };
     apply_configured_fetch_refspecs(
         repo,
@@ -14406,8 +14431,10 @@ fn collect_configured_fetch_update_rows(
     destination_refs: &RefStore,
     refspecs: &[String],
     include_tags: bool,
+    include_pruned_refs: bool,
 ) -> Result<Vec<String>> {
-    let mut rows = Vec::new();
+    let mut deleted_rows = Vec::new();
+    let mut update_rows = Vec::new();
     for refspec in refspecs {
         let refspec = refspec.trim_start_matches('+');
         let Some((source, destination)) = refspec.split_once(':') else {
@@ -14416,7 +14443,34 @@ fn collect_configured_fetch_update_rows(
         if let Some((source_prefix, source_suffix, destination_prefix, destination_suffix)) =
             wildcard_fetch_parts(source, destination)
         {
-            source_refs.for_each_resolved_ref(source_prefix, |source_ref, _| {
+            if include_pruned_refs {
+                destination_refs.for_each_ref_name(destination_prefix, |destination_ref| {
+                    if destination_ref.ends_with("/HEAD") {
+                        return Ok::<(), CliError>(());
+                    }
+                    let Some(captured) = destination_ref
+                        .strip_prefix(destination_prefix)
+                        .and_then(|rest| rest.strip_suffix(destination_suffix))
+                    else {
+                        return Ok::<(), CliError>(());
+                    };
+                    let source_ref = format!("{source_prefix}{captured}{source_suffix}");
+                    match source_refs.read_ref(&source_ref) {
+                        Ok(_) => {}
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                            ) =>
+                        {
+                            deleted_rows.push(fetch_deleted_row(destination_ref));
+                        }
+                        Err(error) => return Err(CliError::Io(error)),
+                    }
+                    Ok::<(), CliError>(())
+                })?;
+            }
+            source_refs.for_each_resolved_ref(source_prefix, |source_ref, source_id| {
                 let Some(captured) = source_ref
                     .strip_prefix(source_prefix)
                     .and_then(|rest| rest.strip_suffix(source_suffix))
@@ -14424,8 +14478,27 @@ fn collect_configured_fetch_update_rows(
                     return Ok::<(), CliError>(());
                 };
                 let destination_ref = format!("{destination_prefix}{captured}{destination_suffix}");
-                if destination_ref_missing(destination_refs, &destination_ref)? {
-                    rows.push(fetch_update_row(source_ref, &destination_ref));
+                match destination_refs.resolve(&destination_ref) {
+                    Ok(destination_id) if destination_id == *source_id => {}
+                    Ok(destination_id) => {
+                        update_rows.push(fetch_fast_forward_update_row(
+                            source_ref,
+                            &destination_ref,
+                            &destination_id,
+                            &source_id,
+                        ));
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::NotFound
+                                | io::ErrorKind::IsADirectory
+                                | io::ErrorKind::NotADirectory
+                        ) =>
+                    {
+                        update_rows.push(fetch_update_row(source_ref, &destination_ref));
+                    }
+                    Err(error) => return Err(CliError::Io(error)),
                 }
                 Ok::<(), CliError>(())
             })?;
@@ -14435,12 +14508,33 @@ fn collect_configured_fetch_update_rows(
             continue;
         }
         let destination_ref = destination_fetch_ref_name(destination)?;
-        if source_refs.resolve(source).is_ok()
-            && destination_ref_missing(destination_refs, &destination_ref)?
-        {
-            rows.push(fetch_update_row(source, &destination_ref));
+        if let Ok(source_id) = source_refs.resolve(source) {
+            match destination_refs.resolve(&destination_ref) {
+                Ok(destination_id) if destination_id == source_id => {}
+                Ok(destination_id) => {
+                    update_rows.push(fetch_fast_forward_update_row(
+                        source,
+                        &destination_ref,
+                        &destination_id,
+                        &source_id,
+                    ));
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound
+                            | io::ErrorKind::IsADirectory
+                            | io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    update_rows.push(fetch_update_row(source, &destination_ref));
+                }
+                Err(error) => return Err(CliError::Io(error)),
+            }
         }
     }
+    let mut rows = deleted_rows;
+    rows.extend(update_rows);
     if include_tags {
         source_refs.for_each_resolved_ref("refs/tags/", |source_ref, _| {
             if destination_ref_missing(destination_refs, source_ref)? {
@@ -14486,9 +14580,40 @@ fn fetch_update_row(source: &str, destination: &str) -> String {
     )
 }
 
+fn fetch_fast_forward_update_row(
+    source: &str,
+    destination: &str,
+    old_id: &ObjectId,
+    new_id: &ObjectId,
+) -> String {
+    let source_display = source
+        .strip_prefix("refs/heads/")
+        .or_else(|| source.strip_prefix("refs/tags/"))
+        .unwrap_or(source);
+    format!(
+        "   {}..{}  {source_display:<10} -> {}",
+        fetch_short_id(old_id),
+        fetch_short_id(new_id),
+        fetch_update_destination_display(destination)
+    )
+}
+
+fn fetch_deleted_row(destination: &str) -> String {
+    format!(
+        " - [deleted]         {:<10} -> {}",
+        "(none)",
+        fetch_update_destination_display(destination)
+    )
+}
+
+fn fetch_short_id(id: &ObjectId) -> String {
+    id.to_hex().chars().take(7).collect()
+}
+
 fn fetch_update_destination_display(destination: &str) -> &str {
     destination
         .strip_prefix("refs/heads/")
+        .or_else(|| destination.strip_prefix("refs/remotes/"))
         .or_else(|| destination.strip_prefix("refs/tags/"))
         .unwrap_or(destination)
 }
