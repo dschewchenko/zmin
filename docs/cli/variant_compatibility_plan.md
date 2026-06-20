@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 755 written rows / 679 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 756 written rows / 680 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -155,6 +155,20 @@ Every compatibility slice must finish these items:
 | 3 | Command inventory expansion | expand high-use commands from docs into option values, negations, repeated forms, order-sensitive combinations and repo states | command state reaches at least `expanding`; no support percentage is published |
 | 4 | Platform and upstream evidence | macOS/Linux/Windows checks plus selected upstream Git test slices for rows already implemented | rows that depend on platform behavior have platform evidence before being called closed |
 | 5 | Zmin-only extensions | keep hooks staged-file runner and other extensions below Git compatibility reporting | extension rows stay in the Zmin-only inventory, not the Git 2.47 denominator |
+
+### Immediate Slice Queue
+
+This queue is the handoff point when work resumes. Do not start a later item
+until the earlier item has a matrix row, stock-Git evidence, generated count
+updates, project-note update, commit and push.
+
+| Order | Slice | Required evidence | Required docs/counts |
+| ---: | --- | --- | --- |
+| 1 | Continue WebStorm replacement blockers from observed command lines | focused replacement smoke rows for `status`, `log`, `diff`, `ls-files`, `rev-parse` or `config`, one behavior shape per commit | add rows before implementation; keep complete matrices at `0/151` and complete doc-option matrices at `0/4632` |
+| 2 | Classify Rust `unsupported` and `not supported` guards | each guard maps to a Git-supported gap, stock-compatible invalid input, intentional deferral or Zmin-only extension | add matrix rows, invalid-input rows or deferral notes instead of leaving raw source hits ambiguous |
+| 3 | Expand one high-use command matrix from Git docs | documented options split into values, negations, repeated/order-sensitive forms, positional modes and repository states | mark the command as `expanding`; do not publish a support percentage |
+| 4 | Add upstream/platform evidence for already-written rows | selected upstream Git tests or macOS/Linux/Windows checks for rows where platform or upstream behavior matters | only rows with matching stock-Git evidence may remain closed |
+| 5 | Design Zmin-only hooks staged-file runner | API and behavior rows for staged index files, extension/pathspec filters, renamed/deleted files, dry-run/list and hook-wrapper mode | record under Zmin-only extensions, not Git 2.47 compatibility |
 
 The most recent closed transport lane is `fetch --server-option` protocol v2
 for smart HTTP, SSH and git-daemon, covering explicit branch and branchless
@@ -201,6 +215,7 @@ until a full matrix is expanded and verified.
 | `log --decorate` boolean value forms | `5` | `0` | `yes`, `on`, `1`, `off`, `0` |
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
+| `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
 | `diff` replacement cached NUL name-status | `1` | `0` | `--cached --name-status -z` through the `git` shim with staged modified and added files |
 | `stash list` reflog/signature format atoms | `6` | `0` | `%gN`, `%gE`, `%gn`, `%ge`, `%GS`, `%GG` |
 | `stash list` literal-preserved format atoms | `12` | `0` | `%r`, `%R`, `%q`, `%Q`, `%z`, `%gL`, `%gI`, `%gq`, `%gZ`, `%aZ`, `%cZ`, `%GZ` |
@@ -276,7 +291,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `423` verified variants.
+Tracked closed blocks in this table: `424` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
