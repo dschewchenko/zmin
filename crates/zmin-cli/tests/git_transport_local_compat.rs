@@ -5433,6 +5433,137 @@ fn fetch_unshallow_explicit_location_head_matches_stock_git() {
 }
 
 #[test]
+fn fetch_unshallow_multiple_refspecs_local_file_forms_match_stock_git() {
+    for (case_label, use_remote, remote_url_from_source) in [
+        (
+            "named local remote",
+            true,
+            Box::new(|source: &Path| source.display().to_string()) as Box<dyn Fn(&Path) -> String>,
+        ),
+        (
+            "named file remote",
+            true,
+            Box::new(|source: &Path| format!("file://{}", source.display())),
+        ),
+        (
+            "explicit local path",
+            false,
+            Box::new(|source: &Path| source.display().to_string()),
+        ),
+        (
+            "explicit file URL",
+            false,
+            Box::new(|source: &Path| format!("file://{}", source.display())),
+        ),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let source = dir.path().join("source");
+        let git_client = dir.path().join(format!(
+            "git-client-unshallow-{}",
+            case_label.replace(' ', "-")
+        ));
+        let zmin_client = dir.path().join(format!(
+            "zmin-client-unshallow-{}",
+            case_label.replace(' ', "-")
+        ));
+
+        git(
+            dir.path(),
+            ["init", "-b", "main", source.to_str().expect("source path")],
+        );
+        configure_identity(&source);
+        fs::write(source.join("base.txt"), "base\n").expect("write base");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "base"]);
+        let base_tip = git(&source, ["rev-parse", "HEAD"]);
+        fs::write(source.join("main.txt"), "main 1\n").expect("write main");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "main 1"]);
+        fs::write(source.join("main.txt"), "main 2\n").expect("write main");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "main 2"]);
+        git(&source, ["checkout", "-b", "feature", &base_tip]);
+        fs::write(source.join("feature.txt"), "feature 1\n").expect("write feature");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "feature 1"]);
+        fs::write(source.join("feature.txt"), "feature 2\n").expect("write feature");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", "feature 2"]);
+        git(&source, ["checkout", "main"]);
+
+        let remote_url = remote_url_from_source(&source);
+        for client in [&git_client, &zmin_client] {
+            git(
+                dir.path(),
+                ["init", "-b", "main", client.to_str().expect("client path")],
+            );
+            if use_remote {
+                git(client, ["remote", "add", "origin", &remote_url]);
+            }
+        }
+
+        let mut initial_args = vec!["fetch", "--quiet", "--depth=1"];
+        if use_remote {
+            initial_args.push("origin");
+        } else {
+            initial_args.push(remote_url.as_str());
+        }
+        initial_args.extend([
+            "refs/heads/main:refs/remotes/origin/main",
+            "refs/heads/feature:refs/remotes/origin/feature",
+        ]);
+        let git_initial = command_any_output("git", &git_client, &initial_args, "git");
+        let zmin_initial = command_any_output(zmin_bin(), &zmin_client, &initial_args, "zmin");
+        assert_eq!(zmin_initial.0, git_initial.0, "{case_label} initial");
+        assert_eq!(zmin_initial.1, git_initial.1, "{case_label} initial");
+        assert_eq!(zmin_initial.2, git_initial.2, "{case_label} initial");
+
+        let mut unshallow_args = vec!["fetch", "--quiet", "--unshallow"];
+        if use_remote {
+            unshallow_args.push("origin");
+        } else {
+            unshallow_args.push(remote_url.as_str());
+        }
+        unshallow_args.extend([
+            "refs/heads/main:refs/remotes/origin/main",
+            "refs/heads/feature:refs/remotes/origin/feature",
+        ]);
+
+        let git_output = command_any_output("git", &git_client, &unshallow_args, "git");
+        let zmin_output = command_any_output(zmin_bin(), &zmin_client, &unshallow_args, "zmin");
+
+        assert_eq!(zmin_output.0, git_output.0, "{case_label}");
+        assert_eq!(zmin_output.1, git_output.1, "{case_label}");
+        assert_eq!(zmin_output.2, git_output.2, "{case_label}");
+        assert_eq!(
+            git(&zmin_client, ["show-ref"]),
+            git(&git_client, ["show-ref"]),
+            "{case_label}"
+        );
+        assert_eq!(
+            git(&zmin_client, ["rev-parse", "--is-shallow-repository"]),
+            git(&git_client, ["rev-parse", "--is-shallow-repository"]),
+            "{case_label}"
+        );
+        assert_eq!(
+            zmin_client.join(".git/shallow").exists(),
+            git_client.join(".git/shallow").exists(),
+            "{case_label}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{case_label}"
+        );
+        assert_eq!(
+            git_status_args(&zmin_client, &["cat-file", "-e", &base_tip]),
+            git_status_args(&git_client, &["cat-file", "-e", &base_tip]),
+            "{case_label}"
+        );
+    }
+}
+
+#[test]
 fn fetch_shallow_since_explicit_location_matches_stock_git() {
     for (label, shallow_since_args) in [
         ("equals", vec!["--shallow-since=2020-01-03T00:00:00 +0000"]),

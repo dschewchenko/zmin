@@ -8547,7 +8547,7 @@ pub(crate) fn run_fetch(
                 .into(),
         });
     }
-    if unshallow && (all || multiple || refspecs.len() > 1) {
+    if unshallow && (all || multiple) {
         return Err(CliError::Fatal {
             code: 128,
             message: "fetch --unshallow currently supports one named remote".into(),
@@ -8680,6 +8680,7 @@ pub(crate) fn run_fetch(
             has_server_options,
             upload_pack_command.as_deref(),
             deepen,
+            unshallow,
             shallow_since,
             &shallow_exclude,
         )?;
@@ -9196,6 +9197,7 @@ fn fetch_multiple_refspecs(
     has_server_options: bool,
     upload_pack_command: Option<&str>,
     deepen: Option<usize>,
+    unshallow: bool,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
@@ -9228,6 +9230,7 @@ fn fetch_multiple_refspecs(
             effective_prune,
             no_tags,
             deepen,
+            unshallow,
             shallow_since,
             shallow_exclude,
         );
@@ -9240,6 +9243,12 @@ fn fetch_multiple_refspecs(
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
+        if unshallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports local and file remotes".into(),
+            });
+        }
         if deepen.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9272,6 +9281,12 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_git_daemon_transport_url(&url) {
+        if unshallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports local and file remotes".into(),
+            });
+        }
         if deepen.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9302,6 +9317,12 @@ fn fetch_multiple_refspecs(
         );
     }
     if is_ssh_transport_url(&url) {
+        if unshallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports local and file remotes".into(),
+            });
+        }
         if deepen.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9375,6 +9396,15 @@ fn fetch_multiple_refspecs(
                 shallow_exclude,
                 no_tags,
             )?;
+        } else if unshallow {
+            if read_repo_shallow_boundaries(&repo)?.is_none() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "--unshallow on a complete repository does not make sense".into(),
+                });
+            }
+            copy_local_unshallow_objects(&source, &repo, &source_refs, None, &refspecs, 128)?;
+            write_shallow_file(&repo, Vec::new())?;
         } else if let Some(depth) = depth {
             copy_local_fetch_objects_for_depth_refspecs(
                 &source,
@@ -9838,6 +9868,7 @@ fn fetch_multiple_refspecs_from_location(
     prune: bool,
     no_tags: bool,
     deepen: Option<usize>,
+    unshallow: bool,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
 ) -> Result<()> {
@@ -9845,6 +9876,12 @@ fn fetch_multiple_refspecs_from_location(
         return Err(unsupported_remote_helper_error(location, String::new()));
     };
     if source_path.is_file() {
+        if unshallow {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --unshallow currently supports local and file remotes".into(),
+            });
+        }
         if deepen.is_some() {
             return Err(CliError::Fatal {
                 code: 128,
@@ -9913,6 +9950,15 @@ fn fetch_multiple_refspecs_from_location(
                 shallow_exclude,
                 no_tags,
             )?;
+        } else if unshallow {
+            if read_repo_shallow_boundaries(repo)?.is_none() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "--unshallow on a complete repository does not make sense".into(),
+                });
+            }
+            copy_local_unshallow_objects(&source, repo, &source_refs, None, refspecs, 128)?;
+            write_shallow_file(repo, Vec::new())?;
         } else if let Some(depth) = depth {
             copy_local_fetch_objects_for_depth_refspecs(
                 &source,
@@ -11536,6 +11582,7 @@ fn fetch_with_repo_and_location(
                     prune,
                     no_tags,
                     None,
+                    false,
                     None,
                     &[],
                 );
