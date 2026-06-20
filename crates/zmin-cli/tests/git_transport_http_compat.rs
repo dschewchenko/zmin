@@ -3724,6 +3724,202 @@ fn fetch_recurse_submodules_smart_http_parent_uninitialized_submodule_matches_st
     }
 }
 
+#[test]
+fn fetch_recurse_submodules_smart_http_parent_nested_submodule_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let grandchild = dir.path().join("grandchild");
+    let submodule = dir.path().join("submodule");
+    let source = dir.path().join("source");
+    let parent_remote = dir.path().join("parent.git");
+    let git_client = dir.path().join("git-client-nested-submodule-http-parent");
+    let zmin_client = dir.path().join("zmin-client-nested-submodule-http-parent");
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            grandchild.to_str().expect("grandchild path"),
+        ],
+    );
+    configure_identity(&grandchild);
+    fs::write(grandchild.join("grand.txt"), b"one\n").expect("write grandchild one");
+    git(&grandchild, ["add", "-A"]);
+    git_with_env(&grandchild, ["commit", "-m", "grandchild one"]);
+    let first_grandchild_head = git(&grandchild, ["rev-parse", "HEAD"]);
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    command_output_with_env(
+        "git",
+        &submodule,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            grandchild.to_str().expect("grandchild path"),
+            "nested/grand",
+        ],
+        &[],
+        "git nested submodule add",
+    );
+    git_with_env(&submodule, ["commit", "-m", "add nested submodule"]);
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    command_output_with_env(
+        "git",
+        &source,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.to_str().expect("submodule path"),
+            "deps/sub",
+        ],
+        &[],
+        "git parent submodule add",
+    );
+    git_with_env(&source, ["commit", "-m", "add submodule"]);
+
+    git(dir.path(), ["init", "--bare", "parent.git"]);
+    fs::write(parent_remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(
+        &source,
+        [
+            "remote",
+            "add",
+            "origin",
+            parent_remote.to_str().expect("parent remote path"),
+        ],
+    );
+    git(&source, ["push", "-q", "origin", "main"]);
+    set_bare_head_to_main(&parent_remote);
+
+    for (client, label) in [(&git_client, "git"), (&zmin_client, "zmin")] {
+        command_output_with_env(
+            "git",
+            dir.path(),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "clone",
+                "--recurse-submodules",
+                source.to_str().expect("source path"),
+                client.to_str().expect("client path"),
+            ],
+            &[],
+            &format!("{label} recursive clone"),
+        );
+    }
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let parent_url = format!("http://127.0.0.1:{}/parent.git", server.port);
+    git(&git_client, ["remote", "set-url", "origin", &parent_url]);
+    git(&zmin_client, ["remote", "set-url", "origin", &parent_url]);
+
+    fs::write(grandchild.join("grand.txt"), b"two\n").expect("write grandchild two");
+    git(&grandchild, ["add", "-A"]);
+    git_with_env(&grandchild, ["commit", "-m", "grandchild two"]);
+    let second_grandchild_head = git(&grandchild, ["rev-parse", "HEAD"]);
+    command_output_with_env(
+        "git",
+        &submodule.join("nested/grand"),
+        &["-c", "protocol.file.allow=always", "fetch", "origin"],
+        &[],
+        "git nested submodule source fetch",
+    );
+    git(
+        &submodule.join("nested/grand"),
+        ["checkout", &second_grandchild_head],
+    );
+    git(&submodule, ["add", "nested/grand"]);
+    git_with_env(&submodule, ["commit", "-m", "update nested submodule"]);
+    let second_submodule_head = git(&submodule, ["rev-parse", "HEAD"]);
+    command_output_with_env(
+        "git",
+        &source.join("deps/sub"),
+        &["-c", "protocol.file.allow=always", "fetch", "origin"],
+        &[],
+        "git submodule source fetch",
+    );
+    git(
+        &source.join("deps/sub"),
+        ["checkout", &second_submodule_head],
+    );
+    git(&source, ["add", "deps/sub"]);
+    git_with_env(&source, ["commit", "-m", "update submodule"]);
+    git(&source, ["push", "-q", "origin", "main"]);
+
+    let args = [
+        "-c",
+        "protocol.file.allow=always",
+        "fetch",
+        "--quiet",
+        "--recurse-submodules",
+        "origin",
+    ];
+    let git_output = command_output_with_env("git", &git_client, &args, &[], "git fetch");
+    let zmin_output = command_output_with_env(zmin_bin(), &zmin_client, &args, &[], "zmin fetch");
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
+        git(&git_client, ["rev-parse", "refs/remotes/origin/main"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(
+            &zmin_client.join("deps/sub"),
+            ["cat-file", "-t", &second_submodule_head]
+        ),
+        git(
+            &git_client.join("deps/sub"),
+            ["cat-file", "-t", &second_submodule_head]
+        )
+    );
+    assert_eq!(
+        git(
+            &zmin_client.join("deps/sub/nested/grand"),
+            ["cat-file", "-t", &second_grandchild_head]
+        ),
+        git(
+            &git_client.join("deps/sub/nested/grand"),
+            ["cat-file", "-t", &second_grandchild_head]
+        )
+    );
+    assert_eq!(
+        git(
+            &zmin_client.join("deps/sub/nested/grand"),
+            ["rev-parse", "HEAD"]
+        ),
+        first_grandchild_head
+    );
+    assert_eq!(
+        git(
+            &git_client.join("deps/sub/nested/grand"),
+            ["rev-parse", "HEAD"]
+        ),
+        first_grandchild_head
+    );
+}
+
 fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
     label: &str,
     mode_arg: &str,

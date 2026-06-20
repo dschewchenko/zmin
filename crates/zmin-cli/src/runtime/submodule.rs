@@ -119,6 +119,8 @@ pub(crate) fn fetch_submodules_on_demand(repo: &GitRepo, remote: &str) -> Result
             continue;
         }
         fetch_submodule_target(repo, &module, &path, &parent_repository, target)?;
+        let submodule_repo = find_repo_at(&path)?;
+        fetch_submodules_on_demand(&submodule_repo, "origin")?;
     }
     Ok(())
 }
