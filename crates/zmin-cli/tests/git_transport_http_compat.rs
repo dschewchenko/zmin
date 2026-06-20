@@ -7689,11 +7689,74 @@ fn fetch_smart_http_noop_skips_upload_pack_when_roots_exist_locally() {
 
 #[test]
 fn fetch_server_option_protocol_v2_smart_http_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+        "equals",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "origin",
+            "main",
+        ],
+        &["fetch", "--server-option=trace", "origin", "main"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_separate_protocol_v2_smart_http_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+        "separate",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option",
+            "trace",
+            "origin",
+            "main",
+        ],
+        &["fetch", "--server-option", "trace", "origin", "main"],
+        &["server-option=trace"],
+    );
+}
+
+#[test]
+fn fetch_server_option_repeated_protocol_v2_smart_http_branch_matches_stock_git() {
+    assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+        "repeated",
+        &[
+            "-c",
+            "protocol.version=2",
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+            "main",
+        ],
+        &[
+            "fetch",
+            "--server-option=trace",
+            "--server-option=mode=full",
+            "origin",
+            "main",
+        ],
+        &["server-option=trace", "server-option=mode=full"],
+    );
+}
+
+fn assert_server_option_protocol_v2_smart_http_branch_matches_stock_git(
+    label: &str,
+    stock_args: &[&str],
+    zmin_args: &[&str],
+    expected_options: &[&str],
+) {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
     let work = dir.path().join("work");
-    let git_client = dir.path().join("git-server-option");
-    let zmin_client = dir.path().join("zmin-server-option");
+    let git_client = dir.path().join(format!("git-server-option-{label}"));
+    let zmin_client = dir.path().join(format!("zmin-server-option-{label}"));
     git(dir.path(), ["init", "--bare", "remote.git"]);
     fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
     git(dir.path(), ["init", "-b", "main", "work"]);
@@ -7715,22 +7778,21 @@ fn fetch_server_option_protocol_v2_smart_http_branch_matches_stock_git() {
 
     let server = SmartHttpServer::new(dir.path().to_path_buf());
     let url = format!("http://127.0.0.1:{}/remote.git", server.port);
-    git(dir.path(), ["init", "git-server-option"]);
-    git(dir.path(), ["init", "zmin-server-option"]);
+    git(
+        dir.path(),
+        ["init", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", zmin_client.to_str().expect("zmin client")],
+    );
     git(&git_client, ["remote", "add", "origin", url.as_str()]);
     run_zmin(&zmin_client, ["remote", "add", "origin", url.as_str()]);
 
     let stock = command_output(
         stock_git_bin().to_str().expect("stock git path"),
         &git_client,
-        &[
-            "-c",
-            "protocol.version=2",
-            "fetch",
-            "--server-option=trace",
-            "origin",
-            "main",
-        ],
+        stock_args,
         "git fetch --server-option",
     );
     assert_eq!(stock.0, 0);
@@ -7741,19 +7803,21 @@ fn fetch_server_option_protocol_v2_smart_http_branch_matches_stock_git() {
         stock_protocol_count >= 3,
         "stock Git should use protocol v2 for discovery and upload-pack requests"
     );
-    assert!(
-        stock_bodies
-            .iter()
-            .filter(|body| body.contains("server-option=trace"))
-            .count()
-            >= 2,
-        "stock Git should send server-option during ls-refs and fetch"
-    );
+    for expected in expected_options {
+        assert!(
+            stock_bodies
+                .iter()
+                .filter(|body| body.contains(expected))
+                .count()
+                >= 2,
+            "stock Git should send {expected} during ls-refs and fetch"
+        );
+    }
 
     let zmin = command_output(
         zmin_bin(),
         &zmin_client,
-        &["fetch", "--server-option=trace", "origin", "main"],
+        zmin_args,
         "zmin fetch --server-option",
     );
     assert_eq!(zmin.0, 0);
@@ -7764,14 +7828,16 @@ fn fetch_server_option_protocol_v2_smart_http_branch_matches_stock_git() {
     );
     let bodies = server.upload_pack_bodies_text();
     let zmin_bodies = &bodies[stock_body_count..];
-    assert!(
-        zmin_bodies
-            .iter()
-            .filter(|body| body.contains("server-option=trace"))
-            .count()
-            >= 2,
-        "Zmin should send server-option during ls-refs and fetch"
-    );
+    for expected in expected_options {
+        assert!(
+            zmin_bodies
+                .iter()
+                .filter(|body| body.contains(expected))
+                .count()
+                >= 2,
+            "Zmin should send {expected} during ls-refs and fetch"
+        );
+    }
     assert!(
         zmin_bodies
             .iter()
