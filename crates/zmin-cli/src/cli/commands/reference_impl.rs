@@ -1968,6 +1968,7 @@ pub(crate) struct ForEachRefRow {
     pub(crate) ref_name: String,
     pub(crate) object_id: ObjectId,
     pub(crate) object_kind: GitObjectKind,
+    pub(crate) object_size: Option<usize>,
     pub(crate) subject: String,
     pub(crate) author_name: String,
     pub(crate) author_email: String,
@@ -1994,6 +1995,7 @@ pub(crate) struct ForEachRefRow {
 #[derive(Debug, Clone, Copy, Default)]
 struct ForEachRefRequirements {
     need_object_kind: bool,
+    need_object_size: bool,
     need_subject: bool,
     need_author: bool,
     need_creator: bool,
@@ -2192,6 +2194,7 @@ fn build_for_each_ref_row(
         ref_name: ref_name.to_owned(),
         object_id,
         object_kind,
+        object_size: metadata.object_size,
         subject: metadata.subject,
         tagger_name: metadata.tagger_name,
         tagger_email: metadata.tagger_email,
@@ -2258,6 +2261,7 @@ fn load_for_each_ref_metadata(
     requirements: &ForEachRefRequirements,
 ) -> Result<(GitObjectKind, RefObjectMetadata)> {
     if !requirements.need_object_kind
+        && !requirements.need_object_size
         && !requirements.need_subject
         && !requirements.need_author
         && !requirements.need_creator
@@ -2273,6 +2277,7 @@ fn load_for_each_ref_metadata(
     let kind = parse_git_object_kind(ref_name, &object.object_type)?;
 
     if !requirements.need_subject
+        && !requirements.need_object_size
         && !requirements.need_author
         && !requirements.need_creator
         && !requirements.need_tagger
@@ -2335,6 +2340,10 @@ fn apply_for_each_ref_atom_requirements(
         }
         "upstream" | "upstream:short" | "upstream:track" | "upstream:trackshort" => {}
         "objecttype" => requirements.need_object_kind = true,
+        "objectsize" => {
+            requirements.need_object_kind = true;
+            requirements.need_object_size = true;
+        }
         "subject" | "contents:subject" => {
             requirements.need_object_kind = true;
             requirements.need_subject = true;
@@ -2422,6 +2431,7 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             "refname" => left.ref_name.cmp(&right.ref_name),
             "objectname" => left.object_id.to_hex().cmp(&right.object_id.to_hex()),
             "objecttype" => left.object_kind.as_str().cmp(right.object_kind.as_str()),
+            "objectsize" => left.object_size.cmp(&right.object_size),
             "subject" => left.subject.cmp(&right.subject),
             "contents:subject" => left.subject.cmp(&right.subject),
             "authordate" => left.author_timestamp.cmp(&right.author_timestamp),
@@ -2431,8 +2441,9 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
             _ => std::cmp::Ordering::Equal,
         };
         match key {
-            "refname" | "objectname" | "objecttype" | "subject" | "contents:subject"
-            | "authordate" | "creatordate" | "taggerdate" | "committerdate" => {
+            "refname" | "objectname" | "objecttype" | "objectsize" | "subject"
+            | "contents:subject" | "authordate" | "creatordate" | "taggerdate"
+            | "committerdate" => {
                 if descending {
                     rows.sort_by(|left, right| compare(right, left));
                 } else {
@@ -2520,6 +2531,7 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
         "upstream:track" => Ok(row.upstream_track.clone()),
         "upstream:trackshort" => Ok(row.upstream_track_short.clone()),
         "objecttype" => Ok(row.object_kind.as_str().to_owned()),
+        "objectsize" => Ok(row.object_size.unwrap_or_default().to_string()),
         "subject" => Ok(row.subject.clone()),
         "contents:subject" => Ok(row.subject.clone()),
         "authorname" => Ok(row.author_name.clone()),
@@ -2679,6 +2691,7 @@ fn ref_pattern_matches(ref_name: &str, pattern: &str) -> bool {
 
 #[derive(Default)]
 pub(crate) struct RefObjectMetadata {
+    pub(crate) object_size: Option<usize>,
     pub(crate) subject: String,
     pub(crate) author_name: String,
     pub(crate) author_email: String,
@@ -2742,6 +2755,7 @@ fn object_ref_metadata_parts(
             let committer_date = signature_timestamp_timezone(&commit.committer)
                 .map(|(timestamp, timezone)| (timestamp, timezone.to_owned()));
             Ok(RefObjectMetadata {
+                object_size: Some(content.len()),
                 subject: commit_subject(&commit.message),
                 author_name: signature_name(&commit.author),
                 author_email: signature_email(&commit.author),
@@ -2767,6 +2781,7 @@ fn object_ref_metadata_parts(
             let tagger_date = signature_timestamp_timezone(&tag.tagger)
                 .map(|(timestamp, timezone)| (timestamp, timezone.to_owned()));
             Ok(RefObjectMetadata {
+                object_size: Some(content.len()),
                 subject: tag_subject(&tag.message),
                 author_name: String::new(),
                 author_email: String::new(),
@@ -2786,6 +2801,7 @@ fn object_ref_metadata_parts(
             })
         }
         GitObjectKind::Tree | GitObjectKind::Blob => Ok(RefObjectMetadata {
+            object_size: Some(content.len()),
             subject: String::new(),
             author_name: String::new(),
             author_email: String::new(),
@@ -6065,6 +6081,7 @@ fn tag(options: TagOptions) -> Result<()> {
                     ref_name: ref_name.to_owned(),
                     object_id: object_id.clone(),
                     object_kind: object.kind,
+                    object_size: metadata.object_size,
                     subject: metadata.subject,
                     author_name: metadata.author_name,
                     author_email: metadata.author_email,

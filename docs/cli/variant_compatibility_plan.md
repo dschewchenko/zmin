@@ -67,13 +67,15 @@ Examples:
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
 | `for-each-ref` committer identity atoms | `2` | `0` | `committername` and `committeremail` for commit refs and annotated tag refs |
+| `for-each-ref` object size atom | `4` | `0` | `objectsize` for commit, annotated tag, blob, and tree refs |
+| `for-each-ref` object size sort key | `1` | `0` | `--sort=objectsize` across commit, annotated tag, blob, and tree refs |
 | `for-each-ref` creator atoms | `18` | `0` | `creator` and `creatordate` formats for commit refs and annotated tag refs |
 | `for-each-ref` object id abbreviation lengths | `3` | `0` | `objectname:short=4`, `objectname:short=12`, and `objectname:short=40` |
 | `for-each-ref` invalid object id abbreviation lengths | `4` | `0` | `objectname:short=0`, `objectname:short=abc`, `objectname:short=-1`, and `objectname:short=` fatal diagnostics |
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `232` verified variants.
+Tracked closed blocks in this table: `237` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

@@ -44,6 +44,10 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
         ["hash-object", "-t", "tag", "-w", "signed-tag.txt"],
     );
     git(repo.path(), ["update-ref", "refs/tags/signed", &signed_id]);
+    let blob_id = git(repo.path(), ["hash-object", "a.txt"]);
+    let tree_id = git(repo.path(), ["rev-parse", "HEAD^{tree}"]);
+    git(repo.path(), ["update-ref", "refs/blobs/a", &blob_id]);
+    git(repo.path(), ["update-ref", "refs/trees/root", &tree_id]);
 
     assert_eq!(
         run_zmin(repo.path(), ["for-each-ref"]),
@@ -59,8 +63,10 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
             [
                 "for-each-ref",
                 "--format=%(refname) %(objectname) %(objecttype) %(subject)",
+                "refs/blobs",
                 "refs/heads",
                 "refs/tags",
+                "refs/trees",
             ],
         ),
         git(
@@ -68,8 +74,62 @@ fn for_each_ref_matches_stock_git_for_common_formats() {
             [
                 "for-each-ref",
                 "--format=%(refname) %(objectname) %(objecttype) %(subject)",
+                "refs/blobs",
                 "refs/heads",
                 "refs/tags",
+                "refs/trees",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=objectsize",
+                "--format=%(objectsize)|%(refname:short)",
+                "refs/blobs",
+                "refs/heads",
+                "refs/tags",
+                "refs/trees",
+            ],
+        ),
+        git(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=objectsize",
+                "--format=%(objectsize)|%(refname:short)",
+                "refs/blobs",
+                "refs/heads",
+                "refs/tags",
+                "refs/trees",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=refname",
+                "--format=%(refname:short)|%(objecttype)|%(objectsize)",
+                "refs/blobs",
+                "refs/heads",
+                "refs/tags",
+                "refs/trees",
+            ],
+        ),
+        git(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--sort=refname",
+                "--format=%(refname:short)|%(objecttype)|%(objectsize)",
+                "refs/blobs",
+                "refs/heads",
+                "refs/tags",
+                "refs/trees",
             ],
         )
     );

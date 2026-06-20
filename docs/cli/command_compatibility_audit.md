@@ -75,6 +75,9 @@ Recently closed replacement gaps:
   `taggername` and `taggeremail`
 - `for-each-ref` supports stock committer identity atoms for commit refs:
   `committername` and `committeremail`
+- `for-each-ref` supports stock `objectsize` for commit, annotated tag, blob
+  and tree refs
+- `for-each-ref` supports stock `--sort=objectsize` ordering for those refs
 - `for-each-ref` supports `creator` and `creatordate` for commit refs and
   annotated tag refs
 - `for-each-ref` supports stock `objectname:short=<n>` abbreviation lengths
