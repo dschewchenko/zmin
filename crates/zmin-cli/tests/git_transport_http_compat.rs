@@ -4864,6 +4864,100 @@ fn fetch_filter_combine_network_branch_transports_match_stock_git() {
     );
 }
 
+#[test]
+fn fetch_filter_combine_network_branchless_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_filter_remote(dir.path());
+    let root_blob = git(&remote, ["rev-parse", "main:small.txt"]);
+    let child_blob = git(&remote, ["rev-parse", "main:dir/b.txt"]);
+    let dir_tree = git(&remote, ["rev-parse", "main:dir"]);
+    let args = [
+        "fetch",
+        "--quiet",
+        "--filter=combine:object%3Atype%3Dblob+tree%3A2",
+        "origin",
+    ];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-combine-branchless-http", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git filter combine branchless http",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter combine branchless http",
+    );
+    assert_combined_filter_fetch_matches_stock_git(
+        "smart-http filter combine branchless",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        child_blob.as_str(),
+        dir_tree.as_str(),
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-combine-branchless-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter combine branchless ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter combine branchless ssh",
+    );
+    assert_combined_filter_fetch_matches_stock_git(
+        "ssh filter combine branchless",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        child_blob.as_str(),
+        dir_tree.as_str(),
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-combine-branchless-daemon", url.as_str());
+    command_output(
+        "git",
+        &git_client,
+        &args,
+        "git filter combine branchless daemon",
+    );
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter combine branchless daemon",
+    );
+    assert_combined_filter_fetch_matches_stock_git(
+        "git-daemon filter combine branchless",
+        &git_client,
+        &zmin_client,
+        root_blob.as_str(),
+        child_blob.as_str(),
+        dir_tree.as_str(),
+    );
+}
+
 fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("filter.git");
     let work = root.join("filter-work");
