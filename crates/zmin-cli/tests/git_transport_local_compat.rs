@@ -1916,6 +1916,8 @@ fn fetch_recurse_submodules_no_submodule_modes_match_stock_git() {
     let modes = [
         vec!["fetch", "--quiet", "--recurse-submodules", "origin"],
         vec!["fetch", "--quiet", "--recurse-submodules=yes", "origin"],
+        vec!["fetch", "--quiet", "--recurse-submodules=true", "origin"],
+        vec!["fetch", "--quiet", "--recurse-submodules=1", "origin"],
         vec![
             "fetch",
             "--quiet",
@@ -1923,6 +1925,8 @@ fn fetch_recurse_submodules_no_submodule_modes_match_stock_git() {
             "origin",
         ],
         vec!["fetch", "--quiet", "--recurse-submodules=no", "origin"],
+        vec!["fetch", "--quiet", "--recurse-submodules=false", "origin"],
+        vec!["fetch", "--quiet", "--recurse-submodules=0", "origin"],
         vec!["fetch", "--quiet", "--no-recurse-submodules", "origin"],
     ];
 
@@ -1982,6 +1986,46 @@ fn fetch_recurse_submodules_no_submodule_modes_match_stock_git() {
 }
 
 #[test]
+fn fetch_recurse_submodules_invalid_value_matches_stock_git_failure() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file"), b"main\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            git_client.to_str().expect("git client path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+    );
+
+    let args = ["fetch", "--recurse-submodules=bad", "origin"];
+    assert_eq!(
+        run_zmin_failure_output(&zmin_client, &args),
+        git_failure_output(&git_client, &args)
+    );
+}
+
+#[test]
 fn fetch_recurse_submodules_local_changed_submodule_modes_match_stock_git() {
     let cases = [
         (
@@ -1991,6 +2035,14 @@ fn fetch_recurse_submodules_local_changed_submodule_modes_match_stock_git() {
         (
             "explicit-yes",
             ["fetch", "--quiet", "--recurse-submodules=yes", "origin"],
+        ),
+        (
+            "explicit-true",
+            ["fetch", "--quiet", "--recurse-submodules=true", "origin"],
+        ),
+        (
+            "explicit-one",
+            ["fetch", "--quiet", "--recurse-submodules=1", "origin"],
         ),
         (
             "on-demand",

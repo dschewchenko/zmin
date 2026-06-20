@@ -8966,14 +8966,12 @@ fn fetch_shallow_exclude(raw_args: &[String]) -> Vec<String> {
 
 fn parse_fetch_recurse_submodules_mode(value: &str) -> Result<FetchRecurseSubmodulesMode> {
     match value {
-        "yes" => Ok(FetchRecurseSubmodulesMode::Yes),
+        "yes" | "true" | "1" => Ok(FetchRecurseSubmodulesMode::Yes),
         "on-demand" => Ok(FetchRecurseSubmodulesMode::OnDemand),
-        "no" => Ok(FetchRecurseSubmodulesMode::No),
+        "no" | "false" | "0" => Ok(FetchRecurseSubmodulesMode::No),
         _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!(
-                "bad recurse-submodules argument: {value}. expected yes, on-demand, or no"
-            ),
+            code: 128,
+            message: format!("bad recurse-submodules argument: {value}"),
         }),
     }
 }
