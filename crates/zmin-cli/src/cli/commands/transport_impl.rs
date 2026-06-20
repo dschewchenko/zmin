@@ -8822,8 +8822,7 @@ pub(crate) fn run_fetch(
                 message: "fetch --filter currently supports one named network remote branch".into(),
             });
         }
-        if depth.is_some()
-            || deepen.is_some()
+        if deepen.is_some()
             || unshallow
             || update_shallow
             || shallow_since.is_some()
@@ -8840,14 +8839,26 @@ pub(crate) fn run_fetch(
                 message: "fetch --filter currently supports one named network remote branch".into(),
             });
         }
-        fetch_with_repo_and_remote_filter(
-            remote,
-            refspecs.into_iter().next(),
-            filter,
-            128,
-            append,
-            write_fetch_head,
-        )?;
+        if let Some(depth) = depth.as_deref().map(validate_positive_depth).transpose()? {
+            fetch_with_repo_and_remote_filter_depth(
+                remote,
+                refspecs.into_iter().next(),
+                filter,
+                depth,
+                128,
+                append,
+                write_fetch_head,
+            )?;
+        } else {
+            fetch_with_repo_and_remote_filter(
+                remote,
+                refspecs.into_iter().next(),
+                filter,
+                128,
+                append,
+                write_fetch_head,
+            )?;
+        }
         if !dry_run {
             write_fetch_commit_graph_if_enabled()?;
             write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
@@ -14598,6 +14609,24 @@ fn fetch_fast_forward_update_row(
     )
 }
 
+fn fetch_forced_update_row(
+    source: &str,
+    destination: &str,
+    old_id: &ObjectId,
+    new_id: &ObjectId,
+) -> String {
+    let source_display = source
+        .strip_prefix("refs/heads/")
+        .or_else(|| source.strip_prefix("refs/tags/"))
+        .unwrap_or(source);
+    format!(
+        " + {}...{} {source_display:<10} -> {}  (forced update)",
+        fetch_short_id(old_id),
+        fetch_short_id(new_id),
+        fetch_update_destination_display(destination)
+    )
+}
+
 fn fetch_deleted_row(destination: &str) -> String {
     format!(
         " - [deleted]         {:<10} -> {}",
@@ -19860,6 +19889,54 @@ fn fetch_with_repo_and_remote_filter(
     )
 }
 
+fn fetch_with_repo_and_remote_filter_depth(
+    remote: Option<String>,
+    branch: Option<String>,
+    filter: &str,
+    depth: usize,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let repo = find_repo_or_bare()?;
+    let remote = default_fetch_remote(&repo, remote)?;
+    validate_remote_name(&remote)?;
+    if !remote_exists(&repo, &remote)? {
+        return Err(remote_repository_unavailable_error(&remote));
+    }
+    let url = fetch_remote_url(&repo, &remote)?;
+    let Some(source_path) = local_repository_path_from_location(&url)? else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports non-shallow network fetches".into(),
+        });
+    };
+    let Some(branch) = branch else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports one named network remote branch".into(),
+        });
+    };
+    if filter != "blob:none" {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --filter currently supports network remotes".into(),
+        });
+    }
+    fetch_with_local_remote_filter_blob_none_depth(
+        repo,
+        remote,
+        &url,
+        &source_path,
+        &branch,
+        filter,
+        depth,
+        missing_ref_code,
+        append,
+        write_fetch_head,
+    )
+}
+
 fn fetch_with_local_remote_filter_blob_none(
     repo: GitRepo,
     remote: String,
@@ -19908,6 +19985,80 @@ fn fetch_with_local_remote_filter_blob_none(
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
     }
+    record_fetch_filter_promisor_config(&repo, &remote, filter)
+}
+
+fn fetch_with_local_remote_filter_blob_none_depth(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    source_path: &std::path::Path,
+    branch: &str,
+    filter: &str,
+    depth: usize,
+    missing_ref_code: i32,
+    append: bool,
+    write_fetch_head: bool,
+) -> Result<()> {
+    let source = local_clone_source(source_path)?;
+    let source_repo = local_clone_source_repo(&source);
+    let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let ref_name = branch_ref_name(branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(branch, missing_ref_code))?;
+    let destination_ref = format!("refs/remotes/{remote}/{branch}");
+    let old_id = destination_refs.resolve(&destination_ref).ok();
+
+    let depth_limited_commits =
+        upload_pack_depth_limited_commits(&source_store, std::slice::from_ref(&id), depth)?;
+    let mut fetched_objects = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+        source_store.object_id_capacity_hint()?,
+        depth_limited_commits.len(),
+    ));
+    copy_reachable_objects_for_depth_into(
+        &source_store,
+        &destination_store,
+        &depth_limited_commits,
+        &mut fetched_objects,
+    )?;
+    copy_fetch_pack_included_tags(
+        &source_refs,
+        &source_store,
+        &destination_store,
+        &source_repo,
+        &mut fetched_objects,
+        Some(depth),
+    )?;
+    let mut shallow_boundaries =
+        shallow_boundaries(&source_store, std::slice::from_ref(&id), depth)?;
+    if let Some(existing_boundaries) = read_repo_shallow_boundaries(&repo)? {
+        shallow_boundaries.extend(existing_boundaries);
+    }
+    sort_dedup_object_ids(&mut shallow_boundaries);
+
+    eprintln!("warning: filtering not recognized by server, ignoring");
+    eprintln!("From {}", fetch_head_url_display(url));
+    eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    if let Some(old_id) = old_id {
+        if old_id != id {
+            eprintln!(
+                "{}",
+                fetch_forced_update_row(&ref_name, &destination_ref, &old_id, &id)
+            );
+        }
+    } else {
+        eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
+    }
+    write_fetch_destination_ref(&destination_refs, &destination_ref, &id, Some(&remote))?;
+    if write_fetch_head {
+        write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    write_shallow_file(&repo, shallow_boundaries)?;
     record_fetch_filter_promisor_config(&repo, &remote, filter)
 }
 
