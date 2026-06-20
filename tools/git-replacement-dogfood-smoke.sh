@@ -216,6 +216,13 @@ compare_command status_short status --short
 compare_command status_short_branch status --short --branch
 compare_command status_z status -z
 compare_command status_v2_z_branch status --porcelain=v2 -z --branch
+printf 'ignored.log\n' >"$stock_client/.gitignore"
+printf 'ignored.log\n' >"$zmin_client/.gitignore"
+printf 'ignored\n' >"$stock_client/ignored.log"
+printf 'ignored\n' >"$zmin_client/ignored.log"
+compare_command status_ignored_porcelain_z status --ignored --porcelain=v1 -z
+rm "$stock_client/.gitignore" "$zmin_client/.gitignore" \
+  "$stock_client/ignored.log" "$zmin_client/ignored.log"
 compare_command ls_files_z ls-files -z --cached --others --exclude-standard
 compare_command ls_files_stage_z ls-files --stage -z
 compare_command ls_files_cached_pathspec_z ls-files -z --cached -- dir
