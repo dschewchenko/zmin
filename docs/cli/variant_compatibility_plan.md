@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 792 written rows / 716 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 793 written rows / 717 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -179,7 +179,7 @@ prove it through stock Git versus the temporary `git` shim, then refresh the
 generated counts and commit.
 
 Do not publish a support percentage just because open written rows are now
-`0/792`; the complete command matrices and complete doc-option matrices remain
+`0/793`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -236,6 +236,7 @@ until a full matrix is expanded and verified.
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
 | `log` replacement directory pathspec NUL output | `1` | `0` | `-z --format=%H%x00%s -1 -- dir` through the `git` shim |
 | `diff` replacement worktree NUL name-status | `1` | `0` | `--name-status -z` through the `git` shim with a modified tracked file |
+| `diff` replacement worktree NUL name-only | `1` | `0` | `--name-only -z` through the `git` shim with a modified tracked file |
 | `diff` replacement pathspec NUL name-status | `1` | `0` | `--name-status -z -- dir` through the `git` shim with a dirty nested tracked file |
 | `diff` replacement cached NUL name-status | `1` | `0` | `--cached --name-status -z` through the `git` shim with staged modified and added files |
 | `diff` replacement cached pathspec NUL name-status | `1` | `0` | `--cached --name-status -z -- new.txt` through the `git` shim with a staged added file |
@@ -336,7 +337,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `460` verified variants.
+Tracked closed blocks in this table: `461` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
