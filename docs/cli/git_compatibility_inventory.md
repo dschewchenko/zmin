@@ -2,8 +2,8 @@
 
 This is the source of truth for counting Git compatibility work.
 
-Command presence is not enough. Parser presence is not enough. A closed item is
-a behavior variant checked against stock Git.
+Command presence is not enough. Parser presence is not enough. Test presence is
+not enough. A closed item is a behavior variant checked against stock Git.
 
 ## Baseline
 
@@ -51,6 +51,26 @@ Current matrices are still being expanded. A command with no open rows in the
 current matrix is not automatically complete; it only has no open row among the
 variants written down so far.
 
+## Completion Rule
+
+Do not call a command complete until all of these inputs have been reconciled:
+
+- upstream Git command list for `v2.47.1`
+- documented options from `Documentation/git-*.txt` and included option files
+- option values, missing-value defaults, negations and repeated forms
+- order-sensitive option combinations, including last-option-wins cases
+- positional forms, pathspec magic and stdin/file-list modes
+- repository states: clean, dirty, staged, conflicted, bare, shallow,
+  submodule, linked worktree, unborn branch and detached `HEAD`
+- transports: local path, `file://`, smart HTTP, SSH, git daemon and bundles
+- platform behavior on macOS, Linux and Windows
+- selected upstream Git test cases
+- real tool traces from IDEs and GUI clients
+
+Each row must store the stock Git command line, exit code, stdout/stderr shape
+and repository-state expectations. Zmin support for that row is closed only when
+focused parity evidence checks the same surface.
+
 ## Files
 
 - `tools/git-command-gap.sh` checks command entry points only.
@@ -92,10 +112,11 @@ Do not collapse these layers into one percentage.
 
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
+| Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Command routing | `151/151` | no | dispatch only |
 | Git doc option spellings | `4632` | no | seed only |
-| Written behavior rows | `133` | yes, row by row | `118` exact rows already match stock Git |
-| Fully certified command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
+| Written behavior rows | `133` | no by itself | explicit rows currently written |
+| Closed behavior rows | `118/133` | yes, row by row | exact written rows that match stock Git |
 | Full Git behavior denominator | incomplete | not yet | still being expanded |
 
 The full denominator must include command, option, value, option combination,
@@ -137,10 +158,12 @@ parity blocks from `docs/cli/variant_compatibility_plan.md`; they are not a
 full denominator. Reference group rows follow git-scm sections and can
 duplicate command names. The total row is unique.
 
-Never use `151/151` command presence or `4632` option spellings as a support
-percentage. A command is complete only after its documented options, values,
-negations, repeated forms, order-sensitive combinations, repository states,
-transports and platforms have behavior rows with stock-Git evidence.
+Never use `151/151` command presence, `4632` option spellings or `118/133`
+closed written rows as a Git support percentage. The `118/133` number is audit
+progress for rows already written down. A command is complete only after its
+documented options, values, negations, repeated forms, order-sensitive
+combinations, repository states, transports and platforms have behavior rows
+with stock-Git evidence.
 
 ## Command Matrices
 

@@ -148,9 +148,10 @@ zmin clone --instant --demand-hydrate https://github.com/example/project.git
 
 Use commands as `zmin <command>`.
 
-Zmin has handlers for all `151` Git `2.47` command names. This is command
-dispatch only. It is not a claim that every option, option value or workflow
-matches Git.
+This preview is not 100% Git-compatible yet. Zmin has handlers for all `151`
+Git `2.47` command names, but command routing is only the entry point. A command
+is complete only after its documented options, values, option ordering,
+repository states, transports and platform cases match stock Git.
 
 Real compatibility is counted by behavior variants:
 
@@ -158,15 +159,16 @@ Real compatibility is counted by behavior variants:
 
 Current accounting:
 
-| Layer | Count | Counts as support | Meaning |
-| --- | ---: | --- | --- |
-| Command routing | `151/151` | no | every Git `2.47` command name reaches Zmin code |
-| Git doc option spelling seed | `4632` | no | raw option spellings found in Git `2.47.1` docs and include files |
-| Written behavior rows | `133` | yes, row by row | `118` exact rows already match stock Git |
-| Fully certified command matrices | `0/151` | yes, when complete | no command has a complete option/value/state/transport/platform matrix yet |
-| Full Git behavior denominator | incomplete | not yet | still being expanded from docs, upstream tests and real tool traces |
+| Layer | Count | Meaning |
+| --- | ---: | --- |
+| Fully complete Git command matrices | `0/151` | no command has a complete option/value/state/transport/platform matrix yet |
+| Command entry points wired | `151/151` | every Git `2.47` command name reaches Zmin code; not a support claim |
+| Git doc option spelling inventory | `4632` | raw option spellings found in Git `2.47.1` docs and include files |
+| Behavior rows written | `133` | explicit command/option/value/state/transport/platform rows in the current matrix |
+| Behavior rows closed | `118/133` | exact written rows that match stock Git by focused evidence |
+| Full Git behavior denominator | incomplete | still being expanded from docs, upstream tests and real tool traces |
 
-Only audited behavior variants count as supported. Option spellings are just
+Only closed behavior variants count as supported. Option spellings are just
 input for the matrix until they are split into values, negations, repeated
 forms, order-sensitive combinations, repository states, transports and
 platforms, then checked against stock Git.
@@ -176,31 +178,31 @@ the rows written down so far have no open item.
 
 Audit progress by git-scm reference group:
 
-| Git reference group | Git commands | Git doc option seed rows | Behavior rows written | Closed rows | Open rows | Invalid input rows | Closed blocks without full matrix |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` | `0` |
-| Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` | `2` |
-| Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `4` | `64` |
-| Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `309` | `73` | `62` | `9` | `2` | `0` |
-| Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` | `8` |
-| Patching | `5` | `333` | `0` | `0` | `0` | `0` | `0` |
-| Debugging | `3` | `132` | `0` | `0` | `0` | `0` | `52` |
-| Email | `6` | `361` | `0` | `0` | `0` | `0` | `0` |
-| External Systems | `2` | `120` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `147` | `0` | `0` | `0` | `0` | `17` |
-| Server Admin | `2` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` | `76` |
-| Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` | `4` |
-| **Git `2.47` unique total** | **`151`** | **`4632`** | **`133`** | **`118`** | **`9`** | **`6`** | **`253`** |
+| Git reference group | Git commands | Git doc option spellings | Behavior rows written | Closed rows | Open rows | Invalid input rows |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Setup and Config | `6` | `276` | `0` | `0` | `0` | `0` |
+| Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` |
+| Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `4` |
+| Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` |
+| Sharing and Updating Projects | `5` | `309` | `73` | `62` | `9` | `2` |
+| Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` |
+| Patching | `5` | `333` | `0` | `0` | `0` | `0` |
+| Debugging | `3` | `132` | `0` | `0` | `0` | `0` |
+| Email | `6` | `361` | `0` | `0` | `0` | `0` |
+| External Systems | `2` | `120` | `0` | `0` | `0` | `0` |
+| Administration | `8` | `147` | `0` | `0` | `0` | `0` |
+| Server Admin | `2` | `30` | `0` | `0` | `0` | `0` |
+| Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` |
+| Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` |
+| **Git `2.47` unique total** | **`151`** | **`4632`** | **`133`** | **`118`** | **`9`** | **`6`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
 Git-compatible version output.
 
-Do not read command inventory, doc option rows or a closed current matrix as
-complete support. Reference group rows follow the git-scm command sections and
-are not meant to be added together; the total row is unique.
+Do not read command inventory, option spelling inventory or a closed current
+matrix as complete support. Reference group rows follow the git-scm command
+sections and are not meant to be added together; the total row is unique.
 
 Current command-level matrices. This is audit coverage, not command support:
 
