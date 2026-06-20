@@ -99,10 +99,18 @@ run_capture() {
 compare_command() {
   local label="$1"
   shift
+  compare_command_at "$label" "$stock_client" "$zmin_client" "$@"
+}
+
+compare_command_at() {
+  local label="$1"
+  local stock_cwd="$2"
+  local zmin_cwd="$3"
+  shift 3
   local stock_prefix="$capture_dir/$label.stock"
   local zmin_prefix="$capture_dir/$label.zmin"
-  run_capture stock "$stock_client" "$stock_prefix" "$@"
-  run_capture zmin "$zmin_client" "$zmin_prefix" "$@"
+  run_capture stock "$stock_cwd" "$stock_prefix" "$@"
+  run_capture zmin "$zmin_cwd" "$zmin_prefix" "$@"
   for suffix in status stdout stderr; do
     if ! cmp -s "$stock_prefix.$suffix" "$zmin_prefix.$suffix"; then
       echo "mismatch for $label ($*): $suffix" >&2
@@ -113,6 +121,13 @@ compare_command() {
       exit 1
     fi
   done
+}
+
+compare_readonly_same_repo() {
+  local label="$1"
+  local cwd="$2"
+  shift 2
+  compare_command_at "$label" "$cwd" "$cwd" "$@"
 }
 
 assert_zmin_success_stdout() {
@@ -189,6 +204,10 @@ compare_command rev_parse_git_dir rev-parse --git-dir
 compare_command rev_parse_inside rev-parse --is-inside-work-tree
 compare_command rev_parse_branch rev-parse --abbrev-ref HEAD
 compare_command rev_parse_head rev-parse HEAD
+compare_readonly_same_repo \
+  rev_parse_nested_paths \
+  "$zmin_client/dir" \
+  rev-parse --show-prefix --show-cdup --show-toplevel
 compare_command config_remote_url config --get remote.origin.url
 compare_command config_branch_remote config --get branch.main.remote
 compare_command log_z log -z --format=%H%x00%P%x00%D%x00%s -1
