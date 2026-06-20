@@ -4287,6 +4287,69 @@ fn fetch_filter_blob_none_network_branchless_transports_match_stock_git() {
     );
 }
 
+#[test]
+fn fetch_filter_blob_limit_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_filter_remote(dir.path());
+    let args = [
+        "fetch",
+        "--quiet",
+        "--filter=blob:limit=8",
+        "origin",
+        "main",
+    ];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-limit-http", url.as_str());
+    command_output("git", &git_client, &args, "git filter limit http");
+    command_output(zmin_bin(), &zmin_client, &args, "zmin filter limit http");
+    assert_blob_limit_filter_fetch_matches_stock_git(
+        "smart-http filter blob limit",
+        &git_client,
+        &zmin_client,
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-limit-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter limit ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter limit ssh",
+    );
+    assert_blob_limit_filter_fetch_matches_stock_git(
+        "ssh filter blob limit",
+        &git_client,
+        &zmin_client,
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-limit-daemon", url.as_str());
+    command_output("git", &git_client, &args, "git filter limit daemon");
+    command_output(zmin_bin(), &zmin_client, &args, "zmin filter limit daemon");
+    assert_blob_limit_filter_fetch_matches_stock_git(
+        "git-daemon filter blob limit",
+        &git_client,
+        &zmin_client,
+    );
+}
+
 fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("filter.git");
     let work = root.join("filter-work");
@@ -4296,6 +4359,8 @@ fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     git(root, ["init", "-b", "main", "filter-work"]);
     configure_identity(&work);
     fs::write(work.join("a.txt"), b"hello\n").expect("write a");
+    fs::write(work.join("small.txt"), b"tiny\n").expect("write small");
+    fs::write(work.join("large.txt"), b"large blob payload\n").expect("write large");
     fs::create_dir_all(work.join("dir")).expect("create dir");
     fs::write(work.join("dir/b.txt"), b"nested\n").expect("write b");
     git(&work, ["add", "-A"]);
@@ -5327,6 +5392,23 @@ fn assert_filtered_fetch_matches_stock_git(
     git_client: &std::path::Path,
     zmin_client: &std::path::Path,
 ) {
+    assert_filter_fetch_common_matches_stock_git(label, git_client, zmin_client);
+    assert_eq!(
+        filtered_blob_local_presence(zmin_bin(), zmin_client, "a.txt"),
+        filtered_blob_local_presence(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_client,
+            "a.txt",
+        ),
+        "{label}"
+    );
+}
+
+fn assert_filter_fetch_common_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+) {
     assert_eq!(
         git(zmin_client, ["show-ref"]),
         git(git_client, ["show-ref"]),
@@ -5353,18 +5435,47 @@ fn assert_filtered_fetch_matches_stock_git(
         ),
         "{label}"
     );
+}
+
+fn assert_blob_limit_filter_fetch_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+) {
+    assert_filter_fetch_common_matches_stock_git(label, git_client, zmin_client);
     assert_eq!(
-        filtered_blob_local_presence(zmin_bin(), zmin_client),
+        filtered_blob_local_presence(zmin_bin(), zmin_client, "small.txt"),
+        0,
+        "{label}"
+    );
+    assert_eq!(
         filtered_blob_local_presence(
             stock_git_bin().to_str().expect("stock git path"),
             git_client,
+            "small.txt",
+        ),
+        0,
+        "{label}"
+    );
+    assert_ne!(
+        filtered_blob_local_presence(zmin_bin(), zmin_client, "large.txt"),
+        0,
+        "{label}"
+    );
+    assert_eq!(
+        filtered_blob_local_presence(zmin_bin(), zmin_client, "large.txt"),
+        filtered_blob_local_presence(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_client,
+            "large.txt",
         ),
         "{label}"
     );
 }
 
-fn filtered_blob_local_presence(command: &str, repo: &std::path::Path) -> i32 {
-    let blob = git(repo, ["rev-parse", "origin/main:a.txt"]);
+fn filtered_blob_local_presence(command: &str, repo: &std::path::Path, path: &str) -> i32 {
+    let blobish = format!("origin/main:{path}");
+    let blob = git(repo, ["rev-parse", blobish.as_str()]);
     Command::new(command)
         .current_dir(repo)
         .env("GIT_NO_LAZY_FETCH", "1")
