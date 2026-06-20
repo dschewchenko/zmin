@@ -8564,6 +8564,7 @@ pub(crate) fn run_fetch(
     write_fetch_hidden_refs_trace_if_needed()?;
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
+    validate_fetch_jobs(raw_args)?;
     let has_server_options = fetch_has_server_options(raw_args);
     let upload_pack_command = fetch_upload_pack_command(raw_args)?;
     let deepen = fetch_deepen_amount(raw_args)?;
@@ -8874,6 +8875,45 @@ fn fetch_has_server_options(raw_args: &[String]) -> bool {
         }
     }
     false
+}
+
+fn validate_fetch_jobs(raw_args: &[String]) -> Result<()> {
+    let Some((value, subject)) = fetch_jobs_value(raw_args) else {
+        return Ok(());
+    };
+    if is_git_integer_with_optional_suffix(&value) {
+        return Ok(());
+    }
+    Err(CliError::Stderr {
+        code: 129,
+        text: format!("error: {subject} expects an integer value with an optional k/m/g suffix\n"),
+    })
+}
+
+fn fetch_jobs_value(raw_args: &[String]) -> Option<(String, &'static str)> {
+    let mut args = raw_args.iter().skip(1).peekable();
+    while let Some(arg) = args.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--jobs" {
+            let value = args.next()?.clone();
+            return Some((value, "option `jobs'"));
+        }
+        if arg == "-j" {
+            let value = args.next()?.clone();
+            return Some((value, "switch `j'"));
+        }
+        if let Some(value) = arg.strip_prefix("--jobs=") {
+            return Some((value.to_owned(), "option `jobs'"));
+        }
+        if let Some(value) = arg.strip_prefix("-j") {
+            if !value.is_empty() {
+                return Some((value.to_owned(), "switch `j'"));
+            }
+        }
+    }
+    None
 }
 
 fn fetch_upload_pack_command(raw_args: &[String]) -> Result<Option<String>> {

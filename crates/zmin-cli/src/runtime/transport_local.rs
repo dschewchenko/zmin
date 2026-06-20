@@ -277,7 +277,7 @@ pub(crate) fn validate_clone_jobs(jobs: Option<&str>, raw_args: &[String]) -> Re
     })
 }
 
-fn is_git_integer_with_optional_suffix(value: &str) -> bool {
+pub(crate) fn is_git_integer_with_optional_suffix(value: &str) -> bool {
     let value = value.trim();
     if value.is_empty() {
         return false;

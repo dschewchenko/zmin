@@ -117,6 +117,7 @@ pub(crate) fn dispatch(
             atomic,
             recurse_submodules: _,
             no_recurse_submodules: _,
+            jobs: _,
             update_head_ok,
             write_fetch_head,
             no_write_fetch_head,

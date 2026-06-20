@@ -1114,6 +1114,8 @@ pub enum Command {
         recurse_submodules: Vec<String>,
         #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
         no_recurse_submodules: bool,
+        #[arg(short = 'j', long = "jobs", allow_hyphen_values = true)]
+        jobs: Option<String>,
         #[arg(long = "update-head-ok", action = ArgAction::SetTrue)]
         update_head_ok: bool,
         #[arg(long = "write-fetch-head", overrides_with = "no_write_fetch_head", action = ArgAction::SetTrue)]

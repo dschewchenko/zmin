@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 use common::{
-    command_failure_output, command_failure_output_with_env, command_output,
+    command_any_output, command_failure_output, command_failure_output_with_env, command_output,
     command_output_with_env, configure_identity, ensure_remote_http_helper, git, git_args,
     git_init, git_status_args, git_with_env, git_with_stdin_args, git_with_stdin_bytes, run_zmin,
     run_zmin_args, run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin_args,
@@ -3698,22 +3698,32 @@ fn fetch_filter_blob_none_network_branch_transports_match_stock_git() {
 
 #[test]
 fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git() {
-    let cases = [
-        ("implicit-yes", "--recurse-submodules", true),
-        ("explicit-yes", "--recurse-submodules=yes", true),
-        ("explicit-true", "--recurse-submodules=true", true),
-        ("explicit-one", "--recurse-submodules=1", true),
-        ("on-demand", "--recurse-submodules=on-demand", true),
-        ("explicit-no", "--recurse-submodules=no", false),
-        ("explicit-false", "--recurse-submodules=false", false),
-        ("explicit-zero", "--recurse-submodules=0", false),
-        ("no-recurse", "--no-recurse-submodules", false),
+    let cases: [(&str, &[&str], bool); 11] = [
+        ("implicit-yes", &["--recurse-submodules"], true),
+        ("explicit-yes", &["--recurse-submodules=yes"], true),
+        ("explicit-true", &["--recurse-submodules=true"], true),
+        ("explicit-one", &["--recurse-submodules=1"], true),
+        ("on-demand", &["--recurse-submodules=on-demand"], true),
+        (
+            "jobs-equals-two",
+            &["--jobs=2", "--recurse-submodules"],
+            true,
+        ),
+        (
+            "jobs-short-negative",
+            &["-j", "-1", "--recurse-submodules=on-demand"],
+            true,
+        ),
+        ("explicit-no", &["--recurse-submodules=no"], false),
+        ("explicit-false", &["--recurse-submodules=false"], false),
+        ("explicit-zero", &["--recurse-submodules=0"], false),
+        ("no-recurse", &["--no-recurse-submodules"], false),
     ];
 
-    for (label, mode_arg, expect_submodule_fetch) in cases {
+    for (label, mode_args, expect_submodule_fetch) in cases {
         assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
             label,
-            mode_arg,
+            mode_args,
             true,
             expect_submodule_fetch,
         );
@@ -3722,21 +3732,42 @@ fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
 
 #[test]
 fn fetch_recurse_submodules_smart_http_parent_uninitialized_submodule_matches_stock_git() {
-    let cases = [
-        ("implicit-yes", "--recurse-submodules"),
-        ("explicit-yes", "--recurse-submodules=yes"),
-        ("explicit-true", "--recurse-submodules=true"),
-        ("explicit-one", "--recurse-submodules=1"),
-        ("on-demand", "--recurse-submodules=on-demand"),
-        ("explicit-no", "--recurse-submodules=no"),
-        ("explicit-false", "--recurse-submodules=false"),
-        ("explicit-zero", "--recurse-submodules=0"),
-        ("no-recurse", "--no-recurse-submodules"),
+    let cases: [(&str, &[&str]); 9] = [
+        ("implicit-yes", &["--recurse-submodules"]),
+        ("explicit-yes", &["--recurse-submodules=yes"]),
+        ("explicit-true", &["--recurse-submodules=true"]),
+        ("explicit-one", &["--recurse-submodules=1"]),
+        ("on-demand", &["--recurse-submodules=on-demand"]),
+        ("explicit-no", &["--recurse-submodules=no"]),
+        ("explicit-false", &["--recurse-submodules=false"]),
+        ("explicit-zero", &["--recurse-submodules=0"]),
+        ("no-recurse", &["--no-recurse-submodules"]),
     ];
 
-    for (label, mode_arg) in cases {
+    for (label, mode_args) in cases {
         assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
-            label, mode_arg, false, false,
+            label, mode_args, false, false,
+        );
+    }
+}
+
+#[test]
+fn fetch_jobs_invalid_value_matches_stock_git_failure() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    for args in [
+        ["fetch", "-j", "bad", "origin"].as_slice(),
+        ["fetch", "--jobs=bad", "origin"].as_slice(),
+        ["fetch", "--jobs", "bad", "origin"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), &repo, args, "zmin"),
+            command_any_output("git", &repo, args, "git"),
+            "fetch jobs validation mismatch for {args:?}"
         );
     }
 }
@@ -3939,7 +3970,7 @@ fn fetch_recurse_submodules_smart_http_parent_nested_submodule_matches_stock_git
 
 fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
     label: &str,
-    mode_arg: &str,
+    mode_args: &[&str],
     initialize_submodule: bool,
     expect_submodule_fetch: bool,
 ) {
@@ -4080,14 +4111,9 @@ fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_sto
     git_with_env(&source, ["commit", "-m", "update submodule"]);
     git(&source, ["push", "-q", "origin", "main"]);
 
-    let args = [
-        "-c",
-        "protocol.file.allow=always",
-        "fetch",
-        "--quiet",
-        mode_arg,
-        "origin",
-    ];
+    let mut args = vec!["-c", "protocol.file.allow=always", "fetch", "--quiet"];
+    args.extend_from_slice(mode_args);
+    args.push("origin");
     let git_output = command_output_with_env("git", &git_client, &args, &[], "git fetch");
     let zmin_output = command_output_with_env(zmin_bin(), &zmin_client, &args, &[], "zmin fetch");
     assert_eq!(zmin_output, git_output);
