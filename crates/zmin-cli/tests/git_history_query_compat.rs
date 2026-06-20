@@ -991,14 +991,22 @@ fn log_date_formats_match_stock_git() {
 
     for mode in [
         "default",
+        "default-local",
         "local",
         "iso",
+        "iso-local",
         "iso-strict",
+        "iso-strict-local",
         "rfc",
+        "rfc-local",
         "rfc2822",
+        "rfc2822-local",
         "short",
+        "short-local",
         "unix",
+        "unix-local",
         "raw",
+        "raw-local",
     ] {
         let date_arg = format!("--date={mode}");
         let args = ["log", "-1", date_arg.as_str(), "--format=%ad|%cd"];
@@ -1010,7 +1018,7 @@ fn log_date_formats_match_stock_git() {
     }
 
     let date_env = [("GIT_TEST_DATE_NOW", "1780000000")];
-    for mode in ["relative", "human"] {
+    for mode in ["relative", "relative-local", "human", "human-local"] {
         let date_arg = format!("--date={mode}");
         let args = ["log", "-1", date_arg.as_str(), "--format=%ad|%cd"];
         assert_eq!(

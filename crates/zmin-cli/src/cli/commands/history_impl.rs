@@ -1800,6 +1800,7 @@ enum BlameDateMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LogDateMode<'a> {
     Builtin(BlameDateMode),
+    BuiltinLocal(BlameDateMode),
     Format(&'a str),
     FormatLocal(&'a str),
 }
@@ -2138,17 +2139,13 @@ fn parse_log_date_mode(value: Option<&str>) -> Result<LogDateMode<'_>> {
     let Some(value) = value else {
         return Ok(LogDateMode::Builtin(BlameDateMode::Default));
     };
+    if let Some((mode, local)) = parse_log_builtin_date_mode(value) {
+        if local {
+            return Ok(LogDateMode::BuiltinLocal(mode));
+        }
+        return Ok(LogDateMode::Builtin(mode));
+    }
     match value {
-        "iso" => Ok(LogDateMode::Builtin(BlameDateMode::Iso)),
-        "iso-strict" => Ok(LogDateMode::Builtin(BlameDateMode::IsoStrict)),
-        "default" => Ok(LogDateMode::Builtin(BlameDateMode::Default)),
-        "short" => Ok(LogDateMode::Builtin(BlameDateMode::Short)),
-        "raw" => Ok(LogDateMode::Builtin(BlameDateMode::Raw)),
-        "unix" => Ok(LogDateMode::Builtin(BlameDateMode::Unix)),
-        "rfc" | "rfc2822" => Ok(LogDateMode::Builtin(BlameDateMode::Rfc2822)),
-        "local" => Ok(LogDateMode::Builtin(BlameDateMode::Local)),
-        "relative" => Ok(LogDateMode::Builtin(BlameDateMode::Relative)),
-        "human" => Ok(LogDateMode::Builtin(BlameDateMode::Human)),
         value if value.starts_with("format:") => Ok(LogDateMode::Format(
             value.strip_prefix("format:").unwrap_or_default(),
         )),
@@ -2159,6 +2156,31 @@ fn parse_log_date_mode(value: Option<&str>) -> Result<LogDateMode<'_>> {
             code: 128,
             message: format!("unknown date format {value}"),
         }),
+    }
+}
+
+fn parse_log_builtin_date_mode(value: &str) -> Option<(BlameDateMode, bool)> {
+    match value {
+        "iso" => Some((BlameDateMode::Iso, false)),
+        "iso-local" => Some((BlameDateMode::Iso, true)),
+        "iso-strict" => Some((BlameDateMode::IsoStrict, false)),
+        "iso-strict-local" => Some((BlameDateMode::IsoStrict, true)),
+        "default" => Some((BlameDateMode::Default, false)),
+        "default-local" => Some((BlameDateMode::Default, true)),
+        "short" => Some((BlameDateMode::Short, false)),
+        "short-local" => Some((BlameDateMode::Short, true)),
+        "raw" => Some((BlameDateMode::Raw, false)),
+        "raw-local" => Some((BlameDateMode::Raw, true)),
+        "unix" => Some((BlameDateMode::Unix, false)),
+        "unix-local" => Some((BlameDateMode::Unix, true)),
+        "rfc" | "rfc2822" => Some((BlameDateMode::Rfc2822, false)),
+        "rfc-local" | "rfc2822-local" => Some((BlameDateMode::Rfc2822, true)),
+        "local" => Some((BlameDateMode::Local, false)),
+        "relative" => Some((BlameDateMode::Relative, false)),
+        "relative-local" => Some((BlameDateMode::Relative, true)),
+        "human" => Some((BlameDateMode::Human, false)),
+        "human-local" => Some((BlameDateMode::Human, true)),
+        _ => None,
     }
 }
 
@@ -2618,8 +2640,29 @@ fn format_blame_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
 fn format_log_date(signature: &[u8], mode: LogDateMode<'_>) -> Result<String> {
     match mode {
         LogDateMode::Builtin(mode) => format_blame_date(signature, mode),
+        LogDateMode::BuiltinLocal(mode) => format_log_builtin_local_date(signature, mode),
         LogDateMode::Format(pattern) => signature_formatted_log_date(signature, pattern, false),
         LogDateMode::FormatLocal(pattern) => signature_formatted_log_date(signature, pattern, true),
+    }
+}
+
+fn format_log_builtin_local_date(signature: &[u8], mode: BlameDateMode) -> Result<String> {
+    match mode {
+        BlameDateMode::Iso => signature_formatted_log_date(signature, "%Y-%m-%d %H:%M:%S %z", true),
+        BlameDateMode::IsoStrict => {
+            signature_formatted_log_date(signature, "%Y-%m-%dT%H:%M:%S%:z", true)
+        }
+        BlameDateMode::Default | BlameDateMode::Local => {
+            signature_formatted_log_date(signature, "%a %b %-d %H:%M:%S %Y", true)
+        }
+        BlameDateMode::Short => signature_formatted_log_date(signature, "%Y-%m-%d", true),
+        BlameDateMode::Raw => signature_raw_log_date(signature, true),
+        BlameDateMode::Unix => signature_raw_timestamp(signature),
+        BlameDateMode::Rfc2822 => {
+            signature_formatted_log_date(signature, "%a, %d %b %Y %H:%M:%S %z", true)
+        }
+        BlameDateMode::Relative => signature_relative_blame_date(signature),
+        BlameDateMode::Human => signature_human_log_date(signature, true),
     }
 }
 
@@ -2646,7 +2689,40 @@ fn signature_formatted_log_date(signature: &[u8], pattern: &str, local: bool) ->
     Ok(utc.with_timezone(&offset).format(pattern).to_string())
 }
 
+fn signature_raw_log_date(signature: &[u8], local: bool) -> Result<String> {
+    let (timestamp, timezone) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid author date".into(),
+        })?;
+    if !local {
+        return Ok(format!("{timestamp} {timezone}"));
+    }
+    let utc = chrono::DateTime::from_timestamp(timestamp, 0).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit author timestamp is out of range".into(),
+    })?;
+    Ok(format!(
+        "{} {}",
+        timestamp,
+        utc.with_timezone(&chrono::Local).format("%z")
+    ))
+}
+
+fn signature_raw_timestamp(signature: &[u8]) -> Result<String> {
+    let (timestamp, _) =
+        signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit has invalid author date".into(),
+        })?;
+    Ok(timestamp.to_string())
+}
+
 fn signature_human_blame_date(signature: &[u8]) -> Result<String> {
+    signature_human_log_date(signature, false)
+}
+
+fn signature_human_log_date(signature: &[u8], local: bool) -> Result<String> {
     let (timestamp, timezone) =
         signature_timestamp_timezone(signature).ok_or_else(|| CliError::Fatal {
             code: 128,
@@ -2660,7 +2736,29 @@ fn signature_human_blame_date(signature: &[u8]) -> Result<String> {
         code: 128,
         message: "commit author timestamp is out of range".into(),
     })?;
-    let commit = utc.with_timezone(&offset);
+    if local {
+        return Ok(format_human_log_date(
+            utc.with_timezone(&chrono::Local),
+            timestamp,
+            signature_relative_blame_date(signature)?,
+        ));
+    }
+    Ok(format_human_log_date(
+        utc.with_timezone(&offset),
+        timestamp,
+        signature_relative_blame_date(signature)?,
+    ))
+}
+
+fn format_human_log_date<Tz>(
+    commit: chrono::DateTime<Tz>,
+    timestamp: i64,
+    relative: String,
+) -> String
+where
+    Tz: chrono::TimeZone,
+    Tz::Offset: std::fmt::Display,
+{
     let now = git_test_date_now()
         .and_then(|timestamp| chrono::DateTime::from_timestamp(timestamp, 0))
         .map(|timestamp| timestamp.with_timezone(&chrono::Local))
@@ -2670,19 +2768,19 @@ fn signature_human_blame_date(signature: &[u8]) -> Result<String> {
         && commit.day() == now.day()
         && timestamp <= now.timestamp()
     {
-        return signature_relative_blame_date(signature);
+        return relative;
     }
     if commit.year() == now.year()
         && commit.month() == now.month()
         && commit.day() < now.day()
         && commit.day() + 5 > now.day()
     {
-        return Ok(commit.format("%a %H:%M").to_string());
+        return commit.format("%a %H:%M").to_string();
     }
     if commit.year() == now.year() {
-        return Ok(commit.format("%b %-d %H:%M").to_string());
+        return commit.format("%b %-d %H:%M").to_string();
     }
-    Ok(commit.format("%b %-d %Y").to_string())
+    commit.format("%b %-d %Y").to_string()
 }
 
 fn signature_relative_blame_date(signature: &[u8]) -> Result<String> {
