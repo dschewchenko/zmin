@@ -558,6 +558,19 @@ fn ls_files_recurse_submodules_matches_stock_git() {
     let git = command_output_any("git", &repo, &["ls-files", "--recurse-submodules", "-o"]);
     assert_eq!(zmin.0, git.0);
     assert_eq!(zmin.2.lines().next(), git.2.lines().next());
+
+    assert_eq!(
+        command_output_any(
+            zmin_bin(),
+            &repo,
+            &["ls-files", "--recurse-submodules", "--modified"],
+        ),
+        command_output_any(
+            "git",
+            &repo,
+            &["ls-files", "--recurse-submodules", "--modified"],
+        )
+    );
 }
 
 #[test]
