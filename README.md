@@ -172,12 +172,12 @@ Current state:
 | Commands with any matrix rows | `15/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `218/4632` | option spellings that have at least one behavior row; this is not support |
 | Written behavior rows | `665` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `591/665` | exact written rows with focused parity evidence |
-| Open written rows | `3/665` | written rows that still do not match stock Git |
+| Written rows matching stock Git | `592/665` | exact written rows with focused parity evidence |
+| Open written rows | `2/665` | written rows that still do not match stock Git |
 | Invalid input rows | `71/665` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `591/665` as Git compatibility. It only means `591` of the `665`
+Do not read `592/665` as Git compatibility. It only means `592` of the `665`
 rows already written down match stock Git. The larger unexpanded surface is not
 counted yet. Do not read `218/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
@@ -207,7 +207,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `4` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `58` | `35` | `0` | `23` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `205` | `199` | `3` | `3` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `205` | `200` | `2` | `3` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `135` | `132` | `0` | `3` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` |
@@ -217,7 +217,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `152` | `124` | `0` | `28` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `1` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`665`** | **`591`** | **`3`** | **`71`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`665`** | **`592`** | **`2`** | **`71`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -233,7 +233,7 @@ Current command-level matrices:
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `config` | `243` | `0` | `17` | `51` | `42` | `0` | `0` | `9` | no |
 | `status` | `26` | `0` | `22` | `61` | `57` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `0` | `28` | `205` | `199` | `0` | `3` | `3` | no |
+| `fetch` | `73` | `0` | `28` | `205` | `200` | `0` | `2` | `3` | no |
 | `diff` | `133` | `0` | `31` | `53` | `53` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `32` | `82` | `79` | `0` | `0` | `3` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |

@@ -276,6 +276,30 @@ fn fake_ssh_command_arg(script: &std::path::Path) -> String {
     }
 }
 
+fn write_upload_pack_wrapper(
+    root: &std::path::Path,
+    label: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let script = root.join(format!("upload-pack-{label}.sh"));
+    let log = script.with_extension("sh.log");
+    fs::write(
+        &script,
+        b"#!/bin/sh\nprintf 'invoked %s\\n' \"$*\" >> \"$0.log\"\nexec git-upload-pack \"$@\"\n",
+    )
+    .expect("write upload-pack wrapper");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut perms = fs::metadata(&script)
+            .expect("upload-pack wrapper metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script, perms).expect("chmod upload-pack wrapper");
+    }
+    (script, log)
+}
+
 fn set_bare_head_to_main(remote: &std::path::Path) {
     git(remote, ["symbolic-ref", "HEAD", "refs/heads/main"]);
 }
@@ -3113,6 +3137,133 @@ fn fetch_unshallow_network_multiple_refspecs_match_stock_git() {
         "git-daemon unshallow multi",
         &git_client,
         &zmin_client,
+    );
+}
+
+#[test]
+fn fetch_upload_pack_ssh_shallow_modes_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_shallow_since_remote(dir.path());
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let (wrapper, log) = write_upload_pack_wrapper(dir.path(), "ssh-shallow");
+    let wrapper_command = wrapper.to_str().expect("wrapper path");
+    let upload_pack_arg = format!("--upload-pack={wrapper_command}");
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "upload-pack-ssh-shallow", url.as_str());
+    let ssh_env = [("GIT_SSH_COMMAND", fake_ssh_arg.as_str())];
+
+    command_output_with_env(
+        "git",
+        &git_client,
+        &[
+            "fetch",
+            "--quiet",
+            "--depth=1",
+            &upload_pack_arg,
+            "origin",
+            "main",
+        ],
+        &ssh_env,
+        "git upload-pack depth ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &[
+            "fetch",
+            "--quiet",
+            "--depth=1",
+            &upload_pack_arg,
+            "origin",
+            "main",
+        ],
+        &ssh_env,
+        "zmin upload-pack depth ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh upload-pack depth",
+        &git_client,
+        &zmin_client,
+    );
+
+    command_output_with_env(
+        "git",
+        &git_client,
+        &[
+            "fetch",
+            "--quiet",
+            "--deepen=1",
+            &upload_pack_arg,
+            "origin",
+            "main",
+        ],
+        &ssh_env,
+        "git upload-pack deepen ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &[
+            "fetch",
+            "--quiet",
+            "--deepen=1",
+            &upload_pack_arg,
+            "origin",
+            "main",
+        ],
+        &ssh_env,
+        "zmin upload-pack deepen ssh",
+    );
+    assert_network_branch_shallow_fetch_matches_stock_git(
+        "ssh upload-pack deepen",
+        &git_client,
+        &zmin_client,
+    );
+
+    command_output_with_env(
+        "git",
+        &git_client,
+        &[
+            "fetch",
+            "--quiet",
+            "--unshallow",
+            &upload_pack_arg,
+            "origin",
+            "main",
+        ],
+        &ssh_env,
+        "git upload-pack unshallow ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &[
+            "fetch",
+            "--quiet",
+            "--unshallow",
+            &upload_pack_arg,
+            "origin",
+            "main",
+        ],
+        &ssh_env,
+        "zmin upload-pack unshallow ssh",
+    );
+    assert_network_branch_unshallow_fetch_matches_stock_git(
+        "ssh upload-pack unshallow",
+        &git_client,
+        &zmin_client,
+    );
+
+    let log_contents = fs::read_to_string(&log).expect("upload-pack wrapper log");
+    assert!(
+        log_contents.lines().count() >= 6,
+        "expected stock Git and Zmin to invoke upload-pack wrapper for each fetch:\n{log_contents}"
+    );
+    assert!(
+        log_contents.contains(remote.to_str().expect("remote path")),
+        "expected wrapper log to include remote path:\n{log_contents}"
     );
 }
 

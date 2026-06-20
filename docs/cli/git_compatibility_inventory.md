@@ -178,7 +178,7 @@ Do not collapse these layers into one percentage.
 | Commands with any matrix rows | `15/151` | no | audit rows exist for `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref`, `tag` and `version` |
 | Git doc option pairs represented by rows | `218/4632` | no | documented command-option pairs with at least one behavior row |
 | Written behavior rows | `665` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `591/665` | yes, row by row | exact written rows with parity evidence |
+| Written rows matching stock Git | `592/665` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -211,7 +211,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `58` | `35` | `0` | `0` | `23` | `30` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `205` | `199` | `0` | `3` | `3` | `92` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `205` | `200` | `0` | `2` | `3` | `92` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `135` | `132` | `0` | `0` | `3` | `21` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -221,7 +221,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `152` | `124` | `0` | `0` | `28` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `3` | `2` | `0` | `0` | `1` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`665`** | **`591`** | **`0`** | **`3`** | **`71`** | **`358`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`665`** | **`592`** | **`0`** | **`2`** | **`71`** | **`358`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -232,8 +232,8 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `218/4632`
-represented option pairs or `591/665` passing written rows as a Git support
-percentage. The `591/665` number is audit progress for rows already written
+represented option pairs or `592/665` passing written rows as a Git support
+percentage. The `592/665` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -250,7 +250,7 @@ variants.
 | `branch` | `51` | `0` | `13` | `docs/cli/matrices/branch_v2_47.tsv` | `31` | `18` | `0` | `0` | `13` | no |
 | `config` | `243` | `0` | `17` | `docs/cli/matrices/config_v2_47.tsv` | `51` | `42` | `0` | `0` | `9` | no |
 | `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `61` | `57` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `0` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `205` | `199` | `0` | `3` | `3` | no |
+| `fetch` | `73` | `0` | `28` | `docs/cli/matrices/fetch_v2_47.tsv` | `205` | `200` | `0` | `2` | `3` | no |
 | `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `53` | `53` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `32` | `docs/cli/matrices/log_v2_47.tsv` | `82` | `79` | `0` | `0` | `3` | no |
 | `for-each-ref` | `22` | `0` | `2` | `docs/cli/matrices/for_each_ref_v2_47.tsv` | `34` | `23` | `0` | `0` | `11` | no |
@@ -369,10 +369,10 @@ slice closed branch, multiple explicit refspec and branchless configured
 unshallow fetches over smart HTTP, SSH and git daemon using shallow boundary
 lines plus an absolute deepen request. Related unmatrixed modes still need
 expansion before `fetch` can be complete.
-Zmin invokes the external upload-pack command where stock Git does for those
-local/file forms and preserves stock Git's local/file `--all` and `--multiple`
-behavior, where the custom upload-pack command is not invoked. SSH upload-pack
-override for shallow fetch modes remains open.
+Zmin invokes the external upload-pack command where stock Git does for local
+path and file URL forms, preserves stock Git's local/file `--all` and
+`--multiple` behavior where the custom upload-pack command is not invoked, and
+matches SSH upload-pack override for depth, deepen and unshallow branch fetches.
 
 ## Required Matrix Columns
 

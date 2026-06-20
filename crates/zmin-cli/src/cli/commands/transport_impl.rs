@@ -9530,6 +9530,13 @@ fn fetch_multiple_refspecs(
                 });
             };
             let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            if upload_pack_command.is_some() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --upload-pack currently supports one named SSH remote branch"
+                        .into(),
+                });
+            }
             return fetch_multiple_refspecs_from_ssh_remote(
                 &repo,
                 &remote,
@@ -9550,6 +9557,13 @@ fn fetch_multiple_refspecs(
                 });
             };
             let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            if upload_pack_command.is_some() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "fetch --upload-pack currently supports one named SSH remote branch"
+                        .into(),
+                });
+            }
             return fetch_multiple_refspecs_from_ssh_remote(
                 &repo,
                 &remote,
@@ -11254,13 +11268,11 @@ fn fetch_with_depth(
     ensure_fetch_recurse_submodules_supported(&repo, recurse_submodules_mode, Some(&url))?;
     ensure_fetch_server_options_supported_for_location(&url, has_server_options)?;
     if upload_pack_command.is_some()
-        && (is_http_transport_url(&url)
-            || is_git_daemon_transport_url(&url)
-            || is_ssh_transport_url(&url))
+        && (is_http_transport_url(&url) || is_git_daemon_transport_url(&url))
     {
         return Err(CliError::Fatal {
             code: 128,
-            message: "fetch --upload-pack currently supports local and file remotes".into(),
+            message: "fetch --upload-pack currently supports local, file, and SSH remotes".into(),
         });
     }
     if update_shallow
@@ -11581,7 +11593,14 @@ pub(crate) fn fetch_with_repo_and_remote(
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
-        return fetch_with_ssh_remote(repo, remote, branch, missing_ref_code, &url);
+        return fetch_with_ssh_remote(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            upload_pack_command,
+        );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
         return Err(unsupported_remote_helper_error(&url, String::new()));
@@ -15859,8 +15878,10 @@ fn fetch_with_ssh_remote(
     branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
-    let rows = ssh_ls_remote_rows(url, false, false, false, &[])?;
+    let rows =
+        ssh_ls_remote_rows_with_upload_pack(url, false, false, false, &[], upload_pack_command)?;
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
@@ -15891,7 +15912,7 @@ fn fetch_with_ssh_remote(
             ref_updates.push((format!("refs/remotes/{remote}/{branch}"), row.id.clone()));
             roots.push(row.id.clone());
         }
-        if let Some(branch) = ssh_head_branch(url)? {
+        if let Some(branch) = ssh_head_branch_with_upload_pack(url, upload_pack_command)? {
             symbolic_head = Some(branch);
         }
         for row in rows.iter().filter(|row| row.name.starts_with("refs/tags/")) {
@@ -15902,7 +15923,13 @@ fn fetch_with_ssh_remote(
         }
     }
     sort_dedup_object_ids(&mut roots);
-    ssh_fetch_pack_with_haves(url, &repo.objects_dir, &roots, &haves)?;
+    ssh_fetch_pack_with_haves_and_upload_pack(
+        url,
+        &repo.objects_dir,
+        &roots,
+        &haves,
+        upload_pack_command,
+    )?;
     for (name, id) in ref_updates {
         destination_refs.write_ref(&name, &id)?;
     }
@@ -15922,8 +15949,12 @@ fn fetch_with_ssh_remote_depth(
     missing_ref_code: i32,
     url: &str,
     depth: usize,
+    append: bool,
+    write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
-    let rows = ssh_ls_remote_rows(url, false, false, false, &[])?;
+    let rows =
+        ssh_ls_remote_rows_with_upload_pack(url, false, false, false, &[], upload_pack_command)?;
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let mut request_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
     let mut shallow_roots = Vec::with_capacity(transport_ref_collection_capacity(rows.len()));
@@ -15935,6 +15966,9 @@ fn fetch_with_ssh_remote_depth(
             .map(|row| row.id.clone())
             .ok_or_else(|| missing_remote_ref_error(&branch, missing_ref_code))?;
         destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+        if write_fetch_head {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+        }
         request_roots.push(id.clone());
         shallow_roots.push(id);
     } else {
@@ -15953,7 +15987,7 @@ fn fetch_with_ssh_remote_depth(
             request_roots.push(row.id.clone());
             shallow_roots.push(row.id.clone());
         }
-        if let Some(branch) = ssh_head_branch(url)? {
+        if let Some(branch) = ssh_head_branch_with_upload_pack(url, upload_pack_command)? {
             destination_refs.write_symbolic_ref(
                 &format!("refs/remotes/{remote}/HEAD"),
                 &format!("refs/remotes/{remote}/{branch}"),
@@ -15968,8 +16002,13 @@ fn fetch_with_ssh_remote_depth(
     }
     sort_dedup_object_ids(&mut request_roots);
     sort_dedup_object_ids(&mut shallow_roots);
-    let boundaries =
-        ssh_fetch_pack_with_depth(url, &repo.objects_dir, &request_roots, Some(depth))?;
+    let boundaries = ssh_fetch_pack_with_depth_and_upload_pack(
+        url,
+        &repo.objects_dir,
+        &request_roots,
+        Some(depth),
+        upload_pack_command,
+    )?;
     write_shallow_file(
         &repo,
         boundaries_or_local_fallback(&repo, &shallow_roots, depth, boundaries)?,
@@ -15985,9 +16024,16 @@ fn fetch_with_ssh_remote_shallow_options(
     options: UploadPackShallowOptions<'_>,
     append: bool,
     write_fetch_head: bool,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
-    let (rows, advertised_shallow_boundaries) =
-        ssh_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
+    let (rows, advertised_shallow_boundaries) = ssh_ls_remote_rows_with_shallows_and_upload_pack(
+        url,
+        false,
+        false,
+        false,
+        &[],
+        upload_pack_command,
+    )?;
     let objects_dir = repo.objects_dir.clone();
     fetch_with_advertised_remote_shallow_options(
         repo,
@@ -16001,7 +16047,14 @@ fn fetch_with_ssh_remote_shallow_options(
         append,
         write_fetch_head,
         |roots, haves, options| {
-            ssh_fetch_pack_with_shallow_options_and_haves(url, &objects_dir, roots, haves, options)
+            ssh_fetch_pack_with_shallow_options_and_haves_and_upload_pack(
+                url,
+                &objects_dir,
+                roots,
+                haves,
+                options,
+                upload_pack_command,
+            )
         },
     )
 }
@@ -17068,7 +17121,17 @@ fn fetch_with_repo_and_remote_depth(
         return fetch_with_daemon_remote_depth(repo, remote, branch, missing_ref_code, &url, depth);
     }
     if is_ssh_transport_url(&url) {
-        return fetch_with_ssh_remote_depth(repo, remote, branch, missing_ref_code, &url, depth);
+        return fetch_with_ssh_remote_depth(
+            repo,
+            remote,
+            branch,
+            missing_ref_code,
+            &url,
+            depth,
+            append,
+            write_fetch_head,
+            upload_pack_command,
+        );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
         return Err(unsupported_remote_helper_error(&url, String::new()));
@@ -17246,6 +17309,7 @@ fn fetch_with_repo_and_remote_shallow_since(
             UploadPackShallowOptions::since(since),
             append,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -17381,6 +17445,7 @@ fn fetch_with_repo_and_remote_shallow_exclude(
             UploadPackShallowOptions::deepen_not(exclude_revs),
             append,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -17545,6 +17610,7 @@ fn fetch_with_repo_and_remote_deepen(
             UploadPackShallowOptions::depth_with_shallows(deepen, &shallows),
             append,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -17667,6 +17733,7 @@ fn fetch_with_repo_and_remote_unshallow(
             UploadPackShallowOptions::unshallow(&shallows),
             append,
             write_fetch_head,
+            upload_pack_command,
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -17774,6 +17841,7 @@ fn fetch_with_repo_and_remote_update_shallow(
             UploadPackShallowOptions::depth(None),
             append,
             write_fetch_head,
+            None,
         );
     }
     Err(unsupported_remote_helper_error(&url, String::new()))
@@ -19037,6 +19105,25 @@ pub(crate) fn ssh_ls_remote_rows(
     ssh_ls_remote_rows_with_shallows(url, heads, tags, refs_only, patterns).map(|(rows, _)| rows)
 }
 
+fn ssh_ls_remote_rows_with_upload_pack(
+    url: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+    upload_pack_command: Option<&str>,
+) -> Result<Vec<LsRemoteRow>> {
+    ssh_ls_remote_rows_with_shallows_and_upload_pack(
+        url,
+        heads,
+        tags,
+        refs_only,
+        patterns,
+        upload_pack_command,
+    )
+    .map(|(rows, _)| rows)
+}
+
 fn ssh_ls_remote_rows_with_shallows(
     url: &str,
     heads: bool,
@@ -19044,8 +19131,20 @@ fn ssh_ls_remote_rows_with_shallows(
     refs_only: bool,
     patterns: &[String],
 ) -> Result<(Vec<LsRemoteRow>, Vec<ObjectId>)> {
+    ssh_ls_remote_rows_with_shallows_and_upload_pack(url, heads, tags, refs_only, patterns, None)
+}
+
+fn ssh_ls_remote_rows_with_shallows_and_upload_pack(
+    url: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+    upload_pack_command: Option<&str>,
+) -> Result<(Vec<LsRemoteRow>, Vec<ObjectId>)> {
     let parsed = ParsedSshUrl::parse(url)?;
-    let mut session = spawn_ssh_remote_command(&parsed, "git-upload-pack")?;
+    let service = ssh_upload_pack_service(upload_pack_command)?;
+    let mut session = spawn_ssh_remote_command(&parsed, service)?;
     let (rows, _, shallow_boundaries) = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
             code: 128,
@@ -19103,8 +19202,16 @@ fn ssh_open_advertised_upload_pack(
 }
 
 fn ssh_head_branch(url: &str) -> Result<Option<String>> {
+    ssh_head_branch_with_upload_pack(url, None)
+}
+
+fn ssh_head_branch_with_upload_pack(
+    url: &str,
+    upload_pack_command: Option<&str>,
+) -> Result<Option<String>> {
     let parsed = ParsedSshUrl::parse(url)?;
-    let mut session = spawn_ssh_remote_command(&parsed, "git-upload-pack")?;
+    let service = ssh_upload_pack_service(upload_pack_command)?;
+    let mut session = spawn_ssh_remote_command(&parsed, service)?;
     let branch = {
         let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
             code: 128,
@@ -19134,13 +19241,39 @@ pub(crate) fn ssh_fetch_pack_with_haves(
     ssh_fetch_pack_with_depth_and_haves(url, objects_dir, roots, haves, None).map(|_| ())
 }
 
-fn ssh_fetch_pack_with_depth(
+fn ssh_fetch_pack_with_haves_and_upload_pack(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    upload_pack_command: Option<&str>,
+) -> Result<()> {
+    ssh_fetch_pack_with_depth_and_haves_and_upload_pack(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        None,
+        upload_pack_command,
+    )
+    .map(|_| ())
+}
+
+fn ssh_fetch_pack_with_depth_and_upload_pack(
     url: &str,
     objects_dir: &std::path::Path,
     roots: &[ObjectId],
     depth: Option<usize>,
+    upload_pack_command: Option<&str>,
 ) -> Result<Vec<ObjectId>> {
-    ssh_fetch_pack_with_depth_and_haves(url, objects_dir, roots, &[], depth)
+    ssh_fetch_pack_with_depth_and_haves_and_upload_pack(
+        url,
+        objects_dir,
+        roots,
+        &[],
+        depth,
+        upload_pack_command,
+    )
 }
 
 fn ssh_fetch_pack_with_depth_and_haves(
@@ -19150,12 +19283,53 @@ fn ssh_fetch_pack_with_depth_and_haves(
     haves: &[ObjectId],
     depth: Option<usize>,
 ) -> Result<Vec<ObjectId>> {
-    ssh_fetch_pack_with_shallow_options_and_haves(
+    ssh_fetch_pack_with_depth_and_haves_and_upload_pack(url, objects_dir, roots, haves, depth, None)
+}
+
+fn ssh_fetch_pack_with_depth_and_haves_and_upload_pack(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    upload_pack_command: Option<&str>,
+) -> Result<Vec<ObjectId>> {
+    ssh_fetch_pack_with_shallow_options_and_haves_impl(
         url,
         objects_dir,
         roots,
         haves,
         UploadPackShallowOptions::depth(depth),
+        upload_pack_command,
+    )
+}
+
+fn ssh_upload_pack_service(upload_pack_command: Option<&str>) -> Result<&str> {
+    match upload_pack_command {
+        Some(command) if command.trim().is_empty() => Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --upload-pack command is empty".into(),
+        }),
+        Some(command) => Ok(command),
+        None => Ok("git-upload-pack"),
+    }
+}
+
+fn ssh_fetch_pack_with_shallow_options_and_haves_and_upload_pack(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    upload_pack_command: Option<&str>,
+) -> Result<Vec<ObjectId>> {
+    ssh_fetch_pack_with_shallow_options_and_haves_impl(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        upload_pack_command,
     )
 }
 
@@ -19166,13 +19340,32 @@ fn ssh_fetch_pack_with_shallow_options_and_haves(
     haves: &[ObjectId],
     options: UploadPackShallowOptions<'_>,
 ) -> Result<Vec<ObjectId>> {
+    ssh_fetch_pack_with_shallow_options_and_haves_impl(
+        url,
+        objects_dir,
+        roots,
+        haves,
+        options,
+        None,
+    )
+}
+
+fn ssh_fetch_pack_with_shallow_options_and_haves_impl(
+    url: &str,
+    objects_dir: &std::path::Path,
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    options: UploadPackShallowOptions<'_>,
+    upload_pack_command: Option<&str>,
+) -> Result<Vec<ObjectId>> {
     if roots.is_empty() {
         return Ok(Vec::new());
     }
     let parsed = ParsedSshUrl::parse(url)?;
+    let service = ssh_upload_pack_service(upload_pack_command)?;
     let mut session = {
         let _trace = phase_trace("ssh_fetch_pack.spawn");
-        spawn_ssh_remote_command(&parsed, "git-upload-pack")?
+        spawn_ssh_remote_command(&parsed, service)?
     };
     {
         let _trace = phase_trace("ssh_fetch_pack.advertisement");
