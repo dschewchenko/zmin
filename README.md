@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `8/151` | `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files` and `rev-parse` have started behavior matrices |
-| Documented option spellings represented by rows | `178/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `522` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `475/522` | exact written rows with focused parity evidence |
-| Open written rows | `9/522` | written rows that still do not match stock Git |
-| Invalid input rows | `38/522` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `9/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files` and `rev-parse` have started behavior matrices |
+| Documented option spellings represented by rows | `191/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `553` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `493/553` | exact written rows with focused parity evidence |
+| Open written rows | `9/553` | written rows that still do not match stock Git |
+| Invalid input rows | `51/553` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `475/522` as Git compatibility. It only means `475` of the `522`
+Do not read `493/553` as Git compatibility. It only means `493` of the `553`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `178/4632` as option support either; it only means
+counted yet. Do not read `191/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -206,7 +206,7 @@ Audit progress by git-scm reference group:
 | Setup and Config | `6` | `0` | `276` | `0` | `51` | `42` | `0` | `9` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `4` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `0` | `0` | `0` | `0` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `31` | `18` | `0` | `13` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `189` | `177` | `9` | `3` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `109` | `108` | `0` | `1` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` |
@@ -217,7 +217,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `112` | `91` | `0` | `21` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`522`** | **`475`** | **`9`** | **`38`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`553`** | **`493`** | **`9`** | **`51`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -230,6 +230,7 @@ Current command-level matrices:
 
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `config` | `243` | `0` | `17` | `51` | `42` | `0` | `0` | `9` | no |
 | `status` | `26` | `0` | `22` | `61` | `57` | `0` | `0` | `4` | no |
 | `fetch` | `73` | `0` | `28` | `189` | `177` | `0` | `9` | `3` | no |
@@ -239,7 +240,7 @@ Current command-level matrices:
 | `ls-files` | `42` | `0` | `27` | `53` | `45` | `0` | `0` | `8` | no |
 | `rev-parse` | `72` | `0` | `20` | `25` | `23` | `0` | `0` | `2` | no |
 
-`config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files` or `rev-parse`
+`branch`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files` or `rev-parse`
 having `0` open rows does not mean full command compatibility. It means no open
 item remains among the rows currently written. Unwritten values, option
 combinations, repository states, transports and platform cases are still
