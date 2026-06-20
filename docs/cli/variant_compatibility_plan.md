@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 233 written rows / 218 written rows matching stock Git / 9 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 239 written rows / 224 written rows matching stock Git / 9 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -166,10 +166,12 @@ command.
 | `fetch --shallow-since` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --shallow-since` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches |
 | `fetch --shallow-since` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs |
+| `fetch --shallow-since` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches with matching remote-tracking ref, FETCH_HEAD and shallow state |
 | `fetch --shallow-exclude` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --shallow-exclude` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches |
 | `fetch --shallow-exclude` repeated local/file forms | `5` | `0` | repeated exclude forms for named local/file remote branch, explicit local/file branch, and explicit local/file HEAD fetches |
 | `fetch --shallow-exclude` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs |
+| `fetch --shallow-exclude` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches with matching remote-tracking ref, FETCH_HEAD and shallow state |
 | `fetch --deepen` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches in existing shallow repos |
 | `fetch --deepen` explicit local/file HEAD forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --deepen` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs in existing shallow repos |
@@ -193,7 +195,7 @@ command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `315` verified variants.
+Tracked closed blocks in this table: `321` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
