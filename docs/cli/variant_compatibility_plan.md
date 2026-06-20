@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 20/151 commands with matrix rows / 225/4632 represented doc-option pairs / 820 written rows / 727 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 21/151 commands with matrix rows / 225/4632 represented doc-option pairs / 821 written rows / 727 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -179,16 +179,15 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-Current candidate: probe `git bisect visualize --bad` only after starting a
-real bisect session, compare stock Git and Zmin stdout, stderr and exit code,
-then either add a focused invalid-input row/test for the existing
-`bisect visualize` unsupported-option guard or discard the candidate and move
-to the next guard. If the row is closed, create a command matrix for
-`bisect_v2_47.tsv`, update counts and project notes, commit and push before
-classifying another guard.
+The latest closed guard classification is `git bisect visualize --bad` after a
+real bisect session is started. The next default slice remains the second
+active lane: run a fresh `unsupported` / `not supported` code scan, choose one
+small remaining guard that is not entangled with unrelated staged changes, then
+classify it as Git-supported behavior, stock-compatible invalid input,
+intentional deferral or Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/820`; the complete command matrices and complete doc-option matrices remain
+`0/821`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -351,6 +350,7 @@ until a full matrix is expanded and verified.
 | `fetch --jobs submodule recursion values` | `2` | `1` | accepted `--jobs=2` and `-j -1` with smart HTTP parent/local submodule recursion, plus invalid non-integer `--jobs`/`-j` diagnostics |
 | `fetch --dry-run smart HTTP submodule recursion` | `2` | `0` | default/on-demand and explicit `--recurse-submodules` smart HTTP parent/local-submodule dry-runs leave parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
 | `submodule` subcommand unknown option usage | `4` | `0` | `git submodule update/deinit/set-branch/summary --bad` exit `1` with stock usage text instead of custom unsupported-option fatal diagnostics |
+| `bisect` visualize unknown option usage | `1` | `0` | `git bisect visualize --bad` after `bisect start` exits `128` with stock fatal diagnostic instead of a custom unsupported-option fatal diagnostic |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
@@ -365,7 +365,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `470` verified variants.
+Tracked closed blocks in this table: `485` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

@@ -849,8 +849,8 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
             }
             value if value.starts_with('-') => {
                 return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported bisect visualize log option '{value}'"),
+                    code: 128,
+                    message: format!("unrecognized argument: {value}"),
                 });
             }
             value => revs.push(value.to_owned()),
