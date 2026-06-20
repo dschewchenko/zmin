@@ -170,6 +170,24 @@ updates, project-note update, commit and push.
 | 4 | Add upstream/platform evidence for already-written rows | selected upstream Git tests or macOS/Linux/Windows checks for rows where platform or upstream behavior matters | only rows with matching stock-Git evidence may remain closed |
 | 5 | Design Zmin-only hooks staged-file runner | API and behavior rows for staged index files, extension/pathspec filters, renamed/deleted files, dry-run/list and hook-wrapper mode | record under Zmin-only extensions, not Git 2.47 compatibility |
 
+### Current Next Slice Pointer
+
+The next slice is a single WebStorm replacement row:
+`git rev-parse --git-dir` through the temporary `git` shim on a cloned
+repository root.
+
+Do not broaden this slice to unrelated `rev-parse` behavior. It is done only
+after these steps complete:
+
+1. Add a closed row to `docs/cli/matrices/rev_parse_v2_47.tsv` with evidence
+   `tools/git-replacement-dogfood-smoke.sh::rev_parse_git_dir`.
+2. Run `tools/git-replacement-dogfood-smoke.sh`.
+3. Run the count gates from this document.
+4. Refresh README, `git_compatibility_inventory.md`, this plan and project
+   notes with generated counts.
+5. Commit and push the docs/matrix slice before moving to the next replacement
+   command line.
+
 The most recent closed transport lane is `fetch --server-option` protocol v2
 for smart HTTP, SSH and git-daemon, covering explicit branch and branchless
 configured fetches with equals, separate-value and repeated option forms. Do
