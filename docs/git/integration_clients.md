@@ -57,3 +57,15 @@ The version line must start with the Git 2.47 compatibility baseline, currently
 `git version 2.47.1.zmin`, and include the real Zmin package version after it. Some
 clients reject tools below their minimum Git version before running any other
 command.
+
+Run the replacement smoke before local IDE dogfood:
+
+```bash
+tools/git-replacement-dogfood-smoke.sh
+```
+
+The smoke creates a temporary `git` shim that dispatches to `zmin`, then checks
+the IDE-shaped surfaces that usually run first: version, `status -z`,
+porcelain v2 branch status, `rev-parse`, `config`, `ls-files -z`, `diff -z`,
+`log -z` and `fetch --prune --no-tags`. This is a dogfood gate, not a complete
+Git compatibility claim.
