@@ -583,6 +583,18 @@ fn ls_files_recurse_submodules_matches_stock_git() {
             &["ls-files", "--recurse-submodules", "--deleted"],
         )
     );
+    assert_eq!(
+        command_output_any(
+            zmin_bin(),
+            &repo,
+            &["ls-files", "--recurse-submodules", "--unmerged"],
+        ),
+        command_output_any(
+            "git",
+            &repo,
+            &["ls-files", "--recurse-submodules", "--unmerged"],
+        )
+    );
 }
 
 #[test]

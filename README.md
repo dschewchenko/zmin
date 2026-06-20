@@ -171,15 +171,15 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `25/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `233/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `843` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `732/843` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/843` | written rows that still do not match stock Git |
-| Invalid input rows | `111/843` | rows where stock Git rejects the input |
+| Written behavior rows | `844` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `732/844` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/844` | written rows that still do not match stock Git |
+| Invalid input rows | `112/844` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `732/843` as Git compatibility. It only means `732` of the `843`
+Do not read `732/844` as Git compatibility. It only means `732` of the `844`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `111/843` additional rows are
+unexpanded surface is not counted yet, and `112/844` additional rows are
 stock-compatible invalid inputs. Do not read `233/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -216,9 +216,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `6` | `0` | `0` | `6` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `179` | `144` | `0` | `35` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `180` | `144` | `0` | `36` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`843`** | **`732`** | **`0`** | **`111`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`844`** | **`732`** | **`0`** | **`112`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -244,7 +244,7 @@ Current command-level matrices:
 | `diff` | `133` | `0` | `31` | `65` | `65` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `32` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
-| `ls-files` | `42` | `0` | `27` | `61` | `51` | `0` | `0` | `10` | no |
+| `ls-files` | `42` | `0` | `27` | `62` | `51` | `0` | `0` | `11` | no |
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
 | `notes` | `33` | `0` | `0` | `6` | `0` | `0` | `0` | `6` | no |
