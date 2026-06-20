@@ -9314,10 +9314,22 @@ fn fetch_multiple_refspecs(
     let prune = effective_fetch_prune(&repo, Some(&remote), prune, no_prune)?;
     if is_http_transport_url(&url) {
         if unshallow {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --unshallow currently supports local and file remotes".into(),
-            });
+            let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "--unshallow on a complete repository does not make sense".into(),
+                });
+            };
+            let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            return fetch_multiple_refspecs_from_http_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                Some(UploadPackShallowOptions::unshallow(&shallows)),
+            );
         }
         if let Some(deepen) = deepen {
             let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
@@ -9381,10 +9393,23 @@ fn fetch_multiple_refspecs(
     }
     if is_git_daemon_transport_url(&url) {
         if unshallow {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --unshallow currently supports local and file remotes".into(),
-            });
+            let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "--unshallow on a complete repository does not make sense".into(),
+                });
+            };
+            let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            return fetch_multiple_refspecs_from_daemon_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::unshallow(&shallows)),
+            );
         }
         if let Some(deepen) = deepen {
             let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
@@ -9452,10 +9477,23 @@ fn fetch_multiple_refspecs(
     }
     if is_ssh_transport_url(&url) {
         if unshallow {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --unshallow currently supports local and file remotes".into(),
-            });
+            let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "--unshallow on a complete repository does not make sense".into(),
+                });
+            };
+            let shallows = sorted_object_ids_from_set(&shallow_boundaries);
+            return fetch_multiple_refspecs_from_ssh_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::unshallow(&shallows)),
+            );
         }
         if let Some(deepen) = deepen {
             let Some(shallow_boundaries) = read_repo_shallow_boundaries(&repo)? else {
@@ -9719,7 +9757,7 @@ fn fetch_multiple_refspecs_from_http_remote(
             boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
         )?;
     } else if let Some(shallow_options) = shallow_options {
-        let request_roots = if shallow_options.deepen_relative {
+        let request_roots = if shallow_options.deepen_relative || shallow_options.is_unshallow() {
             roots.clone()
         } else {
             missing_fetch_roots(&store, &roots)?
@@ -9758,7 +9796,11 @@ fn fetch_multiple_refspecs_from_http_remote(
                 } else {
                     shallow_boundaries
                 };
-            write_shallow_file(repo, shallow_boundaries)?;
+            if shallow_options.is_unshallow() {
+                write_shallow_file(repo, Vec::new())?;
+            } else {
+                write_shallow_file(repo, shallow_boundaries)?;
+            }
         }
     } else {
         let request_roots = missing_fetch_roots(&store, &roots)?;
@@ -9921,11 +9963,12 @@ where
         .collect::<Vec<_>>();
     sort_dedup_object_ids(&mut roots);
     let shallow_options = shallow_options.unwrap_or_else(|| UploadPackShallowOptions::depth(depth));
-    let request_roots = if depth.is_some() || shallow_options.deepen_relative {
-        roots.clone()
-    } else {
-        missing_fetch_roots(&store, &roots)?
-    };
+    let request_roots =
+        if depth.is_some() || shallow_options.deepen_relative || shallow_options.is_unshallow() {
+            roots.clone()
+        } else {
+            missing_fetch_roots(&store, &roots)?
+        };
     let shallow_boundaries = fetch_pack(&request_roots, &haves, shallow_options)?;
     if let Some(depth) = depth {
         let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
@@ -9944,6 +9987,8 @@ where
             shallow_boundaries
         };
         write_shallow_file(repo, shallow_boundaries)?;
+    } else if shallow_options.is_unshallow() {
+        write_shallow_file(repo, Vec::new())?;
     } else if shallow_options.uses_advertised_shallow_fallback() {
         write_shallow_file(
             repo,
@@ -18129,6 +18174,14 @@ impl<'a> UploadPackShallowOptions<'a> {
             && self.since.is_none()
             && self.deepen_not.is_empty()
             && self.shallows.is_empty()
+            && !self.deepen_relative
+    }
+
+    fn is_unshallow(self) -> bool {
+        self.depth == Some(i32::MAX as usize)
+            && self.since.is_none()
+            && self.deepen_not.is_empty()
+            && !self.shallows.is_empty()
             && !self.deepen_relative
     }
 }

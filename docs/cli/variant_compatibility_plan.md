@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 215/4632 represented doc-option pairs / 651 written rows / 576 written rows matching stock Git / 5 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 215/4632 represented doc-option pairs / 654 written rows / 579 written rows matching stock Git / 5 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -182,6 +182,7 @@ command.
 | `fetch --unshallow` explicit local/file HEAD forms | `2` | `0` | explicit local path and file URL HEAD fetches in existing shallow repos |
 | `fetch --unshallow` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs in existing shallow repos |
 | `fetch --unshallow` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches from existing shallow repos using shallow boundary lines plus an absolute deepen request |
+| `fetch --unshallow` network multiple explicit refspec forms | `3` | `0` | smart HTTP, SSH and git daemon fetches with two destination refspecs from existing shallow repos using shallow boundary lines plus an absolute deepen request |
 | `fetch --update-shallow` local/file remote forms | `6` | `0` | named and explicit local path/file URL branch plus explicit HEAD fetches where the remote itself is shallow |
 | `fetch --update-shallow` multiple explicit local/file refspec forms | `4` | `0` | named local/file remotes and explicit local/file locations with two destination refspecs where the remote itself is shallow |
 | `fetch --update-shallow` network branch forms | `3` | `0` | smart HTTP, SSH and git daemon branch fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
