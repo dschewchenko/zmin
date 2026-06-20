@@ -109,16 +109,19 @@ compatibility.
 
 Progress reports use these numbers:
 
-`complete command matrices / commands with matrix rows / represented doc-option pairs / written behavior rows / written rows matching stock Git / open written rows`
+`complete command matrices / complete doc-option matrices / commands with matrix rows / represented doc-option pairs / written behavior rows / written rows matching stock Git / open written rows`
 
 For the current branch:
 
-`0/151 complete command matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 230 written rows / 215 written rows matching stock Git / 9 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 230 written rows / 215 written rows matching stock Git / 9 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
-spelling can expand into many behavior rows. The final denominator exists only
-after the expansion plan above is done for that command.
+spelling can expand into many behavior rows. A complete doc-option matrix
+requires values, negations, repeated forms, order-sensitive combinations,
+repository states, transports and platforms with stock-Git evidence. The final
+denominator exists only after the expansion plan above is done for that
+command.
 
 ## Closed Evidence Blocks
 

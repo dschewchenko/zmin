@@ -19,6 +19,7 @@ option_seed="$tmp_dir/option-seed.tsv"
 matrix_counts="$tmp_dir/matrix-counts.tsv"
 represented_options="$tmp_dir/represented-options.tsv"
 complete_commands="$tmp_dir/complete-commands.tsv"
+complete_options="$tmp_dir/complete-options.tsv"
 
 awk '$1 ~ /^git-/ { command = $1; sub(/^git-/, "", command); print command }' "$command_list" |
   sort -u >"$all_commands"
@@ -67,6 +68,12 @@ awk -F'\t' '
 # file empty until a command has been reviewed against that rule.
 : >"$complete_commands"
 
+# A documented command-option pair becomes complete only after all values,
+# negations, repeated forms, ordering, repository states, transports and
+# platforms for that pair have stock-Git evidence. Keep this file empty until
+# a command-option pair has been reviewed against that rule.
+: >"$complete_options"
+
 awk -F'\t' -v format="$format" '
   FILENAME ~ /all-commands/ {
     all[$1] = 1
@@ -101,6 +108,13 @@ awk -F'\t' -v format="$format" '
     represented_total += $2
     next
   }
+  FILENAME ~ /complete-options/ {
+    if ($1 != "") {
+      complete_options[$1]++
+      complete_option_total++
+    }
+    next
+  }
   FILENAME ~ /complete-commands/ {
     if ($1 != "") {
       complete[$1] = 1
@@ -112,6 +126,7 @@ awk -F'\t' -v format="$format" '
     if (format == "--tsv") {
       print "metric\tcount\ttotal\tnote"
       printf "complete_command_matrices\t%d\t%d\tonly commands whose full behavior matrix is finished\n", complete_count + 0, command_count + 0
+      printf "complete_doc_option_pairs\t%d\t%d\tdocumented command-option pairs whose full behavior matrix is finished\n", complete_option_total + 0, option_total + 0
       printf "commands_with_matrix_rows\t%d\t%d\tcommands with any written behavior rows\n", matrix_command_count + 0, command_count + 0
       printf "doc_option_pairs_represented_by_rows\t%d\t%d\tdocumented command-option pairs with at least one behavior row\n", represented_total + 0, option_total + 0
       printf "behavior_rows_written\t%d\t%d\tcurrent written command option value combination state transport platform rows\n", rows_total + 0, rows_total + 0
@@ -120,12 +135,13 @@ awk -F'\t' -v format="$format" '
       printf "behavior_rows_open\t%d\t%d\twritten rows not implemented or not matching yet\n", open_total + 0, rows_total + 0
       printf "invalid_input_rows\t%d\t%d\trows where stock Git rejects the input\n", invalid_total + 0, rows_total + 0
       print ""
-      print "command\tdoc_option_pairs\trepresented_doc_option_pairs\tbehavior_rows_written\twritten_rows_matching_stock_git\tpartial\topen\tinvalid_input\tcomplete_matrix"
+      print "command\tdoc_option_pairs\tcomplete_doc_option_pairs\trepresented_doc_option_pairs\tbehavior_rows_written\twritten_rows_matching_stock_git\tpartial\topen\tinvalid_input\tcomplete_matrix"
       for (i = 1; i <= command_order_count; i++) {
         command = command_order[i]
         if (!(command in commands_with_matrix)) continue
-        printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
-          command, option_seed[command] + 0, represented[command] + 0,
+        printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+          command, option_seed[command] + 0, complete_options[command] + 0,
+          represented[command] + 0,
           matrix_rows[command] + 0, matrix_closed[command] + 0,
           matrix_partial[command] + 0, matrix_open[command] + 0,
           matrix_invalid[command] + 0, (command in complete ? "yes" : "no")
@@ -134,6 +150,7 @@ awk -F'\t' -v format="$format" '
       print "| Metric | Count | Meaning |"
       print "| --- | ---: | --- |"
       printf "| Complete command matrices | `%d/%d` | full command behavior matrix finished |\n", complete_count + 0, command_count + 0
+      printf "| Complete doc option pairs | `%d/%d` | documented command-option pairs whose full behavior matrix is finished |\n", complete_option_total + 0, option_total + 0
       printf "| Commands with any matrix rows | `%d/%d` | audit has started for the command |\n", matrix_command_count + 0, command_count + 0
       printf "| Doc option pairs represented by rows | `%d/%d` | documented command-option pairs with at least one behavior row |\n", represented_total + 0, option_total + 0
       printf "| Behavior rows written | `%d` | command + option + value + combination + state + transport + platform rows |\n", rows_total + 0
@@ -142,17 +159,18 @@ awk -F'\t' -v format="$format" '
       printf "| Open rows | `%d/%d` | written rows not implemented or not matching yet |\n", open_total + 0, rows_total + 0
       printf "| Invalid input rows | `%d/%d` | rows where stock Git rejects the input |\n", invalid_total + 0, rows_total + 0
       print ""
-      print "| Command | Git doc option pairs | Represented doc option pairs | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |"
-      print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+      print "| Command | Git doc option pairs | Complete doc option pairs | Represented doc option pairs | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |"
+      print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
       for (i = 1; i <= command_order_count; i++) {
         command = command_order[i]
         if (!(command in commands_with_matrix)) continue
-        printf "| `%s` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | %s |\n",
-          command, option_seed[command] + 0, represented[command] + 0,
+        printf "| `%s` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | %s |\n",
+          command, option_seed[command] + 0, complete_options[command] + 0,
+          represented[command] + 0,
           matrix_rows[command] + 0, matrix_closed[command] + 0,
           matrix_partial[command] + 0, matrix_open[command] + 0,
           matrix_invalid[command] + 0, (command in complete ? "yes" : "no")
       }
     }
   }
-' "$all_commands" "$option_seed" "$matrix_counts" "$represented_options" "$complete_commands"
+' "$all_commands" "$option_seed" "$matrix_counts" "$represented_options" "$complete_options" "$complete_commands"

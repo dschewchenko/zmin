@@ -8,8 +8,10 @@ surface.
 - Git `v2.32.0`: `145/145` tracked command entry points present
 - Git `v2.47.1`: `151/151` tracked command entry points present
 - complete Git `v2.47.1` behavior matrices: `0/151`
+- complete documented command-option behavior matrices: `0/4632`
 - commands with any written behavior matrix rows: `2/151`
 - documented command-option pairs represented by at least one row: `50/4632`
+  audit progress only, not argument support
 
 ## Current state
 

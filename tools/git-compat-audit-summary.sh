@@ -167,10 +167,10 @@ awk -F'\t' '
 } >"$tmp_dir/unique-summary.tsv"
 
 if [[ "$format" == "--tsv" ]]; then
-  printf 'group\tgit_commands\tgit_doc_option_seed_rows\tmatrix_rows\twritten_rows_matching_stock_git\tmatrix_partial\tmatrix_open\tmatrix_invalid_input\tclosed_block_variants\n'
+  printf 'group\tgit_commands\tcomplete_command_matrices\tgit_doc_option_seed_rows\tcomplete_doc_option_pairs\tmatrix_rows\twritten_rows_matching_stock_git\tmatrix_partial\tmatrix_open\tmatrix_invalid_input\tclosed_block_variants\n'
 else
-  printf '| Git reference group | Git commands | Git doc option seed rows | Matrix rows | Written rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |\n'
-  printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
+  printf '| Git reference group | Git commands | Complete command matrices | Git doc option seed rows | Complete doc option pairs | Matrix rows | Written rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |\n'
+  printf '| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n'
 fi
 
 awk -F'\t' -v format="$format" '
@@ -205,25 +205,27 @@ awk -F'\t' -v format="$format" '
     for (i = 1; i <= 14; i++) {
       group = order[i]
       if (format == "--tsv") {
-        printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
-          group, commands[group] + 0, options[group] + 0, matrix_rows[group] + 0,
+        printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+          group, commands[group] + 0, 0, options[group] + 0, 0,
+          matrix_rows[group] + 0,
           matrix_closed[group] + 0, matrix_partial[group] + 0, matrix_open[group] + 0,
           matrix_invalid[group] + 0, ad_hoc[group] + 0
       } else {
-        printf "| %s | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` |\n",
-          group, commands[group] + 0, options[group] + 0, matrix_rows[group] + 0,
+        printf "| %s | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` |\n",
+          group, commands[group] + 0, 0, options[group] + 0, 0,
+          matrix_rows[group] + 0,
           matrix_closed[group] + 0, matrix_partial[group] + 0, matrix_open[group] + 0,
           matrix_invalid[group] + 0, ad_hoc[group] + 0
       }
     }
     if (format == "--tsv") {
-      printf "Git 2.47 unique total\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
-        unique["git_command_total"] + 0, unique["git_doc_option_seed_total"] + 0,
+      printf "Git 2.47 unique total\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
+        unique["git_command_total"] + 0, 0, unique["git_doc_option_seed_total"] + 0, 0,
         unique["matrix_rows_total"] + 0, unique["matrix_closed_total"] + 0,
         unique["matrix_partial_total"] + 0, unique["matrix_open_total"] + 0,
         unique["matrix_invalid_total"] + 0, unique["closed_block_total"] + 0
     } else {
-      printf "| **Git 2.47 unique total** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** |\n",
+      printf "| **Git 2.47 unique total** | **`%d`** | **`0`** | **`%d`** | **`0`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** | **`%d`** |\n",
         unique["git_command_total"] + 0, unique["git_doc_option_seed_total"] + 0,
         unique["matrix_rows_total"] + 0, unique["matrix_closed_total"] + 0,
         unique["matrix_partial_total"] + 0, unique["matrix_open_total"] + 0,
