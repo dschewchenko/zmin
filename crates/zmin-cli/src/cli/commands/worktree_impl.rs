@@ -170,6 +170,10 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
             value if value.starts_with('-') && value.len() > 2 && !value.starts_with("--") => {
                 parse_clean_short_cluster(value, &mut options)?;
             }
+            value if value.starts_with('-') && value.len() == 2 && !value.starts_with("--") => {
+                let switch = value[1..].chars().next().expect("single switch");
+                return Err(clean_unknown_switch(switch));
+            }
             value if value.starts_with('-') => {
                 return Err(clean_unknown_option(value));
             }
@@ -193,6 +197,13 @@ fn clean_unknown_option(option: &str) -> CliError {
             "error: unknown option `{}'\n{CLEAN_USAGE}",
             option.trim_start_matches('-')
         ),
+    }
+}
+
+fn clean_unknown_switch(switch: char) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!("error: unknown switch `{switch}'\n{CLEAN_USAGE}"),
     }
 }
 
@@ -238,10 +249,7 @@ fn parse_clean_short_cluster(value: &str, options: &mut CleanOptions) -> Result<
                 return Ok(());
             }
             _ => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported clean option '-{flag}'"),
-                });
+                return Err(clean_unknown_switch(flag));
             }
         }
         if chars.peek().is_none() {

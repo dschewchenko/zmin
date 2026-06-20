@@ -247,3 +247,14 @@ fn clean_unknown_option_matches_stock_git() {
         command_any_output("git", git_repo.path(), &["clean", "--bad"], "git")
     );
 }
+
+#[test]
+fn clean_unknown_short_switch_matches_stock_git() {
+    let git_repo = clean_fixture_repo();
+    let zmin_repo = clean_fixture_repo();
+
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &["clean", "-Z"], "zmin"),
+        command_any_output("git", git_repo.path(), &["clean", "-Z"], "git")
+    );
+}

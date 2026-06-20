@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 25/151 commands with matrix rows / 231/4632 represented doc-option pairs / 838 written rows / 732 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 25/151 commands with matrix rows / 231/4632 represented doc-option pairs / 839 written rows / 732 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,7 +195,7 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git clean --bad`.
+The latest closed guard classification is `git clean -Z`.
 The next default slice remains the second
 active lane: run a fresh `unsupported` / `not supported` code scan, choose one
 small remaining guard that is not entangled with unrelated staged changes, then
@@ -203,7 +203,7 @@ classify it as Git-supported behavior, stock-compatible invalid input,
 intentional deferral or Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/838`; the complete command matrices and complete doc-option matrices remain
+`0/839`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -318,6 +318,7 @@ until a full matrix is expanded and verified.
 | `status` invalid ignored mode usage | `1` | `0` | `git status --ignored=bogus` exits `128` with stock fatal diagnostic instead of an unclassified unsupported-mode guard |
 | `status` invalid ignore-submodules mode usage | `1` | `0` | `git status --ignore-submodules=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-mode fatal diagnostic |
 | `clean` unknown option usage | `1` | `0` | `git clean --bad` exits `129` with stock unknown-option usage text instead of a fatal unsupported-option diagnostic |
+| `clean` unknown short-switch usage | `1` | `0` | `git clean -Z` exits `129` with stock unknown-switch usage text instead of an unknown-option diagnostic |
 | `ls-files` replacement stage NUL output | `1` | `0` | `--stage -z` through the `git` shim on a clean cloned index |
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
 | `ls-files` replacement cached pathspec NUL output | `1` | `0` | `-z --cached -- dir` through the `git` shim on a cloned repository |
@@ -398,7 +399,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `502` verified variants.
+Tracked closed blocks in this table: `503` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
