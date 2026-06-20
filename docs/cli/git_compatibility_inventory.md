@@ -174,8 +174,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `14/151` | no | audit rows exist for `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `rev-parse`, `show-ref`, `symbolic-ref` and `tag` |
 | Git doc option pairs represented by rows | `215/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `645` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `567/645` | yes, row by row | exact written rows with parity evidence |
+| Written behavior rows | `647` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `570/647` | yes, row by row | exact written rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -208,7 +208,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `61` | `57` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `58` | `35` | `0` | `0` | `23` | `30` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `194` | `183` | `0` | `8` | `3` | `83` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `196` | `186` | `0` | `7` | `3` | `83` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `135` | `132` | `0` | `0` | `3` | `21` |
 | Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `0` | `132` | `0` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -218,7 +218,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `146` | `118` | `0` | `0` | `28` | `76` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`645`** | **`567`** | **`0`** | **`8`** | **`70`** | **`349`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`647`** | **`570`** | **`0`** | **`7`** | **`70`** | **`349`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -229,8 +229,8 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `215/4632`
-represented option pairs or `567/645` passing written rows as a Git support
-percentage. The `567/645` number is audit progress for rows already written
+represented option pairs or `570/647` passing written rows as a Git support
+percentage. The `570/647` number is audit progress for rows already written
 down. It says nothing about the still unexpanded rows. A command or option
 pair is complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -338,9 +338,9 @@ configured fetch over smart HTTP, SSH and git daemon.
 The latest `fetch --shallow-since` slices closed explicit local path/file URL
 branch and HEAD fetches for equals and separate-value forms. The latest
 `fetch --shallow-since` slice also closed multiple explicit refspec forms for
-named local/file remotes and explicit local/file locations. The latest network
-slice closed branch shallow-since fetches over smart HTTP, SSH and git daemon;
-network multi-refspec, branchless and related modes remain open.
+named local/file remotes, explicit local/file locations, and named remotes over
+smart HTTP, SSH and git daemon. Branchless and related network modes remain
+open.
 The latest `fetch --shallow-exclude` slices closed explicit local path/file URL
 branch and HEAD fetches for equals and separate-value forms, plus repeated
 exclude forms for named local/file remote branch fetches, explicit local/file

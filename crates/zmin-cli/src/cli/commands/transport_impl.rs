@@ -9325,12 +9325,16 @@ fn fetch_multiple_refspecs(
                 message: "fetch --deepen currently supports local and file remotes".into(),
             });
         }
-        if shallow_since.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-since needs smart HTTP transport support before use"
-                    .into(),
-            });
+        if let Some(since) = shallow_since {
+            return fetch_multiple_refspecs_from_http_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                Some(UploadPackShallowOptions::since(since)),
+            );
         }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
@@ -9353,7 +9357,7 @@ fn fetch_multiple_refspecs(
             &refspecs,
             depth,
             quiet,
-            update_shallow,
+            update_shallow.then(|| UploadPackShallowOptions::depth(None)),
         );
     }
     if is_git_daemon_transport_url(&url) {
@@ -9369,11 +9373,17 @@ fn fetch_multiple_refspecs(
                 message: "fetch --deepen currently supports local and file remotes".into(),
             });
         }
-        if shallow_since.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-since currently supports local and file remotes".into(),
-            });
+        if let Some(since) = shallow_since {
+            return fetch_multiple_refspecs_from_daemon_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::since(since)),
+            );
         }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
@@ -9396,7 +9406,7 @@ fn fetch_multiple_refspecs(
             depth,
             quiet,
             prune,
-            update_shallow,
+            update_shallow.then(|| UploadPackShallowOptions::depth(None)),
         );
     }
     if is_ssh_transport_url(&url) {
@@ -9412,11 +9422,17 @@ fn fetch_multiple_refspecs(
                 message: "fetch --deepen currently supports local and file remotes".into(),
             });
         }
-        if shallow_since.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --shallow-since currently supports local and file remotes".into(),
-            });
+        if let Some(since) = shallow_since {
+            return fetch_multiple_refspecs_from_ssh_remote(
+                &repo,
+                &remote,
+                &url,
+                &refspecs,
+                depth,
+                quiet,
+                prune,
+                Some(UploadPackShallowOptions::since(since)),
+            );
         }
         if !shallow_exclude.is_empty() {
             return Err(CliError::Fatal {
@@ -9439,7 +9455,7 @@ fn fetch_multiple_refspecs(
             depth,
             quiet,
             prune,
-            update_shallow,
+            update_shallow.then(|| UploadPackShallowOptions::depth(None)),
         );
     }
     let Some(source_path) = local_repository_path_from_location(&url)? else {
@@ -9587,7 +9603,7 @@ fn fetch_multiple_refspecs_from_http_remote(
     refspecs: &[String],
     depth: Option<usize>,
     quiet: bool,
-    update_shallow: bool,
+    shallow_options: Option<UploadPackShallowOptions<'_>>,
 ) -> Result<()> {
     let parsed_url = parsed_http_url_with_extra_headers(Some(repo), url)?;
     let mut helper = if parsed_url.scheme == HttpScheme::Https {
@@ -9641,8 +9657,7 @@ fn fetch_multiple_refspecs_from_http_remote(
         )?;
     } else {
         let request_roots = missing_fetch_roots(&store, &roots)?;
-        if update_shallow {
-            let shallow_options = UploadPackShallowOptions::depth(None);
+        if let Some(shallow_options) = shallow_options {
             let shallow_boundaries = if let Some(helper) = helper.as_mut() {
                 http_fetch_smart_pack_with_shallow_options_with_helper(
                     &parsed_url,
@@ -9661,14 +9676,12 @@ fn fetch_multiple_refspecs_from_http_remote(
                     shallow_options,
                 )?
             };
-            write_shallow_file(
-                repo,
-                upload_pack_response_or_advertised_shallows(
-                    shallow_options,
-                    shallow_boundaries,
-                    &advertised_shallow_boundaries,
-                ),
-            )?;
+            let shallow_boundaries = upload_pack_response_or_advertised_shallows(
+                shallow_options,
+                shallow_boundaries,
+                &advertised_shallow_boundaries,
+            );
+            write_shallow_file(repo, shallow_boundaries)?;
         } else {
             let pack_fetched = if let Some(helper) = helper.as_mut() {
                 http_fetch_smart_pack_with_helper(
@@ -9743,7 +9756,7 @@ fn fetch_multiple_refspecs_from_daemon_remote(
     depth: Option<usize>,
     quiet: bool,
     prune: bool,
-    update_shallow: bool,
+    shallow_options: Option<UploadPackShallowOptions<'_>>,
 ) -> Result<()> {
     let (rows, advertised_shallow_boundaries) =
         daemon_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
@@ -9758,7 +9771,7 @@ fn fetch_multiple_refspecs_from_daemon_remote(
         prune,
         &rows,
         &advertised_shallow_boundaries,
-        update_shallow,
+        shallow_options,
         |request_roots, haves, options| {
             daemon_fetch_pack_with_shallow_options_and_haves(
                 url,
@@ -9779,7 +9792,7 @@ fn fetch_multiple_refspecs_from_ssh_remote(
     depth: Option<usize>,
     quiet: bool,
     prune: bool,
-    update_shallow: bool,
+    shallow_options: Option<UploadPackShallowOptions<'_>>,
 ) -> Result<()> {
     let (rows, advertised_shallow_boundaries) =
         ssh_ls_remote_rows_with_shallows(url, false, false, false, &[])?;
@@ -9794,7 +9807,7 @@ fn fetch_multiple_refspecs_from_ssh_remote(
         prune,
         &rows,
         &advertised_shallow_boundaries,
-        update_shallow,
+        shallow_options,
         |request_roots, haves, options| {
             ssh_fetch_pack_with_shallow_options_and_haves(
                 url,
@@ -9817,7 +9830,7 @@ fn fetch_multiple_refspecs_from_advertised_remote<F>(
     prune: bool,
     rows: &[LsRemoteRow],
     advertised_shallow_boundaries: &[ObjectId],
-    update_shallow: bool,
+    shallow_options: Option<UploadPackShallowOptions<'_>>,
     mut fetch_pack: F,
 ) -> Result<()>
 where
@@ -9840,7 +9853,7 @@ where
     } else {
         missing_fetch_roots(&store, &roots)?
     };
-    let shallow_options = UploadPackShallowOptions::depth(depth);
+    let shallow_options = shallow_options.unwrap_or_else(|| UploadPackShallowOptions::depth(depth));
     let shallow_boundaries = fetch_pack(&request_roots, &haves, shallow_options)?;
     if let Some(depth) = depth {
         let shallow_roots = shallow_roots_from_resolved_rows(&store, &resolved)?;
@@ -9848,7 +9861,7 @@ where
             repo,
             boundaries_or_local_fallback(repo, &shallow_roots, depth, shallow_boundaries)?,
         )?;
-    } else if update_shallow {
+    } else if shallow_options.uses_advertised_shallow_fallback() {
         write_shallow_file(
             repo,
             upload_pack_response_or_advertised_shallows(
@@ -9857,6 +9870,8 @@ where
                 advertised_shallow_boundaries,
             ),
         )?;
+    } else if shallow_options.since.is_some() || !shallow_options.deepen_not.is_empty() {
+        write_shallow_file(repo, shallow_boundaries)?;
     }
 
     let mut update_rows = Vec::new();
@@ -11318,7 +11333,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 std::slice::from_ref(refspec),
                 None,
                 quiet,
-                update_shallow,
+                update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
@@ -11330,7 +11345,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &refspecs,
                 None,
                 quiet,
-                update_shallow,
+                update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
@@ -11346,7 +11361,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
-                update_shallow,
+                update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
@@ -11359,7 +11374,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
-                update_shallow,
+                update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
@@ -11375,7 +11390,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
-                update_shallow,
+                update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         if let Some(branch) = branch.as_deref().filter(|_| !refmap.is_empty()) {
@@ -11388,7 +11403,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 None,
                 quiet,
                 prune,
-                update_shallow,
+                update_shallow.then(|| UploadPackShallowOptions::depth(None)),
             );
         }
         ensure_fetch_update_shallow_supported_for_local(update_shallow)?;
