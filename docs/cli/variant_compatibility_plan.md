@@ -150,12 +150,17 @@ Every compatibility slice must finish these items:
 
 | Order | Lane | Next slices | Done when |
 | ---: | --- | --- | --- |
-| 1 | `fetch --server-option` protocol v2 | branchless configured smart HTTP/SSH combinations, then decide git-daemon applicability from stock Git | forwarded server options and refs/FETCH_HEAD match stock Git |
-| 2 | WebStorm replacement blockers | `status`, `log`, `diff`, `ls-files`, `rev-parse`, `config` rows observed from IDE dogfood, especially `-z` and date/format values | replacement smoke and focused rows pass through the `git` shim |
-| 3 | Unsupported-guard classification | classify each `unsupported`/`not supported` Rust hit as Git-supported gap, invalid input, intentional deferral or Zmin-only behavior | every hit maps to a matrix row, deferral note or invalid-input test |
-| 4 | Command inventory expansion | expand high-use commands from docs into option values, negations, repeated forms, order-sensitive combinations and repo states | command state reaches at least `expanding`; no support percentage is published |
-| 5 | Platform and upstream evidence | macOS/Linux/Windows checks plus selected upstream Git test slices for rows already implemented | rows that depend on platform behavior have platform evidence before being called closed |
-| 6 | Zmin-only extensions | keep hooks staged-file runner and other extensions below Git compatibility reporting | extension rows stay in the Zmin-only inventory, not the Git 2.47 denominator |
+| 1 | WebStorm replacement blockers | `status`, `log`, `diff`, `ls-files`, `rev-parse`, `config` rows observed from IDE dogfood, especially `-z`, date/format values, null output and pathspec combinations | replacement smoke and focused rows pass through the `git` shim |
+| 2 | Unsupported-guard classification | classify each `unsupported`/`not supported` Rust hit as Git-supported gap, invalid input, intentional deferral or Zmin-only behavior | every hit maps to a matrix row, deferral note or invalid-input test |
+| 3 | Command inventory expansion | expand high-use commands from docs into option values, negations, repeated forms, order-sensitive combinations and repo states | command state reaches at least `expanding`; no support percentage is published |
+| 4 | Platform and upstream evidence | macOS/Linux/Windows checks plus selected upstream Git test slices for rows already implemented | rows that depend on platform behavior have platform evidence before being called closed |
+| 5 | Zmin-only extensions | keep hooks staged-file runner and other extensions below Git compatibility reporting | extension rows stay in the Zmin-only inventory, not the Git 2.47 denominator |
+
+The most recent closed transport lane is `fetch --server-option` protocol v2
+for smart HTTP, SSH and git-daemon, covering explicit branch and branchless
+configured fetches with equals, separate-value and repeated option forms. Do
+not return to that lane unless a new stock-Git trace, upstream test or dogfood
+flow exposes a missing value, mode or side effect.
 
 ### Count Update Gates
 
