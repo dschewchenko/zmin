@@ -1961,7 +1961,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut score_debug = false;
     let mut color_lines = false;
     let mut color_by_age = false;
-    let mut minimal = false;
     let mut line_range = None;
     let mut positionals = Vec::new();
     let mut after_separator = false;
@@ -2012,8 +2011,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "--no-color-lines" => color_lines = false,
                 "--color-by-age" => color_by_age = true,
                 "--no-color-by-age" => color_by_age = false,
-                "--minimal" => minimal = true,
-                "--no-minimal" => minimal = false,
+                "--minimal" | "--no-minimal" => {}
                 "-M" | "-C" | "--find-renames" | "--find-copies" => {}
                 "--contents" => {
                     cursor += 1;
@@ -2110,7 +2108,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         (score_debug, "--score-debug"),
         (color_lines, "--color-lines"),
         (color_by_age, "--color-by-age"),
-        (minimal, "--minimal"),
     ] {
         if enabled {
             return Err(CliError::Fatal {

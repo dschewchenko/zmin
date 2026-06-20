@@ -368,6 +368,25 @@ fn blame_progress_matches_stock_git() {
 }
 
 #[test]
+fn blame_minimal_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "a\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            repo.path(),
+            &["blame", "--minimal", "a.txt"],
+            "zmin"
+        ),
+        command_output("git", repo.path(), &["blame", "--minimal", "a.txt"], "git")
+    );
+}
+
+#[test]
 fn blame_line_regex_and_function_ranges_match_stock_git() {
     let git_repo = git_init();
     configure_identity(git_repo.path());
