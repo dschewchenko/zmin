@@ -164,8 +164,8 @@ Current accounting:
 | Fully complete Git command matrices | `0/151` | no command has a complete option/value/state/transport/platform matrix yet |
 | Command entry points wired | `151/151` | every Git `2.47` command name reaches Zmin code; not a support claim |
 | Git doc option spelling inventory | `4632` | raw option spellings found in Git `2.47.1` docs and include files |
-| Behavior rows written | `137` | explicit command/option/value/state/transport/platform rows in the current matrix |
-| Behavior rows closed | `122/137` | exact written rows that match stock Git by focused evidence |
+| Behavior rows written | `138` | explicit command/option/value/state/transport/platform rows in the current matrix |
+| Behavior rows closed | `123/138` | exact written rows that match stock Git by focused evidence |
 | Full Git behavior denominator | incomplete | still being expanded from docs, upstream tests and real tool traces |
 
 Only closed behavior variants count as supported. Option spellings are just
@@ -184,7 +184,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `66` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `371` | `60` | `56` | `0` | `4` |
 | Branching and Merging | `9` | `581` | `0` | `0` | `0` | `0` |
-| Sharing and Updating Projects | `5` | `309` | `77` | `66` | `9` | `2` |
+| Sharing and Updating Projects | `5` | `309` | `78` | `67` | `9` | `2` |
 | Inspection and Comparison | `7` | `774` | `0` | `0` | `0` | `0` |
 | Patching | `5` | `333` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `132` | `0` | `0` | `0` | `0` |
@@ -194,7 +194,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `30` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `644` | `0` | `0` | `0` | `0` |
 | Other Git `2.47` commands | `71` | `1075` | `0` | `0` | `0` | `0` |
-| **Git `2.47` unique total** | **`151`** | **`4632`** | **`137`** | **`122`** | **`9`** | **`6`** |
+| **Git `2.47` unique total** | **`151`** | **`4632`** | **`138`** | **`123`** | **`9`** | **`6`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -209,7 +209,7 @@ Current command-level matrices. This is audit coverage, not command support:
 | Command | Git doc option spellings | Doc spellings represented by rows | Behavior rows written | Closed rows | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `status` | `26` | `22` | `60` | `56` | `0` | `0` | `4` | no |
-| `fetch` | `73` | `28` | `77` | `66` | `0` | `9` | `2` | no |
+| `fetch` | `73` | `28` | `78` | `67` | `0` | `9` | `2` | no |
 
 Doc spellings represented by rows means at least one matrix row mentions that
 documented option. It does not mean every value, negation, order-sensitive
