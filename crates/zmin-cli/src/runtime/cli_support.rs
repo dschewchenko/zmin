@@ -4,7 +4,7 @@ use clap::{CommandFactory, Parser};
 
 use super::*;
 
-pub(crate) const GIT_COMPAT_VERSION: &str = "2.36.0";
+pub(crate) const GIT_COMPAT_VERSION: &str = "2.47.1.zmin";
 
 static BROKEN_PIPE_PANIC: AtomicBool = AtomicBool::new(false);
 

@@ -119,7 +119,7 @@ fn root_version_option_reports_git_compatible_version_and_zmin_version() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.starts_with("git version 2.36.0 "), "{stdout}");
+    assert!(stdout.starts_with("git version 2.47.1.zmin "), "{stdout}");
     assert!(stdout.contains("(zmin "), "{stdout}");
     assert!(String::from_utf8_lossy(&output.stderr).is_empty());
 }

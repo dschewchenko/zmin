@@ -53,7 +53,7 @@ git status
 git fetch --prune --no-tags
 ```
 
-The version line must start with a Git-compatible version, currently
-`git version 2.36.0`, and include the real Zmin package version after it. Some
+The version line must start with the Git 2.47 compatibility baseline, currently
+`git version 2.47.1.zmin`, and include the real Zmin package version after it. Some
 clients reject tools below their minimum Git version before running any other
 command.
