@@ -261,6 +261,30 @@ a complete matrix built from Git docs, upstream Git tests and real tool traces.
 
 </details>
 
+## Zmin-Only Extensions
+
+Zmin has additive features that are not counted as Git `2.47.1` compatibility.
+They are tracked separately in
+[`docs/cli/zmin_extensions_inventory.md`](docs/cli/zmin_extensions_inventory.md).
+
+Current extension inventory:
+
+| Layer | Count |
+| --- | ---: |
+| Zmin-only commands | `8` |
+| Zmin-only options on Git commands | `4` |
+| Stable extensions | `2` |
+| Experimental extensions | `2` |
+| Planned extensions | `1` |
+
+Implemented extensions include `zmin clone --instant`, managed `zmin hooks`
+commands and CMS-style porcelain such as `zmin save`, `zmin changes`,
+`zmin publish` and `zmin update`.
+
+The staged-file hook runner is planned as a Zmin-only extension, with an API
+shape like `zmin hooks run pre-commit --staged -- command ...`. It will be
+tracked below the extension inventory, not in the Git compatibility matrix.
+
 ## Preview Limits
 
 Zmin works with regular Git repositories and existing Git remotes. This preview

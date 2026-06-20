@@ -201,6 +201,10 @@ commands.
 
 ## Additive Zmin surface
 
+The counted extension inventory is maintained separately in
+`docs/cli/zmin_extensions_inventory.md`. These features are additive and must
+not be reported as Git `2.47.1` compatibility coverage.
+
 `zmin clone --worktree-first` and `zmin clone --instant` are
 additive Zmin clone modes. They do not change default `zmin clone`
 behavior. The current surface supports local repositories, smart HTTP remotes,
