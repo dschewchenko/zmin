@@ -3697,12 +3697,33 @@ fn fetch_filter_blob_none_network_branch_transports_match_stock_git() {
 
 #[test]
 fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git() {
+    let cases = [
+        ("implicit-yes", "--recurse-submodules"),
+        ("explicit-yes", "--recurse-submodules=yes"),
+        ("on-demand", "--recurse-submodules=on-demand"),
+    ];
+
+    for (label, mode_arg) in cases {
+        assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
+            label, mode_arg,
+        );
+    }
+}
+
+fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
+    label: &str,
+    mode_arg: &str,
+) {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
     let source = dir.path().join("source");
     let parent_remote = dir.path().join("parent.git");
-    let git_client = dir.path().join("git-client-submodule-http-parent");
-    let zmin_client = dir.path().join("zmin-client-submodule-http-parent");
+    let git_client = dir
+        .path()
+        .join(format!("git-client-submodule-http-parent-{label}"));
+    let zmin_client = dir
+        .path()
+        .join(format!("zmin-client-submodule-http-parent-{label}"));
 
     git(
         dir.path(),
@@ -3810,7 +3831,7 @@ fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
         "protocol.file.allow=always",
         "fetch",
         "--quiet",
-        "--recurse-submodules",
+        mode_arg,
         "origin",
     ];
     let git_output = command_output_with_env("git", &git_client, &args, &[], "git fetch");
@@ -3818,11 +3839,13 @@ fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
     assert_eq!(zmin_output, git_output);
     assert_eq!(
         git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
-        git(&git_client, ["rev-parse", "refs/remotes/origin/main"])
+        git(&git_client, ["rev-parse", "refs/remotes/origin/main"]),
+        "{label}"
     );
     assert_eq!(
         fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
-        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+        "{label}"
     );
     assert_eq!(
         git(
@@ -3832,15 +3855,18 @@ fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
         git(
             &git_client.join("deps/sub"),
             ["cat-file", "-t", &second_submodule_head]
-        )
+        ),
+        "{label}"
     );
     assert_eq!(
         git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
-        first_submodule_head
+        first_submodule_head,
+        "{label}"
     );
     assert_eq!(
         git(&git_client.join("deps/sub"), ["rev-parse", "HEAD"]),
-        first_submodule_head
+        first_submodule_head,
+        "{label}"
     );
 }
 
