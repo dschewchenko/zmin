@@ -9,8 +9,9 @@ use tempfile::TempDir;
 use common::{
     command_failure_output, command_failure_output_with_env, command_output,
     command_output_with_env, configure_identity, ensure_remote_http_helper, git, git_args,
-    git_init, git_with_env, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
-    run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin_args, stock_git_bin, zmin_bin,
+    git_init, git_status_args, git_with_env, git_with_stdin_args, git_with_stdin_bytes, run_zmin,
+    run_zmin_args, run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin_args,
+    stock_git_bin, zmin_bin,
 };
 
 fn unused_local_port() -> u16 {
@@ -3698,14 +3699,23 @@ fn fetch_filter_blob_none_network_branch_transports_match_stock_git() {
 #[test]
 fn fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git() {
     let cases = [
-        ("implicit-yes", "--recurse-submodules"),
-        ("explicit-yes", "--recurse-submodules=yes"),
-        ("on-demand", "--recurse-submodules=on-demand"),
+        ("implicit-yes", "--recurse-submodules", true),
+        ("explicit-yes", "--recurse-submodules=yes", true),
+        ("explicit-true", "--recurse-submodules=true", true),
+        ("explicit-one", "--recurse-submodules=1", true),
+        ("on-demand", "--recurse-submodules=on-demand", true),
+        ("explicit-no", "--recurse-submodules=no", false),
+        ("explicit-false", "--recurse-submodules=false", false),
+        ("explicit-zero", "--recurse-submodules=0", false),
+        ("no-recurse", "--no-recurse-submodules", false),
     ];
 
-    for (label, mode_arg) in cases {
+    for (label, mode_arg, expect_submodule_fetch) in cases {
         assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
-            label, mode_arg, true,
+            label,
+            mode_arg,
+            true,
+            expect_submodule_fetch,
         );
     }
 }
@@ -3719,7 +3729,7 @@ fn fetch_recurse_submodules_smart_http_parent_uninitialized_submodule_matches_st
 
     for (label, mode_arg) in cases {
         assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_stock_git(
-            label, mode_arg, false,
+            label, mode_arg, false, false,
         );
     }
 }
@@ -3924,6 +3934,7 @@ fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_sto
     label: &str,
     mode_arg: &str,
     initialize_submodule: bool,
+    expect_submodule_fetch: bool,
 ) {
     let dir = TempDir::new().expect("temp dir");
     let submodule = dir.path().join("submodule");
@@ -4084,17 +4095,26 @@ fn assert_fetch_recurse_submodules_smart_http_parent_local_submodule_matches_sto
         "{label}"
     );
     if initialize_submodule {
-        assert_eq!(
-            git(
-                &zmin_client.join("deps/sub"),
-                ["cat-file", "-t", &second_submodule_head]
-            ),
-            git(
-                &git_client.join("deps/sub"),
-                ["cat-file", "-t", &second_submodule_head]
-            ),
-            "{label}"
-        );
+        if expect_submodule_fetch {
+            assert_eq!(
+                git(
+                    &zmin_client.join("deps/sub"),
+                    ["cat-file", "-t", &second_submodule_head]
+                ),
+                git(
+                    &git_client.join("deps/sub"),
+                    ["cat-file", "-t", &second_submodule_head]
+                ),
+                "{label}"
+            );
+        } else {
+            let args = ["cat-file", "-e", &second_submodule_head];
+            assert_eq!(
+                git_status_args(&zmin_client.join("deps/sub"), &args),
+                git_status_args(&git_client.join("deps/sub"), &args),
+                "{label}"
+            );
+        }
         assert_eq!(
             git(&zmin_client.join("deps/sub"), ["rev-parse", "HEAD"]),
             first_submodule_head,

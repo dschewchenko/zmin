@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 218/4632 represented doc-option pairs / 682 written rows / 608 written rows matching stock Git / 2 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 218/4632 represented doc-option pairs / 688 written rows / 614 written rows matching stock Git / 2 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -191,6 +191,7 @@ command.
 | `fetch --update-shallow` network branchless configured fetch forms | `3` | `0` | smart HTTP, SSH and git daemon configured fetches from shallow remotes using advertised shallow boundaries when the response does not repeat them |
 | `fetch --recurse-submodules local/file no-submodule value modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true, on-demand, no, boolean false, numeric false and `--no-recurse-submodules` for repositories without submodules |
 | `fetch --recurse-submodules local/file changed submodule modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed gitlink commit into the initialized submodule object database without checkout; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
+| `fetch --recurse-submodules smart HTTP initialized local submodule modes` | `9` | `0` | smart HTTP parent fetch with an initialized local submodule remote: implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed submodule commit; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
 | `fetch --recurse-submodules smart HTTP uninitialized submodule modes` | `2` | `0` | implicit yes and on-demand for smart HTTP parent fetches where the submodule is present in the index but not initialized locally |
 | `fetch --recurse-submodules smart HTTP nested initialized submodule` | `1` | `0` | implicit yes for smart HTTP parent fetches with initialized local submodule remotes and initialized nested submodule remotes |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
