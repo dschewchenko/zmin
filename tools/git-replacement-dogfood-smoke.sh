@@ -279,6 +279,7 @@ compare_command status_pathspec_dir_z status --porcelain=v1 -z -- dir
 compare_command diff_cached_pathspec_name_status_z diff --cached --name-status -z -- new.txt
 compare_command diff_cached_name_status_z diff --cached --name-status -z
 compare_command diff_cached_name_only_z diff --cached --name-only -z
+compare_command diff_cached_pathspec_name_only_z diff --cached --name-only -z -- new.txt
 
 compare_root_path_command rev_parse_toplevel rev-parse --show-toplevel
 
