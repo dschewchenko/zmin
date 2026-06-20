@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `9/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files` and `rev-parse` have started behavior matrices |
-| Documented option spellings represented by rows | `191/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `553` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `493/553` | exact written rows with focused parity evidence |
-| Open written rows | `9/553` | written rows that still do not match stock Git |
-| Invalid input rows | `51/553` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `10/151` | `branch`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `rev-parse` and `show-ref` have started behavior matrices |
+| Documented option spellings represented by rows | `196/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `563` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `500/563` | exact written rows with focused parity evidence |
+| Open written rows | `9/563` | written rows that still do not match stock Git |
+| Invalid input rows | `54/563` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `493/553` as Git compatibility. It only means `493` of the `553`
+Do not read `500/563` as Git compatibility. It only means `500` of the `563`
 rows already written down match stock Git. The larger unexpanded surface is not
-counted yet. Do not read `191/4632` as option support either; it only means
+counted yet. Do not read `196/4632` as option support either; it only means
 those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -215,9 +215,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `0` | `0` | `0` | `0` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `112` | `91` | `0` | `21` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `122` | `98` | `0` | `24` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `0` | `0` | `0` | `0` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`553`** | **`493`** | **`9`** | **`51`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`563`** | **`500`** | **`9`** | **`54`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -239,8 +239,10 @@ Current command-level matrices:
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
 | `ls-files` | `42` | `0` | `27` | `53` | `45` | `0` | `0` | `8` | no |
 | `rev-parse` | `72` | `0` | `20` | `25` | `23` | `0` | `0` | `2` | no |
+| `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 
-`branch`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files` or `rev-parse`
+`branch`, `config`, `status`, `diff`, `log`, `for-each-ref`, `ls-files`,
+`rev-parse` or `show-ref`
 having `0` open rows does not mean full command compatibility. It means no open
 item remains among the rows currently written. Unwritten values, option
 combinations, repository states, transports and platform cases are still
