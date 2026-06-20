@@ -102,7 +102,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 183 written rows / 168 matching stock Git / 9 open rows`
+`0/151 complete command matrices / 2/151 commands with matrix rows / 50/4632 represented doc-option pairs / 187 written rows / 172 matching stock Git / 9 open rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -151,6 +151,7 @@ after the expansion plan above is done for that command.
 | `status` pathspec modes | `13` | `0` | exact file, directory, default glob, explicit magic, exclude magic, human output and global pathspec flags |
 | `fetch --shallow-since` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
 | `fetch --shallow-exclude` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches |
+| `fetch --deepen` explicit local/file branch forms | `4` | `0` | equals and separate-value forms for explicit local path and file URL branch fetches in existing shallow repos |
 | `fetch --update-shallow` local/file remote forms | `4` | `0` | named and explicit local path/file URL branch fetches where the remote itself is shallow |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
@@ -166,7 +167,7 @@ after the expansion plan above is done for that command.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `265` verified variants.
+Tracked closed blocks in this table: `269` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

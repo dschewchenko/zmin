@@ -10674,12 +10674,6 @@ fn fetch_with_depth(
                     .into(),
             });
         }
-        if deepen.is_some() {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "fetch --deepen currently supports one named remote branch".into(),
-            });
-        }
         if unshallow {
             return Err(CliError::Fatal {
                 code: 128,
@@ -10707,6 +10701,7 @@ fn fetch_with_depth(
             update_shallow,
             shallow_since,
             &shallow_exclude,
+            deepen,
         );
     }
     validate_remote_name(&remote)?;
@@ -11331,6 +11326,7 @@ fn fetch_with_repo_and_location(
     update_shallow: bool,
     shallow_since: Option<i64>,
     shallow_exclude: &[String],
+    deepen: Option<usize>,
 ) -> Result<()> {
     if is_http_transport_url(&location)
         || is_git_daemon_transport_url(&location)
@@ -11362,6 +11358,13 @@ fn fetch_with_repo_and_location(
                 message:
                     "fetch --shallow-exclude currently supports explicit local and file branches"
                         .into(),
+            });
+        }
+        if deepen.is_some() && refspec.contains(':') {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "fetch --deepen currently supports explicit local and file branches"
+                    .into(),
             });
         }
         if let Some((source_name, destination)) = refspec.split_once(':')
@@ -11496,6 +11499,17 @@ fn fetch_with_repo_and_location(
                     shallow_exclude,
                 );
             }
+            if let Some(deepen) = deepen {
+                return fetch_branch_without_destination_ref_deepen(
+                    &repo,
+                    &source,
+                    &source_refs,
+                    refspec,
+                    &location,
+                    no_tags,
+                    deepen,
+                );
+            }
             if let Some(depth) = depth {
                 return fetch_branch_without_destination_ref_depth(
                     &repo,
@@ -11536,6 +11550,12 @@ fn fetch_with_repo_and_location(
             code: 128,
             message: "fetch --shallow-exclude currently supports explicit local and file branches"
                 .into(),
+        });
+    }
+    if deepen.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen currently supports explicit local and file branches".into(),
         });
     }
     if !prune && !tags && branch.is_none() {
@@ -12087,6 +12107,40 @@ fn fetch_branch_without_destination_ref_shallow_exclude(
         )?,
     )?;
     write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
+}
+
+fn fetch_branch_without_destination_ref_deepen(
+    repo: &GitRepo,
+    source: &LocalCloneSource,
+    source_refs: &RefStore,
+    branch: &str,
+    url: &str,
+    no_tags: bool,
+    deepen: usize,
+) -> Result<()> {
+    let Some(shallow_boundaries) = read_repo_shallow_boundaries(repo)? else {
+        return fetch_branch_without_destination_ref(repo, source, source_refs, branch, url, false);
+    };
+    let ref_name = branch_ref_name(branch)?;
+    let id = source_refs
+        .resolve(&ref_name)
+        .map_err(|_| missing_remote_ref_error(branch, 128))?;
+    let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+    let current_depth = shallow_depth_from_source_tip(&source_store, &id, &shallow_boundaries)?
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "fetch --deepen could not match the local shallow boundary to remote history"
+                .into(),
+        })?;
+    fetch_branch_without_destination_ref_depth(
+        repo,
+        source,
+        source_refs,
+        branch,
+        url,
+        no_tags,
+        current_depth.saturating_add(deepen),
+    )
 }
 
 fn set_fetch_upstream_config(repo: &GitRepo, remote: &str, branch: &str) -> Result<()> {
