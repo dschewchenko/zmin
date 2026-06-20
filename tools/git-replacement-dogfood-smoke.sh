@@ -130,21 +130,38 @@ compare_readonly_same_repo() {
   compare_command_at "$label" "$cwd" "$cwd" "$@"
 }
 
-assert_zmin_success_stdout() {
+compare_root_path_command() {
   local label="$1"
-  local cwd="$2"
-  local expected="$3"
-  shift 3
+  shift
+  local stock_prefix="$capture_dir/$label.stock"
   local prefix="$capture_dir/$label.zmin"
-  run_capture zmin "$cwd" "$prefix" "$@"
+  run_capture stock "$stock_client" "$stock_prefix" "$@"
+  run_capture zmin "$zmin_client" "$prefix" "$@"
+  if [[ "$(cat "$stock_prefix.status")" != "$(cat "$prefix.status")" ]]; then
+    echo "status mismatch for $label: $*" >&2
+    exit 1
+  fi
   if [[ "$(cat "$prefix.status")" != "0" ]]; then
     echo "zmin command failed for $label: $*" >&2
     cat "$prefix.stderr" >&2
     exit 1
   fi
-  if [[ "$(cat "$prefix.stdout")" != "$expected" ]]; then
-    echo "unexpected stdout for $label" >&2
-    printf 'expected: %s\nactual: %s\n' "$expected" "$(cat "$prefix.stdout")" >&2
+  if ! cmp -s "$stock_prefix.stderr" "$prefix.stderr"; then
+    echo "stderr mismatch for $label: $*" >&2
+    exit 1
+  fi
+  local stock_expected
+  local zmin_expected
+  stock_expected="$(cd "$stock_client" && pwd -P)"
+  zmin_expected="$(cd "$zmin_client" && pwd -P)"
+  if [[ "$(cat "$stock_prefix.stdout")" != "$stock_expected" ]]; then
+    echo "unexpected stock stdout for $label" >&2
+    printf 'expected: %s\nactual: %s\n' "$stock_expected" "$(cat "$stock_prefix.stdout")" >&2
+    exit 1
+  fi
+  if [[ "$(cat "$prefix.stdout")" != "$zmin_expected" ]]; then
+    echo "unexpected zmin stdout for $label" >&2
+    printf 'expected: %s\nactual: %s\n' "$zmin_expected" "$(cat "$prefix.stdout")" >&2
     exit 1
   fi
 }
@@ -219,9 +236,7 @@ compare_command log_date_iso_strict_z log -z --date=iso-strict --format=%H%x00%a
 "$stock_git" -C "$zmin_client" add tracked.txt new.txt
 compare_command diff_cached_name_status_z diff --cached --name-status -z
 
-zmin_client_physical="$(cd "$zmin_client" && pwd -P)"
-assert_zmin_success_stdout \
-  rev_parse_toplevel "$zmin_client" "$zmin_client_physical" rev-parse --show-toplevel
+compare_root_path_command rev_parse_toplevel rev-parse --show-toplevel
 
 printf 'two\n' >"$source_repo/tracked.txt"
 "$stock_git" -C "$source_repo" commit -am second --quiet
