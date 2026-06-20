@@ -4427,6 +4427,87 @@ fn fetch_filter_blob_limit_network_branchless_transports_match_stock_git() {
     );
 }
 
+#[test]
+fn fetch_filter_object_type_blob_network_branch_transports_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = prepare_filter_remote(dir.path());
+    let blob = git(&remote, ["rev-parse", "main:small.txt"]);
+    let tree = git(&remote, ["rev-parse", "main^{tree}"]);
+    let args = [
+        "fetch",
+        "--quiet",
+        "--filter=object:type=blob",
+        "origin",
+        "main",
+    ];
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/filter.git", server.port);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-object-type-http", url.as_str());
+    command_output("git", &git_client, &args, "git filter object type http");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter object type http",
+    );
+    assert_object_type_blob_filter_fetch_matches_stock_git(
+        "smart-http filter object:type=blob",
+        &git_client,
+        &zmin_client,
+        blob.as_str(),
+        tree.as_str(),
+    );
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let url = ssh_url_for_remote(&remote);
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-object-type-ssh", url.as_str());
+    command_output_with_env(
+        "git",
+        &git_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "git filter object type ssh",
+    );
+    command_output_with_env(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        &[("GIT_SSH_COMMAND", fake_ssh_arg.as_str())],
+        "zmin filter object type ssh",
+    );
+    assert_object_type_blob_filter_fetch_matches_stock_git(
+        "ssh filter object:type=blob",
+        &git_client,
+        &zmin_client,
+        blob.as_str(),
+        tree.as_str(),
+    );
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/filter.git");
+    let (git_client, zmin_client) =
+        init_network_fetch_clients(dir.path(), "filter-object-type-daemon", url.as_str());
+    command_output("git", &git_client, &args, "git filter object type daemon");
+    command_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin filter object type daemon",
+    );
+    assert_object_type_blob_filter_fetch_matches_stock_git(
+        "git-daemon filter object:type=blob",
+        &git_client,
+        &zmin_client,
+        blob.as_str(),
+        tree.as_str(),
+    );
+}
+
 fn prepare_filter_remote(root: &std::path::Path) -> std::path::PathBuf {
     let remote = root.join("filter.git");
     let work = root.join("filter-work");
@@ -5550,13 +5631,55 @@ fn assert_blob_limit_filter_fetch_matches_stock_git(
     );
 }
 
+fn assert_object_type_blob_filter_fetch_matches_stock_git(
+    label: &str,
+    git_client: &std::path::Path,
+    zmin_client: &std::path::Path,
+    blob: &str,
+    tree: &str,
+) {
+    assert_filter_fetch_common_matches_stock_git(label, git_client, zmin_client);
+    assert_eq!(
+        filtered_object_local_presence(zmin_bin(), zmin_client, blob),
+        0,
+        "{label}"
+    );
+    assert_eq!(
+        filtered_object_local_presence(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_client,
+            blob,
+        ),
+        0,
+        "{label}"
+    );
+    assert_ne!(
+        filtered_object_local_presence(zmin_bin(), zmin_client, tree),
+        0,
+        "{label}"
+    );
+    assert_eq!(
+        filtered_object_local_presence(zmin_bin(), zmin_client, tree),
+        filtered_object_local_presence(
+            stock_git_bin().to_str().expect("stock git path"),
+            git_client,
+            tree,
+        ),
+        "{label}"
+    );
+}
+
 fn filtered_blob_local_presence(command: &str, repo: &std::path::Path, path: &str) -> i32 {
     let blobish = format!("origin/main:{path}");
     let blob = git(repo, ["rev-parse", blobish.as_str()]);
+    filtered_object_local_presence(command, repo, blob.as_str())
+}
+
+fn filtered_object_local_presence(command: &str, repo: &std::path::Path, object: &str) -> i32 {
     Command::new(command)
         .current_dir(repo)
         .env("GIT_NO_LAZY_FETCH", "1")
-        .args(["cat-file", "-e", blob.as_str()])
+        .args(["cat-file", "-e", object])
         .output()
         .expect("cat-file local blob presence")
         .status
