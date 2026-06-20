@@ -218,6 +218,7 @@ compare_command status_short status --short
 compare_command status_short_branch status --short --branch
 compare_command status_z status -z
 compare_command status_v2_z_branch status --porcelain=v2 -z --branch
+compare_command status_v2_z_branch_untracked_no status --porcelain=v2 -z --branch --untracked-files=no
 printf 'ignored.log\n' >"$stock_client/.gitignore"
 printf 'ignored.log\n' >"$zmin_client/.gitignore"
 printf 'ignored\n' >"$stock_client/ignored.log"

@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 800 written rows / 724 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 801 written rows / 725 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -179,7 +179,7 @@ prove it through stock Git versus the temporary `git` shim, then refresh the
 generated counts and commit.
 
 Do not publish a support percentage just because open written rows are now
-`0/800`; the complete command matrices and complete doc-option matrices remain
+`0/801`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -270,6 +270,7 @@ until a full matrix is expanded and verified.
 | `status` human branch modes | `1` | `0` | `-b`/`--branch` standalone human status for dirty, untracked and upstream-ahead states |
 | `status` replacement short branch output | `1` | `0` | `--short --branch` through the `git` shim on a cloned repository with dirty and untracked files |
 | `status` replacement porcelain v2 branch NUL output | `1` | `0` | `--porcelain=v2 -z --branch` through the `git` shim on a cloned repository |
+| `status` replacement porcelain v2 branch NUL no-untracked output | `1` | `0` | `--porcelain=v2 -z --branch --untracked-files=no` through the `git` shim on a cloned repository |
 | `status` pathspec modes | `13` | `0` | exact file, directory, default glob, explicit magic, exclude magic, human output and global pathspec flags |
 | `ls-files` replacement stage NUL output | `1` | `0` | `--stage -z` through the `git` shim on a clean cloned index |
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
@@ -344,7 +345,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `468` verified variants.
+Tracked closed blocks in this table: `469` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
