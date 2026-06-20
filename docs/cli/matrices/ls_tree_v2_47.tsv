@@ -1,0 +1,5 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Plumbing Commands	ls-tree	<none>	HEAD	<none>	two-commit tree with root file and nested file	local	all	git ls-tree HEAD	closed	git_object_plumbing_compat::treeish_path_resolution_and_ls_tree_match_stock_git	default tree listing matches stock Git
+Plumbing Commands	ls-tree	-r	HEAD	--name-only	two-commit tree with root file and nested file	local	all	git ls-tree -r --name-only HEAD	closed	git_object_plumbing_compat::treeish_path_resolution_and_ls_tree_match_stock_git	recursive name-only output matches stock Git
+Plumbing Commands	ls-tree	-t	HEAD	-r	two-commit tree with root file and nested file	local	all	git ls-tree -r -t HEAD	closed	git_object_plumbing_compat::treeish_path_resolution_and_ls_tree_match_stock_git	recursive listing with tree entries matches stock Git
+Plumbing Commands	ls-tree	<none>	missing	<none>	missing treeish	local	all	git ls-tree missing	invalid-input	git_cli_failure_compat::invalid_option_combinations_match_stock_git_failures	missing treeish failure shape matches stock Git

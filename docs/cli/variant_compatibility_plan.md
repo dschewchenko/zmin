@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 13/151 commands with matrix rows / 212/4632 represented doc-option pairs / 610 written rows / 534 written rows matching stock Git / 9 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 14/151 commands with matrix rows / 214/4632 represented doc-option pairs / 614 written rows / 537 written rows matching stock Git / 9 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
