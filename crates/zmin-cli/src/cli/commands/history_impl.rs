@@ -1958,7 +1958,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut abbrev_width = None;
     let mut date_mode = BlameDateMode::Iso;
     let mut ignore_whitespace = false;
-    let mut progress = false;
     let mut score_debug = false;
     let mut color_lines = false;
     let mut color_by_age = false;
@@ -2006,8 +2005,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "--show-stats" => show_stats = true,
                 "--no-show-stats" => show_stats = false,
                 "-w" => ignore_whitespace = true,
-                "--progress" => progress = true,
-                "--no-progress" => progress = false,
+                "--progress" | "--no-progress" => {}
                 "--score-debug" => score_debug = true,
                 "--no-score-debug" => score_debug = false,
                 "--color-lines" => color_lines = true,
@@ -2109,7 +2107,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         cursor += 1;
     }
     for (enabled, option) in [
-        (progress, "--progress"),
         (score_debug, "--score-debug"),
         (color_lines, "--color-lines"),
         (color_by_age, "--color-by-age"),

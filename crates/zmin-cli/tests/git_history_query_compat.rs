@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_output_with_env, configure_identity, git, git_args,
+    clone_repo_fixture, command_output, command_output_with_env, configure_identity, git, git_args,
     git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
     run_zmin_failure_output, run_zmin_status, run_zmin_with_env, stock_git_bin, write_file,
     zmin_bin,
@@ -345,6 +345,25 @@ fn blame_unknown_option_matches_stock_git_usage() {
     assert_eq!(
         run_zmin_failure_output(repo.path(), &["blame", "--bad", "a.txt"]),
         git_failure_output(repo.path(), &["blame", "--bad", "a.txt"])
+    );
+}
+
+#[test]
+fn blame_progress_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "a\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            repo.path(),
+            &["blame", "--progress", "a.txt"],
+            "zmin"
+        ),
+        command_output("git", repo.path(), &["blame", "--progress", "a.txt"], "git")
     );
 }
 
