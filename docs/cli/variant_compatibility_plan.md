@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 770 written rows / 694 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 773 written rows / 694 written rows matching stock Git / 3 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -172,17 +172,19 @@ updates, project-note update, commit and push.
 
 ### Current Next Slice Pointer
 
-The next slice is one unsupported-guard classification pass:
-`fetch --filter` local/file and shallow-mode guards in
-`crates/zmin-cli/src/cli/commands/transport_impl.rs`.
+The next slice is one implementation pass:
+`git fetch --filter=blob:none origin main` for named local path and file URL
+remotes.
 
 Do not broaden this slice to unrelated `fetch` behavior. It is done only
 after these steps complete:
 
-1. Inventory each matching guard as Git-supported gap, stock-compatible invalid
-   input, intentional deferral or Zmin-only behavior.
-2. Add or update rows in `docs/cli/matrices/fetch_v2_47.tsv` before runtime
-   changes.
+1. Reuse `git_fetch_filter_guard_inventory::fetch_filter_local_file_and_shallow_guards_are_git_supported_gaps`
+   as the stock-Git oracle and convert the named local path and file URL rows
+   from open to closed only after stdout/stderr/status, refs and
+   `.git/FETCH_HEAD` match stock Git.
+2. Do not close the `--filter=blob:none --depth=1` shallow-mode row in the
+   same slice unless the same local/file implementation naturally proves it.
 3. Run the count gates from this document.
 4. Refresh README, `git_compatibility_inventory.md`, this plan and project
    notes with generated counts.
