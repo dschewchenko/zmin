@@ -1959,7 +1959,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     let mut date_mode = BlameDateMode::Iso;
     let mut ignore_whitespace = false;
     let mut score_debug = false;
-    let mut color_lines = false;
     let mut color_by_age = false;
     let mut line_range = None;
     let mut positionals = Vec::new();
@@ -2007,8 +2006,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "--progress" | "--no-progress" => {}
                 "--score-debug" => score_debug = true,
                 "--no-score-debug" => score_debug = false,
-                "--color-lines" => color_lines = true,
-                "--no-color-lines" => color_lines = false,
+                "--color-lines" | "--no-color-lines" => {}
                 "--color-by-age" => color_by_age = true,
                 "--no-color-by-age" => color_by_age = false,
                 "--minimal" | "--no-minimal" => {}
@@ -2106,7 +2104,6 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
     }
     for (enabled, option) in [
         (score_debug, "--score-debug"),
-        (color_lines, "--color-lines"),
         (color_by_age, "--color-by-age"),
     ] {
         if enabled {
