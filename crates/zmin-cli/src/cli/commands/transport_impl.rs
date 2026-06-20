@@ -8806,7 +8806,10 @@ pub(crate) fn run_fetch(
                 message: "fetch --filter currently supports one named network remote branch".into(),
             });
         }
-        if refspecs.is_empty() || refspecs[0].contains(':') {
+        if refspecs
+            .first()
+            .is_some_and(|refspec| refspec.contains(':'))
+        {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "fetch --filter currently supports one named network remote branch".into(),
@@ -16226,7 +16229,7 @@ fn fetch_with_http_remote_shallow_options(
 fn fetch_with_http_remote_filter(
     repo: GitRepo,
     remote: String,
-    branch: String,
+    branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
     filter: &str,
@@ -16239,7 +16242,7 @@ fn fetch_with_http_remote_filter(
     } else {
         None
     };
-    let (rows, _) = discover_http_refs_with_helper(
+    let (rows, head_branch) = discover_http_refs_with_helper(
         &parsed_url,
         helper.as_mut().map(std::convert::identity),
         false,
@@ -16250,6 +16253,40 @@ fn fetch_with_http_remote_filter(
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let Some(branch) = branch else {
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_filter(
+            repo,
+            remote,
+            url,
+            &rows,
+            head_branch,
+            missing_ref_code,
+            filter,
+            append,
+            write_fetch_head,
+            |roots, haves, options| {
+                if let Some(helper) = helper.as_mut() {
+                    http_fetch_smart_pack_with_shallow_options_with_helper(
+                        &parsed_url,
+                        helper,
+                        &objects_dir,
+                        roots,
+                        haves,
+                        options,
+                    )
+                } else {
+                    http_fetch_smart_pack_with_shallow_options_direct(
+                        &parsed_url,
+                        &objects_dir,
+                        roots,
+                        haves,
+                        options,
+                    )
+                }
+            },
+        );
+    };
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
         .iter()
@@ -16468,7 +16505,7 @@ fn fetch_with_daemon_remote_shallow_options(
 fn fetch_with_daemon_remote_filter(
     repo: GitRepo,
     remote: String,
-    branch: String,
+    branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
     filter: &str,
@@ -16479,6 +16516,30 @@ fn fetch_with_daemon_remote_filter(
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let Some(branch) = branch else {
+        let head_branch = daemon_head_branch(url)?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_filter(
+            repo,
+            remote,
+            url,
+            &rows,
+            head_branch,
+            missing_ref_code,
+            filter,
+            append,
+            write_fetch_head,
+            |roots, haves, options| {
+                daemon_fetch_pack_with_shallow_options_and_haves(
+                    url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            },
+        );
+    };
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
         .iter()
@@ -16713,7 +16774,7 @@ fn fetch_with_ssh_remote_shallow_options(
 fn fetch_with_ssh_remote_filter(
     repo: GitRepo,
     remote: String,
-    branch: String,
+    branch: Option<String>,
     missing_ref_code: i32,
     url: &str,
     filter: &str,
@@ -16724,6 +16785,30 @@ fn fetch_with_ssh_remote_filter(
     let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let Some(branch) = branch else {
+        let head_branch = ssh_head_branch(url)?;
+        let objects_dir = repo.objects_dir.clone();
+        return fetch_configured_advertised_remote_filter(
+            repo,
+            remote,
+            url,
+            &rows,
+            head_branch,
+            missing_ref_code,
+            filter,
+            append,
+            write_fetch_head,
+            |roots, haves, options| {
+                ssh_fetch_pack_with_shallow_options_and_haves(
+                    url,
+                    &objects_dir,
+                    roots,
+                    haves,
+                    options,
+                )
+            },
+        );
+    };
     let ref_name = branch_ref_name(&branch)?;
     let id = rows
         .iter()
@@ -16742,6 +16827,57 @@ fn fetch_with_ssh_remote_filter(
     record_fetch_filter_promisor_config(&repo, &remote, filter)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, url, append, false)?;
+    }
+    Ok(())
+}
+
+fn fetch_configured_advertised_remote_filter<F>(
+    repo: GitRepo,
+    remote: String,
+    url: &str,
+    rows: &[LsRemoteRow],
+    head_branch: Option<String>,
+    missing_ref_code: i32,
+    filter: &str,
+    append: bool,
+    write_fetch_head: bool,
+    mut fetch_pack: F,
+) -> Result<()>
+where
+    F: FnMut(&[ObjectId], &[ObjectId], UploadPackShallowOptions<'_>) -> Result<Vec<ObjectId>>,
+{
+    if rows.is_empty() {
+        return Err(missing_remote_ref_error(&remote, missing_ref_code));
+    }
+    let destination_refs = refs_adapter_from_git_dir(&repo.git_dir);
+    let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let haves = collect_upload_pack_haves(&store, &destination_refs)?;
+    let (mut roots, ref_updates) = configured_network_fetch_roots_and_updates(&remote, rows)?;
+    sort_dedup_object_ids(&mut roots);
+    if !roots.is_empty() {
+        fetch_pack(&roots, &haves, UploadPackShallowOptions::filter(filter))?;
+    }
+    for (name, id) in ref_updates {
+        destination_refs.write_ref(&name, &id)?;
+    }
+    if let Some(branch) = head_branch {
+        destination_refs.write_symbolic_ref(
+            &format!("refs/remotes/{remote}/HEAD"),
+            &format!("refs/remotes/{remote}/{branch}"),
+        )?;
+    }
+    record_fetch_filter_promisor_config(&repo, &remote, filter)?;
+    let fetch_refspecs = configured_fetch_refspecs(&repo, &remote)?;
+    if write_fetch_head && !fetch_refspecs.is_empty() {
+        write_network_configured_fetch_head_file(
+            &repo,
+            rows,
+            &remote,
+            url,
+            &fetch_refspecs,
+            append,
+            false,
+        )?;
     }
     Ok(())
 }
@@ -19101,12 +19237,6 @@ fn fetch_with_repo_and_remote_filter(
     if !remote_exists(&repo, &remote)? {
         return Err(remote_repository_unavailable_error(&remote));
     }
-    let Some(branch) = branch else {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "fetch --filter currently supports one named network remote branch".into(),
-        });
-    };
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
         return fetch_with_http_remote_filter(
