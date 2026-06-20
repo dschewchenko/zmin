@@ -79,7 +79,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `57` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `252` | `60` | `56` | `0` | `0` | `4` | `64` |
 | Branching and Merging | `9` | `267` | `0` | `0` | `0` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `119` | `44` | `30` | `0` | `14` | `0` | `0` |
+| Sharing and Updating Projects | `5` | `119` | `44` | `31` | `0` | `13` | `0` | `0` |
 | Inspection and Comparison | `7` | `108` | `0` | `0` | `0` | `0` | `0` | `8` |
 | Patching | `5` | `179` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Debugging | `3` | `127` | `0` | `0` | `0` | `0` | `0` | `52` |
@@ -89,7 +89,7 @@ Current generated summary:
 | Server Admin | `2` | `28` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `332` | `0` | `0` | `0` | `0` | `0` | `76` |
 | Other Git 2.47 commands | `71` | `600` | `0` | `0` | `0` | `0` | `0` | `4` |
-| **Git 2.47 unique total** | **`151`** | **`2500`** | **`104`** | **`86`** | **`0`** | **`14`** | **`4`** | **`253`** |
+| **Git 2.47 unique total** | **`151`** | **`2500`** | **`104`** | **`87`** | **`0`** | **`13`** | **`4`** | **`253`** |
 
 The matrix columns are command-level matrices with explicit option/value/state
 rows. Closed block variants are focused parity blocks from
@@ -102,7 +102,7 @@ The total row is unique.
 | Command | Matrix | Total rows | Closed | Partial | Open | Invalid input |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | `status` | `docs/cli/matrices/status_v2_47.tsv` | `60` | `56` | `0` | `0` | `4` |
-| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `44` | `30` | `0` | `14` | `0` |
+| `fetch` | `docs/cli/matrices/fetch_v2_47.tsv` | `44` | `31` | `0` | `13` | `0` |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted

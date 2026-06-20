@@ -288,6 +288,57 @@ fn fetch_without_remote_uses_current_branch_remote_like_stock_git() {
 }
 
 #[test]
+fn fetch_all_appends_fetch_head_for_all_remotes_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let one = dir.path().join("one");
+    let two = dir.path().join("two");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    for (remote, file, branch) in [
+        (&one, "one.txt", "one-branch"),
+        (&two, "two.txt", "two-branch"),
+    ] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", remote.to_str().expect("remote path")],
+        );
+        configure_identity(remote);
+        fs::write(remote.join(file), format!("{file}\n")).expect("write remote file");
+        git(remote, ["add", "-A"]);
+        git_with_env(remote, ["commit", "-m", file]);
+        git(remote, ["branch", branch]);
+    }
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", client.to_str().expect("client path")],
+        );
+        git(
+            client,
+            ["remote", "add", "one", one.to_str().expect("one path")],
+        );
+        git(
+            client,
+            ["remote", "add", "two", two.to_str().expect("two path")],
+        );
+    }
+
+    git(&git_client, ["fetch", "--all"]);
+    run_zmin(&zmin_client, ["fetch", "--all"]);
+
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+}
+
+#[test]
 fn fetch_creates_git_trace_packet_file_for_upstream_harness() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
@@ -1241,12 +1292,7 @@ fn fetch_direct_location_refspec_rejects_current_branch_destination_like_stock_g
 
     run_zmin(
         dir.path(),
-        [
-            "init",
-            "-b",
-            "main",
-            zmin_repo.to_str().expect("zmin path"),
-        ],
+        ["init", "-b", "main", zmin_repo.to_str().expect("zmin path")],
     );
     configure_identity(&zmin_repo);
     fs::write(zmin_repo.join("file"), b"main\n").expect("write zmin file");
@@ -1272,12 +1318,7 @@ fn fetch_direct_location_dry_run_write_fetch_head_modes_like_stock_git() {
     let zmin_repo = dir.path().join("zmin-repo");
     run_zmin(
         dir.path(),
-        [
-            "init",
-            "-b",
-            "main",
-            zmin_repo.to_str().expect("zmin path"),
-        ],
+        ["init", "-b", "main", zmin_repo.to_str().expect("zmin path")],
     );
     configure_identity(&zmin_repo);
     fs::write(zmin_repo.join("file"), b"main\n").expect("write zmin file");
@@ -2507,8 +2548,7 @@ fn fetch_updates_remote_head_even_when_ref_update_fails_like_stock_git() {
     fs::create_dir_all(repo.join("refs/remotes/origin")).expect("create remote refs");
     fs::write(repo.join("refs/remotes/origin/branch.lock"), b"").expect("write lock");
 
-    let (status, _stdout, _stderr) =
-        run_zmin_failure_output(&repo, ["fetch", "origin"].as_slice());
+    let (status, _stdout, _stderr) = run_zmin_failure_output(&repo, ["fetch", "origin"].as_slice());
 
     assert_eq!(status, 1);
     assert!(repo.join("refs/remotes/origin/HEAD").is_file());
@@ -4187,10 +4227,7 @@ fn fetch_pack_copies_local_ref_objects_like_stock_git() {
     let remote_path = remote.to_str().expect("remote path");
     let expected = git(&git_client, ["fetch-pack", remote_path, "refs/heads/main"]);
     assert_eq!(
-        run_zmin(
-            &zmin_client,
-            ["fetch-pack", remote_path, "refs/heads/main"]
-        ),
+        run_zmin(&zmin_client, ["fetch-pack", remote_path, "refs/heads/main"]),
         expected
     );
     let fetched = expected

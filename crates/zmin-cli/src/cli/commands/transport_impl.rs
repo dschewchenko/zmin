@@ -8455,7 +8455,7 @@ pub(crate) fn run_fetch(
             });
         }
         let repo = find_repo()?;
-        for remote in configured_remotes(&repo)? {
+        for (idx, remote) in configured_remotes(&repo)?.into_iter().enumerate() {
             fetch_with_depth(
                 Some(remote),
                 None,
@@ -8463,7 +8463,7 @@ pub(crate) fn run_fetch(
                 128,
                 quiet,
                 dry_run,
-                append,
+                append || idx > 0,
                 set_upstream,
                 prune,
                 no_prune,
@@ -10397,7 +10397,14 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         {
             let _trace = phase_trace("fetch.local.write_fetch_head");
-            write_configured_fetch_head_file(&repo, &source_refs, &remote, &url, &fetch_refspecs)?;
+            write_configured_fetch_head_file(
+                &repo,
+                &source_refs,
+                &remote,
+                &url,
+                &fetch_refspecs,
+                append,
+            )?;
         }
         {
             let _trace = phase_trace("fetch.local.apply_refspecs");
@@ -10516,7 +10523,14 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         {
             let _trace = phase_trace("fetch.local.write_fetch_head");
-            write_configured_fetch_head_file(&repo, &source_refs, &remote, &url, &fetch_refspecs)?;
+            write_configured_fetch_head_file(
+                &repo,
+                &source_refs,
+                &remote,
+                &url,
+                &fetch_refspecs,
+                append,
+            )?;
         }
         let hook_head_branch = if atomic {
             source_head_branch(&source_refs)?
@@ -12304,6 +12318,7 @@ fn write_configured_fetch_head_file(
     remote: &str,
     url: &str,
     refspecs: &[String],
+    append: bool,
 ) -> Result<()> {
     let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1))?
         .and_then(|current| {
@@ -12385,7 +12400,7 @@ fn write_configured_fetch_head_file(
         }
     }
     merge_rows.extend(rows);
-    fs::write(repo.git_dir.join("FETCH_HEAD"), merge_rows.concat()).map_err(CliError::Io)
+    write_fetch_head_content(repo, merge_rows.concat().as_bytes(), append)
 }
 
 fn write_explicit_location_refspec_fetch_head_file(
