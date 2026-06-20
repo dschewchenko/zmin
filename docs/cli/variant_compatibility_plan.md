@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 780 written rows / 704 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 15/151 commands with matrix rows / 223/4632 represented doc-option pairs / 781 written rows / 705 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -179,7 +179,7 @@ prove it through stock Git versus the temporary `git` shim, then refresh the
 generated counts and commit.
 
 Do not publish a support percentage just because open written rows are now
-`0/780`; the complete command matrices and complete doc-option matrices remain
+`0/781`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -261,6 +261,7 @@ until a full matrix is expanded and verified.
 | `ls-files` replacement stage NUL output | `1` | `0` | `--stage -z` through the `git` shim on a clean cloned index |
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
 | `ls-files` replacement cached pathspec NUL output | `1` | `0` | `-z --cached -- dir` through the `git` shim on a cloned repository |
+| `ls-files` replacement others pathspec NUL output | `1` | `0` | `-z --others --exclude-standard -- dir` through the `git` shim on a cloned repository with an untracked nested file |
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
 | `rev-parse` replacement git-dir discovery | `1` | `0` | `--git-dir` through the `git` shim on a cloned repository root |
@@ -325,7 +326,7 @@ until a full matrix is expanded and verified.
 | `reflog expire` default policy forms | `6` | `0` | empty args, `main`, `HEAD`, `--updateref main`, `--rewrite main`, `--verbose main` |
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 
-Tracked closed blocks in this table: `448` verified variants.
+Tracked closed blocks in this table: `449` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
