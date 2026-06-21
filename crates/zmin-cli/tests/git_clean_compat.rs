@@ -175,32 +175,36 @@ fn clean_no_option_toggles_match_stock_git_order() {
 
 #[test]
 fn clean_interactive_quit_matches_stock_git() {
-    let git_repo = git_init();
-    let zmin_repo = git_init();
-    fs::write(git_repo.path().join("untracked.txt"), b"untracked\n").expect("write git file");
-    fs::write(zmin_repo.path().join("untracked.txt"), b"untracked\n").expect("write zmin file");
+    for input in ["q\n", "quit\n", "5\n", ""] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        fs::write(git_repo.path().join("untracked.txt"), b"untracked\n").expect("write git file");
+        fs::write(zmin_repo.path().join("untracked.txt"), b"untracked\n").expect("write zmin file");
 
-    assert_eq!(
-        command_any_output_with_stdin(
-            zmin_bin(),
-            zmin_repo.path(),
-            &["clean", "--interactive"],
-            "q\n",
-            "zmin",
-        ),
-        command_any_output_with_stdin(
-            "git",
-            git_repo.path(),
-            &["clean", "--interactive"],
-            "q\n",
-            "git",
-        )
-    );
-    assert!(zmin_repo.path().join("untracked.txt").exists());
-    assert_eq!(
-        zmin_repo.path().join("untracked.txt").exists(),
-        git_repo.path().join("untracked.txt").exists()
-    );
+        assert_eq!(
+            command_any_output_with_stdin(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["clean", "--interactive"],
+                input,
+                "zmin",
+            ),
+            command_any_output_with_stdin(
+                "git",
+                git_repo.path(),
+                &["clean", "--interactive"],
+                input,
+                "git",
+            ),
+            "interactive clean input {input:?}"
+        );
+        assert!(zmin_repo.path().join("untracked.txt").exists());
+        assert_eq!(
+            zmin_repo.path().join("untracked.txt").exists(),
+            git_repo.path().join("untracked.txt").exists(),
+            "untracked file state for input {input:?}"
+        );
+    }
 }
 
 #[test]
