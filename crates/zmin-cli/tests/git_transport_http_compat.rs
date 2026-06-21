@@ -205,6 +205,12 @@ struct ChunkedHttpServer {
     handle: Option<std::thread::JoinHandle<()>>,
 }
 
+struct NonChunkedTransferEncodingHttpServer {
+    port: u16,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
 struct AuthorizationCaptureHttpServer {
     port: u16,
     request: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
@@ -1061,6 +1067,39 @@ impl ChunkedHttpServer {
     }
 }
 
+impl NonChunkedTransferEncodingHttpServer {
+    fn new() -> Self {
+        let listener =
+            std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind transfer-encoding http");
+        let port = listener.local_addr().expect("local addr").port();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let handle = std::thread::spawn(move || {
+            while !thread_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                if thread_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                let _ = read_http_request_headers(&mut stream);
+                let body = b"1111111111111111111111111111111111111111\trefs/heads/main\n";
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nConnection: close\r\n\r\n",
+                );
+                let _ = stream.write_all(body);
+                let _ = stream.flush();
+                let _ = stream.shutdown(std::net::Shutdown::Write);
+            }
+        });
+        Self {
+            port,
+            stop,
+            handle: Some(handle),
+        }
+    }
+}
+
 impl AuthorizationCaptureHttpServer {
     fn new() -> Self {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind auth http");
@@ -1171,6 +1210,16 @@ impl Drop for ConflictingLengthHttpServer {
 }
 
 impl Drop for ChunkedHttpServer {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = std::net::TcpStream::connect(("127.0.0.1", self.port));
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for NonChunkedTransferEncodingHttpServer {
     fn drop(&mut self) {
         self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
         let _ = std::net::TcpStream::connect(("127.0.0.1", self.port));
@@ -8970,6 +9019,31 @@ fn http_transport_decodes_chunked_info_refs() {
     assert!(
         stdout.contains("1111111111111111111111111111111111111111\trefs/heads/main"),
         "unexpected stdout: {stdout}"
+    );
+}
+
+#[test]
+fn ls_remote_accepts_non_chunked_transfer_encoding_like_stock_git() {
+    let git_dir = TempDir::new().expect("git temp dir");
+    let zmin_dir = TempDir::new().expect("zmin temp dir");
+    let git_server = NonChunkedTransferEncodingHttpServer::new();
+    let zmin_server = NonChunkedTransferEncodingHttpServer::new();
+    let git_url = format!("http://127.0.0.1:{}/remote.git", git_server.port);
+    let zmin_url = format!("http://127.0.0.1:{}/remote.git", zmin_server.port);
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_dir.path(),
+            &["ls-remote", "--refs", &zmin_url],
+            "zmin ls-remote transfer encoding",
+        ),
+        command_any_output(
+            "git",
+            git_dir.path(),
+            &["ls-remote", "--refs", &git_url],
+            "git ls-remote transfer encoding",
+        )
     );
 }
 

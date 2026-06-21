@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 49/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1086 written rows / 818 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 49/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1087 written rows / 819 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,20 +266,17 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is a required smudge process-filter delayed-status
-invalid-input case:
+The latest completed slice is an HTTP `ls-remote` transfer-encoding case:
 
-`git checkout-index -f a.bad`
+`git ls-remote --refs http://127.0.0.1:<port>/remote.git`
 
-Stock Git rejects a required smudge process filter that returns
-`status=delayed` when the helper did not advertise `delay`. It exits `128`,
-leaves stdout empty, reports the external filter failure plus the stock
-signal-15 diagnostic and fatal `a.bad: smudge filter bad failed`, and leaves
-the worktree file absent. Zmin now rejects the delayed smudge response through
-the same protocol-failure shape and removes newly materialized
-`checkout-index` files when smudge fails. The row is recorded in
-`docs/cli/matrices/checkout_index_v2_47.tsv` with focused evidence in
-`git_worktree_state_compat::checkout_index_delayed_smudge_process_filter_matches_stock_git_failure`.
+Stock Git accepts a plain dumb-info-refs response that carries
+`Transfer-Encoding: gzip` without chunk framing, exits `0`, leaves stderr
+empty and reads the body unchanged. Zmin now ignores non-`chunked`
+transfer-coding tokens in response headers instead of exiting through the
+former `unsupported HTTP transfer encoding` fatal guard. The row is recorded
+in `docs/cli/matrices/ls_remote_v2_47.tsv` with focused evidence in
+`git_transport_http_compat::ls_remote_accepts_non_chunked_transfer_encoding_like_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -628,7 +625,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1086` written-row
+This card is the exact handoff target after the current `1087` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -647,7 +644,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1086`; the `1/1086` open row and the still incomplete command/doc-option
+`0/1087`; the `1/1087` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -876,6 +873,7 @@ until a full matrix is expanded and verified.
 | `fetch --jobs submodule recursion values` | `2` | `1` | accepted `--jobs=2` and `-j -1` with smart HTTP parent/local submodule recursion, plus invalid non-integer `--jobs`/`-j` diagnostics |
 | `fetch --dry-run smart HTTP submodule recursion` | `2` | `0` | default/on-demand and explicit `--recurse-submodules` smart HTTP parent/local-submodule dry-runs leave parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
 | `fetch` invalid bundle file | `1` | `0` | `git fetch bad.bundle HEAD:refs/heads/from-bundle` exits `128` with stock unreadable-remote diagnostics, writes empty `FETCH_HEAD`, leaves the destination ref absent and installs no pack files |
+| `ls-remote` HTTP non-chunked transfer encoding | `1` | `0` | `git ls-remote --refs` accepts a plain info/refs response with `Transfer-Encoding: gzip` and reads the body unchanged like stock Git |
 | `maintenance run` invalid schedule/task usage | `4` | `0` | `--schedule=invalid`, `--schedule=invalid --task=gc`, `--auto --schedule=daily`, and `--task=missing --schedule=daily` match stock invalid-input diagnostics |
 | `prune --expire` loose-object expiry modes | `7` | `0` | default expiry, `--expire=now` dry-run/prune/reflog-reachable modes, `--expire=never` with `--no-exclude-promisor-objects`, negated dry-run/verbose flags, and invalid `--expire=bogus` diagnostics |
 | `commit-graph verify` header variants | `3` | `0` | checksum-valid bad signature, bad version and bad hash version commit-graph files reject with stock diagnostics and exit `1` |
@@ -974,6 +972,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git clone` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_compat::clone_unsupported_remote_helper_failure_matches_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git fetch` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git ls-remote` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/ls_remote_v2_47.tsv`; `git_transport_local_compat::ls_remote_unsupported_remote_helper_failure_matches_stock_git` |
+| `transport_impl.rs` former `unsupported HTTP transfer encoding` response-header guard in `git ls-remote` HTTP discovery | Git-supported plain info/refs response with a non-`chunked` transfer-coding token is accepted and read unchanged like stock Git | `docs/cli/matrices/ls_remote_v2_47.tsv`; `git_transport_http_compat::ls_remote_accepts_non_chunked_transfer_encoding_like_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git push` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/push_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` former named-remote branch tag omission for `git fetch --tags origin main` | Git-supported named local remote branch fetch with `--tags` now follows annotated and lightweight tags, writes tag rows to `FETCH_HEAD`, emits stock-shaped branch/tag/remote-tracking update stderr and keeps `refs/remotes/origin/main` updated | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_tags_named_local_remote_branch_follows_tags_like_stock_git` |
 | `transport_impl.rs` former branch-without-destination tag omission for `git fetch --tags <path> main` | Git-supported explicit local-path branch fetch with `--tags` now follows annotated and lightweight tags, writes tag rows to `FETCH_HEAD` and emits stock-shaped branch/tag update stderr | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_tags_direct_location_branch_follows_tags_like_stock_git` |

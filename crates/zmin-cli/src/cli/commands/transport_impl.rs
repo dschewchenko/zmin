@@ -4051,11 +4051,6 @@ fn parse_http_response_header_line(
         for coding in value.split(',').map(str::trim) {
             if coding.eq_ignore_ascii_case("chunked") {
                 *chunked = true;
-            } else if !coding.is_empty() {
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: format!("unsupported HTTP transfer encoding: {coding}"),
-                });
             }
         }
     } else if name.eq_ignore_ascii_case("location") && location.is_none() {
@@ -25496,6 +25491,17 @@ mod transport_request_tests {
         assert_eq!(head.status_code, 200);
         assert!(head.chunked);
         assert_eq!(head.content_length, Some(12));
+    }
+
+    #[test]
+    fn http_response_head_parser_ignores_non_chunked_transfer_codings() {
+        let mut reader = io::Cursor::new(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\n\r\n");
+
+        let head = read_http_response_head(&mut reader).expect("response head");
+
+        assert_eq!(head.status_code, 200);
+        assert!(!head.chunked);
+        assert_eq!(head.content_length, None);
     }
 
     #[test]
