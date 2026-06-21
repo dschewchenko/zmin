@@ -2420,7 +2420,7 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
         .filter(|line| line.line_no >= from_line)
         .find(|line| regex.is_match(&line.content))
         .map(|line| line.line_no)
-        .ok_or_else(|| unsupported_blame_line_range(pattern))
+        .ok_or_else(|| blame_line_range_regex_no_match(pattern, from_line))
 }
 
 fn blame_function_line_matches(line: &[u8], function: &[u8]) -> bool {
@@ -2463,6 +2463,15 @@ fn blame_line_range_function_no_match(function: &str, start_line: usize) -> CliE
     CliError::Fatal {
         code: 128,
         message: format!("-L parameter '{function}' starting at line {start_line}: no match"),
+    }
+}
+
+fn blame_line_range_regex_no_match(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: regexec() failed to match"
+        ),
     }
 }
 

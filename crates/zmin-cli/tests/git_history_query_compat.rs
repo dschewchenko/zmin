@@ -424,6 +424,16 @@ fn blame_missing_function_line_range_matches_stock_git_failure() {
 }
 
 #[test]
+fn blame_missing_regex_line_range_matches_stock_git_failure() {
+    let repo = blame_line_range_fixture_repo();
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["blame", "-L", "/missing/", "a.txt"]),
+        git_failure_output(repo.path(), &["blame", "-L", "/missing/", "a.txt"])
+    );
+}
+
+#[test]
 fn blame_progress_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
