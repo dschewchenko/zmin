@@ -202,6 +202,7 @@ pub(crate) fn index_mode_octal(mode: IndexMode) -> &'static str {
         IndexMode::File => "100644",
         IndexMode::Executable => "100755",
         IndexMode::Symlink => "120000",
+        IndexMode::Tree => "040000",
         IndexMode::Gitlink => "160000",
     }
 }

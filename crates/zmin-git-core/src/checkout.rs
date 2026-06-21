@@ -808,6 +808,12 @@ fn checkout_entry<S: GitObjectStore>(
     if entry.mode == IndexMode::Gitlink {
         return checkout_gitlink(&target, options.force);
     }
+    if entry.mode == IndexMode::Tree {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "index sparse directory entry cannot be checked out directly",
+        ));
+    }
 
     let object = store.read_object(&entry.id)?;
     if object.kind != GitObjectKind::Blob {
@@ -822,6 +828,10 @@ fn checkout_entry<S: GitObjectStore>(
         IndexMode::File => write_regular_file(&target, &content, false, target_exists),
         IndexMode::Executable => write_regular_file(&target, &content, true, target_exists),
         IndexMode::Symlink => write_symlink(&target, &object.content, options.force),
+        IndexMode::Tree => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "index sparse directory entry cannot be checked out directly",
+        )),
         IndexMode::Gitlink => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "index entry unexpectedly marked as gitlink",
@@ -968,6 +978,12 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
     }
     record_phase_elapsed(&mut totals.stream_write, stream_start);
 
+    if entry.mode == IndexMode::Tree {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "index sparse directory entry cannot be checked out directly",
+        ));
+    }
     let object = read_checkout_object(store, &entry.id, trace_enabled, totals)?;
     if object.kind != GitObjectKind::Blob {
         return Err(io::Error::new(
@@ -1013,6 +1029,12 @@ fn checkout_entry_fresh_prepared<S: GitObjectStore>(
                 write_symlink_fresh(&target, &object.content)?;
             }
             record_phase_elapsed(&mut totals.materialize_symlink, symlink_start);
+        }
+        IndexMode::Tree => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "index sparse directory entry cannot be checked out directly",
+            ));
         }
         IndexMode::Gitlink => unreachable!("handled before reading object"),
     };
@@ -1074,6 +1096,12 @@ fn checkout_entry_fresh_prepared_in_place<S: GitObjectStore>(
     }
     record_phase_elapsed(&mut totals.stream_write, stream_start);
 
+    if entry.mode == IndexMode::Tree {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "index sparse directory entry cannot be checked out directly",
+        ));
+    }
     let object = read_checkout_object(store, &entry.id, trace_enabled, totals)?;
     if object.kind != GitObjectKind::Blob {
         return Err(io::Error::new(
@@ -1118,6 +1146,12 @@ fn checkout_entry_fresh_prepared_in_place<S: GitObjectStore>(
                 write_symlink_fresh(&target, &object.content)?;
             }
             record_phase_elapsed(&mut totals.materialize_symlink, symlink_start);
+        }
+        IndexMode::Tree => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "index sparse directory entry cannot be checked out directly",
+            ));
         }
         IndexMode::Gitlink => unreachable!("handled before reading object"),
     };

@@ -190,8 +190,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `27/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` |
 | Git doc option pairs represented by rows | `237/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `958` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `758/958` | yes, row by row | supported-behavior rows with parity evidence |
+| Written behavior rows | `959` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `759/959` | yes, row by row | supported-behavior rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -232,9 +232,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `14` | `7` | `0` | `0` | `7` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `188` | `147` | `0` | `0` | `41` | `104` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `189` | `148` | `0` | `0` | `41` | `105` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `0` | `4` | `5` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`958`** | **`758`** | **`0`** | **`0`** | **`200`** | **`607`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`959`** | **`759`** | **`0`** | **`0`** | **`200`** | **`608`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -245,9 +245,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `237/4632`
-represented option pairs or `758/958` passing written rows as a Git support
-percentage. The `758/958` number is audit progress for supported rows already
-written down; `200/958` additional rows are stock-compatible invalid inputs. It
+represented option pairs or `759/959` passing written rows as a Git support
+percentage. The `759/959` number is audit progress for supported rows already
+written down; `200/959` additional rows are stock-compatible invalid inputs. It
 says nothing about the still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -274,7 +274,7 @@ variants.
 | `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `65` | `65` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `32` | `docs/cli/matrices/log_v2_47.tsv` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `docs/cli/matrices/for_each_ref_v2_47.tsv` | `34` | `23` | `0` | `0` | `11` | no |
-| `ls-files` | `42` | `0` | `27` | `docs/cli/matrices/ls_files_v2_47.tsv` | `70` | `54` | `0` | `0` | `16` | no |
+| `ls-files` | `42` | `0` | `27` | `docs/cli/matrices/ls_files_v2_47.tsv` | `71` | `55` | `0` | `0` | `16` | no |
 | `ls-tree` | `15` | `0` | `2` | `docs/cli/matrices/ls_tree_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `merge` | `69` | `0` | `1` | `docs/cli/matrices/merge_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `docs/cli/matrices/merge_base_v2_47.tsv` | `12` | `10` | `0` | `0` | `2` | no |

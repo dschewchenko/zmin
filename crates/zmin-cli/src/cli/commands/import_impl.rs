@@ -604,7 +604,7 @@ impl<'a> FastImportParser<'a> {
             self.resolve_fast_import_value(value)?
         };
         let size = match mode {
-            IndexMode::Gitlink => 0,
+            IndexMode::Tree | IndexMode::Gitlink => 0,
             _ => self
                 .store
                 .read_object(&id)?
@@ -808,6 +808,7 @@ fn parse_fast_import_mode(mode: &str) -> Result<IndexMode> {
         "644" => Ok(IndexMode::File),
         "755" => Ok(IndexMode::Executable),
         "120000" => Ok(IndexMode::Symlink),
+        "40000" | "040000" => Ok(IndexMode::Tree),
         "160000" => Ok(IndexMode::Gitlink),
         _ => parse_index_mode(mode),
     }

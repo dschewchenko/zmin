@@ -378,6 +378,7 @@ pub(crate) fn refresh_tracked_index_metadata_matching(
                     && hash_worktree_file_blob(&absolute, metadata.len())? == entry.id
             }
             IndexMode::Symlink => symlink_content_matches(&absolute, &entry)?,
+            IndexMode::Tree => false,
             IndexMode::Gitlink => false,
         };
         if content_matches {
@@ -1399,6 +1400,7 @@ fn tracked_entry_needs_stage(
             }
             Ok(!path.is_dir())
         }
+        IndexMode::Tree => Ok(false),
     }
 }
 
@@ -1479,6 +1481,7 @@ fn worktree_entry_modified_with_metadata(
             }
             Ok(!path.is_dir())
         }
+        IndexMode::Tree => Ok(false),
     }
 }
 

@@ -1174,7 +1174,7 @@ fn apply_worktree_mode(path: &std::path::Path, mode: IndexMode) -> Result<()> {
     let bits = match mode {
         IndexMode::Executable => 0o755,
         IndexMode::File => 0o644,
-        IndexMode::Symlink | IndexMode::Gitlink => return Ok(()),
+        IndexMode::Symlink | IndexMode::Tree | IndexMode::Gitlink => return Ok(()),
     };
     let mut permissions = fs::metadata(path)?.permissions();
     permissions.set_mode(bits);

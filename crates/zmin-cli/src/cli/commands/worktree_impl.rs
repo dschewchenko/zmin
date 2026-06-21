@@ -910,6 +910,7 @@ fn status_v2_mode(mode: IndexMode) -> &'static str {
         IndexMode::File => "100644",
         IndexMode::Executable => "100755",
         IndexMode::Symlink => "120000",
+        IndexMode::Tree => "040000",
         IndexMode::Gitlink => "160000",
     }
 }
@@ -1278,7 +1279,7 @@ fn index_mode_from_tree_mode_for_status(mode: TreeMode) -> IndexMode {
         TreeMode::Executable => IndexMode::Executable,
         TreeMode::Symlink => IndexMode::Symlink,
         TreeMode::Gitlink => IndexMode::Gitlink,
-        TreeMode::Tree => IndexMode::File,
+        TreeMode::Tree => IndexMode::Tree,
     }
 }
 
@@ -2375,7 +2376,7 @@ fn ls_files_index_with_tree(
 fn ls_files_index_with_submodules(repo: &GitRepo, index: GitIndex) -> Result<GitIndex> {
     let mut entries = Vec::new();
     for entry in index.entries() {
-        if entry.mode != IndexMode::Gitlink {
+        if !matches!(entry.mode, IndexMode::Gitlink | IndexMode::Tree) {
             entries.push(entry.clone());
             continue;
         }

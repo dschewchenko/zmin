@@ -23,6 +23,7 @@ const INDEX_ENTRY_ASSUME_VALID: u8 = 0b001;
 const INDEX_ENTRY_SKIP_WORKTREE: u8 = 0b010;
 const INDEX_ENTRY_INTENT_TO_ADD: u8 = 0b100;
 const RESOLVE_UNDO_EXTENSION: &[u8; 4] = b"REUC";
+const SPARSE_DIRECTORY_EXTENSION: &[u8; 4] = b"sdir";
 const INDEX_ENTRY_INITIAL_CAPACITY_LIMIT: usize = 8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -30,6 +31,7 @@ pub enum IndexMode {
     File,
     Executable,
     Symlink,
+    Tree,
     Gitlink,
 }
 
@@ -39,6 +41,7 @@ impl IndexMode {
             Self::File => 0o100644,
             Self::Executable => 0o100755,
             Self::Symlink => 0o120000,
+            Self::Tree => 0o040000,
             Self::Gitlink => 0o160000,
         }
     }
@@ -58,10 +61,7 @@ impl IndexMode {
             }
             0o120001..=0o120777 => Ok(Self::Symlink),
             0o160001..=0o160777 => Ok(Self::Gitlink),
-            0o040000 => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "unsupported git index mode",
-            )),
+            0o040000 => Ok(Self::Tree),
             _ => Ok(Self::File),
         }
     }
@@ -71,6 +71,7 @@ impl IndexMode {
             Self::File => TreeMode::File,
             Self::Executable => TreeMode::Executable,
             Self::Symlink => TreeMode::Symlink,
+            Self::Tree => TreeMode::Tree,
             Self::Gitlink => TreeMode::Gitlink,
         }
     }
@@ -800,7 +801,7 @@ fn decode_index_extensions(
             ));
         }
         let signature = &bytes[cursor..cursor + 4];
-        if signature.iter().any(u8::is_ascii_lowercase) {
+        if signature.iter().any(u8::is_ascii_lowercase) && signature != SPARSE_DIRECTORY_EXTENSION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "git index has an unsupported required extension",

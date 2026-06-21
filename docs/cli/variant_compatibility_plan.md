@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 958 written rows / 758 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 959 written rows / 759 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,11 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git ls-files --stage` with
-checksum-valid raw non-tree unknown index modes such as `000000`, `200000` and
-`777777`. Stock Git exits `0` and prints the raw mode bits in stage output.
-Zmin now accepts those entries for read/display paths while preserving the raw
-`mode_bits`.
+The latest closed guard classification is `git ls-files --sparse --stage` with
+stock sparse-index tree entries. Stock Git prints sparse directory entries as
+`040000 <tree> 0\tpath/` records without expanding the index. Zmin now accepts
+the sparse-index `sdir` marker, decodes `040000` as an index tree entry and
+prints the same stage output for this sparse display mode.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -225,17 +225,17 @@ or an explicit product decision brings the GUI surface into scope.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `958` written-row
+This card is the exact handoff target after the current `959` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
-| Slice | classify sparse/tree index mode `040000` after raw non-tree modes |
-| Stock-Git oracle | probe stock Git sparse-index behavior for `040000`, including stdout, stderr, exit code and index/worktree side effects |
-| Implementation area | start at `crates/zmin-git-core/src/index.rs:63` (`unsupported git index mode`) unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest index-reading compat test that proves the stock sparse-index expansion behavior or records an intentional deferral |
-| Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if sparse index remains out of current scope |
-| Expected count movement | depends on whether `040000` becomes supported behavior, invalid input or an intentional sparse-index deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
+| Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
+| Implementation area | start at `crates/zmin-git-core/src/refs.rs:300` (`nested symbolic refs are not supported yet`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
+| Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
+| Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
 | Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
 
@@ -244,7 +244,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/958`; the complete command matrices and complete doc-option matrices remain
+`0/959`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -404,6 +404,7 @@ until a full matrix is expanded and verified.
 | `ls-files` replacement mixed worktree NUL output | `1` | `0` | `-z --modified --deleted --others --exclude-standard` through the `git` shim on a cloned repository with untracked, deleted and modified tracked files |
 | `ls-files --stage` raw regular index mode bits | `1` | `0` | `git ls-files --stage` preserves raw `100640` mode output from a checksum-valid index while using canonical file behavior internally |
 | `ls-files --stage` raw unknown non-tree index mode bits | `1` | `0` | `git ls-files --stage` preserves raw `000000`, `200000` and `777777` mode output from checksum-valid indexes while keeping sparse/tree mode `040000` for a separate slice |
+| `ls-files --sparse --stage` sparse index tree entries | `1` | `0` | `git ls-files --sparse --stage` prints stock sparse-directory `040000` tree entries from an index with the `sdir` marker |
 | `ls-files --stage` stock Git index v4 | `1` | `0` | `git ls-files --stage` reads stock Git version 4 indexes with prefix-compressed paths |
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
@@ -479,7 +480,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `607` verified variants.
+Tracked closed blocks in this table: `608` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

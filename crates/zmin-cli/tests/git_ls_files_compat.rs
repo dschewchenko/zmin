@@ -7,7 +7,7 @@ use tempfile::TempDir;
 
 use common::{
     configure_identity, git, git_args, git_init, git_status, git_with_env, run_zmin_args,
-    write_file, zmin_bin,
+    stock_git_bin, write_file, zmin_bin,
 };
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
@@ -66,6 +66,35 @@ fn set_index_version(repo: &std::path::Path, version: u32) {
     index[4..8].copy_from_slice(&version.to_be_bytes());
     rewrite_index_checksum(&mut index);
     fs::write(index_path, index).expect("write index");
+}
+
+fn stock_git_output_any(cwd: &std::path::Path, args: &[&str]) -> (i32, String, String) {
+    command_output_any(stock_git_bin().to_str().expect("stock git path"), cwd, args)
+}
+
+fn sparse_index_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("keep")).expect("create keep");
+    fs::create_dir_all(repo.path().join("skip/nested")).expect("create skip");
+    fs::write(repo.path().join("keep/a.txt"), b"keep\n").expect("write keep");
+    fs::write(repo.path().join("skip/nested/b.txt"), b"skip\n").expect("write skip");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(
+        repo.path(),
+        ["sparse-checkout", "init", "--cone", "--sparse-index"],
+    );
+    git(repo.path(), ["sparse-checkout", "set", "keep"]);
+    let sparse = stock_git_output_any(repo.path(), &["ls-files", "--sparse", "--stage"]);
+    assert_eq!(sparse.0, 0);
+    assert!(
+        sparse.1.contains("040000 ") && sparse.1.contains("\tskip/"),
+        "expected sparse directory entry, got stdout:\n{}\nstderr:\n{}",
+        sparse.1,
+        sparse.2
+    );
+    repo
 }
 
 fn rewrite_index_checksum(index: &mut [u8]) {
@@ -346,6 +375,21 @@ fn ls_files_stage_preserves_stock_git_raw_unknown_index_modes() {
             "index mode {mode:o}"
         );
     }
+}
+
+#[test]
+fn ls_files_sparse_stage_reads_stock_git_sparse_index_tree_entries() {
+    let git_repo = sparse_index_repo();
+    let zmin_repo = sparse_index_repo();
+
+    assert_eq!(
+        command_output_any(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["ls-files", "--sparse", "--stage"]
+        ),
+        stock_git_output_any(git_repo.path(), &["ls-files", "--sparse", "--stage"])
+    );
 }
 
 #[test]
