@@ -5264,12 +5264,6 @@ fn parse_sparse_checkout_options(
         }
     }
     if options.stdin {
-        if !options.patterns.is_empty() {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: "sparse-checkout --stdin cannot be combined with path arguments".into(),
-            });
-        }
         let mut input = String::new();
         io::stdin().read_to_string(&mut input)?;
         options.patterns = input

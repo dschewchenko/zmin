@@ -168,7 +168,8 @@ focused parity evidence checks the same surface.
   heads, head, hash, tags, verify and invalid-input variants.
 - `docs/cli/matrices/sparse_checkout_v2_47.tsv` tracks the first
   `sparse-checkout` invalid-input subcommand, set-option, init-option and
-  add-option state variants.
+  add-option state variants, plus the first `--stdin` with positional patterns
+  variants.
 - `docs/cli/matrices/symbolic_ref_v2_47.tsv` tracks the first
   `symbolic-ref` write, read, short, no-recurse, quiet and invalid-input
   variants.
@@ -207,9 +208,9 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `37/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `241/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1009` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `770/1009` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `1/1009` | no | written rows with incomplete parity |
+| Written behavior rows | `1011` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `772/1011` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `1/1011` | no | written rows with incomplete parity |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -251,8 +252,8 @@ Current generated summary:
 | Administration | `8` | `0` | `147` | `0` | `28` | `10` | `0` | `0` | `18` | `34` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `0` | `44` | `110` |
-| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `33` | `7` | `1` | `0` | `25` | `28` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1009`** | **`770`** | **`1`** | **`0`** | **`238`** | **`650`** |
+| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `35` | `9` | `1` | `0` | `25` | `28` |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1011`** | **`772`** | **`1`** | **`0`** | **`238`** | **`650`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -263,9 +264,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `241/4632`
-represented option pairs or `770/1009` passing written rows as a Git support
-percentage. The `770/1009` number is audit progress for supported rows already
-written down; `1/1009` row is partial and `238/1009` additional rows are
+represented option pairs or `772/1011` passing written rows as a Git support
+percentage. The `772/1011` number is audit progress for supported rows already
+written down; `1/1011` row is partial and `238/1011` additional rows are
 stock-compatible invalid inputs. It says nothing about the still unexpanded
 rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,

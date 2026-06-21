@@ -181,6 +181,33 @@ fn sparse_checkout_add_unknown_option_matches_stock_git_usage_when_enabled() {
 }
 
 #[test]
+fn sparse_checkout_add_stdin_ignores_positional_patterns_like_stock_git() {
+    let git_repo = sparse_checkout_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    git(git_repo.path(), ["sparse-checkout", "set", "docs"]);
+    run_zmin(zmin_repo.path(), ["sparse-checkout", "set", "docs"]);
+    git_with_stdin(
+        git_repo.path(),
+        ["sparse-checkout", "add", "--stdin", "missing"],
+        "src\n",
+    );
+    run_zmin_with_stdin(
+        zmin_repo.path(),
+        ["sparse-checkout", "add", "--stdin", "missing"],
+        "src\n",
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["sparse-checkout", "list"]),
+        git(git_repo.path(), ["sparse-checkout", "list"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "-t"]),
+        git(git_repo.path(), ["ls-files", "-t"])
+    );
+}
+
+#[test]
 fn sparse_checkout_stdin_and_config_options_match_stock_git() {
     let git_repo = sparse_checkout_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());
@@ -217,6 +244,25 @@ fn sparse_checkout_stdin_and_config_options_match_stock_git() {
     assert_eq!(
         run_zmin(zmin_repo.path(), ["sparse-checkout", "list"]),
         git(git_repo.path(), ["sparse-checkout", "list"])
+    );
+
+    git_with_stdin(
+        git_repo.path(),
+        ["sparse-checkout", "set", "--stdin", "docs"],
+        "src\n",
+    );
+    run_zmin_with_stdin(
+        zmin_repo.path(),
+        ["sparse-checkout", "set", "--stdin", "docs"],
+        "src\n",
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["sparse-checkout", "list"]),
+        git(git_repo.path(), ["sparse-checkout", "list"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "-t"]),
+        git(git_repo.path(), ["ls-files", "-t"])
     );
 
     git(
