@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 292/4632 represented doc-option pairs / 1286 written rows / 1003 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 294/4632 represented doc-option pairs / 1295 written rows / 1012 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands already-covered `diff` cached patch-format
-rows from existing stock-oracle evidence:
+The latest completed slice expands the remaining already-covered `diff`
+cached format/toggle rows from existing stock-oracle evidence:
 
-`git diff --cached --patch --line-prefix='| | | '`
+`git diff --cached --color=always --no-color`
 
-`docs/cli/matrices/diff_v2_47.tsv` now aligns the existing patch-format rows
-with their cached oracle state and records line prefix, output indicator,
-inter-hunk, full-index, short unified, patch-with-stat, patch-with-raw, silent
-and raw-abbrev cached forms with focused evidence in
+`docs/cli/matrices/diff_v2_47.tsv` now records cached numstat NUL output,
+raw no-abbrev output, no-ext-diff/no-textconv, no-color/no-color-moved, color
+value modes and the order-sensitive forced-color/no-color override with focused
+evidence in
 `git_diff_compat::diff_patch_format_options_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
@@ -634,7 +634,7 @@ branch and short output modes. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1286` written-row
+This card is the exact handoff target after the current `1295` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -653,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1286`; the `1/1286` open row and the still incomplete command/doc-option
+`0/1295`; the `1/1295` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
