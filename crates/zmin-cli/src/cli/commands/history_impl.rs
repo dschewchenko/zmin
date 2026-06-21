@@ -2275,10 +2275,7 @@ fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
 
 fn parse_blame_regex_line_range(value: &str) -> Result<BlameLineRange> {
     let Some(pattern_end) = closing_blame_regex_delimiter(value) else {
-        if value == "/" {
-            return Err(blame_usage_error());
-        }
-        return Err(unsupported_blame_line_range(value));
+        return Err(blame_usage_error());
     };
     let pattern = value[1..pattern_end].to_owned();
     if pattern.is_empty() {
@@ -2330,7 +2327,7 @@ fn parse_blame_range_end_spec(value: &str, full_range: &str) -> Result<BlameRang
 
 fn parse_complete_blame_regex(value: &str, full_range: &str) -> Result<String> {
     let Some(pattern_end) = closing_blame_regex_delimiter(value) else {
-        return Err(unsupported_blame_line_range(full_range));
+        return Err(blame_usage_error());
     };
     if pattern_end + 1 != value.len() {
         return Err(unsupported_blame_line_range(full_range));
