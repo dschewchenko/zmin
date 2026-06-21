@@ -169,19 +169,19 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `42/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `http-fetch`, `index-pack`, `log`, `ls-files`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
+| Commands with any matrix rows | `43/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `http-fetch`, `index-pack`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
 | Documented option spellings represented by rows | `245/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1045` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `787/1045` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `1/1045` | written rows with incomplete parity |
-| Open written rows | `0/1045` | written rows that still do not match stock Git |
-| Invalid input rows | `257/1045` | rows where stock Git rejects the input |
+| Written behavior rows | `1046` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `787/1046` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `1/1046` | written rows with incomplete parity |
+| Open written rows | `0/1046` | written rows that still do not match stock Git |
+| Invalid input rows | `258/1046` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `787/1045` as Git compatibility. It only means `787` of the `1045`
+Do not read `787/1046` as Git compatibility. It only means `787` of the `1046`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `1/1045` row is only partially matching,
-and `257/1045` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `1/1046` row is only partially matching,
+and `258/1046` additional rows are stock-compatible invalid inputs. Do
 not read `245/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -210,7 +210,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `82` | `66` | `0` | `0` | `16` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `70` | `41` | `0` | `0` | `29` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `297` | `283` | `0` | `0` | `14` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `298` | `283` | `0` | `0` | `15` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `45` | `17` | `1` | `0` | `27` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1045`** | **`787`** | **`1`** | **`0`** | **`257`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1046`** | **`787`** | **`1`** | **`0`** | **`258`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -252,6 +252,7 @@ Current command-level matrices:
 | `http-fetch` | `10` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `index-pack` | `18` | `0` | `1` | `3` | `0` | `0` | `0` | `3` | no |
 | `ls-files` | `42` | `0` | `27` | `72` | `55` | `0` | `0` | `17` | no |
+| `ls-remote` | `16` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
 | `maintenance` | `14` | `0` | `3` | `5` | `0` | `0` | `0` | `5` | no |
 | `merge` | `69` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
