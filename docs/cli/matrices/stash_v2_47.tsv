@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Branching and Merging	stash	--format	malformed %x hex escapes	list subcommand	stash stack with one entry	local	all	git stash list --format=%xzz	closed	git_stash_compat::stash_list_malformed_hex_format_atoms_match_stock_git_literals	malformed %x, %x0 and %xzz pretty-format escapes are preserved as literal text by stock Git and Zmin

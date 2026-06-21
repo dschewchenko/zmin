@@ -7418,13 +7418,21 @@ fn render_stash_hex_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String
 where
     I: Iterator<Item = char>,
 {
-    let high = chars
-        .next()
-        .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
-    let low = chars
-        .next()
-        .ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
-    let byte = parse_hex_byte(high, low).ok_or_else(|| unsupported_stash_list_format_atom("%x"))?;
+    let Some(high) = chars.next() else {
+        out.push_str("%x");
+        return Ok(());
+    };
+    let Some(low) = chars.next() else {
+        out.push_str("%x");
+        out.push(high);
+        return Ok(());
+    };
+    let Some(byte) = parse_hex_byte(high, low) else {
+        out.push_str("%x");
+        out.push(high);
+        out.push(low);
+        return Ok(());
+    };
     out.push(byte as char);
     Ok(())
 }

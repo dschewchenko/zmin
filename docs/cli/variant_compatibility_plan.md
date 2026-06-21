@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 37/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1013 written rows / 774 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 38/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1014 written rows / 775 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -335,9 +335,15 @@ stderr empty and preserves the untracked file. Zmin now matches that retry
 flow instead of exiting through the former `unsupported clean interactive
 command` fatal guard.
 
+The latest stash list format guard classification is malformed `%x` hex
+escapes. Stock Git preserves `%x`, `%x0` and `%xzz` as literal text in
+`git stash list --format=<format>` instead of failing. Zmin now matches that
+literal-preservation behavior, and `stash_v2_47.tsv` is seeded with the first
+stash command row.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1013` written-row
+This card is the exact handoff target after the current `1014` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -356,7 +362,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1013`; the complete command matrices and complete doc-option matrices remain
+`0/1014`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named

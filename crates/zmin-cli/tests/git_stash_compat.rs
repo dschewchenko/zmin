@@ -1359,6 +1359,30 @@ fn stash_list_formats_match_stock_git() {
 }
 
 #[test]
+fn stash_list_malformed_hex_format_atoms_match_stock_git_literals() {
+    let git_repo = stash_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    write_file(git_repo.path(), "a.txt", "one\nstashed\n");
+    write_file(zmin_repo.path(), "a.txt", "one\nstashed\n");
+    git_with_env(git_repo.path(), ["stash", "push", "-m", "hex"]);
+    run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-m", "hex"]);
+
+    for args in [
+        ["stash", "list", "--format=%x"].as_slice(),
+        ["stash", "list", "--format=%x0"].as_slice(),
+        ["stash", "list", "--format=%xzz"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "malformed %x format should stay literal for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn stash_invalid_top_level_and_push_usage_match_stock_git_shape() {
     let repo = stash_fixture_repo();
 
