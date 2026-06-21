@@ -4182,10 +4182,7 @@ pub(crate) fn sparse_checkout(args: Vec<String>) -> Result<()> {
         "list" => sparse_checkout_list(),
         "disable" => sparse_checkout_disable(),
         "init" => sparse_checkout_init(&args[1..]),
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported sparse-checkout subcommand '{subcommand}'"),
-        }),
+        _ => Err(sparse_checkout_unknown_subcommand_error(subcommand)),
     }
 }
 
@@ -5524,6 +5521,16 @@ fn submodule_usage_error() -> CliError {
    or: git submodule [--quiet] sync [--recursive] [--] [<path>...]
    or: git submodule [--quiet] absorbgitdirs [--] [<path>...]\n"
             .to_owned(),
+    }
+}
+
+fn sparse_checkout_unknown_subcommand_error(subcommand: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown subcommand: `{subcommand}'\n\
+             usage: git sparse-checkout (init | list | set | add | reapply | disable | check-rules) [<options>]\n"
+        ),
     }
 }
 
