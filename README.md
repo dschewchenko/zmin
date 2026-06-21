@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `46/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
 | Documented option spellings represented by rows | `247/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1056` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `795/1056` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1056` | written rows with incomplete parity |
-| Open written rows | `0/1056` | written rows that still do not match stock Git |
-| Invalid input rows | `261/1056` | rows where stock Git rejects the input |
+| Written behavior rows | `1060` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `799/1060` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1060` | written rows with incomplete parity |
+| Open written rows | `0/1060` | written rows that still do not match stock Git |
+| Invalid input rows | `261/1060` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `795/1056` as Git compatibility. It only means `795` of the `1056`
+Do not read `799/1060` as Git compatibility. It only means `799` of the `1060`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1056` rows are partially matching,
-and `261/1056` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `0/1060` rows are partially matching,
+and `261/1060` additional rows are stock-compatible invalid inputs. Do
 not read `247/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -209,7 +209,7 @@ Audit progress by git-scm reference group:
 | Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `4` | `3` | `0` | `0` | `1` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `82` | `66` | `0` | `0` | `16` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `71` | `42` | `0` | `0` | `29` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `75` | `46` | `0` | `0` | `29` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `300` | `283` | `0` | `0` | `17` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `48` | `21` | `0` | `0` | `27` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1056`** | **`795`** | **`0`** | **`0`** | **`261`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1060`** | **`799`** | **`0`** | **`0`** | **`261`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -272,7 +272,7 @@ Current command-level matrices:
 | `show-index` | `1` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `8` | `3` | `0` | `0` | `5` | no |
-| `stash` | `30` | `0` | `0` | `11` | `7` | `0` | `0` | `4` | no |
+| `stash` | `30` | `0` | `0` | `15` | `11` | `0` | `0` | `4` | no |
 | `submodule` | `35` | `0` | `0` | `7` | `0` | `0` | `0` | `7` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
