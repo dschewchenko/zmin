@@ -7389,7 +7389,7 @@ where
             render_stash_color_atom(chars, out)?;
         }
         '<' | '>' => render_stash_width_atom(atom, chars, out, index, entry, commit)?,
-        'w' => return Err(unsupported_stash_list_format_atom("%w")),
+        'w' => render_stash_wrap_atom(chars, out, index, entry, commit)?,
         _ => stash_format_literal_atom(out, "", atom),
     }
     Ok(())
@@ -7524,6 +7524,12 @@ struct StashWidthSpec {
     truncation: StashWidthTruncation,
 }
 
+struct StashWrapSpec {
+    width: usize,
+    indent_first: usize,
+    indent_rest: usize,
+}
+
 enum StashWidthAtom {
     Valid(StashWidthSpec),
     Literal(String),
@@ -7655,6 +7661,169 @@ fn apply_stash_width_truncation(
             out
         }
     }
+}
+
+fn render_stash_wrap_atom<I>(
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+    index: usize,
+    entry: &StashEntry,
+    commit: &CommitObject,
+) -> Result<()>
+where
+    I: Iterator<Item = char>,
+{
+    let Some(spec) = parse_stash_wrap_spec(chars, out) else {
+        return Ok(());
+    };
+    let remaining = chars.by_ref().collect::<String>();
+    let mut rendered = String::new();
+    let mut remaining_chars = remaining.chars().peekable();
+    while let Some(ch) = remaining_chars.next() {
+        if ch != '%' {
+            rendered.push(ch);
+            continue;
+        }
+        let Some(atom) = remaining_chars.next() else {
+            rendered.push('%');
+            break;
+        };
+        render_stash_list_format_atom(
+            atom,
+            &mut remaining_chars,
+            &mut rendered,
+            index,
+            entry,
+            commit,
+        )?;
+    }
+    out.push_str(&apply_stash_wrap_spec(&rendered, &spec));
+    Ok(())
+}
+
+fn parse_stash_wrap_spec<I>(
+    chars: &mut std::iter::Peekable<I>,
+    out: &mut String,
+) -> Option<StashWrapSpec>
+where
+    I: Iterator<Item = char>,
+{
+    if !matches!(chars.peek(), Some('(')) {
+        out.push_str("%w");
+        return None;
+    }
+    chars.next();
+    let mut raw = String::new();
+    for ch in chars.by_ref() {
+        raw.push(ch);
+        if ch == ')' {
+            let inner = &raw[..raw.len() - 1];
+            let mut parts = inner.split(',').map(str::trim);
+            let Some(width) = parts.next().and_then(|value| value.parse::<usize>().ok()) else {
+                out.push_str("%w(");
+                out.push_str(inner);
+                out.push(')');
+                return None;
+            };
+            let indent_first = match parts.next() {
+                None | Some("") => 0,
+                Some(value) => match value.parse::<usize>() {
+                    Ok(indent) => indent,
+                    Err(_) => {
+                        out.push_str("%w(");
+                        out.push_str(inner);
+                        out.push(')');
+                        return None;
+                    }
+                },
+            };
+            let indent_rest = match parts.next() {
+                None | Some("") => 0,
+                Some(value) => match value.parse::<usize>() {
+                    Ok(indent) => indent,
+                    Err(_) => {
+                        out.push_str("%w(");
+                        out.push_str(inner);
+                        out.push(')');
+                        return None;
+                    }
+                },
+            };
+            if parts.next().is_some() {
+                out.push_str("%w(");
+                out.push_str(inner);
+                out.push(')');
+                return None;
+            }
+            return Some(StashWrapSpec {
+                width,
+                indent_first,
+                indent_rest,
+            });
+        }
+    }
+    out.push_str("%w(");
+    out.push_str(&raw);
+    None
+}
+
+fn apply_stash_wrap_spec(value: &str, spec: &StashWrapSpec) -> String {
+    let mut out = String::new();
+    for (paragraph_index, paragraph) in value.split('\n').enumerate() {
+        if paragraph_index > 0 {
+            out.push('\n');
+        }
+        append_wrapped_stash_paragraph(&mut out, paragraph, spec, paragraph_index == 0);
+    }
+    out
+}
+
+fn append_wrapped_stash_paragraph(
+    out: &mut String,
+    paragraph: &str,
+    spec: &StashWrapSpec,
+    first_paragraph: bool,
+) {
+    let mut line = String::new();
+    let mut line_index = 0usize;
+    for word in paragraph.split_whitespace() {
+        let indent = if first_paragraph && line_index == 0 {
+            spec.indent_first
+        } else {
+            spec.indent_rest
+        };
+        let available = spec.width.saturating_sub(indent).max(1);
+        let next_len = if line.is_empty() {
+            word.chars().count()
+        } else {
+            line.chars().count() + 1 + word.chars().count()
+        };
+        if !line.is_empty() && next_len > available {
+            append_stash_wrap_line(out, &line, indent, line_index > 0);
+            line.clear();
+            line_index += 1;
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        let indent = if first_paragraph && line_index == 0 {
+            spec.indent_first
+        } else {
+            spec.indent_rest
+        };
+        append_stash_wrap_line(out, &line, indent, line_index > 0);
+    }
+}
+
+fn append_stash_wrap_line(out: &mut String, line: &str, indent: usize, needs_newline: bool) {
+    if needs_newline {
+        out.push('\n');
+    }
+    out.push_str(&" ".repeat(indent));
+    out.push_str(line);
 }
 
 fn render_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String) -> Result<()>

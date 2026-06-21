@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 42/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1043 written rows / 785 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 42/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1044 written rows / 786 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -387,6 +387,12 @@ atoms. Stock Git preserves `%<(bad)`, `%<()` and `%<` as literal text in
 atom. Zmin now matches that literal-preservation behavior and
 `stash_v2_47.tsv` records the focused row.
 
+The latest adjacent stash list supported-format classification is `%w`
+wrapping atoms. Stock Git preserves plain `%w` and malformed `%w(...)` atoms
+as literal text, while valid `%w(width[,indent1[,indent2]])` atoms wrap the
+following pretty-format output. Zmin now matches those focused forms and
+`stash_v2_47.tsv` records the supported-format row.
+
 The latest stock-compatible invalid-input guard classification is
 `worktree_impl.rs` `unsupported stash {operation} option` handling for
 reference-style stash operations. Stock Git rejects `git stash apply --bad`,
@@ -459,7 +465,7 @@ during status setup and emits the same diagnostics.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1043` written-row
+This card is the exact handoff target after the current `1044` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -478,7 +484,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1043`; the complete command matrices and complete doc-option matrices remain
+`0/1044`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -602,6 +608,7 @@ until a full matrix is expanded and verified.
 | `stash list` non-forced color format atoms | `3` | `0` | `%Cred`, `%C(red)`, `%C(auto,red)` with reset forms in redirected output |
 | `stash list` forced color format atoms | `3` | `0` | `%C(always,red)`, `%C(always,bold red)`, `%C(always,blue)` with reset/normal forms |
 | `stash list` width format atoms | `6` | `0` | `%<(N)`, `%>(N)`, `%<(N,trunc)`, `%>(N,trunc)`, `%<(N,ltrunc)`, `%<(N,mtrunc)` |
+| `stash list` wrap format atoms | `6` | `0` | plain `%w`, `%w%s`, `%w(N)`, `%w(N,I1,I2)`, malformed `%w(bad)` and `%w(N,bad)` forms |
 | `status -z` implicit porcelain form | `1` | `0` | `git status -z` matches stock Git's NUL-terminated porcelain v1 output |
 | `status` replacement short output | `1` | `0` | `--short` through the `git` shim on a cloned repository with dirty and untracked files |
 | `status` replacement short pathspec output | `1` | `0` | `--short -- dir` through the `git` shim on a cloned repository with a dirty nested tracked file |
@@ -786,6 +793,7 @@ behavior, invalid input, or corrupt-format handling.
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
+| `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
 | `worktree_impl.rs` former `unsupported stash {operation} option '{value}'` guard in `stash apply/drop/pop` option parsing | stock-compatible invalid input for unknown reference-style stash operation options | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_reference_unknown_options_match_stock_git_usage` |
 | `worktree_impl.rs` `ls-files --recurse-submodules unsupported mode` guard | stock-compatible invalid input for unsupported recurse-submodules combinations | `docs/cli/matrices/ls_files_v2_47.tsv`; `git_ls_files_compat::ls_files_recurse_submodules_matches_stock_git` |
 | `admin_impl.rs` `unsupported hook '{hook_name}'` in `zmin hooks` managed-hook validation | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `/usr/bin/git hooks -h` reports that stock Git has no `hooks` command |
@@ -795,12 +803,12 @@ behavior, invalid input, or corrupt-format handling.
 
 ## Code Guard Classification
 
-Raw code scan from 2026-06-19:
+Raw code scan from 2026-06-21:
 
 `rg -n "unsupported|not supported yet|not implemented yet" crates/zmin-cli/src crates/zmin-git-core/src --glob '*.rs'`
 
-This found `132` code hits. This is not the variant denominator and does not
-mean `132` Git features are missing. Each hit must be classified as one of:
+This found `94` code hits. This is not the variant denominator and does not
+mean `94` Git features are missing. Each hit must be classified as one of:
 
 - Git-supported user variant to implement and test
 - parser validation for invalid input
@@ -812,13 +820,13 @@ Largest raw clusters:
 
 | Area | Raw hits | Next action |
 | --- | ---: | --- |
-| `worktree_impl.rs` | `27` | split `clean`, `ls-files`, submodule, sparse-checkout, stash format atoms |
-| `history_impl.rs` | `25` | split blame ranges/options, reflog formats, diff/log decorators, filter-branch |
-| `transport_impl.rs` | `20` | split explicit-location fetch, remote helpers, reftable, HTTP/env guards |
-| `notes_impl.rs` | `7` | split notes copy/edit/add/remove/prune/merge option gaps |
-| `pack.rs` / `pack_impl.rs` | `11` | classify pack/bundle/commit-graph format guards versus stock-supported variants |
-| `admin_impl.rs` | `5` | classify hook validation and legacy foreign-SCM adapters |
-| remaining files | `39` | classify small parser/runtime guards individually |
+| `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, reftable, HTTP/env guards |
+| `pack_impl.rs` | `14` | classify pack/bundle format guards versus stock-supported variants |
+| `worktree_impl.rs` | `9` | split remaining ls-files, submodule, sparse-checkout, stash and worktree guards |
+| `history_impl.rs` | `7` | split blame ranges/options, reflog formats, diff/log decorators, filter-branch |
+| `pack.rs` | `6` | classify pack format guards versus corrupt-storage invalid inputs |
+| `maintenance_impl.rs` / `core_impl.rs` / `admin_impl.rs` | `12` | classify parser/runtime validation and Zmin-only hook validation |
+| remaining files | `16` | classify small parser/runtime guards individually |
 
 ## Audit Order
 
