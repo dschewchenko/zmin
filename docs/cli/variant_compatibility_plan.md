@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 37/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1006 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 37/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1007 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -295,9 +295,15 @@ exit `129`, empty stdout, `error: unknown option` and the command-specific
 `sparse-checkout set` usage text on stderr. Zmin now routes that parser guard
 to the same invalid-input shape.
 
+The latest adjacent sparse-checkout parser classification is
+`git sparse-checkout init --bad`. Stock Git rejects the invalid init option
+with exit `129`, empty stdout, `error: unknown option` and the
+command-specific `sparse-checkout init` usage text on stderr. Zmin matches that
+invalid-input shape through the same parser usage path.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1006` written-row
+This card is the exact handoff target after the current `1007` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -316,7 +322,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1006`; the complete command matrices and complete doc-option matrices remain
+`0/1007`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
