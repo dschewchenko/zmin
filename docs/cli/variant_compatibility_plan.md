@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1466 written rows / 1174 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1469 written rows / 1177 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,14 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice extends the `remote` command matrix with `update`
+The latest completed slice extends the `config` command matrix with local write
 rows from existing stock-oracle evidence:
 
-`git remote update -p`
+`git config branch.main.merge refs/heads/main`
 
-`docs/cli/matrices/remote_v2_47.tsv` now records default update, pruning
-update, named remotes group update, skipDefaultUpdate, remotes.default group,
-missing remote and broken remotes group rows from
-`git_admin_tools_compat::remote_update_matches_stock_git_for_local_remotes`.
+`docs/cli/matrices/config_v2_47.tsv` now records local writes for
+`user.email`, `branch.main.remote` and `branch.main.merge` from
+`git_admin_tools_compat::config_get_set_and_list_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,16 +625,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice extends `remote_v2_47.tsv` with rows already
-covered by
-`git_admin_tools_compat::remote_update_matches_stock_git_for_local_remotes`:
-default update, pruning update, named remotes group update, skipDefaultUpdate,
-remotes.default group, missing remote and broken remotes group. No Rust
-behavior changed.
+The latest matrix inventory slice extends `config_v2_47.tsv` with rows already
+covered by `git_admin_tools_compat::config_get_set_and_list_match_stock_git`:
+local writes for `user.email`, `branch.main.remote` and `branch.main.merge`.
+No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1466` written-row
+This card is the exact handoff target after the current `1469` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -654,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1466`; the `1/1466` open row and the still incomplete command/doc-option
+`0/1469`; the `1/1469` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
