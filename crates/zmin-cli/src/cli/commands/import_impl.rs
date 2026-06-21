@@ -532,10 +532,14 @@ impl<'a> FastImportParser<'a> {
                 self.pending_line = Some(line);
                 break;
             } else {
-                return Err(CliError::Fatal {
-                    code: 1,
-                    message: format!("unsupported fast-import commit command: {line}"),
-                });
+                self.write_fast_import_unreferenced_commit(
+                    &index,
+                    author.clone(),
+                    committer.clone(),
+                    message.clone(),
+                    parent.clone(),
+                )?;
+                return Err(self.unsupported_fast_import_command(&line)?);
             }
         }
 
@@ -735,6 +739,23 @@ impl<'a> FastImportParser<'a> {
             append_reflog_if_identity_available(self.repo, ref_name, &old_id, id, "fast-import")?;
         }
         Ok(())
+    }
+
+    fn write_fast_import_unreferenced_commit(
+        &self,
+        index: &GitIndex,
+        author: Signature,
+        committer: Signature,
+        message: Vec<u8>,
+        parent: Option<ObjectId>,
+    ) -> Result<ObjectId> {
+        let tree = write_tree_from_index(self.store, index)?;
+        let mut builder = CommitBuilder::new(tree, author, committer);
+        if let Some(parent) = parent {
+            builder = builder.parent(parent);
+        }
+        let encoded = builder.message(message)?.encode()?;
+        Ok(self.store.write_object(GitObjectKind::Commit, &encoded)?)
     }
 
     fn next_required_line(&mut self) -> Result<String> {

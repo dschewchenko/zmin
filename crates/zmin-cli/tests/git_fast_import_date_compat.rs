@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use common::{git, git_init, test_command_program, zmin_bin};
+use common::{git, git_init, git_status, test_command_program, zmin_bin};
 
 fn command_with_stdin_output(
     command: &str,
@@ -63,6 +63,30 @@ fn fast_import_crash_reports(repo: &Path) -> Vec<String> {
         .collect::<Vec<_>>();
     reports.sort();
     reports
+}
+
+fn loose_object_file_count(repo: &Path) -> usize {
+    fs::read_dir(repo.join(".git/objects"))
+        .expect("read objects dir")
+        .filter_map(|entry| {
+            let entry = entry.expect("objects dir entry");
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            (name.len() == 2).then_some(entry.path())
+        })
+        .map(|dir| {
+            fs::read_dir(dir)
+                .expect("read object fanout dir")
+                .filter(|entry| {
+                    entry
+                        .as_ref()
+                        .ok()
+                        .and_then(|entry| entry.file_name().to_str().map(str::len))
+                        == Some(38)
+                })
+                .count()
+        })
+        .sum()
 }
 
 #[test]
@@ -149,4 +173,56 @@ fn fast_import_unknown_top_level_command_matches_stock_git_crash_shape() {
         assert!(report.contains("* bogus"));
         assert!(report.contains("END OF CRASH REPORT"));
     }
+}
+
+#[test]
+fn fast_import_unknown_commit_command_matches_stock_git_crash_shape() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let stream = "\
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 0
+bogus
+";
+
+    let git_output = command_with_stdin_output("git", git_repo.path(), &["fast-import"], stream);
+    let zmin_output =
+        command_with_stdin_output(zmin_bin(), zmin_repo.path(), &["fast-import"], stream);
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_crash_stderr(&zmin_output.2),
+        normalize_fast_import_crash_stderr(&git_output.2)
+    );
+
+    let git_reports = fast_import_crash_reports(git_repo.path());
+    let zmin_reports = fast_import_crash_reports(zmin_repo.path());
+    assert_eq!(git_reports.len(), 1);
+    assert_eq!(zmin_reports.len(), 1);
+    for report in [git_reports[0].as_str(), zmin_reports[0].as_str()] {
+        assert!(report.contains("fast-import crash report:"));
+        assert!(report.contains("fatal: Unsupported command: bogus"));
+        assert!(report.contains("* bogus"));
+        assert!(report.contains("END OF CRASH REPORT"));
+    }
+    assert_eq!(
+        git_status(
+            git_repo.path(),
+            ["rev-parse", "--verify", "refs/heads/main"]
+        ),
+        128
+    );
+    assert_eq!(
+        git_status(
+            zmin_repo.path(),
+            ["rev-parse", "--verify", "refs/heads/main"]
+        ),
+        128
+    );
+    assert_eq!(
+        loose_object_file_count(zmin_repo.path()),
+        loose_object_file_count(git_repo.path())
+    );
 }
