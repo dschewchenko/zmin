@@ -260,6 +260,37 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
+### Current Locked Slice
+
+The current locked implementation slice is
+`filter-branch --parent-filter` bad output parity:
+
+`git filter-branch -f --parent-filter 'printf bad' HEAD`
+
+This row already exists in `docs/cli/matrices/filter_branch_v2_47.tsv` as an
+open stock-Git mismatch. Finish it before starting another guard
+classification or WebStorm dogfood row.
+
+Done for this slice means:
+
+1. The focused test proves stock Git exits `1`, prints rewrite progress, emits
+   the `must give exactly one tree` and `could not write rewritten commit`
+   diagnostics, leaves `HEAD` unchanged and does not create the original ref.
+2. Zmin matches that stdout/stderr/exit/side-effect shape.
+3. `filter_branch_v2_47.tsv` changes this row from `open` to `closed`.
+4. README, inventory, this plan and project notes carry generated counts.
+5. The slice is committed and pushed before any other command or option class.
+
+After this slice is closed, return to the Immediate Slice Queue order unless a
+new WebStorm/replacement-binary trace is blocking local dogfooding.
+
+### No-Skip Rule
+
+Every iteration must update the durable handoff before it is considered done:
+matrix row, focused evidence, generated counts, README/inventory/plan/project
+notes, commit and push. If any item is missing, the slice stays open even if
+the code happens to pass the focused test.
+
 The latest closed guard classification is `fetch` from an invalid bundle file.
 Stock Git treats `git fetch bad.bundle HEAD:refs/heads/from-bundle` as an
 unreadable remote repository, exits `128`, writes an empty `FETCH_HEAD`, leaves
