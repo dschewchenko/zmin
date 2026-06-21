@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1077 written rows / 812 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1078 written rows / 813 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -267,17 +267,17 @@ appear, add those rows before continuing guard classification.
 ### Latest Completed Slice
 
 The latest completed slice is `fetch --prune` with an explicit local path
-one-to-one refspec:
+branch refspec:
 
-`git fetch --prune <path> main:refs/remotes/origin/main`
+`git fetch --prune <path> main`
 
-Stock Git accepts this option combination, updates
-`refs/remotes/origin/main`, writes `FETCH_HEAD` for the explicit source and
-exits successfully. Zmin now routes this direct-location one-to-one refspec
-through the existing explicit-refspec handler instead of the catch-all explicit
-location unsupported branch. The row is recorded in
+Stock Git accepts this option combination, writes `FETCH_HEAD` for the
+explicit source, leaves destination refs empty and exits successfully. Zmin now
+routes this direct-location branch fetch through the branch-without-destination
+handler instead of the catch-all explicit-location unsupported branch. The row
+is recorded in
 `docs/cli/matrices/fetch_v2_47.tsv` with focused evidence in
-`git_transport_local_compat::fetch_prune_direct_location_one_to_one_refspec_matches_stock_git`.
+`git_transport_local_compat::fetch_prune_direct_location_branch_fetch_head_matches_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -626,7 +626,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1077` written-row
+This card is the exact handoff target after the current `1078` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -645,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1077`; the `1/1077` open row and the still incomplete command/doc-option
+`0/1078`; the `1/1078` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -973,6 +973,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git fetch` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git ls-remote` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/ls_remote_v2_47.tsv`; `git_transport_local_compat::ls_remote_unsupported_remote_helper_failure_matches_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git push` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/push_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
+| `transport_impl.rs` former `fetch from explicit location ... is not supported yet` path for `git fetch --prune <path> main` | Git-supported explicit local-path branch fetch with `--prune` now routed to the branch-without-destination handler and writes only `FETCH_HEAD` | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_prune_direct_location_branch_fetch_head_matches_stock_git` |
 | `transport_impl.rs` former `fetch from explicit location ... is not supported yet` path for `git fetch --prune <path> main:refs/remotes/origin/main` | Git-supported explicit local-path one-to-one refspec with `--prune` now routed to the direct refspec handler | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_prune_direct_location_one_to_one_refspec_matches_stock_git` |
 | `transport_impl.rs` former `reference repositories are not supported for dumb HTTP clone yet` guard | Git-supported clone reference and reference-if-able behavior now accepted for dumb HTTP sources with stock-shaped alternates | `docs/cli/matrices/clone_v2_47.tsv`; `git_transport_http_compat::clone_reference_dumb_http_matches_stock_git`; `git_transport_http_compat::clone_reference_if_able_dumb_http_matches_stock_git` |
 | `runtime/worktree_index.rs` former `unsupported filter capability` process-filter handshake guard | stock-compatible invalid input for a required process filter that replies with an unsupported capability during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_unknown_capability_matches_stock_git` |

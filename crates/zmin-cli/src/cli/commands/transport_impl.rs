@@ -12532,7 +12532,7 @@ fn fetch_with_repo_and_location(
                 no_tags,
             );
         }
-        if !prune && !refspec.contains(':') {
+        if !refspec.contains(':') {
             let source = local_clone_source(&source_path)?;
             let source_refs = refs_adapter_from_git_dir(&source.git_dir);
             if let Some(since) = shallow_since {

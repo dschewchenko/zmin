@@ -1530,6 +1530,70 @@ fn fetch_prune_direct_location_one_to_one_refspec_matches_stock_git() {
 }
 
 #[test]
+fn fetch_prune_direct_location_branch_fetch_head_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+    );
+
+    git(
+        &git_client,
+        [
+            "fetch",
+            "--prune",
+            source.to_str().expect("source path"),
+            "main",
+        ],
+    );
+    run_zmin(
+        &zmin_client,
+        [
+            "fetch",
+            "--prune",
+            source.to_str().expect("source path"),
+            "main",
+        ],
+    );
+
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(&zmin_client, ["for-each-ref", "--format=%(refname)"]),
+        git(&git_client, ["for-each-ref", "--format=%(refname)"])
+    );
+}
+
+#[test]
 fn fetch_direct_location_branch_into_bare_writes_fetch_head_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
