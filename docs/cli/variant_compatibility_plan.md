@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 282/4632 represented doc-option pairs / 1187 written rows / 905 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 283/4632 represented doc-option pairs / 1192 written rows / 910 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,16 +266,16 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice imports already-covered `stash list` grep mode and
-repeated-grep rows from existing stock-oracle tests:
+The latest completed slice imports already-covered `ls-files` mode rows from
+existing stock-oracle tests:
 
-`git stash list -E -F --grep=a.b|missing`
+`git ls-files -z --format=%(path)`
 
-`docs/cli/matrices/stash_v2_47.tsv` now records extended-regexp,
-fixed-strings, short `-E`/`-F`, last-grep-mode-wins, separate-value grep,
-missing grep, repeated grep and `--all-match` rows with focused evidence in
-`git_stash_compat::stash_list_max_count_matches_stock_git`. This is an
-evidence import only; no Rust behavior changed.
+`docs/cli/matrices/ls_files_v2_47.tsv` now records short `-s -z`,
+path-only `--format`, NUL path-only format, plain `--recurse-submodules` and
+plain `--full-name` from a subdirectory with focused evidence in
+`git_ls_files_compat::ls_files_modes_match_stock_git`. This is an evidence
+import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -632,7 +632,7 @@ slice imports existing stock-oracle evidence into `clone_v2_47.tsv`.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1187` written-row
+This card is the exact handoff target after the current `1192` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1187`; the `1/1187` open row and the still incomplete command/doc-option
+`0/1192`; the `1/1192` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
