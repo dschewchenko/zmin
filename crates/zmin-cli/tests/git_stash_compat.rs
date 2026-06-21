@@ -1456,6 +1456,30 @@ fn stash_list_invalid_forced_color_format_atom_matches_stock_git() {
 }
 
 #[test]
+fn stash_list_malformed_width_format_atoms_match_stock_git_literals() {
+    let git_repo = stash_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    write_file(git_repo.path(), "a.txt", "one\nstashed\n");
+    write_file(zmin_repo.path(), "a.txt", "one\nstashed\n");
+    git_with_env(git_repo.path(), ["stash", "push", "-m", "width"]);
+    run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-m", "width"]);
+
+    for args in [
+        ["stash", "list", "--format=%<(bad)%h"].as_slice(),
+        ["stash", "list", "--format=%<()%h"].as_slice(),
+        ["stash", "list", "--format=%<%h"].as_slice(),
+    ] {
+        assert_eq!(
+            normalize_trailing_short_hash(&run_zmin_args(zmin_repo.path(), args)),
+            normalize_trailing_short_hash(&git_args(git_repo.path(), args)),
+            "malformed width atom should stay literal for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn stash_invalid_top_level_and_push_usage_match_stock_git_shape() {
     let repo = stash_fixture_repo();
 
@@ -2323,6 +2347,24 @@ fn normalize_stash_oneline_hashes(output: &str) -> String {
                 return line.to_owned();
             };
             format!("<hash> {rest}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_trailing_short_hash(output: &str) -> String {
+    output
+        .lines()
+        .map(|line| {
+            if line.len() < 7 {
+                return line.to_owned();
+            }
+            let (prefix, hash) = line.split_at(line.len() - 7);
+            if hash.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                format!("{prefix}<hash>")
+            } else {
+                line.to_owned()
+            }
         })
         .collect::<Vec<_>>()
         .join("\n")

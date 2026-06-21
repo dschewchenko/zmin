@@ -7503,6 +7503,11 @@ struct StashWidthSpec {
     truncation: StashWidthTruncation,
 }
 
+enum StashWidthAtom {
+    Valid(StashWidthSpec),
+    Literal(String),
+}
+
 enum StashColorAtom {
     Valid(String),
     Unterminated(String),
@@ -7521,7 +7526,15 @@ fn render_stash_width_atom<I>(
 where
     I: Iterator<Item = char> + Clone,
 {
-    let spec = parse_stash_width_spec(atom, chars)?;
+    let spec = match parse_stash_width_spec(atom, chars) {
+        StashWidthAtom::Valid(spec) => spec,
+        StashWidthAtom::Literal(literal) => {
+            out.push('%');
+            out.push(atom);
+            out.push_str(&literal);
+            return Ok(());
+        }
+    };
     let Some('%') = chars.next() else {
         return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
     };
@@ -7534,35 +7547,32 @@ where
     Ok(())
 }
 
-fn parse_stash_width_spec<I>(
-    atom: char,
-    chars: &mut std::iter::Peekable<I>,
-) -> Result<StashWidthSpec>
+fn parse_stash_width_spec<I>(atom: char, chars: &mut std::iter::Peekable<I>) -> StashWidthAtom
 where
     I: Iterator<Item = char>,
 {
-    if chars.next() != Some('(') {
-        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+    if !matches!(chars.peek(), Some('(')) {
+        return StashWidthAtom::Literal(String::new());
     }
+    chars.next();
     let mut raw = String::new();
     for ch in chars.by_ref() {
         if ch == ')' {
             let mut parts = raw.split(',').map(str::trim);
-            let width = parts
-                .next()
-                .and_then(|value| value.parse::<usize>().ok())
-                .ok_or_else(|| unsupported_stash_list_format_atom(&format!("%{atom}")))?;
+            let Some(width) = parts.next().and_then(|value| value.parse::<usize>().ok()) else {
+                return StashWidthAtom::Literal(format!("({raw})"));
+            };
             let truncation = match parts.next() {
                 None | Some("") => StashWidthTruncation::None,
                 Some("trunc") => StashWidthTruncation::Right,
                 Some("ltrunc") => StashWidthTruncation::Left,
                 Some("mtrunc") => StashWidthTruncation::Middle,
-                Some(_) => return Err(unsupported_stash_list_format_atom(&format!("%{atom}"))),
+                Some(_) => return StashWidthAtom::Literal(format!("({raw})")),
             };
             if parts.next().is_some() {
-                return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+                return StashWidthAtom::Literal(format!("({raw})"));
             }
-            return Ok(StashWidthSpec {
+            return StashWidthAtom::Valid(StashWidthSpec {
                 width,
                 align: if atom == '<' {
                     StashWidthAlign::Left
@@ -7574,7 +7584,7 @@ where
         }
         raw.push(ch);
     }
-    Err(unsupported_stash_list_format_atom(&format!("%{atom}")))
+    StashWidthAtom::Literal(format!("({raw}"))
 }
 
 fn apply_stash_width_spec(value: &str, spec: &StashWidthSpec) -> String {
