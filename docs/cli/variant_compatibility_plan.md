@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 302/4632 represented doc-option pairs / 1305 written rows / 1022 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 307/4632 represented doc-option pairs / 1315 written rows / 1032 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -272,12 +272,12 @@ continuing matrix expansion or guard classification.
 The latest completed slice expands the `diff-tree` command matrix from existing
 stock-oracle evidence:
 
-`git diff-tree --pretty --notes HEAD`
+`git diff-tree --name-status --diff-filter=A HEAD~1 HEAD`
 
-`docs/cli/matrices/diff_tree_v2_47.tsv` now records pretty output, pretty
-notes output and `%N` notes-only format for a `HEAD` commit with a note, with
-focused evidence in
-`git_diff_compat::diff_tree_pretty_notes_match_stock_git`.
+`docs/cli/matrices/diff_tree_v2_47.tsv` now records default, explicit raw,
+reversed, name-status, name-only and added/modified diff-filter forms for
+non-recursive nested directory changes, with focused evidence in
+`git_diff_compat::diff_tree_non_recursive_directory_entries_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -633,7 +633,7 @@ branch and short output modes. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1305` written-row
+This card is the exact handoff target after the current `1315` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1305`; the `1/1305` open row and the still incomplete command/doc-option
+`0/1315`; the `1/1315` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
