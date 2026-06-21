@@ -2414,6 +2414,11 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
     if let Some(error) = blame_basic_regex_interval_error(pattern, from_line) {
         return Err(error);
     }
+    if blame_basic_regex_grouping_unbalanced(pattern) {
+        return Err(blame_line_range_regex_parentheses_not_balanced(
+            pattern, from_line,
+        ));
+    }
     if blame_regex_has_invalid_character_range(pattern) {
         return Err(blame_line_range_regex_invalid_character_range(
             pattern, from_line,
@@ -2555,6 +2560,29 @@ fn blame_basic_regex_interval_counts_valid(interval: &str) -> bool {
         (Ok(min), Ok(max)) => min <= max,
         _ => false,
     }
+}
+
+fn blame_basic_regex_grouping_unbalanced(pattern: &str) -> bool {
+    let mut depth = 0usize;
+    let mut escaped = false;
+    for ch in pattern.chars() {
+        if escaped {
+            if ch == '(' {
+                depth += 1;
+            } else if ch == ')' {
+                let Some(next_depth) = depth.checked_sub(1) else {
+                    return true;
+                };
+                depth = next_depth;
+            }
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+        }
+    }
+    depth != 0
 }
 
 fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
@@ -2731,6 +2759,15 @@ fn blame_line_range_regex_invalid_character_range(pattern: &str, start_line: usi
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: invalid character range"
+        ),
+    }
+}
+
+fn blame_line_range_regex_parentheses_not_balanced(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: parentheses not balanced"
         ),
     }
 }

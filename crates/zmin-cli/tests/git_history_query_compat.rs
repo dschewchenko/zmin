@@ -719,6 +719,24 @@ fn blame_basic_regex_literal_metacharacters_no_match_like_stock_git() {
 }
 
 #[test]
+fn blame_basic_regex_unbalanced_grouping_matches_stock_git_failure() {
+    let repo = blame_line_range_fixture_repo();
+
+    for args in [
+        ["blame", "-L", "/\\(/", "a.txt"].as_slice(),
+        ["blame", "-L", "/\\)/", "a.txt"].as_slice(),
+        ["blame", "-L", "/x\\(y/", "a.txt"].as_slice(),
+        ["blame", "-L", "/x\\)y/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_basic_regex_invalid_intervals_match_stock_git_failure() {
     let repo = blame_line_range_fixture_repo();
 
