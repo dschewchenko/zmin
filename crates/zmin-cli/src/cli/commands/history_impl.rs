@@ -7985,6 +7985,7 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
         if rewritten.contains_key(&old_id_hex) {
             continue;
         }
+        println!("Rewrite {} ({}/{})", old_id.to_hex(), idx + 1, total);
         let commit = commit_cache.read_commit(old_id)?;
         let mut parents = commit
             .parents
@@ -8084,7 +8085,6 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
             let new_id = store.write_object(GitObjectKind::Commit, &encoded)?;
             new_id.to_hex()
         };
-        println!("Rewrite {} ({}/{})", old_id.to_hex(), idx + 1, total);
         filter_branch_record_map(temp_root.path(), &old_id_hex, &rewritten_value)?;
         rewritten.insert(old_id_hex, rewritten_value);
     }
@@ -8381,20 +8381,21 @@ fn parse_parent_filter_output(output: &[u8]) -> Result<Vec<ObjectId>> {
     let mut parts = text.split_whitespace();
     while let Some(flag) = parts.next() {
         if flag != "-p" {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: format!("parent filter emitted unsupported token '{flag}'"),
-            });
+            return Err(filter_branch_commit_tree_failure());
         }
         let Some(parent) = parts.next() else {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: "parent filter emitted -p without object id".into(),
-            });
+            return Err(filter_branch_commit_tree_failure());
         };
         parents.push(ObjectId::from_hex(GitHashAlgorithm::Sha1, parent).map_err(CliError::Io)?);
     }
     Ok(parents)
+}
+
+fn filter_branch_commit_tree_failure() -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: "fatal: must give exactly one tree\ncould not write rewritten commit\n".into(),
+    }
 }
 
 fn filter_branch_subdirectory_tree(

@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 47/151 commands with matrix rows / 249/4632 represented doc-option pairs / 1071 written rows / 808 written rows matching stock Git / 0 partial written rows / 2 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 47/151 commands with matrix rows / 249/4632 represented doc-option pairs / 1071 written rows / 809 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -260,29 +260,20 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-### Current Locked Slice
+### Latest Completed Slice
 
-The current locked implementation slice is
-`filter-branch --parent-filter` bad output parity:
+The latest completed implementation slice is `filter-branch --parent-filter`
+bad output parity:
 
 `git filter-branch -f --parent-filter 'printf bad' HEAD`
 
-This row already exists in `docs/cli/matrices/filter_branch_v2_47.tsv` as an
-open stock-Git mismatch. Finish it before starting another guard
-classification or WebStorm dogfood row.
-
-Done for this slice means:
-
-1. The focused test proves stock Git exits `1`, prints rewrite progress, emits
-   the `must give exactly one tree` and `could not write rewritten commit`
-   diagnostics, leaves `HEAD` unchanged and does not create the original ref.
-2. Zmin matches that stdout/stderr/exit/side-effect shape.
-3. `filter_branch_v2_47.tsv` changes this row from `open` to `closed`.
-4. README, inventory, this plan and project notes carry generated counts.
-5. The slice is committed and pushed before any other command or option class.
-
-After this slice is closed, return to the Immediate Slice Queue order unless a
-new WebStorm/replacement-binary trace is blocking local dogfooding.
+Zmin now matches stock Git exit `1`, rewrite progress, `must give exactly one
+tree` and `could not write rewritten commit` diagnostics, unchanged `HEAD` and
+no original ref for that bad parent-filter output. The row is closed in
+`docs/cli/matrices/filter_branch_v2_47.tsv`. The next default slice returns to
+the Immediate Slice Queue: classify one remaining `unsupported` or
+`not supported` Rust guard unless a new WebStorm/replacement-binary trace is
+blocking local dogfooding.
 
 ### No-Skip Rule
 
@@ -580,13 +571,11 @@ environment creates a reftable clone and reports `reftable` from
 `rev-parse --show-ref-format`; Zmin currently exits `128` before destination
 creation. This is now an open Git-supported behavior row, not invalid input.
 
-The latest adjacent open guard classification is `history_impl.rs`
-`parent filter emitted unsupported token` for
-`git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits `1`
-after printing rewrite progress and commit-tree diagnostics, leaving `HEAD`
-unchanged and no original ref. Zmin currently exits `128` before rewrite
-progress with a custom unsupported-token diagnostic. This is now an open
-Git-supported behavior row, not invalid input.
+The latest closed behavior slice is `history_impl.rs` parent-filter bad output
+for `git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits
+`1` after printing rewrite progress and commit-tree diagnostics, leaving
+`HEAD` unchanged and no original ref. Zmin now emits the same shape instead of
+the former custom unsupported-token diagnostic.
 
 The latest `init` rows are `git init -q -b main repo` and
 `git init --quiet -b main repo`. Zmin suppresses init output and creates the
@@ -614,7 +603,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1071`; the `2/1071` open rows and the still incomplete command/doc-option
+`0/1071`; the `1/1071` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -906,7 +895,6 @@ until implementation and focused parity evidence close them.
 | Source guard | Classification | Matrix / evidence |
 | --- | --- | --- |
 | `transport_impl.rs` `reftable ref storage is not supported yet` in `git clone --ref-format=reftable` parsing | open Git-supported feature gap; stock Git creates a reftable clone in the current oracle environment | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_reftable_is_open_gap_against_stock_git` |
-| `history_impl.rs` `parent filter emitted unsupported token` in `git filter-branch --parent-filter` output parsing | open Git-supported behavior gap; stock Git routes bad parent-filter output into commit-tree failure after rewrite progress | `docs/cli/matrices/filter_branch_v2_47.tsv`; `git_filter_branch_parent_filter_compat::filter_branch_parent_filter_bad_token_is_open_gap_against_stock_git` |
 
 ## Closed Code Guard Mappings
 
@@ -917,6 +905,7 @@ behavior, invalid input, or corrupt-format handling.
 
 | Source guard | Classification | Matrix / evidence |
 | --- | --- | --- |
+| `history_impl.rs` former `parent filter emitted unsupported token` in `git filter-branch --parent-filter` output parsing | Git-supported behavior now mapped to stock commit-tree failure after rewrite progress | `docs/cli/matrices/filter_branch_v2_47.tsv`; `git_filter_branch_parent_filter_compat::filter_branch_parent_filter_bad_token_matches_stock_git` |
 | `pack_impl.rs` `unsupported index version {value}` in `pack-objects --index-version` parsing | stock-compatible invalid input for unsupported requested pack-index major versions | `docs/cli/matrices/pack_objects_v2_47.tsv`; `git_pack_integrity_compat::pack_objects_index_version_values_match_stock_git` |
 | `pack_impl.rs` `unsupported bundle version {other}` in `bundle create --version` parsing | stock-compatible invalid input for unsupported bundle versions | `docs/cli/matrices/bundle_v2_47.tsv`; `git_pack_integrity_compat::bundle_create_version_values_match_stock_git` |
 | `pack_impl.rs` `unsupported bundle format` in bundle header parsing | corrupt/invalid bundle input; mapped differently for bundle subcommands and fetch-from-bundle | `docs/cli/matrices/bundle_v2_47.tsv`; `docs/cli/matrices/fetch_v2_47.tsv`; `git_pack_integrity_compat::bundle_subcommands_reject_unsupported_bundle_format_like_stock_git`; `git_transport_local_compat::fetch_invalid_bundle_file_matches_stock_git` |
@@ -975,7 +964,7 @@ Largest raw clusters:
 | `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, HTTP/env guards; reftable clone is now recorded as an open row |
 | `pack_impl.rs` | `14` | classify pack/bundle format guards versus stock-supported variants |
 | `worktree_impl.rs` | `9` | split remaining ls-files, submodule, sparse-checkout, stash and worktree guards |
-| `history_impl.rs` | `7` | split blame ranges/options, reflog formats and diff/log decorators; bad parent-filter output is now recorded as an open row |
+| `history_impl.rs` | `7` | split blame ranges/options, reflog formats and diff/log decorators; bad parent-filter output is now closed |
 | `pack.rs` | `6` | classify pack format guards versus corrupt-storage invalid inputs |
 | `maintenance_impl.rs` / `core_impl.rs` / `admin_impl.rs` | `12` | classify parser/runtime validation and Zmin-only hook validation |
 | remaining files | `16` | classify small parser/runtime guards individually |

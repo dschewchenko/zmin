@@ -7,7 +7,7 @@ use common::{
 use tempfile::TempDir;
 
 #[test]
-fn filter_branch_parent_filter_bad_token_is_open_gap_against_stock_git() {
+fn filter_branch_parent_filter_bad_token_matches_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let git_repo = create_repo(dir.path(), "git-rewrite");
     let zmin_repo = create_repo(dir.path(), "zmin-rewrite");
@@ -60,12 +60,10 @@ fn filter_branch_parent_filter_bad_token_is_open_gap_against_stock_git() {
         &env,
         "zmin filter-branch bad parent-filter",
     );
-    assert_eq!(zmin.0, 128);
-    assert!(zmin.1.is_empty());
-    assert!(
-        zmin.2
-            .contains("fatal: parent filter emitted unsupported token 'bad'")
-    );
+    assert_eq!(zmin.0, 1);
+    assert!(zmin.1.contains("Rewrite "));
+    assert!(zmin.2.contains("fatal: must give exactly one tree"));
+    assert!(zmin.2.contains("could not write rewritten commit"));
     assert_eq!(git(&zmin_repo, ["rev-parse", "HEAD"]), zmin_head);
     assert_ne!(
         command_any_output(
