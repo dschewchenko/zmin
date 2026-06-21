@@ -5,8 +5,8 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, configure_identity, git, git_args, git_init, git_status, git_with_env,
-    run_zmin, run_zmin_args, run_zmin_status, zmin_bin,
+    command_any_output, command_any_output_with_stdin, configure_identity, git, git_args, git_init,
+    git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_status, zmin_bin,
 };
 
 fn clean_fixture_repo() -> TempDir {
@@ -171,6 +171,36 @@ fn clean_no_option_toggles_match_stock_git_order() {
             "fixture untracked.txt existence should match for {args:?}"
         );
     }
+}
+
+#[test]
+fn clean_interactive_quit_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    fs::write(git_repo.path().join("untracked.txt"), b"untracked\n").expect("write git file");
+    fs::write(zmin_repo.path().join("untracked.txt"), b"untracked\n").expect("write zmin file");
+
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["clean", "--interactive"],
+            "q\n",
+            "zmin",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            git_repo.path(),
+            &["clean", "--interactive"],
+            "q\n",
+            "git",
+        )
+    );
+    assert!(zmin_repo.path().join("untracked.txt").exists());
+    assert_eq!(
+        zmin_repo.path().join("untracked.txt").exists(),
+        git_repo.path().join("untracked.txt").exists()
+    );
 }
 
 #[test]

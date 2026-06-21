@@ -172,12 +172,12 @@ Current state:
 | Commands with any matrix rows | `25/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `234/4632` | option spellings that have at least one behavior row; this is not support |
 | Written behavior rows | `849` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `732/849` | supported-behavior rows with focused parity evidence |
-| Open written rows | `1/849` | written rows that still do not match stock Git |
+| Written rows matching stock Git | `733/849` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/849` | written rows that still do not match stock Git |
 | Invalid input rows | `116/849` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `732/849` as Git compatibility. It only means `732` of the `849`
+Do not read `733/849` as Git compatibility. It only means `733` of the `849`
 rows already written down are closed supported-behavior rows. The larger
 unexpanded surface is not counted yet, and `116/849` additional rows are
 stock-compatible invalid inputs. Do not read `234/4632` as option support
@@ -214,11 +214,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `8` | `5` | `0` | `3` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `7` | `0` | `1` | `6` |
+| Administration | `8` | `0` | `147` | `0` | `7` | `1` | `0` | `6` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `184` | `144` | `0` | `40` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`849`** | **`732`** | **`1`** | **`116`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`849`** | **`733`** | **`0`** | **`116`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -236,7 +236,7 @@ Current command-level matrices:
 | `blame` | `39` | `0` | `5` | `7` | `5` | `0` | `0` | `2` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `cat-file` | `21` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
-| `clean` | `13` | `0` | `3` | `5` | `0` | `0` | `1` | `4` | no |
+| `clean` | `13` | `0` | `3` | `5` | `1` | `0` | `0` | `4` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
 | `status` | `26` | `0` | `22` | `75` | `66` | `0` | `0` | `9` | no |
@@ -258,10 +258,9 @@ Current command-level matrices:
 | `version` | `2` | `0` | `2` | `4` | `2` | `0` | `0` | `2` | no |
 
 Rows with `0` open items are still not complete command compatibility. They
-only mean no open item remains among the rows currently written. The current
-written open row is `clean --interactive`. Unwritten values, option
-combinations, repository states, transports and platform cases are still
-unknown.
+only mean no open item remains among the rows currently written. Unwritten
+values, option combinations, repository states, transports and platform cases
+are still unknown.
 
 A global percentage will be published only after every Git `2.47.1` command has
 a complete matrix built from Git docs, upstream Git tests and real tool traces.
