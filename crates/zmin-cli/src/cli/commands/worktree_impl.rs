@@ -190,11 +190,7 @@ fn parse_clean_args(args: Vec<String>) -> Result<CleanOptions> {
     Ok(options)
 }
 
-fn clean_interactive_quit(entries: &[Vec<u8>]) -> Result<()> {
-    if entries.is_empty() {
-        return Ok(());
-    }
-
+fn clean_interactive_prompt(entries: &[Vec<u8>]) {
     println!(
         "Would remove the following item{}:",
         if entries.len() == 1 { "" } else { "s" }
@@ -211,20 +207,49 @@ fn clean_interactive_quit(entries: &[Vec<u8>]) -> Result<()> {
     println!("    1: clean                2: filter by pattern    3: select by numbers");
     println!("    4: ask each             5: quit                 6: help");
     print!("What now> ");
+}
+
+fn clean_interactive_help() {
+    println!("clean               - start cleaning");
+    println!("filter by pattern   - exclude items from deletion");
+    println!("select by numbers   - select items to be deleted by numbers");
+    println!("ask each            - confirm each deletion (like \"rm -i\")");
+    println!("quit                - stop cleaning");
+    println!("help                - this screen");
+    println!("?                   - help for prompt selection");
+}
+
+fn clean_interactive_quit(entries: &[Vec<u8>]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    clean_interactive_prompt(entries);
     io::stdout().flush()?;
 
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
-    let command = input.lines().next().unwrap_or_default().trim();
-    if command.is_empty() || command == "q" || command == "quit" || command == "5" {
-        print!("Bye.");
-        return Ok(());
+    let mut lines = input.lines();
+    loop {
+        let command = lines.next().unwrap_or_default().trim();
+        match command {
+            "" | "q" | "quit" | "5" => {
+                print!("Bye.");
+                return Ok(());
+            }
+            "?" | "help" | "6" => {
+                clean_interactive_help();
+                clean_interactive_prompt(entries);
+                io::stdout().flush()?;
+            }
+            _ => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("unsupported clean interactive command '{command}'"),
+                });
+            }
+        }
     }
-
-    Err(CliError::Fatal {
-        code: 128,
-        message: format!("unsupported clean interactive command '{command}'"),
-    })
 }
 
 fn clean_unknown_option(option: &str) -> CliError {

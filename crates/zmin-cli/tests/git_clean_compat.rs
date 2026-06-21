@@ -225,6 +225,37 @@ fn clean_interactive_quit_matches_stock_git() {
             "untracked file state for input {input:?}"
         );
     }
+
+    for input in ["6\nq\n", "help\nq\n"] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        fs::write(git_repo.path().join("untracked.txt"), b"untracked\n").expect("write git file");
+        fs::write(zmin_repo.path().join("untracked.txt"), b"untracked\n").expect("write zmin file");
+
+        assert_eq!(
+            command_any_output_with_stdin(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["clean", "--interactive"],
+                input,
+                "zmin",
+            ),
+            command_any_output_with_stdin(
+                "git",
+                git_repo.path(),
+                &["clean", "--interactive"],
+                input,
+                "git",
+            ),
+            "interactive clean help input {input:?}"
+        );
+        assert!(zmin_repo.path().join("untracked.txt").exists());
+        assert_eq!(
+            zmin_repo.path().join("untracked.txt").exists(),
+            git_repo.path().join("untracked.txt").exists(),
+            "untracked file state for help input {input:?}"
+        );
+    }
 }
 
 #[test]
