@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 334/4632 represented doc-option pairs / 1356 written rows / 1073 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 336/4632 represented doc-option pairs / 1361 written rows / 1078 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -272,11 +272,12 @@ continuing matrix expansion or guard classification.
 The latest completed slice expands the `diff-tree` command matrix from existing
 stock-oracle evidence:
 
-`git diff-tree --pickaxe-all -Sneedle --name-only HEAD~1 HEAD`
+`git diff-tree -p --submodule=diff <previous> <updated>`
 
 `docs/cli/matrices/diff_tree_v2_47.tsv` now records the
-`diff_pickaxe_matches_stock_git_for_porcelain_and_plumbing` batch: string
-pickaxe, regex pickaxe and `--pickaxe-all` name-only output.
+`diff_submodule_gitlink_patch_matches_stock_git` batch: `--submodule`
+short/log/diff patch modes and `--ignore-submodules` name-status modes for a
+committed submodule gitlink update.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -632,7 +633,7 @@ branch and short output modes. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1356` written-row
+This card is the exact handoff target after the current `1361` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1356`; the `1/1356` open row and the still incomplete command/doc-option
+`0/1361`; the `1/1361` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
