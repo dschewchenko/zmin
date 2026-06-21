@@ -171,15 +171,15 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `27/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `237/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `959` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `759/959` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/959` | written rows that still do not match stock Git |
-| Invalid input rows | `200/959` | rows where stock Git rejects the input |
+| Written behavior rows | `960` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `760/960` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/960` | written rows that still do not match stock Git |
+| Invalid input rows | `200/960` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `759/959` as Git compatibility. It only means `759` of the `959`
+Do not read `760/960` as Git compatibility. It only means `760` of the `960`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `200/959` additional rows are
+unexpanded surface is not counted yet, and `200/960` additional rows are
 stock-compatible invalid inputs. Do not read `237/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -216,9 +216,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `14` | `7` | `0` | `7` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `189` | `148` | `0` | `41` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `190` | `149` | `0` | `41` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`959`** | **`759`** | **`0`** | **`200`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`960`** | **`760`** | **`0`** | **`200`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -252,7 +252,7 @@ Current command-level matrices:
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `reflog` | `13` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
 | `rerere` | `7` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `rev-parse` | `72` | `0` | `24` | `49` | `43` | `0` | `0` | `6` | no |
+| `rev-parse` | `72` | `0` | `24` | `50` | `44` | `0` | `0` | `6` | no |
 | `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 | `submodule` | `35` | `0` | `0` | `6` | `0` | `0` | `0` | `6` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |

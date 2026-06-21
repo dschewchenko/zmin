@@ -287,19 +287,24 @@ impl RefStore {
     }
 
     pub fn resolve(&self, name: &str) -> io::Result<ObjectId> {
+        let mut seen = BTreeSet::new();
+        self.resolve_symbolic(name, &mut seen)
+    }
+
+    fn resolve_symbolic(&self, name: &str, seen: &mut BTreeSet<String>) -> io::Result<ObjectId> {
+        if !seen.insert(name.to_owned()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "symbolic ref cycle detected",
+            ));
+        }
         match if name == "HEAD" {
             self.read_head()?
         } else {
             self.read_ref(name)?
         } {
             RefTarget::Direct(id) => Ok(id),
-            RefTarget::Symbolic(target) => match self.read_ref(&target)? {
-                RefTarget::Direct(id) => Ok(id),
-                RefTarget::Symbolic(_) => Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "nested symbolic refs are not supported yet",
-                )),
-            },
+            RefTarget::Symbolic(target) => self.resolve_symbolic(&target, seen),
         }
     }
 

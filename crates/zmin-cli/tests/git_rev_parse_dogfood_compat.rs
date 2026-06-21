@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::path::Path;
 
 use common::{
     command_any_output, command_any_output as command_output, configure_identity, git, zmin_bin,
@@ -124,4 +125,36 @@ fn rev_parse_verify_quiet_modes_match_stock_git() {
             "{args:?}"
         );
     }
+}
+
+#[test]
+fn rev_parse_head_follows_nested_symbolic_refs_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    configure_identity(&repo);
+    fs::write(repo.join("tracked.txt"), "one\n").expect("write tracked file");
+    git(&repo, ["add", "tracked.txt"]);
+    git(&repo, ["commit", "-m", "initial"]);
+    write_nested_symbolic_head(&repo);
+
+    let args = ["rev-parse", "HEAD"];
+    assert_eq!(
+        command_any_output(zmin_bin(), &repo, &args, "zmin nested symbolic HEAD"),
+        command_any_output("git", &repo, &args, "git nested symbolic HEAD")
+    );
+}
+
+fn write_nested_symbolic_head(repo: &Path) {
+    let branch = git(repo, ["symbolic-ref", "--short", "HEAD"]);
+    fs::write(
+        repo.join(".git").join("refs").join("heads").join("alias"),
+        format!("ref: refs/heads/{branch}\n"),
+    )
+    .expect("write alias ref");
+    fs::write(repo.join(".git").join("HEAD"), "ref: refs/heads/alias\n")
+        .expect("write nested HEAD");
 }
