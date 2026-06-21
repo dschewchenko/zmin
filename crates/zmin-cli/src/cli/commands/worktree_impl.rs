@@ -5447,10 +5447,7 @@ fn parse_submodule_add_options(args: &[String]) -> Result<SubmoduleAddOptions> {
         } else if !path_args && arg.starts_with("--reference=") {
             references.push(PathBuf::from(arg["--reference=".len()..].to_owned()));
         } else if !path_args && arg.starts_with('-') {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported submodule add option '{arg}'"),
-            });
+            return Err(submodule_usage_error());
         } else {
             values.push(arg.clone());
         }

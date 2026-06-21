@@ -4,7 +4,7 @@ use common::{git_failure_output, git_init, run_zmin_failure_output};
 
 #[test]
 fn submodule_subcommand_unknown_options_match_stock_git_usage() {
-    for subcommand in ["status", "update", "deinit", "set-branch", "summary"] {
+    for subcommand in ["add", "status", "update", "deinit", "set-branch", "summary"] {
         let git_repo = git_init();
         let zmin_repo = git_init();
 
