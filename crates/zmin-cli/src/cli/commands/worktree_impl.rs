@@ -5505,15 +5505,31 @@ fn submodule_status(args: &[String]) -> Result<()> {
         } else if !path_args && arg == "--quiet" {
             quiet = true;
         } else if !path_args && arg.starts_with('-') {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: format!("unsupported submodule status option '{arg}'"),
-            });
+            return Err(submodule_usage_error());
         } else {
             paths.push(arg.clone());
         }
     }
     submodule_status_for_repo(&repo, &paths, cached, recursive, quiet, "")
+}
+
+fn submodule_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: "usage: git submodule [--quiet] [--cached]
+   or: git submodule [--quiet] add [-b <branch>] [-f|--force] [--name <name>] [--reference <repository>] [--] <repository> [<path>]
+   or: git submodule [--quiet] status [--cached] [--recursive] [--] [<path>...]
+   or: git submodule [--quiet] init [--] [<path>...]
+   or: git submodule [--quiet] deinit [-f|--force] (--all| [--] <path>...)
+   or: git submodule [--quiet] update [--init [--filter=<filter-spec>]] [--remote] [-N|--no-fetch] [-f|--force] [--checkout|--merge|--rebase] [--[no-]recommend-shallow] [--reference <repository>] [--recursive] [--[no-]single-branch] [--] [<path>...]
+   or: git submodule [--quiet] set-branch (--default|--branch <branch>) [--] <path>
+   or: git submodule [--quiet] set-url [--] <path> <newurl>
+   or: git submodule [--quiet] summary [--cached|--files] [--summary-limit <n>] [commit] [--] [<path>...]
+   or: git submodule [--quiet] foreach [--recursive] <command>
+   or: git submodule [--quiet] sync [--recursive] [--] [<path>...]
+   or: git submodule [--quiet] absorbgitdirs [--] [<path>...]\n"
+            .to_owned(),
+    }
 }
 
 fn submodule_status_for_repo(
