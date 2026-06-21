@@ -176,6 +176,8 @@ focused parity evidence checks the same surface.
 - `docs/cli/matrices/version_v2_47.tsv` tracks the first `version` default,
   build-options and invalid-option variants used by replacement-binary
   dogfooding.
+- `docs/cli/matrices/worktree_v2_47.tsv` tracks the first `worktree`
+  invalid-input subcommand variant.
 
 ## Current Seed
 
@@ -202,11 +204,11 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `36/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` |
+| Commands with any matrix rows | `37/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `241/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1004` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `770/1004` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `1/1004` | no | written rows with incomplete parity |
+| Written behavior rows | `1005` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `770/1005` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `1/1005` | no | written rows with incomplete parity |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -238,7 +240,7 @@ Current generated summary:
 | Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` | `8` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `81` | `66` | `0` | `0` | `15` | `96` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `59` | `35` | `0` | `0` | `24` | `31` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `60` | `35` | `0` | `0` | `25` | `32` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `297` | `283` | `0` | `0` | `14` | `159` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `152` | `147` | `0` | `0` | `5` | `26` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` | `1` |
@@ -249,7 +251,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `0` | `44` | `110` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `29` | `7` | `1` | `0` | `21` | `28` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1004`** | **`770`** | **`1`** | **`0`** | **`233`** | **`649`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1005`** | **`770`** | **`1`** | **`0`** | **`234`** | **`650`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -260,9 +262,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `241/4632`
-represented option pairs or `770/1004` passing written rows as a Git support
-percentage. The `770/1004` number is audit progress for supported rows already
-written down; `1/1004` row is partial and `233/1004` additional rows are
+represented option pairs or `770/1005` passing written rows as a Git support
+percentage. The `770/1005` number is audit progress for supported rows already
+written down; `1/1005` row is partial and `234/1005` additional rows are
 stock-compatible invalid inputs. It
 says nothing about the still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -313,6 +315,7 @@ variants.
 | `tag` | `40` | `0` | `11` | `docs/cli/matrices/tag_v2_47.tsv` | `27` | `17` | `0` | `0` | `10` | no |
 | `verify-pack` | `4` | `0` | `0` | `docs/cli/matrices/verify_pack_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
 | `version` | `2` | `0` | `2` | `docs/cli/matrices/version_v2_47.tsv` | `4` | `2` | `0` | `0` | `2` | no |
+| `worktree` | `28` | `0` | `0` | `docs/cli/matrices/worktree_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 
 Selected closed behavior blocks without a full command matrix yet. The full
 closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted

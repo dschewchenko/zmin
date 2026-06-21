@@ -4166,10 +4166,7 @@ pub(crate) fn worktree(args: Vec<String>) -> Result<()> {
         "remove" => worktree_remove(&args[1..]),
         "prune" => worktree_prune(&args[1..]),
         "repair" => worktree_repair(&args[1..]),
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported worktree subcommand '{subcommand}'"),
-        }),
+        _ => Err(worktree_unknown_subcommand_error(subcommand)),
     }
 }
 
@@ -5532,6 +5529,30 @@ fn sparse_checkout_unknown_subcommand_error(subcommand: &str) -> CliError {
              usage: git sparse-checkout (init | list | set | add | reapply | disable | check-rules) [<options>]\n"
         ),
     }
+}
+
+fn worktree_unknown_subcommand_error(subcommand: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown subcommand: `{subcommand}'\n{}",
+            worktree_usage()
+        ),
+    }
+}
+
+fn worktree_usage() -> &'static str {
+    concat!(
+        "usage: git worktree add [-f] [--detach] [--checkout] [--lock [--reason <string>]]\n",
+        "                        [--orphan] [(-b | -B) <new-branch>] <path> [<commit-ish>]\n",
+        "   or: git worktree list [-v | --porcelain [-z]]\n",
+        "   or: git worktree lock [--reason <string>] <worktree>\n",
+        "   or: git worktree move <worktree> <new-path>\n",
+        "   or: git worktree prune [-n] [-v] [--expire <expire>]\n",
+        "   or: git worktree remove [-f] <worktree>\n",
+        "   or: git worktree repair [<path>...]\n",
+        "   or: git worktree unlock <worktree>\n"
+    )
 }
 
 fn submodule_status_for_repo(

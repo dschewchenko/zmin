@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 36/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1004 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 37/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1005 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -282,9 +282,15 @@ The latest stock-compatible invalid-input guard classification is
 `error: unknown subcommand` diagnostic and the sparse-checkout usage text on
 stderr. Zmin now routes that guard to the same invalid-input shape.
 
+The latest stock-compatible invalid-input guard classification is
+`worktree_impl.rs` `unsupported worktree subcommand`. Stock Git rejects
+`git worktree bogus` with exit `129`, empty stdout, an
+`error: unknown subcommand` diagnostic and the worktree usage text on stderr.
+Zmin now routes that guard to the same invalid-input shape.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1004` written-row
+This card is the exact handoff target after the current `1005` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -303,7 +309,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1004`; the complete command matrices and complete doc-option matrices remain
+`0/1005`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -538,6 +544,7 @@ until a full matrix is expanded and verified.
 | `submodule` subcommand unknown option usage | `6` | `0` | `git submodule add/status/update/deinit/set-branch/summary --bad` exit `1` with stock usage text instead of custom unsupported-option fatal diagnostics |
 | `submodule` unknown subcommand usage | `1` | `0` | `git submodule bogus` exits `1` with stock usage text instead of a custom unsupported-subcommand fatal diagnostic |
 | `sparse-checkout` unknown subcommand usage | `1` | `0` | `git sparse-checkout bogus` exits `129` with stock unknown-subcommand usage text instead of a custom unsupported-subcommand fatal diagnostic |
+| `worktree` unknown subcommand usage | `1` | `0` | `git worktree bogus` exits `129` with stock unknown-subcommand usage text instead of a custom unsupported-subcommand fatal diagnostic |
 | `bisect` visualize unknown option usage | `1` | `0` | `git bisect visualize --bad` after `bisect start` exits `128` with stock fatal diagnostic instead of a custom unsupported-option fatal diagnostic |
 | `cat-file` batch unknown atom usage | `1` | `0` | `git cat-file --batch='%(bad)'` exits `128` with stock fatal bad-format diagnostic instead of a custom unsupported-atom fatal diagnostic |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
@@ -555,7 +562,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `649` verified variants.
+Tracked closed blocks in this table: `650` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
