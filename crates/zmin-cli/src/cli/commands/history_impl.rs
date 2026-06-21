@@ -2304,17 +2304,13 @@ fn parse_blame_range_end_spec(value: &str, full_range: &str) -> Result<BlameRang
     if value.is_empty() {
         Ok(BlameRangeEndSpec::ToEnd)
     } else if let Some(count) = value.strip_prefix('+') {
-        let count = count
-            .parse::<usize>()
-            .map_err(|_| unsupported_blame_line_range(full_range))?;
+        let count = count.parse::<usize>().map_err(|_| blame_usage_error())?;
         if count == 0 {
             return Err(invalid_blame_empty_range());
         }
         Ok(BlameRangeEndSpec::Count(count))
     } else if let Some(count) = value.strip_prefix('-') {
-        let count = count
-            .parse::<usize>()
-            .map_err(|_| unsupported_blame_line_range(full_range))?;
+        let count = count.parse::<usize>().map_err(|_| blame_usage_error())?;
         if count == 0 {
             return Err(invalid_blame_empty_range());
         }
