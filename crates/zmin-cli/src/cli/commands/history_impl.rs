@@ -2278,9 +2278,6 @@ fn parse_blame_regex_line_range(value: &str) -> Result<BlameLineRange> {
         return Err(blame_usage_error());
     };
     let pattern = value[1..pattern_end].to_owned();
-    if pattern.is_empty() {
-        return Err(unsupported_blame_line_range(value));
-    }
     let suffix = &value[pattern_end + 1..];
     let end = match parse_blame_range_end_spec(suffix.strip_prefix(',').unwrap_or(suffix), value)? {
         BlameRangeEndSpec::ToEnd => BlameRangeEnd::ToEnd,
