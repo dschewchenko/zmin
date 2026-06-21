@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 280/4632 represented doc-option pairs / 1150 written rows / 868 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 282/4632 represented doc-option pairs / 1160 written rows / 878 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,16 +266,15 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is the supported `filter-branch` message-filter
-form:
+The latest completed slice imports already-covered `archive` behavior rows from
+existing stock-oracle tests:
 
-`git filter-branch -f --msg-filter 'sed s/old/new/' HEAD`
+`git archive --format=tar --prefix=pre/ --add-file=extra.txt --add-virtual-file=virt/path.txt:virtual --mtime='2024-01-02 03:04:05 +0000' -o out.tar HEAD`
 
-Stock Git rewrites the `HEAD` commit message, preserves the tree, and writes
-`refs/original/refs/heads/main`. Zmin has existing focused stock-oracle
-evidence for the same ref, log-message and tree side effects in
-`git_filter_branch_compat::filter_branch_msg_filter_rewrites_head_like_stock_git`;
-`docs/cli/matrices/filter_branch_v2_47.tsv` now records the row.
+`docs/cli/matrices/archive_v2_47.tsv` now records local tar, path-limited tar,
+zip, tgz, tar.gz, common `--mtime` values and local remote upload-archive rows
+with focused evidence in `git_archive_compat`. This is an evidence import only;
+no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -632,7 +631,7 @@ slice imports existing stock-oracle evidence into `clone_v2_47.tsv`.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1150` written-row
+This card is the exact handoff target after the current `1160` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +650,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1150`; the `1/1150` open row and the still incomplete command/doc-option
+`0/1160`; the `1/1160` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
