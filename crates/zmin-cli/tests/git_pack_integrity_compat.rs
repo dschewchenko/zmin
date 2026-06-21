@@ -4,11 +4,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{
-    clone_repo_fixture, command_any_output, command_stdout_bytes, command_stdout_bytes_with_stdin,
-    configure_identity, git, git_args, git_init, git_status, git_status_args, git_with_env,
-    git_with_stdin, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
-    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args, run_zmin_with_stdin_bytes,
-    write_file, zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_stdout_bytes,
+    command_stdout_bytes_with_stdin, configure_identity, git, git_args, git_init, git_status,
+    git_status_args, git_with_env, git_with_stdin, git_with_stdin_args, git_with_stdin_bytes,
+    run_zmin, run_zmin_args, run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args,
+    run_zmin_with_stdin_bytes, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
@@ -2318,6 +2318,50 @@ fn pack_objects_undeltified_compat_flags_write_stock_readable_pack() {
                 "flag: {flag}; object: {id}"
             );
         }
+    }
+}
+
+#[test]
+fn pack_objects_index_version_values_match_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+    write_file(source.path(), "b.txt", "two\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "two"]);
+
+    let objects = git(source.path(), ["rev-list", "--objects", "HEAD"]);
+    for value in ["0", "0,64", "1,64", "2,128"] {
+        let option = format!("--index-version={value}");
+        let args = ["pack-objects", "--stdout", "--revs", option.as_str()];
+        let git_pack = command_stdout_bytes_with_stdin("git", source.path(), &args, b"HEAD\n");
+        let zmin_pack =
+            command_stdout_bytes_with_stdin(zmin_bin(), source.path(), &args, b"HEAD\n");
+
+        for (label, pack) in [("git", git_pack), ("zmin", zmin_pack)] {
+            let target = git_init();
+            git_with_stdin_bytes(target.path(), ["unpack-objects", "-q"], &pack);
+            for line in objects.lines() {
+                let id = line.split_whitespace().next().expect("object id");
+                assert_eq!(
+                    command_stdout_bytes("git", target.path(), &["cat-file", "-p", id]),
+                    command_stdout_bytes("git", source.path(), &["cat-file", "-p", id]),
+                    "value: {value}; command: {label}; object: {id}"
+                );
+            }
+        }
+    }
+
+    for value in ["3", "3,0", "foo", "2,foo", "1,foo", "-1"] {
+        let option = format!("--index-version={value}");
+        let args = ["pack-objects", "--stdout", "--revs", option.as_str()];
+        assert_eq!(
+            command_any_output_with_stdin(zmin_bin(), source.path(), &args, "HEAD\n", "zmin"),
+            command_any_output_with_stdin("git", source.path(), &args, "HEAD\n", "git"),
+            "value: {value}"
+        );
     }
 }
 

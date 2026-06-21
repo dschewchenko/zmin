@@ -3492,12 +3492,40 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
 fn requested_pack_index_version(version: Option<&str>) -> Result<PackIndexVersion> {
     match version {
         None => Ok(PackIndexVersion::V2),
-        Some("1") | Some("1,0") => Ok(PackIndexVersion::V1),
-        Some("2") | Some("2,0") | Some("2,64") => Ok(PackIndexVersion::V2),
-        Some(other) => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported pack index version '{other}'"),
+        Some(value) => parse_requested_pack_index_version(value),
+    }
+}
+
+fn parse_requested_pack_index_version(value: &str) -> Result<PackIndexVersion> {
+    let mut parts = value.split(',');
+    let major = parts.next().expect("major pack index version");
+    let minor = parts.next();
+    if parts.next().is_some() || minor.is_some_and(|part| part.trim().parse::<u64>().is_err()) {
+        return Err(bad_pack_index_version(value));
+    }
+
+    let major = if major.is_empty() {
+        0
+    } else {
+        major
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| bad_pack_index_version(value))?
+    };
+    match major {
+        0 | 2 => Ok(PackIndexVersion::V2),
+        1 => Ok(PackIndexVersion::V1),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported index version {value}"),
         }),
+    }
+}
+
+fn bad_pack_index_version(value: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("bad index version '{value}'"),
     }
 }
 
