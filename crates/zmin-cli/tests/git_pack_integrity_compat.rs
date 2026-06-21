@@ -1861,6 +1861,28 @@ fn index_pack_verify_rejects_bad_reverse_index_signature_like_stock_git() {
 }
 
 #[test]
+fn index_pack_verify_rejects_bad_reverse_index_version_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "file.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "file.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    git(repo.path(), ["repack", "-adq"]);
+    let pack = first_pack_index(repo.path()).with_extension("pack");
+    let rev = pack.with_extension("rev");
+    set_pack_reverse_index_version(&rev, 2);
+
+    let args = ["index-pack", "--verify", pack.to_str().expect("pack path")];
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &args, "zmin"),
+        command_any_output("git", repo.path(), &args, "git")
+    );
+}
+
+#[test]
 fn pack_redundant_matches_stock_git_for_redundant_pack_set() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -3427,6 +3449,16 @@ fn set_pack_index_version(path: &std::path::Path, version: u32) {
 fn set_pack_reverse_index_signature(path: &std::path::Path, signature: [u8; 4]) {
     let mut bytes = fs::read(path).expect("read pack reverse index");
     bytes[..4].copy_from_slice(&signature);
+    rewrite_pack_reverse_index(path, bytes);
+}
+
+fn set_pack_reverse_index_version(path: &std::path::Path, version: u32) {
+    let mut bytes = fs::read(path).expect("read pack reverse index");
+    bytes[4..8].copy_from_slice(&version.to_be_bytes());
+    rewrite_pack_reverse_index(path, bytes);
+}
+
+fn rewrite_pack_reverse_index(path: &std::path::Path, mut bytes: Vec<u8>) {
     let checksum_offset = bytes.len() - GitHashAlgorithm::Sha1.digest_len();
     let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
     hasher.update(&bytes[..checksum_offset]);
