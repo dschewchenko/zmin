@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 348/4632 represented doc-option pairs / 1387 written rows / 1104 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 348/4632 represented doc-option pairs / 1393 written rows / 1110 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands the `diff` and `log` command matrices from existing
+The latest completed slice expands the `config` command matrix from existing
 stock-oracle evidence:
 
-`git diff --cached --ignore-matching-lines=DEBUG|TRACE`
+`git config --type=bool feature.enabled yes`
 
-`docs/cli/matrices/diff_v2_47.tsv` and `docs/cli/matrices/log_v2_47.tsv` now
-record an ignore-matching-lines batch from the existing
-`git_diff_compat::diff_ignore_matching_lines_matches_stock_git` stock-oracle
-test: attached and separate `-I` values, long `--ignore-matching-lines`, and
-stat/numstat/shortstat combinations for `diff`.
+`docs/cli/matrices/config_v2_47.tsv` now splits concrete boolean type rows from
+the existing
+`git_admin_tools_compat::config_type_bool_matches_stock_git_for_get_set_and_failures`
+stock-oracle test: typed writes for yes/no values, raw gets after typed writes
+and typed reads for both true and false values.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -627,15 +627,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `diff` and `log`
-ignore-matching-lines rows already covered by
-`git_diff_compat::diff_ignore_matching_lines_matches_stock_git`: attached and
-separate `-I` values, long `--ignore-matching-lines`, and
-stat/numstat/shortstat combinations for `diff`. No Rust behavior changed.
+The latest matrix inventory slice expands `config --type=bool` rows already
+covered by
+`git_admin_tools_compat::config_type_bool_matches_stock_git_for_get_set_and_failures`:
+typed writes for yes/no values, raw gets after typed writes and typed reads for
+both true and false values. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1387` written-row
+This card is the exact handoff target after the current `1393` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -654,7 +654,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1387`; the `1/1387` open row and the still incomplete command/doc-option
+`0/1393`; the `1/1393` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
