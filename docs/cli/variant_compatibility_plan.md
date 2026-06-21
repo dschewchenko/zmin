@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1089 written rows / 820 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1090 written rows / 821 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,18 +266,18 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is a porcelain `checkout` process-filter failure
+The latest completed slice is a `stash list --format` width-literal target
 case:
 
-`git checkout -- a.bad`
+`git stash list --format=%<(10)x`
 
-Stock Git rejects a required smudge process filter that returns
-`status=delayed` without advertising delayed checkout support, exits `128`,
-leaves stdout empty, prints stock external-filter diagnostics and leaves the
-worktree file absent. Zmin now removes newly materialized raw checkout files
-when the subsequent smudge stage fails, matching that side effect. The row is
-recorded in `docs/cli/matrices/checkout_v2_47.tsv` with focused evidence in
-`git_worktree_state_compat::checkout_delayed_smudge_process_filter_matches_stock_git_failure`.
+Stock Git accepts valid width atoms followed by literal text. With no later
+pretty-format atom, the literal is preserved; when a later atom appears, the
+width applies only to that atom, not to the preceding literal text. Zmin now
+matches those output shapes instead of exiting through the former
+`unsupported stash list format atom '%<'` fatal guard. The row is recorded in
+`docs/cli/matrices/stash_v2_47.tsv` with focused evidence in
+`git_stash_compat::stash_list_width_format_atoms_with_literal_target_match_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -626,7 +626,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1089` written-row
+This card is the exact handoff target after the current `1090` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -645,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1089`; the `1/1089` open row and the still incomplete command/doc-option
+`0/1090`; the `1/1090` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -768,6 +768,7 @@ until a full matrix is expanded and verified.
 | `stash list` forced color format atoms | `3` | `0` | `%C(always,red)`, `%C(always,bold red)`, `%C(always,blue)` with reset/normal forms |
 | `stash list` width format atoms | `6` | `0` | `%<(N)`, `%>(N)`, `%<(N,trunc)`, `%>(N,trunc)`, `%<(N,ltrunc)`, `%<(N,mtrunc)` |
 | `stash list` width format atoms without target | `4` | `0` | `%<(N)`, `%>(N)`, `%<(N,trunc)`, `%>(N,trunc)` with no following atom |
+| `stash list` width format atoms with literal target | `4` | `0` | `%<(N)x`, `%>(N)x`, and literal text before a later pretty-format atom |
 | `stash list` wrap format atoms | `6` | `0` | plain `%w`, `%w%s`, `%w(N)`, `%w(N,I1,I2)`, malformed `%w(bad)` and `%w(N,bad)` forms |
 | `status -z` implicit porcelain form | `1` | `0` | `git status -z` matches stock Git's NUL-terminated porcelain v1 output |
 | `status` replacement short output | `1` | `0` | `--short` through the `git` shim on a cloned repository with dirty and untracked files |
@@ -908,7 +909,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `672` verified variants.
+Tracked closed blocks in this table: `676` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
@@ -994,6 +995,7 @@ behavior, invalid input, or corrupt-format handling.
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
 | `worktree_impl.rs` `unsupported stash list format atom` width-target guard | Git-supported stash list width atoms with no following target atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_width_format_atoms_without_target_match_stock_git` |
+| `worktree_impl.rs` `unsupported stash list format atom` width-literal target guard | Git-supported stash list width atoms followed by literal text before an optional later pretty-format atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_width_format_atoms_with_literal_target_match_stock_git` |
 | `worktree_impl.rs` former `unsupported stash {operation} option '{value}'` guard in `stash apply/drop/pop` option parsing | stock-compatible invalid input for unknown reference-style stash operation options | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_reference_unknown_options_match_stock_git_usage` |
 | `worktree_impl.rs` `ls-files --recurse-submodules unsupported mode` guard | stock-compatible invalid input for unsupported recurse-submodules combinations | `docs/cli/matrices/ls_files_v2_47.tsv`; `git_ls_files_compat::ls_files_recurse_submodules_matches_stock_git` |
 | `admin_impl.rs` `unsupported hook '{hook_name}'` in `zmin hooks` managed-hook validation | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `/usr/bin/git hooks -h` reports that stock Git has no `hooks` command |

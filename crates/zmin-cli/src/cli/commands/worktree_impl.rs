@@ -7606,7 +7606,22 @@ where
         return Ok(());
     };
     if next != '%' {
-        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+        out.push(next);
+        for ch in chars.by_ref() {
+            if ch != '%' {
+                out.push(ch);
+                continue;
+            }
+            let Some(next_atom) = chars.next() else {
+                out.push('%');
+                break;
+            };
+            let mut rendered = String::new();
+            render_stash_list_format_atom(next_atom, chars, &mut rendered, index, entry, commit)?;
+            out.push_str(&apply_stash_width_spec(&rendered, &spec));
+            return Ok(());
+        }
+        return Ok(());
     }
     let Some(next_atom) = chars.next() else {
         return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));

@@ -1505,6 +1505,31 @@ fn stash_list_width_format_atoms_without_target_match_stock_git() {
 }
 
 #[test]
+fn stash_list_width_format_atoms_with_literal_target_match_stock_git() {
+    let git_repo = stash_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    write_file(git_repo.path(), "a.txt", "one\nstashed\n");
+    write_file(zmin_repo.path(), "a.txt", "one\nstashed\n");
+    git_with_env(git_repo.path(), ["stash", "push", "-m", "width"]);
+    run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-m", "width"]);
+
+    for args in [
+        ["stash", "list", "--format=%<(10)x"].as_slice(),
+        ["stash", "list", "--format=%>(10)x"].as_slice(),
+        ["stash", "list", "--format=[%<(20)x%s]"].as_slice(),
+        ["stash", "list", "--format=[%>(20,trunc)x%s]"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "width atom with literal target should match stock Git for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn stash_list_wrap_format_atoms_match_stock_git() {
     let git_repo = stash_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());
