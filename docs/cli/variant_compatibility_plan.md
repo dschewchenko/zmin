@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 283/4632 represented doc-option pairs / 1206 written rows / 923 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 283/4632 represented doc-option pairs / 1211 written rows / 928 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,17 +266,16 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice imports already-covered `ls-files` worktree-state
-combination rows from existing stock-oracle tests:
+The latest completed slice imports already-covered `ls-files` exclude and
+ignored-output rows from existing stock-oracle tests:
 
-`git ls-files -c -o -z --exclude-standard`
+`git ls-files --ignored --others -X excludes.lst`
 
-`docs/cli/matrices/ls_files_v2_47.tsv` now records killed tag/directory modes,
-EOL output for modified and deleted tracked files, short ignored/others tagged
-output, tagged modified plus deleted output, short cached plus others NUL
-output, and the invalid `--others --error-unmatch` pathspec case with focused
-evidence in `git_ls_files_compat::ls_files_modes_match_stock_git`. This is an
-evidence import only; no Rust behavior changed.
+`docs/cli/matrices/ls_files_v2_47.tsv` now records directory-only others
+output, ignored-output variants for `--exclude`, `--exclude-from` and
+`--exclude-per-directory`, plus the short ignored cached tagged form with
+focused evidence in `git_ls_files_compat::ls_files_modes_match_stock_git`.
+This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -633,7 +632,7 @@ slice imports existing stock-oracle evidence into `clone_v2_47.tsv`.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1206` written-row
+This card is the exact handoff target after the current `1211` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1206`; the `1/1206` open row and the still incomplete command/doc-option
+`0/1211`; the `1/1211` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
