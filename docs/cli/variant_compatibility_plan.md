@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 284/4632 represented doc-option pairs / 1256 written rows / 973 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 284/4632 represented doc-option pairs / 1260 written rows / 977 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -623,15 +623,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `status` branch/ahead rows already
-covered by `git_status_compat`. `status_v2_47.tsv` now splits porcelain v2
-short-vs-branch precedence, human `-b` / `--branch` dirty and upstream-ahead
-states, explicit `--ahead-behind`, and `--no-ahead-behind` for porcelain v2,
-porcelain v1 and short branch output. No Rust behavior changed.
+The latest matrix inventory slice expands remaining `status` edge rows already
+covered by `git_status_compat`: Unix same-size same-mtime content-change
+detection, `--no-verbose -vv` ordering, and `--show-stash` with porcelain v1
+branch and short output modes. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1256` written-row
+This card is the exact handoff target after the current `1260` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -650,7 +649,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1256`; the `1/1256` open row and the still incomplete command/doc-option
+`0/1260`; the `1/1260` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
