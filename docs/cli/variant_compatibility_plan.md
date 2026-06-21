@@ -226,6 +226,12 @@ guard is tracked under `docs/cli/zmin_extensions_inventory.md` instead of the
 Git `2.47.1` matrix. The focused extension test covers `repo info`,
 `repo structure`, NUL key output and invalid output-format validation.
 
+The latest stock-compatible invalid-input guard classification is
+`text_impl.rs` `unsupported option '{other}'` for `git column --mode=<value>`.
+Stock Git rejects unsupported column mode tokens with exit `129` and the same
+diagnostic, so the guard remains in code as parser validation and is mapped to
+the existing `column_v2_47.tsv` invalid-input row.
+
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
 Local stock Git advertises `gui` and `citool` in `git help -a`, but this
@@ -549,6 +555,7 @@ behavior, invalid input, or corrupt-format handling.
 | `zmin-git-core/src/pack.rs` `unsupported pack reverse index signature` and `unsupported pack reverse index version` | corrupt/unsupported reverse-index sidecar files validated through `index-pack --verify` | `docs/cli/matrices/index_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_signature_like_stock_git`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_version_like_stock_git` |
 | `zmin-git-core/src/pack.rs` `unsupported pack file version {version}` while reading pack headers | corrupt/unsupported pack storage format with command-specific stock diagnostics | `docs/cli/matrices/index_pack_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_unsupported_pack_file_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_file_version_like_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
+| `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 
 ## Code Guard Classification
 
