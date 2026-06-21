@@ -647,6 +647,9 @@ fn blame_basic_regex_literal_metacharacters_match_stock_git() {
         ["blame", "-L", "/a+/", "a.txt"].as_slice(),
         ["blame", "-L", "/a?/", "a.txt"].as_slice(),
         ["blame", "-L", "/a|/", "a.txt"].as_slice(),
+        ["blame", "-L", "/a\\+/", "a.txt"].as_slice(),
+        ["blame", "-L", "/a\\?/", "a.txt"].as_slice(),
+        ["blame", "-L", "/z\\|a/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

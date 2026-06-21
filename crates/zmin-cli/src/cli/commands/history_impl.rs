@@ -2432,7 +2432,9 @@ fn translate_blame_basic_regex(pattern: &str) -> String {
     let mut escaped = false;
     for ch in pattern.chars() {
         if escaped {
-            translated.push('\\');
+            if !matches!(ch, '+' | '?' | '|') {
+                translated.push('\\');
+            }
             translated.push(ch);
             escaped = false;
             continue;
