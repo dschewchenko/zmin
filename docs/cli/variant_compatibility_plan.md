@@ -128,6 +128,57 @@ command.
 Use this as the working queue. Each step should land as a small commit with its
 own stock-Git evidence row instead of bundling unrelated commands.
 
+### Resume Checklist
+
+When resuming work, use this checklist before editing code:
+
+1. Read this section, then the `Current Next Slice Pointer`.
+2. Check the active goal in the Codex thread and keep it aligned with the
+   durable objective below.
+3. Run `/usr/bin/git status --short --branch` and preserve unrelated staged or
+   unstaged work.
+4. Pick one row-sized slice only. If no row exists yet, add or update the
+   matrix row before implementation.
+5. Probe stock Git for the exact command line, stdout, stderr, exit code and
+   observable repository side effects.
+6. Add focused oracle evidence for that row.
+7. Implement the smallest code change needed for that row.
+8. Run the focused test, then the relevant build and count gates.
+9. Update generated counts in README, `git_compatibility_inventory.md`, this
+   plan and project notes.
+10. Commit and push before starting another slice.
+
+Do not start from the raw `unsupported` scan alone. The scan only finds source
+guards; each guard still needs classification against stock Git.
+
+### Canonical Files
+
+Use these files as the handoff map:
+
+| File | Purpose |
+| --- | --- |
+| `docs/cli/git_compatibility_inventory.md` | compatibility counting model and current denominator layers |
+| `docs/cli/variant_compatibility_plan.md` | operating plan, active queue, current slice pointer and guard mappings |
+| `docs/cli/matrices/*_v2_47.tsv` | row-level command/option/value/state/transport evidence |
+| `docs/cli/zmin_extensions_inventory.md` | Zmin-only commands/options kept outside Git compatibility counts |
+| `README.md` | user-facing status with honest non-100% compatibility numbers |
+| `/Users/dschewchenko/work/private/.knowledge/projects/skron-core.md` | cross-session project memory and latest slice notes |
+
+### Required Gates
+
+For a normal row-sized slice, run the narrowest useful set:
+
+1. The focused oracle test for the row.
+2. The command-specific compat test file when the touched parser or renderer is
+   shared inside that command.
+3. `cargo check -p zmin-cli --bin zmin --profile compat`.
+4. `tools/git-cli-readiness-status.sh`.
+5. `tools/git-compat-command-summary.sh --tsv`.
+6. `tools/git-compat-audit-summary.sh --tsv`.
+
+For transport slices, include the relevant HTTP/SSH/git-daemon focused test.
+For replacement-binary slices, include `tools/git-replacement-dogfood-smoke.sh`.
+
 ### Durable Objective
 
 Drive Zmin toward honest Git `2.47.1` compatibility through small verified
