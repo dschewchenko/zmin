@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 49/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1087 written rows / 819 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 49/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1088 written rows / 820 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,17 +266,15 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is an HTTP `ls-remote` transfer-encoding case:
+The latest completed slice is an explicit local-path `fetch --no-tags` case:
 
-`git ls-remote --refs http://127.0.0.1:<port>/remote.git`
+`git fetch --no-tags <path>`
 
-Stock Git accepts a plain dumb-info-refs response that carries
-`Transfer-Encoding: gzip` without chunk framing, exits `0`, leaves stderr
-empty and reads the body unchanged. Zmin now ignores non-`chunked`
-transfer-coding tokens in response headers instead of exiting through the
-former `unsupported HTTP transfer encoding` fatal guard. The row is recorded
-in `docs/cli/matrices/ls_remote_v2_47.tsv` with focused evidence in
-`git_transport_http_compat::ls_remote_accepts_non_chunked_transfer_encoding_like_stock_git`.
+Stock Git accepts an explicit local-path HEAD fetch with `--no-tags`, exits
+`0`, writes stock-shaped `FETCH_HEAD`, creates no destination refs and does
+not auto-follow a reachable tag. Zmin already matched that behavior. The row
+is recorded in `docs/cli/matrices/fetch_v2_47.tsv` with focused evidence in
+`git_transport_local_compat::fetch_no_tags_direct_location_head_skips_tags_like_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -625,7 +623,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1087` written-row
+This card is the exact handoff target after the current `1088` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -644,7 +642,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1087`; the `1/1087` open row and the still incomplete command/doc-option
+`0/1088`; the `1/1088` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -862,6 +860,7 @@ until a full matrix is expanded and verified.
 | `fetch --filter=blob:none` local/file branch forms | `2` | `0` | named local path and file URL remotes match stock stdout/stderr, FETCH_HEAD, remote-tracking ref, fetched content and promisor filter config |
 | `fetch --filter=blob:none --depth=1` file URL shallow client | `1` | `0` | named file URL remote from an existing shallow client matches stock stdout/stderr, FETCH_HEAD, remote-tracking ref, fetched content, `.git/shallow` and promisor filter config |
 | `fetch` replacement prune/no-tags | `1` | `0` | `--prune --no-tags` through the `git` shim updates `origin/main`, prunes stale `origin/gone`, skips a newly reachable tag and matches stock stdout/stderr/FETCH_HEAD |
+| `fetch --no-tags` explicit local path HEAD | `1` | `0` | explicit local-path HEAD fetch with `--no-tags` writes stock-shaped `FETCH_HEAD`, creates no destination refs and skips auto-following a reachable tag |
 | `fetch --recurse-submodules local/file no-submodule value modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true, on-demand, no, boolean false, numeric false and `--no-recurse-submodules` for repositories without submodules |
 | `fetch --recurse-submodules local/file changed submodule modes` | `9` | `0` | implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed gitlink commit into the initialized submodule object database without checkout; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
 | `fetch --recurse-submodules smart HTTP initialized local submodule modes` | `9` | `0` | smart HTTP parent fetch with an initialized local submodule remote: implicit yes, explicit yes, boolean true, numeric true and on-demand fetch the changed submodule commit; no, boolean false, numeric false and `--no-recurse-submodules` update only the parent fetch |
@@ -905,7 +904,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `670` verified variants.
+Tracked closed blocks in this table: `671` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
