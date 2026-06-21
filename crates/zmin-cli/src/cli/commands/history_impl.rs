@@ -2242,10 +2242,7 @@ fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
         })?
     };
     if start == 0 {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported blame line range '{value}'"),
-        });
+        return Err(invalid_blame_line_number(start));
     }
     let end = match parse_blame_range_end_spec(end, value)? {
         BlameRangeEndSpec::ToEnd => usize::MAX,
@@ -2315,11 +2312,13 @@ fn parse_blame_range_end_spec(value: &str, full_range: &str) -> Result<BlameRang
             value, full_range,
         )?))
     } else {
-        Ok(BlameRangeEndSpec::Absolute(
-            value
-                .parse::<usize>()
-                .map_err(|_| unsupported_blame_line_range(full_range))?,
-        ))
+        let line = value
+            .parse::<usize>()
+            .map_err(|_| unsupported_blame_line_range(full_range))?;
+        if line == 0 {
+            return Err(invalid_blame_line_number(line));
+        }
+        Ok(BlameRangeEndSpec::Absolute(line))
     }
 }
 
@@ -2439,6 +2438,13 @@ fn unsupported_blame_line_range(value: &str) -> CliError {
     CliError::Fatal {
         code: 129,
         message: format!("unsupported blame line range '{value}'"),
+    }
+}
+
+fn invalid_blame_line_number(line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("-L invalid line number: {line}"),
     }
 }
 

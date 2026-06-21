@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 235/4632 represented doc-option pairs / 858 written rows / 739 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 861 written rows / 739 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,8 +195,8 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git submodule add --bad`
-unknown option.
+The latest closed guard classification is `git blame -L 0`, `git blame -L
+1,0`, and `git blame -L /one/,0` zero line-number values.
 The next default slice remains the second active lane: run a fresh
 `unsupported` / `not supported` code scan, choose one small remaining guard
 that is not entangled with unrelated staged changes, then classify it as
@@ -204,7 +204,7 @@ Git-supported behavior, stock-compatible invalid input, intentional deferral or
 Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/858`; the complete command matrices and complete doc-option matrices remain
+`0/861`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -238,6 +238,7 @@ until a full matrix is expanded and verified.
 | `blame --date` newly closed modes | `2` | `0` | `relative`, `human` |
 | `blame --date` invalid format usage | `1` | `0` | `git blame --date=bogus a.txt` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 | `blame` unknown option usage | `1` | `0` | `git blame --bad a.txt` exits `129` with stock usage text instead of a custom unsupported-option fatal diagnostic |
+| `blame -L` zero line-number usage | `3` | `0` | `git blame -L 0 a.txt`, `git blame -L 1,0 a.txt`, and `git blame -L /one/,0 a.txt` exit `128` with stock fatal invalid-line-number diagnostics instead of custom unsupported-line-range fatal diagnostics |
 | `blame --progress` non-tty form | `1` | `0` | `git blame --progress a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --minimal` small tracked-file form | `1` | `0` | `git blame --minimal a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --color-lines` non-tty form | `1` | `0` | `git blame --color-lines a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |

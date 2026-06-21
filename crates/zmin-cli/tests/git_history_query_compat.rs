@@ -349,6 +349,27 @@ fn blame_unknown_option_matches_stock_git_usage() {
 }
 
 #[test]
+fn blame_zero_line_range_matches_stock_git_failure() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\ntwo\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+
+    for args in [
+        ["blame", "-L", "0", "a.txt"].as_slice(),
+        ["blame", "-L", "1,0", "a.txt"].as_slice(),
+        ["blame", "-L", "/one/,0", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_progress_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
