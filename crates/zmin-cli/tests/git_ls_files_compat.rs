@@ -607,6 +607,18 @@ fn ls_files_recurse_submodules_matches_stock_git() {
             &["ls-files", "--recurse-submodules", "--resolve-undo"],
         )
     );
+    assert_eq!(
+        command_output_any(
+            zmin_bin(),
+            &repo,
+            &["ls-files", "--recurse-submodules", "--with-tree=HEAD"],
+        ),
+        command_output_any(
+            "git",
+            &repo,
+            &["ls-files", "--recurse-submodules", "--with-tree=HEAD"],
+        )
+    );
 }
 
 #[test]
