@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 40/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1040 written rows / 784 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 41/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1041 written rows / 784 written rows matching stock Git / 1 partial written row / 1 open written row`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -418,9 +418,15 @@ The latest stock-compatible invalid-input guard classification is
 diagnostic, so this source hit is parser validation mapped to the existing
 `status_v2_47.tsv` invalid-input row.
 
+The latest honest-open inventory slice is `git p4 unknown`. Stock Git in the
+current oracle environment exits `2`, writes the unknown-command diagnostic and
+usage text to stdout, and leaves stderr empty. Zmin currently exits `129` with
+`fatal: unsupported p4 command 'unknown'` on stderr. The row is recorded as
+`open` in `p4_v2_47.tsv` until implementation matches stock Git.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1040` written-row
+This card is the exact handoff target after the current `1041` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -438,8 +444,8 @@ After this card is committed and pushed, update the pointer to either the next
 small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
-Do not publish a support percentage just because open written rows are now
-`0/1040`; the complete command matrices and complete doc-option matrices remain
+Do not publish a support percentage just because only `1/1041` written row is
+open; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named

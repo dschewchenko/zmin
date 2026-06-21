@@ -169,19 +169,19 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `40/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
+| Commands with any matrix rows | `41/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
 | Documented option spellings represented by rows | `245/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1040` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `784/1040` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `1/1040` | written rows with incomplete parity |
-| Open written rows | `0/1040` | written rows that still do not match stock Git |
-| Invalid input rows | `255/1040` | rows where stock Git rejects the input |
+| Written behavior rows | `1041` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `784/1041` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `1/1041` | written rows with incomplete parity |
+| Open written rows | `1/1041` | written rows that still do not match stock Git |
+| Invalid input rows | `255/1041` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `784/1040` as Git compatibility. It only means `784` of the `1040`
+Do not read `784/1041` as Git compatibility. It only means `784` of the `1041`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `1/1040` row is only partially matching
-stock Git and `255/1040` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `1/1041` row is only partially matching,
+`1/1041` row is open and `255/1041` additional rows are stock-compatible invalid inputs. Do
 not read `245/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -219,8 +219,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `34` | `11` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` |
-| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `43` | `16` | `1` | `0` | `26` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1040`** | **`784`** | **`1`** | **`0`** | **`255`** |
+| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `44` | `16` | `1` | `1` | `26` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1041`** | **`784`** | **`1`** | **`1`** | **`255`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -257,6 +257,7 @@ Current command-level matrices:
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
 | `multi-pack-index` | `10` | `0` | `0` | `4` | `1` | `0` | `0` | `3` | no |
 | `notes` | `33` | `0` | `0` | `6` | `0` | `0` | `0` | `6` | no |
+| `p4` | `40` | `0` | `0` | `1` | `0` | `0` | `1` | `0` | no |
 | `pack-objects` | `44` | `0` | `1` | `10` | `4` | `0` | `0` | `6` | no |
 | `prune` | `7` | `0` | `1` | `7` | `6` | `0` | `0` | `1` | no |
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
