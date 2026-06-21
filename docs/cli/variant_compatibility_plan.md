@@ -608,6 +608,13 @@ unknown type name is corrupt repository input; stock Git rejects
 `git cat-file -t <oid>` for that object, and Zmin now has focused evidence
 showing the same exit code, stdout and stderr.
 
+The latest internal guard classification is `runtime/primitive_adapters.rs`
+primitive-runtime validation. The `unsupported object id length` and
+`unsupported object type ... for patch render` messages are reached through
+the shared `GitPrimitiveRuntime` adapter contract, not through a Git `2.47.1`
+CLI command path. Keep them outside the Git compatibility denominator until
+that primitive API is stabilized with its own non-Git extension tests.
+
 The latest closed behavior slice is the invalid mixed-object `diff` operand
 form. Stock Git rejects `git diff HEAD^{tree} <blob>` and the reverse order
 with exit `129`, empty stdout and the full `git diff` usage text. Zmin now
@@ -923,6 +930,7 @@ keeps the behavior explicitly out of scope.
 | `admin_impl.rs` `unsupported svn command '{command}'` in `git svn` dispatch | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-svn`: `/usr/bin/git svn unknown` exits `1` with `git: 'svn' is not a git command` | revisit only with a real `git-svn` oracle environment or an explicit decision to scope the legacy SVN bridge |
 | `admin_impl.rs` `unsupported archimport option '{arg}'` and intentionally unsupported `git archimport -o` mode | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-archimport`: `/usr/bin/git archimport --bad` exits `1` with `git: 'archimport' is not a git command` | revisit only with a real `git-archimport` oracle environment or an explicit decision to scope the legacy GNU Arch bridge |
 | `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |
+| `runtime/primitive_adapters.rs` `unsupported object id length` and `unsupported object type ... for patch render` | internal primitive-runtime validation, not counted as Git `2.47.1` CLI compatibility | source search shows these guards are reached through `GitPrimitiveRuntime` adapters rather than a `git <command>` entry point; no stock-Git CLI oracle applies to the primitive API contract | cover with dedicated primitive API tests before stabilizing the shared runtime; add a Git matrix row only if a Git-compatible CLI path exposes the behavior |
 
 ## Open Code Guard Mappings
 
