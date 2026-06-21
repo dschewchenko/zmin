@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1475 written rows / 1183 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1479 written rows / 1187 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,14 +269,14 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice extends the `config` command matrix with hasconfig
-include rows from existing stock-oracle evidence:
+The latest completed slice extends the `config` command matrix with raw integer
+read rows from existing stock-oracle evidence:
 
-`git config --get demo.flag`
+`git config --get demo.gib`
 
-`docs/cli/matrices/config_v2_47.tsv` now records matching and nonmatching
-hasconfig remote URL setup plus separate include-match and include-skip query
-rows from `git_admin_tools_compat::config_include_hasconfig_matches_stock_git`.
+`docs/cli/matrices/config_v2_47.tsv` now records raw `--get` rows after typed
+integer writes for `demo.plain`, `demo.kib`, `demo.mib` and `demo.gib` from
+`git_admin_tools_compat::config_type_int_and_bool_or_int_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,13 +626,13 @@ commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
 The latest matrix inventory slice extends `config_v2_47.tsv` with rows already
-covered by `git_admin_tools_compat::config_include_hasconfig_matches_stock_git`:
-matching and nonmatching hasconfig remote URL setup plus separate include-match
-and include-skip query rows. No Rust behavior changed.
+covered by `git_admin_tools_compat::config_type_int_and_bool_or_int_match_stock_git`:
+raw `--get` rows after typed integer writes for `demo.plain`, `demo.kib`,
+`demo.mib` and `demo.gib`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1475` written-row
+This card is the exact handoff target after the current `1479` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1475`; the `1/1475` open row and the still incomplete command/doc-option
+`0/1479`; the `1/1479` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
