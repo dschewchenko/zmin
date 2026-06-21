@@ -213,9 +213,9 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `40/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `245/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1037` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `784/1037` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `1/1037` | no | written rows with incomplete parity |
+| Written behavior rows | `1040` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `784/1040` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `1/1040` | no | written rows with incomplete parity |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -247,7 +247,7 @@ Current generated summary:
 | Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` | `8` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `81` | `66` | `0` | `0` | `15` | `99` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `65` | `39` | `0` | `0` | `26` | `32` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `68` | `39` | `0` | `0` | `29` | `35` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `297` | `283` | `0` | `0` | `14` | `159` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` | `26` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` | `1` |
@@ -258,7 +258,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` | `116` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `43` | `16` | `1` | `0` | `26` | `39` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1037`** | **`784`** | **`1`** | **`0`** | **`252`** | **`670`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1040`** | **`784`** | **`1`** | **`0`** | **`255`** | **`673`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -269,9 +269,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `245/4632`
-represented option pairs or `784/1037` passing written rows as a Git support
-percentage. The `784/1037` number is audit progress for supported rows already
-written down; `1/1037` row is partial and `252/1037` additional rows are
+represented option pairs or `784/1040` passing written rows as a Git support
+percentage. The `784/1040` number is audit progress for supported rows already
+written down; `1/1040` row is partial and `255/1040` additional rows are
 stock-compatible invalid inputs. It says nothing about the still unexpanded
 rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -319,7 +319,7 @@ variants.
 | `show-index` | `1` | `0` | `0` | `docs/cli/matrices/show_index_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `docs/cli/matrices/sparse_checkout_v2_47.tsv` | `8` | `3` | `0` | `0` | `5` | no |
-| `stash` | `30` | `0` | `0` | `docs/cli/matrices/stash_v2_47.tsv` | `5` | `4` | `0` | `0` | `1` | no |
+| `stash` | `30` | `0` | `0` | `docs/cli/matrices/stash_v2_47.tsv` | `8` | `4` | `0` | `0` | `4` | no |
 | `submodule` | `35` | `0` | `0` | `docs/cli/matrices/submodule_v2_47.tsv` | `7` | `0` | `0` | `0` | `7` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `docs/cli/matrices/symbolic_ref_v2_47.tsv` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `docs/cli/matrices/tag_v2_47.tsv` | `27` | `17` | `0` | `0` | `10` | no |

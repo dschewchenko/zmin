@@ -2747,6 +2747,24 @@ fn stash_apply_reports_locked_index_like_stock_git() {
 }
 
 #[test]
+fn stash_reference_unknown_options_match_stock_git_usage() {
+    let git_repo = stash_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    for args in [
+        ["stash", "apply", "--bad"].as_slice(),
+        ["stash", "drop", "--bad"].as_slice(),
+        ["stash", "pop", "--bad"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "stash reference failure output should match for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn stash_show_invalid_option_reports_usage_like_stock_git() {
     let repo = stash_fixture_repo();
     write_file(repo.path(), "a.txt", "changed\n");

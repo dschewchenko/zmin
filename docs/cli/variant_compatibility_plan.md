@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 40/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1037 written rows / 784 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 40/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1040 written rows / 784 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -387,9 +387,16 @@ atoms. Stock Git preserves `%<(bad)`, `%<()` and `%<` as literal text in
 atom. Zmin now matches that literal-preservation behavior and
 `stash_v2_47.tsv` records the focused row.
 
+The latest stock-compatible invalid-input guard classification is
+`worktree_impl.rs` `unsupported stash {operation} option` handling for
+reference-style stash operations. Stock Git rejects `git stash apply --bad`,
+`git stash drop --bad` and `git stash pop --bad` with exit `129` and
+subcommand-specific usage text; Zmin now emits the same diagnostics and
+`stash_v2_47.tsv` records those three invalid-input rows.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1037` written-row
+This card is the exact handoff target after the current `1040` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -408,7 +415,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1037`; the complete command matrices and complete doc-option matrices remain
+`0/1040`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -558,6 +565,7 @@ until a full matrix is expanded and verified.
 | `status` invalid untracked-files mode usage | `1` | `0` | `git status --untracked-files=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-mode fatal diagnostic |
 | `status` invalid ignored mode usage | `1` | `0` | `git status --ignored=bogus` exits `128` with stock fatal diagnostic instead of an unclassified unsupported-mode guard |
 | `status` invalid ignore-submodules mode usage | `1` | `0` | `git status --ignore-submodules=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-mode fatal diagnostic |
+| `stash` reference operation unknown option usage | `3` | `0` | `git stash apply/drop/pop --bad` exit `129` with stock subcommand-specific usage text instead of custom unsupported-option diagnostics |
 | `clean` unknown option usage | `1` | `0` | `git clean --bad` exits `129` with stock unknown-option usage text instead of a fatal unsupported-option diagnostic |
 | `clean` unknown short-switch usage | `1` | `0` | `git clean -Z` exits `129` with stock unknown-switch usage text instead of an unknown-option diagnostic |
 | `clean` exclude missing-value usage | `2` | `0` | `git clean -e` and `git clean --exclude` exit `129` with stock missing-value diagnostics instead of a fatal custom pattern diagnostic |
@@ -715,6 +723,7 @@ behavior, invalid input, or corrupt-format handling.
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
+| `worktree_impl.rs` former `unsupported stash {operation} option '{value}'` guard in `stash apply/drop/pop` option parsing | stock-compatible invalid input for unknown reference-style stash operation options | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_reference_unknown_options_match_stock_git_usage` |
 
 ## Code Guard Classification
 

@@ -5762,6 +5762,26 @@ usage: git stash [push [-p | --patch] [-S | --staged] [-k | --[no-]keep-index] [
                           with --pathspec-from-file, pathspec elements are separated with NUL character
 ";
 
+const STASH_APPLY_USAGE: &str = "\
+usage: git stash apply [--index] [-q | --quiet] [<stash>]
+
+    -q, --[no-]quiet      be quiet, only report errors
+    --[no-]index          attempt to recreate the index
+";
+
+const STASH_DROP_USAGE: &str = "\
+usage: git stash drop [-q | --quiet] [<stash>]
+
+    -q, --[no-]quiet      be quiet, only report errors
+";
+
+const STASH_POP_USAGE: &str = "\
+usage: git stash pop [--index] [-q | --quiet] [<stash>]
+
+    -q, --[no-]quiet      be quiet, only report errors
+    --[no-]index          attempt to recreate the index
+";
+
 fn stash_push(args: &[String], usage: StashPushUsage) -> Result<()> {
     let repo = find_repo()?;
     let mut options = StashPushOptions::default();
@@ -6036,7 +6056,7 @@ fn stash_unknown_option(option: &str, usage: StashPushUsage) -> CliError {
     CliError::Stderr {
         code: 129,
         text: format!(
-            "error: unknown option `{}`\n{}\n",
+            "error: unknown option `{}'\n{}\n",
             option.trim_start_matches('-'),
             usage_text
         ),
@@ -8660,10 +8680,7 @@ fn parse_stash_reference_options(
                 no_index = true;
             }
             value if value.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported stash {operation} option '{value}'"),
-                });
+                return Err(stash_reference_unknown_option(value, operation));
             }
             value => {
                 if let Some(previous) = stash.replace(value.to_owned()) {
@@ -8678,6 +8695,23 @@ fn parse_stash_reference_options(
         no_index,
         stash,
     })
+}
+
+fn stash_reference_unknown_option(option: &str, operation: &str) -> CliError {
+    let usage_text = match operation {
+        "apply" => STASH_APPLY_USAGE,
+        "drop" => STASH_DROP_USAGE,
+        "pop" => STASH_POP_USAGE,
+        other => unreachable!("unsupported stash reference operation: {other}"),
+    };
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown option `{}'\n{}\n",
+            option.trim_start_matches('-'),
+            usage_text
+        ),
+    }
 }
 
 fn stash_index_config_enabled(repo: &GitRepo) -> Result<bool> {
