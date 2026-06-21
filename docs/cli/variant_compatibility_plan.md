@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 341/4632 represented doc-option pairs / 1369 written rows / 1086 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 344/4632 represented doc-option pairs / 1377 written rows / 1094 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands the `diff-tree` command matrix from existing
+The latest completed slice expands the `log` command matrix from existing
 stock-oracle evidence:
 
-`git diff-tree -r --stdin --name-only --format=%s dir`
+`git log --pickaxe-all -Sneedle -p HEAD~1..HEAD`
 
-`docs/cli/matrices/diff_tree_v2_47.tsv` now records a local-option batch from
-existing `git_diff_compat` stock-oracle tests: stdin pretty/name-only modes,
-reverse raw/patch output, order-file, relative path output, anchored diff and
-exit-code status.
+`docs/cli/matrices/log_v2_47.tsv` now records a pickaxe batch from the existing
+`git_diff_compat::diff_pickaxe_matches_stock_git_for_porcelain_and_plumbing`
+stock-oracle test: `-S` attached and separate values, `-G`, patch output,
+`--max-count`, `-n` and `--pickaxe-all`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands remaining `status` edge rows already
-covered by `git_status_compat`: Unix same-size same-mtime content-change
-detection, `--no-verbose -vv` ordering, and `--show-stash` with porcelain v1
-branch and short output modes. No Rust behavior changed.
+The latest matrix inventory slice expands `log` pickaxe rows already covered by
+`git_diff_compat::diff_pickaxe_matches_stock_git_for_porcelain_and_plumbing`:
+`-S` attached and separate values, `-G`, patch output, `--max-count`, `-n` and
+`--pickaxe-all`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1369` written-row
+This card is the exact handoff target after the current `1377` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1369`; the `1/1369` open row and the still incomplete command/doc-option
+`0/1377`; the `1/1377` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
