@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1092 written rows / 822 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1093 written rows / 822 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,18 +266,16 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is the documented blob-to-blob `diff` operand form:
+The latest completed slice is the invalid mixed object `diff` operand form:
 
-`git diff <blob> <blob>`
+`git diff HEAD^{tree} <blob>`
 
-Stock Git accepts two direct blob object ids, prints a normal blob patch for
-different blobs, exits `0` with empty stdout/stderr for identical blobs, and
-does not change repository state. Zmin now has focused stock-oracle evidence
-for both shapes in
-`git_diff_compat::diff_blob_to_blob_operands_match_stock_git`, and
-`docs/cli/matrices/diff_v2_47.tsv` records the row. A separately observed
-mixed tree/blob invalid form still differs and should be handled as its own
-future row instead of being hidden by this supported operand slice.
+Stock Git rejects mixed tree/blob operands in either order with exit `129`,
+empty stdout and the full `git diff` usage text on stderr. Zmin now detects
+two resolved object operands that are neither a valid blob/blob pair nor a
+valid treeish/treeish pair and emits the same usage shape. The row is recorded
+in `docs/cli/matrices/diff_v2_47.tsv` with focused evidence in
+`git_diff_compat::diff_mixed_tree_and_blob_operands_match_stock_git_usage`.
 
 ### No-Skip Rule
 
@@ -610,20 +608,15 @@ unknown type name is corrupt repository input; stock Git rejects
 `git cat-file -t <oid>` for that object, and Zmin now has focused evidence
 showing the same exit code, stdout and stderr.
 
-The latest closed behavior slice is `history_impl.rs` parent-filter bad output
-for `git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits
-`1` after printing rewrite progress and commit-tree diagnostics, leaving
-`HEAD` unchanged and no original ref. Zmin now emits the same shape instead of
-the former custom unsupported-token diagnostic.
-
-The latest `init` rows are `git init -q -b main repo` and
-`git init --quiet -b main repo`. Zmin suppresses init output and creates the
-requested initial branch like stock Git; `init_v2_47.tsv` now records the
-short and long quiet forms.
+The latest closed behavior slice is the invalid mixed-object `diff` operand
+form. Stock Git rejects `git diff HEAD^{tree} <blob>` and the reverse order
+with exit `129`, empty stdout and the full `git diff` usage text. Zmin now
+detects two resolved object operands that are neither a valid blob/blob pair
+nor a valid treeish/treeish pair and emits the same usage shape.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1092` written-row
+This card is the exact handoff target after the current `1093` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -642,7 +635,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1092`; the `1/1092` open row and the still incomplete command/doc-option
+`0/1093`; the `1/1093` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -747,6 +740,7 @@ until a full matrix is expanded and verified.
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
 | `log` replacement directory pathspec NUL output | `1` | `0` | `-z --format=%H%x00%s -1 -- dir` through the `git` shim |
 | `diff` blob-to-blob operands | `1` | `0` | `git diff <blob> <blob>` renders stock blob patch output and empty output for identical blobs |
+| `diff` mixed tree/blob operand usage | `1` | `0` | `git diff HEAD^{tree} <blob>` and the reverse order exit `129` with stock usage text |
 | `diff` replacement worktree NUL name-status | `1` | `0` | `--name-status -z` through the `git` shim with a modified tracked file |
 | `diff` replacement worktree NUL name-only | `1` | `0` | `--name-only -z` through the `git` shim with a modified tracked file |
 | `diff` replacement pathspec NUL name-status | `1` | `0` | `--name-status -z -- dir` through the `git` shim with a dirty nested tracked file |
@@ -907,7 +901,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `677` verified variants.
+Tracked closed blocks in this table: `678` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

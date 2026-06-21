@@ -100,6 +100,27 @@ fn diff_blob_to_blob_operands_match_stock_git() {
 }
 
 #[test]
+fn diff_mixed_tree_and_blob_operands_match_stock_git_usage() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    let blob = git_with_stdin(repo.path(), ["hash-object", "-w", "--stdin"], "two\n");
+
+    for args in [
+        ["diff", "HEAD^{tree}", blob.as_str()].as_slice(),
+        ["diff", blob.as_str(), "HEAD^{tree}"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "mixed tree/blob diff operands should match stock Git usage for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn diff_tree_combined_raw_for_merge_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

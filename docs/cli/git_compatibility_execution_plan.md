@@ -8,6 +8,19 @@ model lives in `docs/cli/git_compatibility_inventory.md`; the live slice queue,
 guard mappings and latest completed slice live in
 `docs/cli/variant_compatibility_plan.md`.
 
+## Durable Plan Files
+
+Use these files instead of chat history:
+
+| File | Role |
+| --- | --- |
+| `docs/cli/git_compatibility_execution_plan.md` | step-by-step operating plan and definition of done |
+| `docs/cli/git_compatibility_inventory.md` | counting model, current generated counts and command-level matrix status |
+| `docs/cli/variant_compatibility_plan.md` | live next-slice pointer, immediate queue, guard classifications and closed evidence blocks |
+| `docs/cli/matrices/*_v2_47.tsv` | per-command behavior rows with command, option, value, combinations, state, transport, expected behavior and evidence |
+| `docs/cli/zmin_extensions_inventory.md` | Zmin-only extensions kept outside the Git `2.47.1` denominator |
+| `/Users/dschewchenko/work/private/.knowledge/projects/skron-core.md` | cross-session project memory that points back to the active execution plan |
+
 ## Objective
 
 Close Git compatibility by verified behavior rows, not by command presence.

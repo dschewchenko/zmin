@@ -2743,9 +2743,15 @@ fn parse_blob_pair_diff_input(
     let old_arg = args[0].to_string_lossy();
     let new_arg = args[1].to_string_lossy();
     let Some(old_side) = resolve_blob_diff_side(repo, store, &old_arg)? else {
+        if diff_args_resolve_to_mixed_object_pair(repo, store, &old_arg, &new_arg)? {
+            return Err(diff_usage_error());
+        }
         return Ok(None);
     };
     let Some(new_side) = resolve_blob_diff_side(repo, store, &new_arg)? else {
+        if diff_args_resolve_to_mixed_object_pair(repo, store, &old_arg, &new_arg)? {
+            return Err(diff_usage_error());
+        }
         return Ok(None);
     };
     let old_index = GitIndex::from_entries(vec![old_side.entry.clone()])?;
@@ -2768,6 +2774,74 @@ fn parse_blob_pair_diff_input(
         new_side_from_index: true,
         paths: Vec::new(),
     }))
+}
+
+fn diff_args_resolve_to_mixed_object_pair(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    old: &str,
+    new: &str,
+) -> Result<bool> {
+    if resolve_treeish(repo, store, old).is_ok() && resolve_treeish(repo, store, new).is_ok() {
+        return Ok(false);
+    }
+    Ok(diff_operand_object_kind(repo, store, old)?.is_some()
+        && diff_operand_object_kind(repo, store, new)?.is_some())
+}
+
+fn diff_operand_object_kind(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    objectish: &str,
+) -> Result<Option<GitObjectKind>> {
+    let resolved = match resolve_objectish_with_mode(repo, objectish) {
+        Ok(resolved) => resolved,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(store.read_object(&resolved.id)?.kind))
+}
+
+fn diff_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: concat!(
+            "usage: git diff [<options>] [<commit>] [--] [<path>...]\n",
+            "   or: git diff [<options>] --cached [--merge-base] [<commit>] [--] [<path>...]\n",
+            "   or: git diff [<options>] [--merge-base] <commit> [<commit>...] <commit> [--] [<path>...]\n",
+            "   or: git diff [<options>] <commit>...<commit> [--] [<path>...]\n",
+            "   or: git diff [<options>] <blob> <blob>\n",
+            "   or: git diff [<options>] --no-index [--] <path> <path>\n",
+            "\n",
+            "common diff options:\n",
+            "  -z            output diff-raw with lines terminated with NUL.\n",
+            "  -p            output patch format.\n",
+            "  -u            synonym for -p.\n",
+            "  --patch-with-raw\n",
+            "                output both a patch and the diff-raw format.\n",
+            "  --stat        show diffstat instead of patch.\n",
+            "  --numstat     show numeric diffstat instead of patch.\n",
+            "  --patch-with-stat\n",
+            "                output a patch and prepend its diffstat.\n",
+            "  --name-only   show only names of changed files.\n",
+            "  --name-status show names and status of changed files.\n",
+            "  --full-index  show full object name on index lines.\n",
+            "  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n",
+            "  -R            swap input file pairs.\n",
+            "  -B            detect complete rewrites.\n",
+            "  -M            detect renames.\n",
+            "  -C            detect copies.\n",
+            "  --find-copies-harder\n",
+            "                try unchanged files as candidate for copy detection.\n",
+            "  -l<n>         limit rename attempts up to <n> paths.\n",
+            "  -O<file>      reorder diffs according to the <file>.\n",
+            "  -S<string>    find filepair whose only one side contains the string.\n",
+            "  --pickaxe-all\n",
+            "                show all files diff when -S is used and hit is found.\n",
+            "  -a  --text    treat all files as text.\n",
+            "\n",
+        )
+        .into(),
+    }
 }
 
 fn resolve_blob_diff_side(
