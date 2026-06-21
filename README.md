@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `50/151` | `add`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
-| Documented option spellings represented by rows | `260/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1102` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `831/1102` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1102` | written rows with incomplete parity |
-| Open written rows | `1/1102` | written rows that still do not match stock Git |
-| Invalid input rows | `270/1102` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `262/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1106` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `835/1106` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1106` | written rows with incomplete parity |
+| Open written rows | `1/1106` | written rows that still do not match stock Git |
+| Invalid input rows | `270/1106` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `831/1102` as Git compatibility. It only means `831` of the `1102`
+Do not read `835/1106` as Git compatibility. It only means `835` of the `1106`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1102` rows are partially matching,
-`1/1102` rows are known open mismatches, and `270/1102` additional rows are
-stock-compatible invalid inputs. Do not read `260/4632` as option support
+unexpanded surface is not counted yet, `0/1106` rows are partially matching,
+`1/1106` rows are known open mismatches, and `270/1106` additional rows are
+stock-compatible invalid inputs. Do not read `262/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -216,11 +216,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `44` | `21` | `0` | `0` | `23` |
+| Administration | `8` | `0` | `147` | `0` | `48` | `25` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `203` | `151` | `0` | `0` | `52` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `48` | `21` | `0` | `0` | `27` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1102`** | **`831`** | **`0`** | **`1`** | **`270`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1106`** | **`835`** | **`0`** | **`1`** | **`270`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -251,7 +251,7 @@ Current command-level matrices:
 | `fetch` | `73` | `0` | `30` | `300` | `291` | `0` | `0` | `9` | no |
 | `diff` | `133` | `0` | `31` | `68` | `66` | `0` | `0` | `2` | no |
 | `fast-import` | `25` | `0` | `1` | `7` | `4` | `0` | `0` | `3` | no |
-| `filter-branch` | `37` | `0` | `9` | `10` | `10` | `0` | `0` | `0` | no |
+| `filter-branch` | `37` | `0` | `11` | `14` | `14` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `32` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
 | `http-fetch` | `10` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 260/4632 represented doc-option pairs / 1102 written rows / 831 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 262/4632 represented doc-option pairs / 1106 written rows / 835 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -623,16 +623,16 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice records eight additional supported
-`filter-branch` rows already covered by `git_filter_branch_compat`: tree,
-index, env, parent, subdirectory and tag-name filters, setup plus
-message-filter, and custom temp directory handling. No Rust behavior changed;
-the slice imports existing stock-oracle evidence into
+The latest matrix inventory slice records four additional supported
+`filter-branch` rows already covered by `git_filter_branch_compat`:
+commit-filter passthrough, commit-filter `skip_commit`, initial
+`--state-branch` and repeated state-branch range rewrites. No Rust behavior
+changed; the slice imports existing stock-oracle evidence into
 `filter_branch_v2_47.tsv`.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1102` written-row
+This card is the exact handoff target after the current `1106` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1102`; the `1/1102` open row and the still incomplete command/doc-option
+`0/1106`; the `1/1106` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -751,7 +751,7 @@ until a full matrix is expanded and verified.
 | `log --diff-merges` invalid value usage | `1` | `0` | `git log --diff-merges=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
 | `rebase -i` invalid todo command usage | `1` | `0` | `GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` with an unknown todo command exits `1` with stock invalid-command diagnostics, leaves `.git/rebase-merge` state for recovery, moves HEAD to the stock in-progress rebase point, and supports `git rebase --abort` cleanup instead of a custom unsupported-interactive-command fatal diagnostic |
-| `filter-branch` supported filters and options | `9` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, and `-d` temp directory forms already covered by `git_filter_branch_compat` |
+| `filter-branch` supported filters and options | `13` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, `-d` temp directory, `--commit-filter` passthrough, `--commit-filter` with `skip_commit`, initial `--state-branch`, and repeated state-branch forms already covered by `git_filter_branch_compat` |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
