@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 25/151 commands with matrix rows / 234/4632 represented doc-option pairs / 855 written rows / 739 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 235/4632 represented doc-option pairs / 856 written rows / 739 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,8 +195,8 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git clean --interactive` help
-commands followed by quit.
+The latest closed guard classification is `git merge -s bogus feature`
+unknown strategy.
 The next default slice remains the second active lane: run a fresh
 `unsupported` / `not supported` code scan, choose one small remaining guard
 that is not entangled with unrelated staged changes, then classify it as
@@ -204,7 +204,7 @@ Git-supported behavior, stock-compatible invalid input, intentional deferral or
 Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/855`; the complete command matrices and complete doc-option matrices remain
+`0/856`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -271,6 +271,7 @@ until a full matrix is expanded and verified.
 | `log --decorate` invalid value usage | `1` | `0` | `git log --decorate=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
 | `log --diff-merges` invalid value usage | `1` | `0` | `git log --diff-merges=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
+| `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |

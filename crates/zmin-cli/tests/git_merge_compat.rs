@@ -497,6 +497,37 @@ fn merge_strategy_output_matches_stock_git_for_default_ort_and_recursive() {
 }
 
 #[test]
+fn merge_unknown_strategy_matches_stock_git_failure() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["switch", "-c", "feature"]);
+        write_file(repo, "feature.txt", "feature\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "feature"]);
+        git(repo, ["switch", &default_branch]);
+        write_file(repo, "main.txt", "main\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "main"]);
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(zmin_repo.path(), &["merge", "-s", "bogus", "feature"]),
+        git_failure_output(git_repo.path(), &["merge", "-s", "bogus", "feature"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["rev-parse", "HEAD"]),
+        git(git_repo.path(), ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+    );
+}
+
+#[test]
 fn merge_conflict_leaves_unmerged_index_and_merge_state_like_stock_git() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();

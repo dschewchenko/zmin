@@ -212,9 +212,12 @@ fn merge_with_strategy(
             mode,
         );
     }
-    Err(CliError::Fatal {
-        code: 128,
-        message: format!("merge strategy not supported: {}", strategies.join(", ")),
+    Err(CliError::Stderr {
+        code: 1,
+        text: format!(
+            "Could not find merge strategy '{}'.\nAvailable strategies are: octopus ours recursive resolve subtree.\n",
+            strategies.first().map(String::as_str).unwrap_or_default()
+        ),
     })
 }
 
