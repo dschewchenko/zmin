@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 251/4632 represented doc-option pairs / 1075 written rows / 811 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1076 written rows / 811 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -606,6 +606,12 @@ validation and is tracked under `docs/cli/zmin_extensions_inventory.md`
 instead of the Git `2.47.1` matrix. Existing focused unit evidence covers
 invalid values such as `h1`.
 
+The latest stock-compatible invalid-repository guard classification is
+`runtime/object.rs` `unsupported git object type`. A loose object with an
+unknown type name is corrupt repository input; stock Git rejects
+`git cat-file -t <oid>` for that object, and Zmin now has focused evidence
+showing the same exit code, stdout and stderr.
+
 The latest closed behavior slice is `history_impl.rs` parent-filter bad output
 for `git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits
 `1` after printing rewrite progress and commit-tree diagnostics, leaving
@@ -619,7 +625,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1075` written-row
+This card is the exact handoff target after the current `1076` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -638,7 +644,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1075`; the `1/1075` open row and the still incomplete command/doc-option
+`0/1076`; the `1/1076` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -980,6 +986,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` `unsupported index-pack option '{arg}'` in `http-fetch --packfile` delegated index-pack parsing | stock-compatible invalid input for invalid delegated `index-pack` arguments | `docs/cli/matrices/http_fetch_v2_47.tsv`; `git_transport_http_compat::http_fetch_packfile_rejects_bad_index_pack_arg_like_stock_git` |
 | `runtime/worktree_index.rs` `unsupported object format '{value}'` while reading repository object format | stock-compatible invalid repository config for unsupported local `extensions.objectFormat` values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_object_format_config_matches_stock_git` |
 | `transport_impl.rs` `unsupported ZMIN_GIT_HTTP_VERSION '{raw}'` in HTTP remote-helper setup | Zmin-only environment validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `transport_impl::tests::remote_http_helper_version_arg_rejects_unsupported_values` |
+| `runtime/object.rs` `unsupported git object type '{value}'` while reading loose object headers | corrupt loose-object repository input with stock diagnostics through `cat-file -t` | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_cat_file_corrupt_object_compat::cat_file_rejects_unsupported_loose_object_type_like_stock_git` |
 
 ## Code Guard Classification
 
