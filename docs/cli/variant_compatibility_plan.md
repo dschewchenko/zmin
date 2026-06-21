@@ -128,6 +128,20 @@ command.
 Use this as the working queue. Each step should land as a small commit with its
 own stock-Git evidence row instead of bundling unrelated commands.
 
+### Durable Objective
+
+Drive Zmin toward honest Git `2.47.1` compatibility through small verified
+slices. A slice closes only when the command, option, value, option
+combination, repository state, transport or workflow, expected stdout/stderr,
+exit code and observable `.git` side effects match stock Git or are explicitly
+classified as stock-compatible invalid input.
+
+The durable target is not `151/151` command dispatch. It is complete matrices
+for commands, documented options, option values, meaningful combinations,
+transport/local modes, edge cases, invalid inputs, side effects and oracle
+evidence. Until those denominators are complete, public docs must keep complete
+command matrices at `0/151` and complete doc-option matrices at `0/4632`.
+
 ### Execution Loop
 
 Repeat this loop until the full Git `2.47.1` matrix is closed:
@@ -200,11 +214,26 @@ The latest closed guard classification is
 `git blame -L /[[:bogus:][:digit:]]/ a.txt`, and
 `git blame -L /[[:bogus:]/ a.txt` for Git basic-regex invalid POSIX character
 class diagnostics inside compound or malformed bracket expressions.
-The next default slice remains the second active lane: run a fresh
-`unsupported` / `not supported` code scan, choose one small remaining guard
-that is not entangled with unrelated staged changes, then classify it as
-Git-supported behavior, stock-compatible invalid input, intentional deferral or
-Zmin-only extension before implementing anything.
+
+### Current Slice Card
+
+This card is the exact handoff target after the current `949` written-row
+state. Finish it before choosing another guard or command.
+
+| Field | Value |
+| --- | --- |
+| Slice | `git blame -L` basic-regex multiple character-range operators |
+| Stock-Git oracle | `/[a-b-c]/`, `/[0-9-a]/`, and `/[a--]/` exit `128` with `invalid character range`; edge literal forms such as `/[a-b-]/` and `/[-a-b]/` remain valid |
+| Implementation area | `crates/zmin-cli/src/cli/commands/history_impl.rs`, specifically `blame_regex_has_invalid_character_range` / `blame_character_class_has_invalid_range` |
+| Evidence test | extend `git_history_query_compat::blame_invalid_character_range_regexes_match_stock_git_failure` |
+| Matrix update | add three invalid-input rows to `docs/cli/matrices/blame_v2_47.tsv` |
+| Expected count movement | written rows `949 -> 952`, invalid-input rows `194 -> 197`, closed evidence blocks `599 -> 602`; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Required gates | focused `git_history_query_compat` test, full `git_history_query_compat`, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
+| Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
+
+After this card is committed and pushed, update the pointer to either the next
+small `unsupported` / `not supported` guard classification or a newly observed
+WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
 `0/949`; the complete command matrices and complete doc-option matrices remain
