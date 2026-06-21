@@ -2332,11 +2332,7 @@ fn parse_complete_blame_regex(value: &str, full_range: &str) -> Result<String> {
     if pattern_end + 1 != value.len() {
         return Err(unsupported_blame_line_range(full_range));
     }
-    let pattern = value[1..pattern_end].to_owned();
-    if pattern.is_empty() {
-        return Err(unsupported_blame_line_range(full_range));
-    }
-    Ok(pattern)
+    Ok(value[1..pattern_end].to_owned())
 }
 
 fn closing_blame_regex_delimiter(value: &str) -> Option<usize> {
@@ -2412,6 +2408,9 @@ fn blame_range_end(start: usize, end: BlameRangeEnd) -> usize {
 }
 
 fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -> Result<usize> {
+    if pattern.is_empty() {
+        return Err(blame_line_range_regex_empty(pattern, from_line));
+    }
     let regex = regex::bytes::Regex::new(pattern).map_err(|_| {
         if pattern == "[" {
             blame_line_range_regex_unbalanced_brackets(pattern, from_line)
@@ -2475,6 +2474,15 @@ fn blame_line_range_regex_no_match(pattern: &str, start_line: usize) -> CliError
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: regexec() failed to match"
+        ),
+    }
+}
+
+fn blame_line_range_regex_empty(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: empty (sub)expression"
         ),
     }
 }
