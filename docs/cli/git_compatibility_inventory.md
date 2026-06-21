@@ -246,11 +246,11 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `55/151` | no | audit rows exist for `add`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `diff-tree`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `remote`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `var`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `350/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1517` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `1225/1517` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1517` | no | written rows with incomplete parity |
-| Open written rows | `1/1517` | no | written rows that still do not match stock Git |
-| Invalid input rows | `291/1517` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Written behavior rows | `1527` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `1235/1527` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1527` | no | written rows with incomplete parity |
+| Open written rows | `1/1527` | no | written rows that still do not match stock Git |
+| Invalid input rows | `291/1527` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -291,9 +291,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` | `47` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `21` | `0` | `650` | `0` | `344` | `281` | `0` | `0` | `63` | `116` |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `354` | `291` | `0` | `0` | `63` | `116` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `48` | `21` | `0` | `0` | `27` | `40` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1517`** | **`1225`** | **`0`** | **`1`** | **`291`** | **`721`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1527`** | **`1235`** | **`0`** | **`1`** | **`291`** | **`721`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -304,9 +304,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `350/4632`
-represented option pairs or `1225/1517` passing written rows as a Git support
-percentage. The `1225/1517` number is audit progress for supported rows already
-written down; `0/1517` rows are partial, `1/1517` rows are open and `291/1517`
+represented option pairs or `1235/1527` passing written rows as a Git support
+percentage. The `1235/1527` number is audit progress for supported rows already
+written down; `0/1527` rows are partial, `1/1527` rows are open and `291/1527`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -364,7 +364,7 @@ variants.
 | `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
 | `remote` | `23` | `0` | `1` | `docs/cli/matrices/remote_v2_47.tsv` | `32` | `26` | `0` | `0` | `6` | no |
 | `rerere` | `7` | `0` | `0` | `docs/cli/matrices/rerere_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
-| `rev-parse` | `72` | `0` | `24` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `52` | `46` | `0` | `0` | `6` | no |
+| `rev-parse` | `72` | `0` | `24` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `62` | `56` | `0` | `0` | `6` | no |
 | `show-index` | `1` | `0` | `0` | `docs/cli/matrices/show_index_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `docs/cli/matrices/sparse_checkout_v2_47.tsv` | `8` | `3` | `0` | `0` | `5` | no |
