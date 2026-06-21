@@ -2325,12 +2325,12 @@ fn parse_blame_range_end_spec(value: &str, full_range: &str) -> Result<BlameRang
     }
 }
 
-fn parse_complete_blame_regex(value: &str, full_range: &str) -> Result<String> {
+fn parse_complete_blame_regex(value: &str, _full_range: &str) -> Result<String> {
     let Some(pattern_end) = closing_blame_regex_delimiter(value) else {
         return Err(blame_usage_error());
     };
     if pattern_end + 1 != value.len() {
-        return Err(unsupported_blame_line_range(full_range));
+        return Err(blame_usage_error());
     }
     Ok(value[1..pattern_end].to_owned())
 }
