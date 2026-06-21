@@ -1716,6 +1716,23 @@ fn maintenance_unavailable_schedulers_match_stock_git_on_macos() {
     }
 }
 
+#[test]
+fn maintenance_unknown_scheduler_failure_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    assert_eq!(
+        run_zmin_failure_output(
+            zmin_repo.path(),
+            &["maintenance", "start", "--scheduler=bogus"]
+        ),
+        git_failure_output(
+            git_repo.path(),
+            &["maintenance", "start", "--scheduler=bogus"]
+        )
+    );
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn maintenance_start_and_stop_auto_manage_launch_agents_like_stock_git() {

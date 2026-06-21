@@ -464,9 +464,9 @@ fn maintenance_scheduler_kind(scheduler: Option<&str>) -> Result<MaintenanceSche
                 message: "schtasks scheduler is not available".into(),
             })
         }
-        other => Err(CliError::Fatal {
-            code: 128,
-            message: format!("unsupported maintenance scheduler '{other}'"),
+        other => Err(CliError::Stderr {
+            code: 129,
+            text: format!("error: unrecognized --scheduler argument '{other}'\n"),
         }),
     }
 }
