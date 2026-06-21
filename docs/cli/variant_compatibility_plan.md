@@ -450,6 +450,13 @@ following pretty-format output. Zmin now matches those focused forms and
 `stash_v2_47.tsv` records the supported-format row.
 
 The latest stock-compatible invalid-input guard classification is
+`worktree_impl.rs` `unsupported clean option` parsing for `git clean --bad`
+and `git clean -Z`. Stock Git rejects unknown long and short clean options
+with exit `129`, empty stdout and command-specific usage diagnostics. Existing
+Zmin behavior and focused evidence already match those rows, so this slice only
+maps the source guard to the `clean_v2_47.tsv` invalid-input rows.
+
+The latest stock-compatible invalid-input guard classification is
 `worktree_impl.rs` `unsupported stash {operation} option` handling for
 reference-style stash operations. Stock Git rejects `git stash apply --bad`,
 `git stash drop --bad` and `git stash pop --bad` with exit `129` and
@@ -849,6 +856,7 @@ behavior, invalid input, or corrupt-format handling.
 | `maintenance_impl.rs` former `unsupported prune expiry '{value}'` guard in `git prune --expire` parsing | stock-compatible invalid input for malformed `prune --expire=<value>` dates | `docs/cli/matrices/prune_v2_47.tsv`; `git_maintenance_compat::prune_invalid_expire_value_matches_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
+| `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
 | `worktree_impl.rs` `unsupported stash list format atom` width-target guard | Git-supported stash list width atoms with no following target atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_width_format_atoms_without_target_match_stock_git` |
