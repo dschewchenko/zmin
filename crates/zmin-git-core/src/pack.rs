@@ -5392,7 +5392,7 @@ fn validate_pack_header(file: &mut fs::File) -> io::Result<()> {
     if version != PACK_VERSION_2 && version != PACK_VERSION_3 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "unsupported pack file version",
+            format!("unsupported pack file version {version}"),
         ));
     }
     Ok(())
@@ -5415,7 +5415,7 @@ fn parse_pack_header_bytes(header: &[u8]) -> io::Result<u32> {
     if version != PACK_VERSION_2 && version != PACK_VERSION_3 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "unsupported pack file version",
+            format!("unsupported pack file version {version}"),
         ));
     }
     Ok(u32::from_be_bytes([

@@ -5044,6 +5044,14 @@ impl IndexPackFsckReporter {
 }
 
 fn index_pack_verify_integrity_error(pack_path: &std::path::Path, error: io::Error) -> CliError {
+    if error.kind() == io::ErrorKind::InvalidData
+        && let Some(version) = unsupported_pack_file_version(&error)
+    {
+        return CliError::Fatal {
+            code: 128,
+            message: format!("pack version {version} unsupported"),
+        };
+    }
     if error.kind() == io::ErrorKind::InvalidData && error.to_string() == "pack checksum mismatch" {
         let idx_path = pack_path.with_extension("idx");
         let entry_count = pack_index_object_count(&idx_path).unwrap_or(1);
@@ -5196,6 +5204,12 @@ fn verify_pack_one(idx_path: &std::path::Path, verbose: bool, stat_only: bool) -
 
 fn verify_pack_integrity_error(error: io::Error) -> CliError {
     if error.kind() == io::ErrorKind::InvalidData {
+        if let Some(version) = unsupported_pack_file_version(&error) {
+            return CliError::Fatal {
+                code: 1,
+                message: format!("pack version {version} unsupported"),
+            };
+        }
         CliError::Fatal {
             code: 1,
             message: error.to_string(),
@@ -5230,6 +5244,13 @@ fn unsupported_pack_index_version(error: &io::Error) -> Option<String> {
     error
         .to_string()
         .strip_prefix("unsupported pack index version ")
+        .map(str::to_owned)
+}
+
+fn unsupported_pack_file_version(error: &io::Error) -> Option<String> {
+    error
+        .to_string()
+        .strip_prefix("unsupported pack file version ")
         .map(str::to_owned)
 }
 
