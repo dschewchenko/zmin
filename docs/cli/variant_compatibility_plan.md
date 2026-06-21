@@ -424,6 +424,14 @@ usage text to stdout, and leaves stderr empty. Zmin now prints the same
 stock-shaped stdout usage, exits `2`, leaves stderr empty, and records the row
 as `closed` in `p4_v2_47.tsv`.
 
+The latest deferred guard classification is `admin_impl.rs`
+`unsupported svn command`. The current stock-Git oracle environment does not
+ship `git-svn`: `git svn unknown` exits `1` with `git: 'svn' is not a git
+command`. That proves only the local unavailable-command shape, not
+`git-svn` subcommand behavior. Keep this guard out of closed Git compatibility
+counts until a real `git-svn` oracle environment is available or the product
+explicitly scopes the legacy SVN bridge.
+
 ### Current Slice Card
 
 This card is the exact handoff target after the current `1041` written-row
