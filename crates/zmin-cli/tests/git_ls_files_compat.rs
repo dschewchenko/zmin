@@ -9,6 +9,7 @@ use common::{
     configure_identity, git, git_args, git_init, git_status, git_with_env, run_zmin_args,
     write_file, zmin_bin,
 };
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 fn command_output_any(
     command: &str,
@@ -48,6 +49,19 @@ fn mergetool_conflict_fixture() -> TempDir {
     git_with_env(repo.path(), ["commit", "-am", "main"]);
     assert_ne!(git_status(repo.path(), ["merge", "feature"]), 0);
     repo
+}
+
+fn set_first_index_entry_mode(repo: &std::path::Path, mode: u32) {
+    let index_path = repo.join(".git/index");
+    let mut index = fs::read(&index_path).expect("read index");
+    let mode_offset = 12 + 24;
+    index[mode_offset..mode_offset + 4].copy_from_slice(&mode.to_be_bytes());
+    let checksum_offset = index.len() - GitHashAlgorithm::Sha1.digest_len();
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&index[..checksum_offset]);
+    let checksum = hasher.finalize();
+    index[checksum_offset..].copy_from_slice(checksum.as_bytes());
+    fs::write(index_path, index).expect("write index");
 }
 
 #[test]
@@ -285,6 +299,22 @@ fn ls_files_modes_match_stock_git() {
             "args: {args:?}"
         );
     }
+}
+
+#[test]
+fn ls_files_stage_preserves_stock_git_raw_regular_index_modes() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+        git(repo, ["add", "a.txt"]);
+        set_first_index_entry_mode(repo, 0o100640);
+    }
+
+    assert_eq!(
+        command_output_any(zmin_bin(), zmin_repo.path(), &["ls-files", "--stage"]),
+        command_output_any("git", git_repo.path(), &["ls-files", "--stage"])
+    );
 }
 
 #[test]

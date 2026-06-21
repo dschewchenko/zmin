@@ -2649,7 +2649,7 @@ fn ls_files_stage_record(
         Ok(format!(
             "{}{:06o} {} {}\t{}",
             tag,
-            entry.mode.bits(),
+            entry.mode_bits(),
             ls_files_object_name(&entry.id, options.abbrev),
             entry.stage,
             eol
@@ -2658,7 +2658,7 @@ fn ls_files_stage_record(
         Ok(format!(
             "{}{:06o} {} {}\t{}",
             tag,
-            entry.mode.bits(),
+            entry.mode_bits(),
             ls_files_object_name(&entry.id, options.abbrev),
             entry.stage,
             String::from_utf8_lossy(display_path)
@@ -2872,7 +2872,7 @@ fn render_ls_files_format(
                     }
                 }
                 match atom.as_str() {
-                    "objectmode" => out.push_str(&format!("{:06o}", entry.mode.bits())),
+                    "objectmode" => out.push_str(&format!("{:06o}", entry.mode_bits())),
                     "objectname" => out.push_str(&ls_files_object_name(&entry.id, abbrev)),
                     "stage" => out.push_str(&entry.stage.to_string()),
                     "path" => out.push_str(&String::from_utf8_lossy(display_path)),

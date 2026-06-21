@@ -954,7 +954,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
             && id == existing.id
         {
             let mut entry = existing.clone();
-            entry.mode = mode;
+            entry.set_mode(mode);
             apply_index_entry_metadata(&mut entry, &metadata);
             let upsert_started = trace.as_ref().and_then(|trace| trace.started());
             index.upsert(entry)?;
@@ -994,7 +994,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
         && id == existing.id
     {
         let mut entry = existing.clone();
-        entry.mode = mode;
+        entry.set_mode(mode);
         apply_index_entry_metadata(&mut entry, &metadata);
         let upsert_started = trace.as_ref().and_then(|trace| trace.started());
         index.upsert(entry)?;
@@ -1135,7 +1135,7 @@ fn stage_resolved_content(
         let id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
         if id == existing.id {
             let mut entry = existing.clone();
-            entry.mode = mode;
+            entry.set_mode(mode);
             apply_index_entry_metadata(&mut entry, metadata);
             index.upsert(entry)?;
             return Ok(());

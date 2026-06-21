@@ -48,6 +48,15 @@ impl IndexMode {
             0o100755 => Ok(Self::Executable),
             0o120000 => Ok(Self::Symlink),
             0o160000 => Ok(Self::Gitlink),
+            0o100000..=0o100777 => {
+                if bits & 0o111 != 0 {
+                    Ok(Self::Executable)
+                } else {
+                    Ok(Self::File)
+                }
+            }
+            0o120001..=0o120777 => Ok(Self::Symlink),
+            0o160001..=0o160777 => Ok(Self::Gitlink),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unsupported git index mode",
@@ -70,6 +79,7 @@ pub struct IndexEntry {
     pub path: Vec<u8>,
     pub id: ObjectId,
     pub mode: IndexMode,
+    pub(crate) mode_bits: u32,
     pub stage: u8,
     pub size: u32,
     pub ctime_seconds: u32,
@@ -114,6 +124,7 @@ impl IndexEntry {
             path,
             id,
             mode,
+            mode_bits: mode.bits(),
             stage: 0,
             size,
             ctime_seconds: 0,
@@ -126,6 +137,15 @@ impl IndexEntry {
             gid: 0,
             flags: 0,
         })
+    }
+
+    pub const fn mode_bits(&self) -> u32 {
+        self.mode_bits
+    }
+
+    pub fn set_mode(&mut self, mode: IndexMode) {
+        self.mode = mode;
+        self.mode_bits = mode.bits();
     }
 
     pub const fn assume_valid(&self) -> bool {
@@ -601,7 +621,7 @@ fn encode_entry_stream<W: Write>(
     write_u32_stream(out, entry.mtime_nanoseconds)?;
     write_u32_stream(out, entry.dev)?;
     write_u32_stream(out, entry.ino)?;
-    write_u32_stream(out, entry.mode.bits())?;
+    write_u32_stream(out, entry.mode_bits())?;
     write_u32_stream(out, entry.uid)?;
     write_u32_stream(out, entry.gid)?;
     write_u32_stream(out, entry.size)?;
@@ -884,7 +904,7 @@ fn encode_entry(out: &mut Vec<u8>, entry: &IndexEntry) -> io::Result<()> {
     write_u32(out, entry.mtime_nanoseconds);
     write_u32(out, entry.dev);
     write_u32(out, entry.ino);
-    write_u32(out, entry.mode.bits());
+    write_u32(out, entry.mode_bits());
     write_u32(out, entry.uid);
     write_u32(out, entry.gid);
     write_u32(out, entry.size);
@@ -979,6 +999,7 @@ fn decode_entry(bytes: &[u8], start: usize, limit: usize) -> io::Result<(IndexEn
         ));
     }
 
+    let mode_bits = read_u32(bytes, start + 24)?;
     Ok((
         IndexEntry {
             ctime_seconds: read_u32(bytes, start)?,
@@ -987,7 +1008,8 @@ fn decode_entry(bytes: &[u8], start: usize, limit: usize) -> io::Result<(IndexEn
             mtime_nanoseconds: read_u32(bytes, start + 12)?,
             dev: read_u32(bytes, start + 16)?,
             ino: read_u32(bytes, start + 20)?,
-            mode: IndexMode::from_bits(read_u32(bytes, start + 24)?)?,
+            mode: IndexMode::from_bits(mode_bits)?,
+            mode_bits,
             uid: read_u32(bytes, start + 28)?,
             gid: read_u32(bytes, start + 32)?,
             size: read_u32(bytes, start + 36)?,
@@ -1215,6 +1237,39 @@ mod tests {
         assert_eq!(entry.mode, IndexMode::File);
         assert_eq!(entry.stage, 0);
         assert_eq!(entry.id.to_hex(), git(&repo, ["hash-object", "README.md"]));
+    }
+
+    #[test]
+    fn reads_and_preserves_raw_regular_index_mode_bits() {
+        let repo = TempDir::new().expect("temp repo");
+        let index_path = repo.path().join("index");
+        let id = ObjectId::new(GitHashAlgorithm::Sha1, &[1; 20]);
+        let index = GitIndex::from_entries(vec![
+            IndexEntry::new("a.txt", id.clone(), IndexMode::File, 6).expect("entry"),
+        ])
+        .expect("index");
+        let mut encoded = encode_index(&index).expect("encode index");
+        encoded[12 + 24..12 + 28].copy_from_slice(&0o100640u32.to_be_bytes());
+        let checksum_offset = encoded.len() - CHECKSUM_LEN;
+        let digest = Sha1::digest(&encoded[..checksum_offset]);
+        encoded[checksum_offset..].copy_from_slice(&digest);
+        std::fs::write(&index_path, encoded).expect("write raw index");
+
+        let index = read_index(&index_path).expect("read index");
+        assert_eq!(index.entries()[0].mode, IndexMode::File);
+        assert_eq!(index.entries()[0].mode_bits(), 0o100640);
+        write_index(&index_path, &index).expect("rewrite index");
+
+        let rewritten = std::fs::read(&index_path).expect("read rewritten");
+        assert_eq!(
+            u32::from_be_bytes([
+                rewritten[12 + 24],
+                rewritten[12 + 25],
+                rewritten[12 + 26],
+                rewritten[12 + 27],
+            ]),
+            0o100640
+        );
     }
 
     #[test]

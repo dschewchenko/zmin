@@ -241,7 +241,7 @@ fn resolve_index_object_path_with_mode(
         .find(|entry| entry.stage == stage && entry.path.as_slice() == path.as_bytes())
         .map(|entry| ResolvedObjectish {
             id: entry.id.clone(),
-            mode: Some(format!("{:o}", entry.mode.bits())),
+            mode: Some(format!("{:o}", entry.mode_bits())),
         })
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "path not found in index"))
 }
