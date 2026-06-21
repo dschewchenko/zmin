@@ -37,6 +37,7 @@ pub(crate) struct ConfigEntry {
     pub(crate) implicit_bool: bool,
     pub(crate) scope: ConfigScope,
     pub(crate) origin: String,
+    pub(crate) line: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -117,6 +118,7 @@ pub(crate) fn parse_global_config_entry(raw: &str) -> Result<ConfigEntry> {
         implicit_bool,
         scope: ConfigScope::Command,
         origin: "command line:".to_owned(),
+        line: None,
     })
 }
 
@@ -652,6 +654,7 @@ fn read_config_file_raw(
             implicit_bool,
             scope,
             origin: origin.clone(),
+            line: Some(line_no),
         });
     }
     Ok(entries)
@@ -1195,6 +1198,7 @@ pub(crate) fn parse_config_entry(name: &str, value: &str) -> Result<ConfigEntry>
         implicit_bool: false,
         scope: ConfigScope::Local,
         origin: String::new(),
+        line: None,
     })
 }
 

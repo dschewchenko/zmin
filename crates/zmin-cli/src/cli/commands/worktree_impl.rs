@@ -487,6 +487,7 @@ pub(crate) fn status(
             message: "this operation must be run in a work tree".into(),
         });
     }
+    repo_object_format(&repo)?;
     let machine_readable = porcelain.is_some() || short || null;
     let column_untracked = status_column_untracked(&repo, column, no_column)?;
     let stash_count = if show_stash {

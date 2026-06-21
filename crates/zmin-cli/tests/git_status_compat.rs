@@ -675,6 +675,22 @@ fn status_invalid_ignore_submodules_mode_matches_stock_git() {
 }
 
 #[test]
+fn status_invalid_object_format_config_matches_stock_git() {
+    let repo = committed_repo();
+    fs::write(
+        repo.path().join(".git/config"),
+        "[core]\n\trepositoryformatversion = 1\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n[extensions]\n\tobjectFormat = bogus\n",
+    )
+    .expect("write invalid object format config");
+    let args = ["status", "--short"];
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &args),
+        git_failure_output(repo.path(), &args)
+    );
+}
+
+#[test]
 fn status_rename_modes_match_stock_git() {
     let repo = committed_repo();
     run_zmin(repo.path(), ["mv", "a.txt", "renamed.txt"]);

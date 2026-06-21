@@ -213,10 +213,10 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `42/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `http-fetch`, `index-pack`, `log`, `ls-files`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `245/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1042` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `785/1042` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `1/1042` | no | written rows with incomplete parity |
-| Open written rows | `0/1042` | no | written rows that still do not match stock Git |
+| Written behavior rows | `1043` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `785/1043` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `1/1043` | no | written rows with incomplete parity |
+| Open written rows | `0/1043` | no | written rows that still do not match stock Git |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -247,7 +247,7 @@ Current generated summary:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` | `8` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` | `2` |
-| Basic Snapshotting | `9` | `0` | `371` | `0` | `81` | `66` | `0` | `0` | `15` | `99` |
+| Basic Snapshotting | `9` | `0` | `371` | `0` | `82` | `66` | `0` | `0` | `16` | `99` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `68` | `39` | `0` | `0` | `29` | `35` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `297` | `283` | `0` | `0` | `14` | `159` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` | `26` |
@@ -259,7 +259,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` | `116` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `45` | `17` | `1` | `0` | `27` | `39` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1042`** | **`785`** | **`1`** | **`0`** | **`256`** | **`673`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1043`** | **`785`** | **`1`** | **`0`** | **`257`** | **`673`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -270,9 +270,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `245/4632`
-represented option pairs or `785/1042` passing written rows as a Git support
-percentage. The `785/1042` number is audit progress for supported rows already
-written down; `1/1042` row is partial and `256/1042` additional rows are
+represented option pairs or `785/1043` passing written rows as a Git support
+percentage. The `785/1043` number is audit progress for supported rows already
+written down; `1/1043` row is partial and `257/1043` additional rows are
 stock-compatible invalid inputs. It says nothing about the still unexpanded
 rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -297,7 +297,7 @@ variants.
 | `column` | `10` | `0` | `1` | `docs/cli/matrices/column_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `docs/cli/matrices/commit_graph_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
 | `config` | `243` | `0` | `17` | `docs/cli/matrices/config_v2_47.tsv` | `60` | `50` | `0` | `0` | `10` | no |
-| `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `75` | `66` | `0` | `0` | `9` | no |
+| `status` | `26` | `0` | `22` | `docs/cli/matrices/status_v2_47.tsv` | `76` | `66` | `0` | `0` | `10` | no |
 | `fetch` | `73` | `0` | `30` | `docs/cli/matrices/fetch_v2_47.tsv` | `290` | `283` | `0` | `0` | `7` | no |
 | `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `66` | `65` | `0` | `0` | `1` | no |
 | `fast-import` | `25` | `0` | `1` | `docs/cli/matrices/fast_import_v2_47.tsv` | `4` | `0` | `1` | `0` | `3` | no |

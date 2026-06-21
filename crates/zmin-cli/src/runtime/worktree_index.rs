@@ -1079,9 +1079,12 @@ pub(crate) fn repo_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
     match entry.value.as_str() {
         "sha1" => Ok(GitHashAlgorithm::Sha1),
         "sha256" => Ok(GitHashAlgorithm::Sha256),
-        value => Err(CliError::Fatal {
+        value => Err(CliError::Stderr {
             code: 128,
-            message: format!("unsupported object format '{value}'"),
+            text: format!(
+                "error: invalid value for 'extensions.objectformat': '{value}'\nfatal: bad config line {} in file .git/config\n",
+                entry.line.expect("local config entries carry line numbers")
+            ),
         }),
     }
 }

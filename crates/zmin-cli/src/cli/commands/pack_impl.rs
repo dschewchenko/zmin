@@ -2791,6 +2791,7 @@ fn gitmodules_blob_entries(content: &[u8]) -> Option<Vec<ConfigEntry>> {
             implicit_bool,
             scope: ConfigScope::Local,
             origin: String::new(),
+            line: None,
         });
     }
     Some(entries)
