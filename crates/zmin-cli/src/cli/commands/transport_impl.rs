@@ -12465,8 +12465,7 @@ fn fetch_with_repo_and_location(
                 no_tags,
             );
         }
-        if !prune
-            && let Some(destination) = refspec.strip_prefix(':')
+        if let Some(destination) = refspec.strip_prefix(':')
             && !destination.is_empty()
             && !destination.contains(':')
         {
@@ -12493,8 +12492,7 @@ fn fetch_with_repo_and_location(
                 no_tags,
             );
         }
-        if !prune
-            && let Some((source_name, destination)) = refspec.split_once(':')
+        if let Some((source_name, destination)) = refspec.split_once(':')
             && !source_name.is_empty()
             && !destination.is_empty()
             && !destination.contains(':')
