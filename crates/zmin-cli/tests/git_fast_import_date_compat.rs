@@ -236,6 +236,50 @@ M 100644 :1 a.txt
 }
 
 #[test]
+fn fast_import_done_imports_stock_shape_but_stats_stderr_is_open() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    let git_output = command_with_stdin_output("git", git_repo.path(), &["fast-import"], stream);
+    let zmin_output =
+        command_with_stdin_output(zmin_bin(), zmin_repo.path(), &["fast-import"], stream);
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert!(
+        git_output.2.contains("fast-import statistics:"),
+        "stock Git stderr should include import statistics: {}",
+        git_output.2
+    );
+    assert!(
+        zmin_output.2.is_empty(),
+        "Zmin still lacks stock fast-import statistics stderr: {}",
+        zmin_output.2
+    );
+    assert_eq!(
+        git(
+            zmin_repo.path(),
+            ["cat-file", "-p", "refs/heads/main:a.txt"]
+        ),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+}
+
+#[test]
 fn fast_import_invalid_date_format_matches_stock_git_crash_shape() {
     let git_repo = git_init();
     let zmin_repo = git_init();
