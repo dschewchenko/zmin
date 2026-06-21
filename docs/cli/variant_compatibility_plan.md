@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 248/4632 represented doc-option pairs / 1070 written rows / 808 written rows matching stock Git / 0 partial written rows / 1 open written row`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 47/151 commands with matrix rows / 249/4632 represented doc-option pairs / 1071 written rows / 808 written rows matching stock Git / 0 partial written rows / 2 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -549,6 +549,14 @@ environment creates a reftable clone and reports `reftable` from
 `rev-parse --show-ref-format`; Zmin currently exits `128` before destination
 creation. This is now an open Git-supported behavior row, not invalid input.
 
+The latest adjacent open guard classification is `history_impl.rs`
+`parent filter emitted unsupported token` for
+`git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits `1`
+after printing rewrite progress and commit-tree diagnostics, leaving `HEAD`
+unchanged and no original ref. Zmin currently exits `128` before rewrite
+progress with a custom unsupported-token diagnostic. This is now an open
+Git-supported behavior row, not invalid input.
+
 The latest `init` rows are `git init -q -b main repo` and
 `git init --quiet -b main repo`. Zmin suppresses init output and creates the
 requested initial branch like stock Git; `init_v2_47.tsv` now records the
@@ -556,7 +564,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1070` written-row
+This card is the exact handoff target after the current `1071` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -575,7 +583,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1070`; the `1/1070` open row and the still incomplete command/doc-option
+`0/1071`; the `2/1071` open rows and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -867,6 +875,7 @@ until implementation and focused parity evidence close them.
 | Source guard | Classification | Matrix / evidence |
 | --- | --- | --- |
 | `transport_impl.rs` `reftable ref storage is not supported yet` in `git clone --ref-format=reftable` parsing | open Git-supported feature gap; stock Git creates a reftable clone in the current oracle environment | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_reftable_is_open_gap_against_stock_git` |
+| `history_impl.rs` `parent filter emitted unsupported token` in `git filter-branch --parent-filter` output parsing | open Git-supported behavior gap; stock Git routes bad parent-filter output into commit-tree failure after rewrite progress | `docs/cli/matrices/filter_branch_v2_47.tsv`; `git_filter_branch_parent_filter_compat::filter_branch_parent_filter_bad_token_is_open_gap_against_stock_git` |
 
 ## Closed Code Guard Mappings
 
@@ -935,7 +944,7 @@ Largest raw clusters:
 | `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, HTTP/env guards; reftable clone is now recorded as an open row |
 | `pack_impl.rs` | `14` | classify pack/bundle format guards versus stock-supported variants |
 | `worktree_impl.rs` | `9` | split remaining ls-files, submodule, sparse-checkout, stash and worktree guards |
-| `history_impl.rs` | `7` | split blame ranges/options, reflog formats, diff/log decorators, filter-branch |
+| `history_impl.rs` | `7` | split blame ranges/options, reflog formats and diff/log decorators; bad parent-filter output is now recorded as an open row |
 | `pack.rs` | `6` | classify pack format guards versus corrupt-storage invalid inputs |
 | `maintenance_impl.rs` / `core_impl.rs` / `admin_impl.rs` | `12` | classify parser/runtime validation and Zmin-only hook validation |
 | remaining files | `16` | classify small parser/runtime guards individually |

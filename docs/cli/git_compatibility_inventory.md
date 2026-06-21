@@ -127,6 +127,8 @@ focused parity evidence checks the same surface.
   include, typed-value and invalid-input variants.
 - `docs/cli/matrices/fast_import_v2_47.tsv` tracks the first `fast-import`
   date-format value variant.
+- `docs/cli/matrices/filter_branch_v2_47.tsv` tracks the first
+  `filter-branch --parent-filter` open behavior gap.
 - `docs/cli/matrices/status_v2_47.tsv` is the first command-level matrix for
   Git `status`.
 - `docs/cli/matrices/fetch_v2_47.tsv` tracks the first `fetch` option,
@@ -220,12 +222,12 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `46/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
-| Git doc option pairs represented by rows | `248/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1070` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `808/1070` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1070` | no | written rows with incomplete parity |
-| Open written rows | `1/1070` | no | written rows that still do not match stock Git |
+| Commands with any matrix rows | `47/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
+| Git doc option pairs represented by rows | `249/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `1071` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `808/1071` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1071` | no | written rows with incomplete parity |
+| Open written rows | `2/1071` | no | written rows that still do not match stock Git |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -264,11 +266,11 @@ Current generated summary:
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` | `154` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `34` | `11` | `0` | `0` | `23` | `34` |
+| Administration | `8` | `0` | `147` | `0` | `35` | `11` | `0` | `1` | `23` | `34` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` | `116` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `48` | `21` | `0` | `0` | `27` | `39` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1070`** | **`808`** | **`0`** | **`1`** | **`261`** | **`683`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1071`** | **`808`** | **`0`** | **`2`** | **`261`** | **`683`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -278,10 +280,10 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `248/4632`
-represented option pairs or `808/1070` passing written rows as a Git support
-percentage. The `808/1070` number is audit progress for supported rows already
-written down; `0/1070` rows are partial, `1/1070` row is open and `261/1070`
+Never use `151/151` command presence, `4632` option spellings, `249/4632`
+represented option pairs or `808/1071` passing written rows as a Git support
+percentage. The `808/1071` number is audit progress for supported rows already
+written down; `0/1071` rows are partial, `2/1071` rows are open and `261/1071`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -311,6 +313,7 @@ variants.
 | `fetch` | `73` | `0` | `30` | `docs/cli/matrices/fetch_v2_47.tsv` | `291` | `283` | `0` | `0` | `8` | no |
 | `diff` | `133` | `0` | `31` | `docs/cli/matrices/diff_v2_47.tsv` | `66` | `65` | `0` | `0` | `1` | no |
 | `fast-import` | `25` | `0` | `1` | `docs/cli/matrices/fast_import_v2_47.tsv` | `7` | `4` | `0` | `0` | `3` | no |
+| `filter-branch` | `37` | `0` | `1` | `docs/cli/matrices/filter_branch_v2_47.tsv` | `1` | `0` | `0` | `1` | `0` | no |
 | `log` | `282` | `0` | `32` | `docs/cli/matrices/log_v2_47.tsv` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `docs/cli/matrices/for_each_ref_v2_47.tsv` | `34` | `23` | `0` | `0` | `11` | no |
 | `http-fetch` | `10` | `0` | `0` | `docs/cli/matrices/http_fetch_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
