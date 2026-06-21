@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 45/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1050 written rows / 788 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 247/4632 represented doc-option pairs / 1052 written rows / 790 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -534,14 +534,14 @@ that repository with exit `128`, empty stdout and invalid config diagnostics
 that include the local `.git/config` line number. Zmin now checks object format
 during status setup and emits the same diagnostics.
 
-The latest `clone` row is `git clone . dst` from inside a source worktree.
-Zmin records a fetchable `remote.origin.url` and a later `git fetch` updates
-`refs/remotes/origin/main` like stock Git; `clone_v2_47.tsv` now records the
-supported local-dot source variant.
+The latest `init` rows are `git init -q -b main repo` and
+`git init --quiet -b main repo`. Zmin suppresses init output and creates the
+requested initial branch like stock Git; `init_v2_47.tsv` now records the
+short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1050` written-row
+This card is the exact handoff target after the current `1052` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -560,7 +560,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1050`; the complete command matrices and complete doc-option matrices remain
+`0/1052`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
