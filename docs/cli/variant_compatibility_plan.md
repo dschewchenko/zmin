@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1093 written rows / 822 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 253/4632 represented doc-option pairs / 1094 written rows / 823 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,16 +266,16 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is the invalid mixed object `diff` operand form:
+The latest completed slice is the supported `filter-branch` message-filter
+form:
 
-`git diff HEAD^{tree} <blob>`
+`git filter-branch -f --msg-filter 'sed s/old/new/' HEAD`
 
-Stock Git rejects mixed tree/blob operands in either order with exit `129`,
-empty stdout and the full `git diff` usage text on stderr. Zmin now detects
-two resolved object operands that are neither a valid blob/blob pair nor a
-valid treeish/treeish pair and emits the same usage shape. The row is recorded
-in `docs/cli/matrices/diff_v2_47.tsv` with focused evidence in
-`git_diff_compat::diff_mixed_tree_and_blob_operands_match_stock_git_usage`.
+Stock Git rewrites the `HEAD` commit message, preserves the tree, and writes
+`refs/original/refs/heads/main`. Zmin has existing focused stock-oracle
+evidence for the same ref, log-message and tree side effects in
+`git_filter_branch_compat::filter_branch_msg_filter_rewrites_head_like_stock_git`;
+`docs/cli/matrices/filter_branch_v2_47.tsv` now records the row.
 
 ### No-Skip Rule
 
@@ -623,15 +623,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest closed behavior slice is the invalid mixed-object `diff` operand
-form. Stock Git rejects `git diff HEAD^{tree} <blob>` and the reverse order
-with exit `129`, empty stdout and the full `git diff` usage text. Zmin now
-detects two resolved object operands that are neither a valid blob/blob pair
-nor a valid treeish/treeish pair and emits the same usage shape.
+The latest closed behavior slice is the supported `filter-branch`
+message-filter form. Stock Git rewrites the `HEAD` commit message, preserves
+the tree, and writes `refs/original/refs/heads/main`; Zmin now has this
+behavior represented as an explicit matrix row with existing focused
+stock-oracle evidence.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1093` written-row
+This card is the exact handoff target after the current `1094` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -650,7 +650,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1093`; the `1/1093` open row and the still incomplete command/doc-option
+`0/1094`; the `1/1094` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -750,6 +750,7 @@ until a full matrix is expanded and verified.
 | `log --diff-merges` invalid value usage | `1` | `0` | `git log --diff-merges=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
 | `rebase -i` invalid todo command usage | `1` | `0` | `GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` with an unknown todo command exits `1` with stock invalid-command diagnostics, leaves `.git/rebase-merge` state for recovery, moves HEAD to the stock in-progress rebase point, and supports `git rebase --abort` cleanup instead of a custom unsupported-interactive-command fatal diagnostic |
+| `filter-branch --msg-filter` message rewrite | `1` | `0` | `git filter-branch -f --msg-filter 'sed s/old/new/' HEAD` rewrites the commit message, preserves the tree and writes `refs/original/refs/heads/main` like stock Git |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
@@ -916,7 +917,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `678` verified variants.
+Tracked closed blocks in this table: `693` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
