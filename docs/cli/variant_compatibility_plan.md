@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 41/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1041 written rows / 785 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 42/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1042 written rows / 785 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -442,9 +442,17 @@ guards out of closed Git compatibility counts until a real `git-archimport`
 oracle environment is available or the legacy GNU Arch bridge is explicitly
 scoped.
 
+The latest stock-compatible invalid-input guard classification is
+`transport_impl.rs` `unsupported index-pack option` in the `http-fetch`
+packfile helper path. Stock Git treats an invalid delegated
+`--index-pack-arg=--bad` token as an `index-pack` usage failure, exits `128`,
+leaves stdout empty and appends `fatal: finish_http_pack_request gave result
+-1` to stderr. Zmin now emits the same shape, and `http_fetch_v2_47.tsv`
+records the focused invalid-input row.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1041` written-row
+This card is the exact handoff target after the current `1042` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -463,7 +471,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1041`; the complete command matrices and complete doc-option matrices remain
+`0/1042`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -775,6 +783,7 @@ behavior, invalid input, or corrupt-format handling.
 | `worktree_impl.rs` `ls-files --recurse-submodules unsupported mode` guard | stock-compatible invalid input for unsupported recurse-submodules combinations | `docs/cli/matrices/ls_files_v2_47.tsv`; `git_ls_files_compat::ls_files_recurse_submodules_matches_stock_git` |
 | `admin_impl.rs` `unsupported hook '{hook_name}'` in `zmin hooks` managed-hook validation | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `/usr/bin/git hooks -h` reports that stock Git has no `hooks` command |
 | `worktree_impl.rs` `error: unsupported option '{other}'` in `git status --column=<value>` parsing | stock-compatible invalid input for unsupported status column mode tokens | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_column_mode_matches_stock_git` |
+| `transport_impl.rs` `unsupported index-pack option '{arg}'` in `http-fetch --packfile` delegated index-pack parsing | stock-compatible invalid input for invalid delegated `index-pack` arguments | `docs/cli/matrices/http_fetch_v2_47.tsv`; `git_transport_http_compat::http_fetch_packfile_rejects_bad_index_pack_arg_like_stock_git` |
 
 ## Code Guard Classification
 

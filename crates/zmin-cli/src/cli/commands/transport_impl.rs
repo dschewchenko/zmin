@@ -452,21 +452,22 @@ fn parse_http_fetch_index_pack_args(args: &[String]) -> Result<HttpFetchIndexPac
                     || value == "--fsck-objects"
                     || value.starts_with("--fsck-objects=") => {}
             _ => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported index-pack option '{arg}'"),
-                });
+                return Err(http_fetch_index_pack_usage_error());
             }
         }
         cursor += 1;
     }
     if !parsed.stdin {
-        return Err(CliError::Stderr {
-            code: 128,
-            text: "usage: git index-pack [-v] [-o <index-file>] [--keep | --keep=<msg>] [--[no-]rev-index] [--verify] [--strict[=<msg-id>=<severity>...]] [--fsck-objects[=<msg-id>=<severity>...]] (<pack-file> | --stdin [--fix-thin] [<pack-file>])\nfatal: finish_http_pack_request gave result -1\n".into(),
-        });
+        return Err(http_fetch_index_pack_usage_error());
     }
     Ok(parsed)
+}
+
+fn http_fetch_index_pack_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: "usage: git index-pack [-v] [-o <index-file>] [--keep | --keep=<msg>] [--[no-]rev-index] [--verify] [--strict[=<msg-id>=<severity>...]] [--fsck-objects[=<msg-id>=<severity>...]] (<pack-file> | --stdin [--fix-thin] [<pack-file>])\nfatal: finish_http_pack_request gave result -1\n".into(),
+    }
 }
 
 pub(crate) fn http_push(options: HttpPushOptions) -> Result<()> {

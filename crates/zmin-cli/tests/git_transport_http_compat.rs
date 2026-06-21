@@ -8764,6 +8764,57 @@ fn http_fetch_packfile_requires_index_pack_args_like_stock_git() {
 }
 
 #[test]
+fn http_fetch_packfile_rejects_bad_index_pack_arg_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("a.txt"), b"hello\n").expect("write a");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    git(&source, ["repack", "-ad"]);
+    git(&source, ["update-server-info"]);
+
+    let pack_dir = source.join(".git/objects/pack");
+    let pack_path = fs::read_dir(&pack_dir)
+        .expect("read source pack dir")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| path.extension().and_then(|ext| ext.to_str()) == Some("pack"))
+        .expect("source pack");
+    let pack_name = pack_path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .expect("pack file stem");
+    let pack_hash = pack_name
+        .strip_prefix("pack-")
+        .expect("pack hash from file name");
+    let server = StaticHttpServer::new(source);
+    let url = format!(
+        "http://127.0.0.1:{}/.git/objects/pack/pack-{pack_hash}.pack",
+        server.port
+    );
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    git(dir.path(), ["init", "git-client"]);
+    git(dir.path(), ["init", "zmin-client"]);
+
+    let args = [
+        "http-fetch",
+        &format!("--packfile={pack_hash}"),
+        "--index-pack-arg=index-pack",
+        "--index-pack-arg=--bad",
+        url.as_str(),
+    ];
+    assert_eq!(
+        command_failure_output("git", &git_client, &args, "git"),
+        run_zmin_failure_output(&zmin_client, &args)
+    );
+}
+
+#[test]
 fn ls_remote_reads_dumb_http_info_refs_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
