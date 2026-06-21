@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `30/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
+| Commands with any matrix rows | `31/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `238/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `972` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `763/972` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/972` | written rows that still do not match stock Git |
-| Invalid input rows | `209/972` | rows where stock Git rejects the input |
+| Written behavior rows | `975` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `763/975` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/975` | written rows that still do not match stock Git |
+| Invalid input rows | `212/975` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `763/972` as Git compatibility. It only means `763` of the `972`
+Do not read `763/975` as Git compatibility. It only means `763` of the `975`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `209/972` additional rows are
+unexpanded surface is not counted yet, and `212/975` additional rows are
 stock-compatible invalid inputs. Do not read `238/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -214,11 +214,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `14` | `7` | `0` | `7` |
+| Administration | `8` | `0` | `147` | `0` | `17` | `7` | `0` | `10` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `44` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `13` | `3` | `0` | `10` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`972`** | **`763`** | **`0`** | **`209`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`975`** | **`763`** | **`0`** | **`212`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -238,6 +238,7 @@ Current command-level matrices:
 | `cat-file` | `21` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `clean` | `13` | `0` | `3` | `11` | `7` | `0` | `0` | `4` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
+| `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
 | `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
 | `status` | `26` | `0` | `22` | `75` | `66` | `0` | `0` | `9` | no |
 | `fetch` | `73` | `0` | `30` | `289` | `283` | `0` | `0` | `6` | no |

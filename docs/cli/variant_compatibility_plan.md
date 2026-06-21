@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 30/151 commands with matrix rows / 238/4632 represented doc-option pairs / 972 written rows / 763 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 31/151 commands with matrix rows / 238/4632 represented doc-option pairs / 975 written rows / 763 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,10 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `rev-parse` blob peeling. Stock Git
-accepts `^{blob}` on direct blob object ids and annotated tags that point to
-blobs. Zmin now recognizes that peel suffix, dereferences tags and returns the
-same object ids.
+The latest closed guard classification is `commit-graph verify` header
+validation. Stock Git rejects checksum-valid commit-graph bad signatures,
+unsupported versions and unsupported hash versions with specific diagnostics
+and exit `1`. Zmin now emits the same diagnostics for those invalid-input
+variants instead of a generic unsupported-header fatal error.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -230,14 +231,14 @@ this cannot be closed without a Windows/non-Unix oracle run.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `972` written-row
+This card is the exact handoff target after the current `975` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
 | Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at `crates/zmin-cli/src/cli/commands/pack_impl.rs:1198` (`unsupported commit-graph header`) unless a new WebStorm replacement trace appears first |
+| Implementation area | start at `crates/zmin-cli/src/cli/commands/pack_impl.rs:3499` (`unsupported pack index version '{other}'`) unless a new WebStorm replacement trace appears first |
 | Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
@@ -249,7 +250,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/972`; the complete command matrices and complete doc-option matrices remain
+`0/975`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -475,6 +476,7 @@ until a full matrix is expanded and verified.
 | `fetch --recurse-submodules SSH/git-daemon submodule remotes` | `2` | `0` | on-demand recursion with smart HTTP parent and SSH or git-daemon submodule remotes fetches the changed gitlink commit without checking it out |
 | `fetch --jobs submodule recursion values` | `2` | `1` | accepted `--jobs=2` and `-j -1` with smart HTTP parent/local submodule recursion, plus invalid non-integer `--jobs`/`-j` diagnostics |
 | `fetch --dry-run smart HTTP submodule recursion` | `2` | `0` | default/on-demand and explicit `--recurse-submodules` smart HTTP parent/local-submodule dry-runs leave parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
+| `commit-graph verify` header variants | `3` | `0` | checksum-valid bad signature, bad version and bad hash version commit-graph files reject with stock diagnostics and exit `1` |
 | `submodule` subcommand unknown option usage | `6` | `0` | `git submodule add/status/update/deinit/set-branch/summary --bad` exit `1` with stock usage text instead of custom unsupported-option fatal diagnostics |
 | `bisect` visualize unknown option usage | `1` | `0` | `git bisect visualize --bad` after `bisect start` exits `128` with stock fatal diagnostic instead of a custom unsupported-option fatal diagnostic |
 | `cat-file` batch unknown atom usage | `1` | `0` | `git cat-file --batch='%(bad)'` exits `128` with stock fatal bad-format diagnostic instead of a custom unsupported-atom fatal diagnostic |
@@ -493,7 +495,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `621` verified variants.
+Tracked closed blocks in this table: `624` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

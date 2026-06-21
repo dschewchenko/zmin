@@ -1192,10 +1192,32 @@ fn verify_commit_graph_bytes(bytes: &[u8]) -> Result<()> {
             message: "commit-graph file is too small".into(),
         });
     }
-    if &bytes[..4] != b"CGPH" || bytes[4] != 1 || bytes[5] != 1 {
-        return Err(CliError::Fatal {
+    if &bytes[..4] != b"CGPH" {
+        let actual = u32::from_be_bytes(bytes[..4].try_into().expect("commit-graph signature"));
+        let expected = u32::from_be_bytes(*b"CGPH");
+        return Err(CliError::Stderr {
             code: 1,
-            message: "unsupported commit-graph header".into(),
+            text: format!(
+                "error: commit-graph signature {actual:08x} does not match signature {expected:08x}\n"
+            ),
+        });
+    }
+    if bytes[4] != 1 {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: commit-graph version {} does not match version 1\n",
+                bytes[4]
+            ),
+        });
+    }
+    if bytes[5] != 1 {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: commit-graph hash version {} does not match version 1\n",
+                bytes[5]
+            ),
         });
     }
     let chunk_count = bytes[6] as usize;

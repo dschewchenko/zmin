@@ -143,6 +143,35 @@ fn rewrite_midx_header(repo: &std::path::Path, offset: usize, replacement: &[u8]
     fs::write(path, bytes).expect("write rewritten midx header");
 }
 
+fn make_file_writable(path: &std::path::Path) {
+    let mut permissions = fs::metadata(path).expect("file metadata").permissions();
+    #[cfg(windows)]
+    permissions.set_readonly(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o644);
+    }
+    fs::set_permissions(path, permissions).expect("make file writable");
+}
+
+fn rewrite_commit_graph_header(repo: &std::path::Path, offset: usize, replacement: &[u8]) {
+    let path = repo.join(".git/objects/info/commit-graph");
+    let mut bytes = fs::read(&path).expect("read commit graph");
+    assert_eq!(&bytes[..4], b"CGPH");
+    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    let checksum_start = bytes.len() - digest_len;
+    assert!(offset + replacement.len() <= checksum_start);
+    bytes[offset..offset + replacement.len()].copy_from_slice(replacement);
+
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&bytes[..checksum_start]);
+    let checksum = hasher.finalize();
+    bytes[checksum_start..].copy_from_slice(checksum.as_bytes());
+    make_file_writable(&path);
+    fs::write(path, bytes).expect("write rewritten commit graph header");
+}
+
 fn duplicate_packed_head_as_loose(repo: &std::path::Path) -> String {
     let id = git(repo, ["rev-parse", "HEAD"]);
     let loose_path = loose_object_path(repo, &id);
@@ -237,6 +266,19 @@ fn pack_file_names(repo: &std::path::Path) -> BTreeSet<String> {
     }
 }
 
+fn commit_graph_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "b.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    repo
+}
+
 fn two_pack_midx_fixture() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -315,15 +357,7 @@ fn collect_ref_files(dir: &std::path::Path, prefix: &str, refs: &mut Vec<String>
 
 #[test]
 fn commit_graph_write_creates_stock_verifiable_graph() {
-    let repo = git_init();
-    configure_identity(repo.path());
-    git(repo.path(), ["checkout", "-b", "main"]);
-    write_file(repo.path(), "a.txt", "one\n");
-    git(repo.path(), ["add", "-A"]);
-    git_with_env(repo.path(), ["commit", "-m", "one"]);
-    write_file(repo.path(), "b.txt", "two\n");
-    git(repo.path(), ["add", "-A"]);
-    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    let repo = commit_graph_fixture_repo();
 
     assert_eq!(
         run_zmin(repo.path(), ["commit-graph", "write", "--reachable"]),
@@ -332,6 +366,33 @@ fn commit_graph_write_creates_stock_verifiable_graph() {
     assert!(repo.path().join(".git/objects/info/commit-graph").exists());
     assert_eq!(run_zmin(repo.path(), ["commit-graph", "verify"]), "");
     assert_eq!(git_status(repo.path(), ["commit-graph", "verify"]), 0);
+}
+
+#[test]
+fn commit_graph_verify_header_variants_match_stock_git() {
+    for (label, offset, replacement) in [
+        ("bad signature", 0, b"BAD!".as_slice()),
+        ("bad version", 4, b"\x02".as_slice()),
+        ("bad hash version", 5, b"\x02".as_slice()),
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        git(git_repo.path(), ["commit-graph", "write", "--reachable"]);
+        git(zmin_repo.path(), ["commit-graph", "write", "--reachable"]);
+        rewrite_commit_graph_header(git_repo.path(), offset, replacement);
+        rewrite_commit_graph_header(zmin_repo.path(), offset, replacement);
+
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["commit-graph", "verify"],
+                "zmin",
+            ),
+            command_any_output("git", git_repo.path(), &["commit-graph", "verify"], "git",),
+            "{label}"
+        );
+    }
 }
 
 #[test]
