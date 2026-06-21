@@ -2424,6 +2424,11 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
             pattern, from_line,
         ));
     }
+    if blame_regex_has_invalid_collating_element(pattern) {
+        return Err(blame_line_range_regex_invalid_collating_element(
+            pattern, from_line,
+        ));
+    }
     if blame_regex_has_invalid_character_class(pattern) {
         return Err(blame_line_range_regex_invalid_character_class(
             pattern, from_line,
@@ -2724,6 +2729,49 @@ fn blame_character_class_has_invalid_range(class_bytes: &[u8]) -> bool {
     false
 }
 
+fn blame_regex_has_invalid_collating_element(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'[' {
+            index += 1;
+            continue;
+        }
+        index += 1;
+        while index + 3 < bytes.len() {
+            if bytes[index] == b'\\' {
+                index += 2;
+                continue;
+            }
+            if bytes[index] == b']' {
+                break;
+            }
+            if bytes[index] == b'[' && matches!(bytes.get(index + 1), Some(b'.' | b'=')) {
+                let delimiter = bytes[index + 1];
+                let element_start = index + 2;
+                let Some(element_end) = bytes[element_start..]
+                    .windows(2)
+                    .position(|window| window == [delimiter, b']'])
+                    .map(|offset| element_start + offset)
+                else {
+                    index += 1;
+                    continue;
+                };
+                if bytes.get(element_end + 2) == Some(&b']') {
+                    let element = &pattern[element_start..element_end];
+                    if element.chars().count() != 1 {
+                        return true;
+                    }
+                    index = element_end + 3;
+                    continue;
+                }
+            }
+            index += 1;
+        }
+    }
+    false
+}
+
 fn blame_regex_has_invalid_character_class(pattern: &str) -> bool {
     let bytes = pattern.as_bytes();
     let mut index = 0;
@@ -2868,6 +2916,15 @@ fn blame_line_range_regex_invalid_character_class(pattern: &str, start_line: usi
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: invalid character class"
+        ),
+    }
+}
+
+fn blame_line_range_regex_invalid_collating_element(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: invalid collating element"
         ),
     }
 }
