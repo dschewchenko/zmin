@@ -11765,7 +11765,7 @@ pub(crate) fn fetch_with_repo_and_remote(
     prune: bool,
     prune_tags: bool,
     no_tags: bool,
-    _tags: bool,
+    tags: bool,
     atomic: bool,
     refmap: &[String],
     prefetch: bool,
@@ -12215,7 +12215,37 @@ pub(crate) fn fetch_with_repo_and_remote(
         if atomic {
             run_reference_transaction_hook(&repo, "committed", &atomic_updates)?;
         }
-        write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, prefetch)?;
+        if tags {
+            let source_repo = local_clone_source_repo(&source);
+            let source_store = object_adapter_from_objects_dir(source.common_dir.join("objects"));
+            let mut tag_roots = Vec::new();
+            source_refs.for_each_resolved_ref("refs/tags/", |_, tag_id| {
+                tag_roots.push(tag_id.clone());
+                Ok::<(), CliError>(())
+            })?;
+            sort_dedup_object_ids(&mut tag_roots);
+            let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
+                source_store.object_id_capacity_hint()?,
+                tag_roots.len(),
+            ));
+            copy_reachable_objects_into_many(
+                &source_repo,
+                &source_store,
+                &destination_store,
+                &tag_roots,
+                &[],
+                &mut seen,
+                PackEncodeOptions::delta(10, 50),
+                fetch_unpack_pack_threshold(&repo)?,
+            )?;
+            copy_configured_fetch_tags(&source_refs, &destination_refs)?;
+            write_branch_fetch_head_with_tags_file(&repo, &id, &ref_name, &source_refs, &url)?;
+            if !quiet {
+                print_named_branch_fetch_with_tags(&url, branch, &remote, &source_refs)?;
+            }
+        } else {
+            write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, prefetch)?;
+        }
         return Ok(());
     }
     if !fetch_refspecs.is_empty() {
@@ -15158,6 +15188,17 @@ fn print_branch_fetch_with_tags(url: &str, branch: &str, source_refs: &RefStore)
         eprintln!(" * [new tag]         {tag:<11}-> {tag}");
         Ok::<(), CliError>(())
     })
+}
+
+fn print_named_branch_fetch_with_tags(
+    url: &str,
+    branch: &str,
+    remote: &str,
+    source_refs: &RefStore,
+) -> Result<()> {
+    print_branch_fetch_with_tags(url, branch, source_refs)?;
+    eprintln!(" * [new branch]      {branch:<11}-> {remote}/{branch}");
+    Ok(())
 }
 
 fn write_fetch_head_content(repo: &GitRepo, content: &[u8], append: bool) -> Result<()> {

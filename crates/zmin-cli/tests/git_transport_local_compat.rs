@@ -1524,6 +1524,79 @@ fn fetch_tags_direct_location_branch_follows_tags_like_stock_git() {
 }
 
 #[test]
+fn fetch_tags_named_local_remote_branch_follows_tags_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("foo"), b"foo\n").expect("write foo");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "foo"]);
+    git(&source, ["tag", "-a", "-m", "annotated", "anno", "HEAD"]);
+    git(&source, ["tag", "light", "HEAD"]);
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client path"),
+        ],
+    );
+    git(
+        &git_client,
+        ["remote", "add", "origin", source.to_str().unwrap()],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+    );
+    run_zmin(
+        &zmin_client,
+        ["remote", "add", "origin", source.to_str().unwrap()],
+    );
+
+    let args = ["fetch", "--tags", "origin", "main"];
+    let git_output = command_any_output("git", &git_client, &args, "git fetch tags origin main");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch tags origin main",
+    );
+
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "refs/tags/anno"]),
+        git(&git_client, ["cat-file", "-p", "refs/tags/anno"])
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "refs/tags/light:foo"]),
+        git(&git_client, ["cat-file", "-p", "refs/tags/light:foo"])
+    );
+}
+
+#[test]
 fn fetch_prune_direct_location_one_to_one_refspec_matches_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
