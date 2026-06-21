@@ -3364,6 +3364,60 @@ fn bundle_create_accepts_version_option_for_upstream_fetch_suite() {
 }
 
 #[test]
+fn bundle_create_version_values_match_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+
+    let bundle_dir = TempDir::new().expect("bundle dir");
+    for (idx, version) in ["2", "3", "-1", "1", "4", "1k", "foo", ""]
+        .into_iter()
+        .enumerate()
+    {
+        let git_bundle = bundle_dir.path().join(format!("git-{idx}.bundle"));
+        let zmin_bundle = bundle_dir.path().join(format!("zmin-{idx}.bundle"));
+        let version_arg = format!("--version={version}");
+        let git_bundle_arg = git_bundle.to_str().expect("git bundle path");
+        let zmin_bundle_arg = zmin_bundle.to_str().expect("zmin bundle path");
+
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                source.path(),
+                &["bundle", "create", &version_arg, zmin_bundle_arg, "HEAD"],
+                "zmin",
+            ),
+            command_any_output(
+                "git",
+                source.path(),
+                &["bundle", "create", &version_arg, git_bundle_arg, "HEAD"],
+                "git",
+            ),
+            "bundle --version={version}"
+        );
+        assert_eq!(
+            zmin_bundle.exists(),
+            git_bundle.exists(),
+            "bundle side effect for --version={version}"
+        );
+        if git_bundle.exists() {
+            assert_eq!(
+                first_line(&zmin_bundle),
+                first_line(&git_bundle),
+                "bundle header for --version={version}"
+            );
+            assert_eq!(
+                git_status_args(source.path(), &["bundle", "verify", zmin_bundle_arg]),
+                0,
+                "stock Git should verify zmin bundle for --version={version}"
+            );
+        }
+    }
+}
+
+#[test]
 fn bundle_create_accepts_since_option_for_upstream_fetch_suite() {
     let source = git_init();
     configure_identity(source.path());
@@ -3478,6 +3532,15 @@ fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
         .collect::<Vec<_>>();
     paths.sort();
     paths.into_iter().next().expect("pack index")
+}
+
+fn first_line(path: &Path) -> String {
+    let bytes = fs::read(path).expect("read file");
+    let line = bytes
+        .split(|byte| *byte == b'\n')
+        .next()
+        .expect("first line");
+    String::from_utf8(line.to_vec()).expect("first line utf8")
 }
 
 fn flip_last_byte(path: &std::path::Path) {

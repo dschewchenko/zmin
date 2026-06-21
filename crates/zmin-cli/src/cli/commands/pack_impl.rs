@@ -3671,13 +3671,7 @@ pub(crate) fn bundle(
 }
 
 fn bundle_create(file: PathBuf, version: Option<String>, revs: Vec<String>) -> Result<()> {
-    let bundle_version = version.as_deref().unwrap_or("2");
-    if !matches!(bundle_version, "2" | "3") {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported bundle version '{bundle_version}'"),
-        });
-    }
+    let bundle_version = parse_bundle_create_version(version.as_deref())?;
     let (max_count, since, revs) = parse_bundle_create_revs(revs)?;
     if revs.is_empty() {
         return Err(CliError::Fatal {
@@ -3793,6 +3787,39 @@ fn bundle_create(file: PathBuf, version: Option<String>, revs: Vec<String>) -> R
     result?;
     fs::rename(temp_file, file)?;
     Ok(())
+}
+
+fn parse_bundle_create_version(version: Option<&str>) -> Result<&'static str> {
+    let Some(version) = version else {
+        return Ok("2");
+    };
+    let parsed = parse_bundle_version_value(version).ok_or_else(|| CliError::Stderr {
+        code: 129,
+        text: if version.is_empty() {
+            "error: option `version' expects a numerical value\n".into()
+        } else {
+            "error: option `version' expects an integer value with an optional k/m/g suffix\n"
+                .into()
+        },
+    })?;
+    match parsed {
+        -1 | 2 => Ok("2"),
+        3 => Ok("3"),
+        other => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported bundle version {other}"),
+        }),
+    }
+}
+
+fn parse_bundle_version_value(value: &str) -> Option<i64> {
+    let (number, scale) = match value.as_bytes().last().copied() {
+        Some(b'k' | b'K') => (&value[..value.len() - 1], 1024_i64),
+        Some(b'm' | b'M') => (&value[..value.len() - 1], 1024_i64 * 1024),
+        Some(b'g' | b'G') => (&value[..value.len() - 1], 1024_i64 * 1024 * 1024),
+        _ => (value, 1),
+    };
+    number.parse::<i64>().ok()?.checked_mul(scale)
 }
 
 fn parse_bundle_create_revs(

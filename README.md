@@ -169,18 +169,18 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `33/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
-| Documented option spellings represented by rows | `239/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `986` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `767/986` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/986` | written rows that still do not match stock Git |
-| Invalid input rows | `219/986` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `34/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
+| Documented option spellings represented by rows | `240/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `994` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `770/994` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/994` | written rows that still do not match stock Git |
+| Invalid input rows | `224/994` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `767/986` as Git compatibility. It only means `767` of the `986`
+Do not read `770/994` as Git compatibility. It only means `770` of the `994`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `219/986` additional rows are
-stock-compatible invalid inputs. Do not read `239/4632` as option support
+unexpanded surface is not counted yet, and `224/994` additional rows are
+stock-compatible invalid inputs. Do not read `240/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -214,11 +214,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `17` | `7` | `0` | `10` |
+| Administration | `8` | `0` | `147` | `0` | `25` | `10` | `0` | `15` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `44` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `24` | `7` | `0` | `17` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`986`** | **`767`** | **`0`** | **`219`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`994`** | **`770`** | **`0`** | **`224`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -235,6 +235,7 @@ Current command-level matrices:
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `blame` | `39` | `0` | `6` | `101` | `21` | `0` | `0` | `80` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
+| `bundle` | `15` | `0` | `1` | `8` | `3` | `0` | `0` | `5` | no |
 | `cat-file` | `21` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `clean` | `13` | `0` | `3` | `11` | `7` | `0` | `0` | `4` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
