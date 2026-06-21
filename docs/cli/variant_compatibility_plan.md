@@ -432,6 +432,16 @@ command`. That proves only the local unavailable-command shape, not
 counts until a real `git-svn` oracle environment is available or the product
 explicitly scopes the legacy SVN bridge.
 
+The latest adjacent deferred guard classification is `admin_impl.rs`
+`unsupported archimport option` plus the intentionally unsupported `-o`
+old-style branch-name mode. The current stock-Git oracle environment does not
+ship `git-archimport`: `git archimport --bad` exits `1` with
+`git: 'archimport' is not a git command`. That proves only the local
+unavailable-command shape, not GNU Arch bridge option behavior. Keep these
+guards out of closed Git compatibility counts until a real `git-archimport`
+oracle environment is available or the legacy GNU Arch bridge is explicitly
+scoped.
+
 ### Current Slice Card
 
 This card is the exact handoff target after the current `1041` written-row
