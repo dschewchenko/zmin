@@ -217,6 +217,24 @@ fn blame_line_range_forms_match_stock_git() {
 }
 
 #[test]
+fn blame_reversed_absolute_line_ranges_match_stock_git() {
+    let git_repo = blame_line_range_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    for args in [
+        ["blame", "-L", "2,1", "a.txt"].as_slice(),
+        ["blame", "-L", "4,2", "a.txt"].as_slice(),
+        ["blame", "-L", "5,1", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
     let git_repo = blame_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

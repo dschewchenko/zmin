@@ -2260,9 +2260,9 @@ fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
         }
     };
     if end < start {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported blame line range '{value}'"),
+        return Ok(BlameLineRange::Numeric {
+            start: end,
+            end: start,
         });
     }
     Ok(BlameLineRange::Numeric { start, end })
