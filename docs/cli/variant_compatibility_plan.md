@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1481 written rows / 1189 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1485 written rows / 1193 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,14 +269,14 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice extends the `config` command matrix with raw
-bool-or-str read rows from existing stock-oracle evidence:
+The latest completed slice extends the `config` command matrix with typed color
+write rows from existing stock-oracle evidence:
 
-`git config --get demo.label`
+`git config --type=color demo.rgb #010203 #0a0b0c`
 
-`docs/cli/matrices/config_v2_47.tsv` now records raw `--get` rows after
-`--type=bool-or-str` writes for `demo.flag` and `demo.label` from
-`git_admin_tools_compat::config_type_bool_or_str_matches_stock_git`.
+`docs/cli/matrices/config_v2_47.tsv` now records `--type=color` writes for
+`demo.red`, `demo.boldred`, `demo.rgb` and `demo.reset` from
+`git_admin_tools_compat::config_type_path_expiry_and_color_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,13 +626,13 @@ commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
 The latest matrix inventory slice extends `config_v2_47.tsv` with rows already
-covered by `git_admin_tools_compat::config_type_bool_or_str_matches_stock_git`:
-raw `--get` rows after `--type=bool-or-str` writes for `demo.flag` and
-`demo.label`. No Rust behavior changed.
+covered by `git_admin_tools_compat::config_type_path_expiry_and_color_match_stock_git`:
+`--type=color` writes for `demo.red`, `demo.boldred`, `demo.rgb` and
+`demo.reset`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1481` written-row
+This card is the exact handoff target after the current `1485` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1481`; the `1/1481` open row and the still incomplete command/doc-option
+`0/1485`; the `1/1485` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
