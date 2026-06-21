@@ -2674,6 +2674,9 @@ fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
 }
 
 fn blame_regex_has_invalid_character_range(pattern: &str) -> bool {
+    if blame_regex_has_posix_class_range_endpoint(pattern) {
+        return true;
+    }
     let bytes = pattern.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -2715,6 +2718,66 @@ fn blame_regex_has_invalid_character_range(pattern: &str) -> bool {
         index = if closed { index + 1 } else { class_start + 1 };
     }
     false
+}
+
+fn blame_regex_has_posix_class_range_endpoint(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'[' {
+            index += 1;
+            continue;
+        }
+        let class_start = index + 1;
+        index = class_start;
+        if bytes.get(index) == Some(&b'^') {
+            index += 1;
+        }
+        while index < bytes.len() {
+            if bytes[index] == b'[' && bytes.get(index + 1) == Some(&b':') {
+                if let Some(end) = closing_posix_character_class(bytes, index) {
+                    index = end + 2;
+                    continue;
+                }
+            }
+            if bytes[index] == b']' {
+                break;
+            }
+            if bytes[index] == b'-'
+                && index > class_start
+                && !matches!(bytes.get(index + 1), None | Some(b']'))
+                && (posix_character_class_ends_at(bytes, class_start, index)
+                    || posix_character_class_starts_at(bytes, index + 1))
+            {
+                return true;
+            }
+            index += 1;
+        }
+    }
+    false
+}
+
+fn closing_posix_character_class(bytes: &[u8], start: usize) -> Option<usize> {
+    bytes[start + 2..]
+        .windows(2)
+        .position(|window| window == b":]")
+        .map(|offset| start + 2 + offset)
+}
+
+fn posix_character_class_ends_at(bytes: &[u8], class_start: usize, end: usize) -> bool {
+    if end < class_start + 4
+        || bytes.get(end - 1) != Some(&b']')
+        || bytes.get(end - 2) != Some(&b':')
+    {
+        return false;
+    }
+    (class_start..end - 2).any(|index| bytes[index] == b'[' && bytes.get(index + 1) == Some(&b':'))
+}
+
+fn posix_character_class_starts_at(bytes: &[u8], start: usize) -> bool {
+    bytes.get(start) == Some(&b'[')
+        && bytes.get(start + 1) == Some(&b':')
+        && closing_posix_character_class(bytes, start).is_some()
 }
 
 fn blame_character_class_has_invalid_range(class_bytes: &[u8]) -> bool {

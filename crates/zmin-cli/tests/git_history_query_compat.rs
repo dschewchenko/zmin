@@ -508,6 +508,9 @@ fn blame_invalid_character_range_regexes_match_stock_git_failure() {
     for args in [
         ["blame", "-L", "/[z-a]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[b-a]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[[:digit:]-a]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[[:digit:]-[:alpha:]]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[a-[:upper:]]/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),
