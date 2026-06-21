@@ -5,9 +5,9 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_output, configure_identity, git, git_args, git_failure_output, git_init, git_with_env,
-    git_with_stdin, run_zmin, run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin,
-    zmin_bin,
+    command_any_output, command_output, configure_identity, git, git_args, git_failure_output,
+    git_init, git_with_env, git_with_stdin, run_zmin, run_zmin_failure_output, run_zmin_with_env,
+    run_zmin_with_stdin, zmin_bin,
 };
 
 fn committed_repo() -> TempDir {
@@ -41,6 +41,58 @@ fn checkout_index_fixture_repo() -> TempDir {
     fs::remove_file(repo.path().join("README.md")).expect("remove readme");
     fs::remove_file(repo.path().join("docs/guide.md")).expect("remove guide");
     repo
+}
+
+#[cfg(unix)]
+fn write_delayed_smudge_filter_helper(path: &std::path::Path) {
+    fs::write(
+        path,
+        r#"use strict;
+use warnings;
+binmode STDIN;
+binmode STDOUT;
+$| = 1;
+sub readpkt {
+    my $header = "";
+    my $read = read(STDIN, $header, 4);
+    exit 0 unless defined($read) && $read == 4;
+    my $len = hex($header);
+    return "" if $len == 0;
+    my $payload = "";
+    read(STDIN, $payload, $len - 4) == $len - 4 or die "short read";
+    return $payload;
+}
+sub readtext {
+    my $value = readpkt();
+    $value =~ s/\n$// if defined $value;
+    return $value;
+}
+sub writepkt {
+    my ($payload) = @_;
+    printf "%04x%s", length($payload) + 4, $payload;
+}
+sub flushpkt { print "0000"; }
+readtext();
+readtext();
+readtext();
+writepkt("git-filter-server");
+writepkt("version=2");
+flushpkt();
+while ((my $capability = readtext()) ne "") {}
+writepkt("capability=smudge");
+flushpkt();
+while (1) {
+    my $command = readtext();
+    last unless defined $command;
+    readtext();
+    while ((my $metadata = readtext()) ne "") {}
+    while ((my $packet = readpkt()) ne "") {}
+    writepkt("status=delayed");
+    flushpkt();
+}
+"#,
+    )
+    .expect("write delayed smudge filter helper");
 }
 
 #[test]
@@ -698,6 +750,50 @@ fn checkout_index_matches_stock_git_for_all_paths_stdin_and_prefix() {
     assert_eq!(
         fs::read(zmin_repo.path().join("docs/guide.md")).expect("read zmin stdin guide"),
         fs::read(git_repo.path().join("docs/guide.md")).expect("read git stdin guide")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn checkout_index_delayed_smudge_process_filter_matches_stock_git_failure() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let helper_dir = TempDir::new().expect("helper tempdir");
+    let helper = helper_dir.path().join("delayed-smudge-filter.pl");
+    write_delayed_smudge_filter_helper(&helper);
+    let command = format!("perl {}", helper.display());
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(repo.join("a.bad"), b"hello\n").expect("write indexed file");
+        git(repo, ["add", "a.bad"]);
+        fs::write(repo.join(".gitattributes"), b"*.bad filter=bad\n").expect("write attributes");
+        git(repo, ["config", "filter.bad.process", &command]);
+        git(repo, ["config", "filter.bad.required", "true"]);
+        fs::remove_file(repo.join("a.bad")).expect("remove worktree file");
+    }
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["checkout-index", "-f", "a.bad"],
+            "zmin checkout-index delayed smudge process filter",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["checkout-index", "-f", "a.bad"],
+            "git checkout-index delayed smudge process filter",
+        )
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("a.bad")).ok(),
+        fs::read(git_repo.path().join("a.bad")).ok()
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
     );
 }
 

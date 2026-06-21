@@ -3809,22 +3809,43 @@ pub(crate) fn checkout_index_command(
         None => (repo.root.clone(), original_selected.clone(), Vec::new()),
     };
     let selected_index = GitIndex::from_entries(checkout_entries)?;
+    let materialized_paths = selected_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| {
+            let path = root.join(String::from_utf8_lossy(&entry.path).as_ref());
+            let existed = path_exists(&path);
+            (path, existed)
+        })
+        .collect::<Vec<_>>();
     checkout_index(
         &store,
         &selected_index,
         root,
         CheckoutIndexOptions { force },
     )?;
-    if prefixed_paths.is_empty() {
-        smudge_worktree_filter_entries(&repo, &selected_index)?;
+    let smudge_result = if prefixed_paths.is_empty() {
+        smudge_worktree_filter_entries(&repo, &selected_index)
     } else {
-        for (entry, path) in original_selected.iter().zip(prefixed_paths) {
-            smudge_worktree_filter_entry_at_path(
-                &repo,
-                entry,
-                &repo.root.join(String::from_utf8_lossy(&path).as_ref()),
-            )?;
+        (|| {
+            for (entry, path) in original_selected.iter().zip(prefixed_paths) {
+                smudge_worktree_filter_entry_at_path(
+                    &repo,
+                    entry,
+                    &repo.root.join(String::from_utf8_lossy(&path).as_ref()),
+                )?;
+            }
+            Ok(())
+        })()
+    };
+    if let Err(error) = smudge_result {
+        for (path, existed) in materialized_paths {
+            if !existed {
+                let _ = fs::remove_file(path);
+            }
         }
+        return Err(error);
     }
     Ok(())
 }

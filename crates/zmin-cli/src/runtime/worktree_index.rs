@@ -2495,7 +2495,8 @@ fn run_worktree_process_filter(
         filters.insert(key.clone(), process);
     }
     let required = worktree_filter_required(repo, filter)?;
-    let status = {
+    let delay_requested = metadata.iter().any(|item| item == "can-delay=1");
+    let (status, delay_capable) = {
         let process = filters
             .get_mut(&key)
             .ok_or_else(|| CliError::Message("filter process disappeared".to_owned()))?;
@@ -2508,7 +2509,10 @@ fn run_worktree_process_filter(
         if !process.capabilities.contains(direction) {
             return Ok(None);
         }
-        process.send_request(direction, relative, metadata, content)
+        (
+            process.send_request(direction, relative, metadata, content),
+            process.capabilities.contains("delay"),
+        )
     };
     let status = match status {
         Ok(status) => status,
@@ -2524,7 +2528,7 @@ fn run_worktree_process_filter(
     };
     match status {
         ProcessFilterResponse::Content(content) => Ok(Some(WorktreeFilterResult::Content(content))),
-        ProcessFilterResponse::Delayed if metadata.iter().any(|item| item == "can-delay=1") => {
+        ProcessFilterResponse::Delayed if delay_requested && delay_capable => {
             Ok(Some(WorktreeFilterResult::Delayed { key }))
         }
         ProcessFilterResponse::Delayed => {
