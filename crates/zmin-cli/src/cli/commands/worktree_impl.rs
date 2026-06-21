@@ -7366,7 +7366,8 @@ where
         'G' => render_stash_gpg_atom(chars, out)?,
         'C' => {
             let Some(sequence) = consume_stash_color_atom(chars) else {
-                return Err(unsupported_stash_list_format_atom("%C"));
+                out.push_str("%C");
+                return Ok(());
             };
             out.push_str(&sequence);
         }
@@ -7400,7 +7401,8 @@ where
     I: Iterator<Item = char>,
 {
     let Some(reflog_atom) = chars.next() else {
-        return Err(unsupported_stash_list_format_atom("%g"));
+        out.push_str("%g");
+        return Ok(());
     };
     match reflog_atom {
         'd' => out.push_str(&format!("stash@{{{index}}}")),
@@ -7447,7 +7449,9 @@ where
     I: Iterator<Item = char>,
 {
     let Some(next) = chars.next() else {
-        return Err(unsupported_stash_list_format_atom(&format!("%{prefix}")));
+        out.push('%');
+        out.push_str(prefix);
+        return Ok(());
     };
     match next {
         'n' => out.push_str(&signature_name(signature)),
@@ -7471,7 +7475,8 @@ where
     I: Iterator<Item = char>,
 {
     let Some(next) = chars.next() else {
-        return Err(unsupported_stash_list_format_atom("%G"));
+        out.push_str("%G");
+        return Ok(());
     };
     match next {
         '?' => out.push('N'),
