@@ -483,10 +483,7 @@ impl<'a> FastImportParser<'a> {
             } else if let Some(ref_name) = line.strip_prefix("reset ") {
                 self.parse_reset(ref_name)?;
             } else {
-                return Err(CliError::Fatal {
-                    code: 1,
-                    message: format!("unsupported fast-import command: {line}"),
-                });
+                return Err(self.unsupported_fast_import_command(&line)?);
             }
         }
         Ok(())
@@ -780,6 +777,43 @@ impl<'a> FastImportParser<'a> {
             self.cursor += 1;
         }
     }
+
+    fn unsupported_fast_import_command(&self, line: &str) -> Result<CliError> {
+        let crash_file = format!("fast_import_crash_{}", std::process::id());
+        let crash_path = self.repo.git_dir.join(&crash_file);
+        fs::write(&crash_path, fast_import_crash_report(line))?;
+        Ok(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "Unsupported command: {line}\nfast-import: dumping crash report to .git/{crash_file}"
+            ),
+        })
+    }
+}
+
+fn fast_import_crash_report(line: &str) -> String {
+    format!(
+        "fast-import crash report:\n\
+             \n\
+             fatal: Unsupported command: {line}\n\
+             \n\
+             Most Recent Commands Before Crash\n\
+             ---------------------------------\n\
+             * {line}\n\
+             \n\
+             Active Branch LRU\n\
+             -----------------\n\
+                 active_branches = 0 cur, 5 max\n\
+             \n\
+             Inactive Branches\n\
+             -----------------\n\
+             \n\
+             Marks\n\
+             -----\n\
+             \n\
+             -------------------\n\
+             END OF CRASH REPORT\n"
+    )
 }
 
 fn parse_fast_import_rfc2822_signature(raw: &str) -> Result<Signature> {
