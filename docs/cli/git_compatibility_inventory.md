@@ -239,11 +239,11 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `52/151` | no | audit rows exist for `add`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `283/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1198` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `916/1198` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1198` | no | written rows with incomplete parity |
-| Open written rows | `1/1198` | no | written rows that still do not match stock Git |
-| Invalid input rows | `281/1198` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Written behavior rows | `1206` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `923/1206` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1206` | no | written rows with incomplete parity |
+| Open written rows | `1/1206` | no | written rows that still do not match stock Git |
+| Invalid input rows | `282/1206` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -284,9 +284,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` | `47` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `21` | `0` | `650` | `0` | `238` | `176` | `0` | `0` | `62` | `116` |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `246` | `183` | `0` | `0` | `63` | `116` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `48` | `21` | `0` | `0` | `27` | `40` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1198`** | **`916`** | **`0`** | **`1`** | **`281`** | **`721`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1206`** | **`923`** | **`0`** | **`1`** | **`282`** | **`721`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -297,9 +297,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `283/4632`
-represented option pairs or `916/1198` passing written rows as a Git support
-percentage. The `916/1198` number is audit progress for supported rows already
-written down; `0/1198` rows are partial, `1/1198` rows are open and `281/1198`
+represented option pairs or `923/1206` passing written rows as a Git support
+percentage. The `923/1206` number is audit progress for supported rows already
+written down; `0/1206` rows are partial, `1/1206` rows are open and `282/1206`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -340,7 +340,7 @@ variants.
 | `http-fetch` | `10` | `0` | `0` | `docs/cli/matrices/http_fetch_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `index-pack` | `18` | `0` | `1` | `docs/cli/matrices/index_pack_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
 | `init` | `10` | `0` | `2` | `docs/cli/matrices/init_v2_47.tsv` | `2` | `2` | `0` | `0` | `0` | no |
-| `ls-files` | `42` | `0` | `28` | `docs/cli/matrices/ls_files_v2_47.tsv` | `83` | `66` | `0` | `0` | `17` | no |
+| `ls-files` | `42` | `0` | `28` | `docs/cli/matrices/ls_files_v2_47.tsv` | `91` | `73` | `0` | `0` | `18` | no |
 | `ls-remote` | `16` | `0` | `0` | `docs/cli/matrices/ls_remote_v2_47.tsv` | `2` | `1` | `0` | `0` | `1` | no |
 | `ls-tree` | `15` | `0` | `2` | `docs/cli/matrices/ls_tree_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `maintenance` | `14` | `0` | `3` | `docs/cli/matrices/maintenance_v2_47.tsv` | `5` | `0` | `0` | `0` | `5` | no |
