@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 53/151 commands with matrix rows / 348/4632 represented doc-option pairs / 1422 written rows / 1139 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 54/151 commands with matrix rows / 349/4632 represented doc-option pairs / 1432 written rows / 1148 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands the `config` command matrix from existing
-stock-oracle evidence:
+The latest completed slice adds the first `var` command matrix rows from
+existing stock-oracle evidence:
 
-`git config --type=expiry-date demo.never`
+`git var GIT_AUTHOR_IDENT`
 
-`docs/cli/matrices/config_v2_47.tsv` now splits concrete expiry-date and color
-rows from the
-existing `git_admin_tools_compat::config_type_path_expiry_and_color_match_stock_git`
-stock-oracle test: `never` and `now` expiry-date typed writes/reads plus named,
-bold, RGB and reset color typed reads.
+`docs/cli/matrices/var_v2_47.tsv` now records identity, list, path query and
+missing-name invalid-input rows from
+`git_admin_tools_compat::var_identity_matches_stock_git` and
+`git_admin_tools_compat::var_list_and_failures_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -627,16 +626,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `config --type=expiry-date` and
-`config --type=color` rows already
-covered by
-`git_admin_tools_compat::config_type_path_expiry_and_color_match_stock_git`:
-`never` and `now` expiry-date typed writes/reads plus named, bold, RGB and
-reset color typed reads. No Rust behavior changed.
+The latest matrix inventory slice adds `var_v2_47.tsv` rows already covered by
+`git_admin_tools_compat::var_identity_matches_stock_git` and
+`git_admin_tools_compat::var_list_and_failures_match_stock_git`: author and
+committer identity, default branch, `-l`, pager/shell/config/attribute path
+queries and missing-name usage failure. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1422` written-row
+This card is the exact handoff target after the current `1432` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -655,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1422`; the `1/1422` open row and the still incomplete command/doc-option
+`0/1432`; the `1/1432` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
