@@ -15,6 +15,10 @@ Examples:
 - Parser acceptance does not count. The behavior must match stock Git output,
   exit code and repository state.
 
+Start each resume from `docs/cli/git_compatibility_execution_plan.md`. This
+file remains the detailed live handoff for counting rules, slice queues, guard
+mappings and latest completed slices.
+
 ## Counting Rules
 
 - Count only stock-Git-supported behavior unless there is an explicit Zmin-only
