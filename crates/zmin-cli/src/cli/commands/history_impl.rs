@@ -2784,8 +2784,16 @@ fn blame_character_class_has_invalid_range(class_bytes: &[u8]) -> bool {
     if class_bytes.len() < 3 {
         return false;
     }
+    let mut range_operators = 0usize;
     for index in 1..class_bytes.len().saturating_sub(1) {
-        if class_bytes[index] == b'-' && class_bytes[index - 1] > class_bytes[index + 1] {
+        if class_bytes[index] != b'-' {
+            continue;
+        }
+        if class_bytes[index - 1] > class_bytes[index + 1] {
+            return true;
+        }
+        range_operators += 1;
+        if range_operators > 1 {
             return true;
         }
     }

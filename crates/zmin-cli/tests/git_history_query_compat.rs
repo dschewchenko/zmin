@@ -508,6 +508,9 @@ fn blame_invalid_character_range_regexes_match_stock_git_failure() {
     for args in [
         ["blame", "-L", "/[z-a]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[b-a]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[a-b-c]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[0-9-a]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[a--]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[[:digit:]-a]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[[:digit:]-[:alpha:]]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[a-[:upper:]]/", "a.txt"].as_slice(),
@@ -690,6 +693,8 @@ fn blame_basic_regex_literal_metacharacters_match_stock_git() {
         ["blame", "-L", "/x\\(y\\)*/", "a.txt"].as_slice(),
         ["blame", "-L", "/x\\{2\\}/", "a.txt"].as_slice(),
         ["blame", "-L", "/x\\{2,3\\}/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[a-b-]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[-a-b]/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),

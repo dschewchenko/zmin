@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 949 written rows / 755 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 952 written rows / 755 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -210,25 +210,26 @@ deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
 The latest closed guard classification is
-`git blame -L /[[:digit:][:bogus:]]/ a.txt`,
-`git blame -L /[[:bogus:][:digit:]]/ a.txt`, and
-`git blame -L /[[:bogus:]/ a.txt` for Git basic-regex invalid POSIX character
-class diagnostics inside compound or malformed bracket expressions.
+`git blame -L /[a-b-c]/ a.txt`, `git blame -L /[0-9-a]/ a.txt`, and
+`git blame -L /[a--]/ a.txt` for Git basic-regex invalid multiple
+character-range operators. Edge literal-hyphen forms such as
+`git blame -L /[a-b-]/ a.txt` and `git blame -L /[-a-b]/ a.txt` remain covered
+by positive stock-Git oracle tests.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `949` written-row
+This card is the exact handoff target after the current `952` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
-| Slice | `git blame -L` basic-regex multiple character-range operators |
-| Stock-Git oracle | `/[a-b-c]/`, `/[0-9-a]/`, and `/[a--]/` exit `128` with `invalid character range`; edge literal forms such as `/[a-b-]/` and `/[-a-b]/` remain valid |
-| Implementation area | `crates/zmin-cli/src/cli/commands/history_impl.rs`, specifically `blame_regex_has_invalid_character_range` / `blame_character_class_has_invalid_range` |
-| Evidence test | extend `git_history_query_compat::blame_invalid_character_range_regexes_match_stock_git_failure` |
-| Matrix update | add three invalid-input rows to `docs/cli/matrices/blame_v2_47.tsv` |
-| Expected count movement | written rows `949 -> 952`, invalid-input rows `194 -> 197`, closed evidence blocks `599 -> 602`; complete command and doc-option matrices stay `0/151` and `0/4632` |
-| Required gates | focused `git_history_query_compat` test, full `git_history_query_compat`, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
+| Slice | classify one remaining `unsupported` / `not supported` Rust guard |
+| Stock-Git oracle | run a focused stock Git probe for the selected guard before changing implementation |
+| Implementation area | start with fresh scan candidate `crates/zmin-cli/src/cli/commands/sequencer_impl.rs:1779` (`unsupported interactive rebase command`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest sequencer/rebase compat test that proves stdout, stderr, exit code and repository state against stock Git |
+| Matrix update | add the row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
+| Expected count movement | depends on the selected guard; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
 | Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
 
 After this card is committed and pushed, update the pointer to either the next
@@ -236,7 +237,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/949`; the complete command matrices and complete doc-option matrices remain
+`0/952`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -294,6 +295,7 @@ until a full matrix is expanded and verified.
 | `blame -L` basic-regex escaped intervals | `3` | `0` | `git blame -L /x\{2\}/ a.txt` and `git blame -L /x\{2,3\}/ a.txt` use stock Git basic-regex interval semantics, while `git blame -L /q\{2\}/ a.txt` exits `128` with stock no-match diagnostics |
 | `blame -L` basic-regex invalid intervals | `5` | `0` | `git blame -L /\{/ a.txt`, `git blame -L /a\{x\}/ a.txt`, `git blame -L /a\{2/ a.txt`, `git blame -L /a\{,2\}/ a.txt`, and `git blame -L /a\{3,2\}/ a.txt` exit `128` with stock invalid interval diagnostics instead of custom unsupported-line-range fatal diagnostics |
 | `blame -L` basic-regex invalid character ranges | `2` | `0` | `git blame -L /[z-a]/ a.txt` and `git blame -L /[b-a]/ a.txt` exit `128` with stock invalid-character-range diagnostics instead of custom unsupported-line-range fatal diagnostics |
+| `blame -L` basic-regex multiple character ranges | `3` | `0` | `git blame -L /[a-b-c]/ a.txt`, `git blame -L /[0-9-a]/ a.txt`, and `git blame -L /[a--]/ a.txt` exit `128` with stock invalid-character-range diagnostics instead of matching through Rust regex range handling |
 | `blame -L` basic-regex invalid POSIX class range endpoints | `3` | `0` | `git blame -L /[[:digit:]-a]/ a.txt`, `git blame -L /[[:digit:]-[:alpha:]]/ a.txt`, and `git blame -L /[a-[:upper:]]/ a.txt` exit `128` with stock invalid-character-range diagnostics instead of matching through Rust regex class support |
 | `blame -L` basic-regex empty character classes | `2` | `0` | `git blame -L /[]/ a.txt` and `git blame -L /[^]/ a.txt` exit `128` with stock unbalanced-brackets diagnostics instead of custom unsupported-line-range fatal diagnostics |
 | `blame -L` basic-regex unbalanced grouping | `4` | `0` | `git blame -L /\(/ a.txt`, `git blame -L /\)/ a.txt`, `git blame -L /x\(y/ a.txt`, and `git blame -L /x\)y/ a.txt` exit `128` with stock parentheses-not-balanced diagnostics instead of custom unsupported-line-range fatal diagnostics |
@@ -465,7 +467,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `505` verified variants.
+Tracked closed blocks in this table: `602` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
