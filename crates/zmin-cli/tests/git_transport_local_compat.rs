@@ -1702,6 +1702,64 @@ fn fetch_empty_colon_refspec_explicit_location_head_matches_stock_git() {
 }
 
 #[test]
+fn fetch_malformed_explicit_location_refspec_matches_stock_git_failure() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("main.txt"), b"main\n").expect("write main");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+    );
+
+    let args = [
+        "fetch",
+        source.to_str().expect("source path"),
+        "main:bad:ref",
+    ];
+    let git_output = command_any_output(
+        "git",
+        &git_client,
+        &args,
+        "git fetch path malformed refspec",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch path malformed refspec",
+    );
+
+    assert_eq!(zmin_output, git_output);
+    assert!(!git_client.join(".git/FETCH_HEAD").exists());
+    assert!(!zmin_client.join(".git/FETCH_HEAD").exists());
+}
+
+#[test]
 fn fetch_prune_direct_location_one_to_one_refspec_matches_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");

@@ -12660,6 +12660,7 @@ fn fetch_with_repo_and_location(
                 quiet,
             );
         }
+        return Err(invalid_fetch_refspec_error(refspec));
     }
     if !prune && !tags && branch.is_none() {
         let source = local_clone_source(&source_path)?;
