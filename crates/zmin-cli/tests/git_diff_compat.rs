@@ -931,6 +931,29 @@ fn diff_filter_matches_stock_git_for_cached_formats() {
 }
 
 #[test]
+fn diff_filter_invalid_change_classes_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"old\n").expect("write");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    fs::write(repo.path().join("a.txt"), b"new\n").expect("rewrite");
+    git(repo.path(), ["add", "-A"]);
+
+    for args in [
+        ["diff", "--cached", "--name-status", "--diff-filter=Z"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=@"].as_slice(),
+        ["diff", "--cached", "--name-status", "--diff-filter=A@"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn diff_no_patch_matches_stock_git_exit_behavior() {
     let repo = git_init();
     configure_identity(repo.path());

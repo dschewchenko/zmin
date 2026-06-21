@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `38/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
 | Documented option spellings represented by rows | `241/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1024` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `778/1024` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `1/1024` | written rows with incomplete parity |
-| Open written rows | `0/1024` | written rows that still do not match stock Git |
-| Invalid input rows | `245/1024` | rows where stock Git rejects the input |
+| Written behavior rows | `1025` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `778/1025` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `1/1025` | written rows with incomplete parity |
+| Open written rows | `0/1025` | written rows that still do not match stock Git |
+| Invalid input rows | `246/1025` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `778/1024` as Git compatibility. It only means `778` of the `1024`
+Do not read `778/1025` as Git compatibility. It only means `778` of the `1025`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `1/1024` row is only partially matching
-stock Git and `245/1024` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `1/1025` row is only partially matching
+stock Git and `246/1025` additional rows are stock-compatible invalid inputs. Do
 not read `241/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -211,7 +211,7 @@ Audit progress by git-scm reference group:
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `81` | `66` | `0` | `0` | `15` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `65` | `39` | `0` | `0` | `26` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `297` | `283` | `0` | `0` | `14` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `152` | `147` | `0` | `0` | `5` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `36` | `10` | `1` | `0` | `25` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1024`** | **`778`** | **`1`** | **`0`** | **`245`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1025`** | **`778`** | **`1`** | **`0`** | **`246`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -245,7 +245,7 @@ Current command-level matrices:
 | `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
 | `status` | `26` | `0` | `22` | `75` | `66` | `0` | `0` | `9` | no |
 | `fetch` | `73` | `0` | `30` | `290` | `283` | `0` | `0` | `7` | no |
-| `diff` | `133` | `0` | `31` | `65` | `65` | `0` | `0` | `0` | no |
+| `diff` | `133` | `0` | `31` | `66` | `65` | `0` | `0` | `1` | no |
 | `fast-import` | `25` | `0` | `1` | `4` | `0` | `1` | `0` | `3` | no |
 | `log` | `282` | `0` | `32` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |

@@ -3056,9 +3056,12 @@ pub(crate) fn parse_diff_filter(value: &str) -> Result<DiffFilter> {
             filter.all_or_none = true;
             continue;
         }
-        let bit = diff_filter_bit(byte.to_ascii_lowercase()).ok_or_else(|| CliError::Fatal {
+        let bit = diff_filter_bit(byte.to_ascii_lowercase()).ok_or_else(|| CliError::Stderr {
             code: 129,
-            message: format!("unsupported --diff-filter status '{}'", byte as char),
+            text: format!(
+                "error: unknown change class '{}' in --diff-filter={value}\n",
+                byte as char
+            ),
         })?;
         if byte.is_ascii_lowercase() {
             filter.exclude_mask |= bit;
