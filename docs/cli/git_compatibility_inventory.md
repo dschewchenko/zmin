@@ -158,6 +158,8 @@ focused parity evidence checks the same surface.
   invalid-operation variant.
 - `docs/cli/matrices/rev_parse_v2_47.tsv` tracks the first `rev-parse`
   discovery, path-format, revision and invalid-input variants.
+- `docs/cli/matrices/show_index_v2_47.tsv` tracks the first `show-index`
+  stdin pack-index invalid-input variant.
 - `docs/cli/matrices/show_ref_v2_47.tsv` tracks the first `show-ref`
   heads, head, hash, tags, verify and invalid-input variants.
 - `docs/cli/matrices/symbolic_ref_v2_47.tsv` tracks the first
@@ -194,10 +196,10 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `32/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` |
+| Commands with any matrix rows | `33/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` |
 | Git doc option pairs represented by rows | `239/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `985` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `767/985` | yes, row by row | supported-behavior rows with parity evidence |
+| Written behavior rows | `986` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `767/986` | yes, row by row | supported-behavior rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -239,8 +241,8 @@ Current generated summary:
 | Administration | `8` | `0` | `147` | `0` | `17` | `7` | `0` | `0` | `10` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `0` | `44` | `110` |
-| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `23` | `7` | `0` | `0` | `16` | `26` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`985`** | **`767`** | **`0`** | **`0`** | **`218`** | **`634`** |
+| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `24` | `7` | `0` | `0` | `17` | `27` |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`986`** | **`767`** | **`0`** | **`0`** | **`219`** | **`635`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -251,9 +253,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `239/4632`
-represented option pairs or `767/985` passing written rows as a Git support
-percentage. The `767/985` number is audit progress for supported rows already
-written down; `218/985` additional rows are stock-compatible invalid inputs. It
+represented option pairs or `767/986` passing written rows as a Git support
+percentage. The `767/986` number is audit progress for supported rows already
+written down; `219/986` additional rows are stock-compatible invalid inputs. It
 says nothing about the still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -293,6 +295,7 @@ variants.
 | `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
 | `rerere` | `7` | `0` | `0` | `docs/cli/matrices/rerere_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-parse` | `72` | `0` | `24` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `52` | `46` | `0` | `0` | `6` | no |
+| `show-index` | `1` | `0` | `0` | `docs/cli/matrices/show_index_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |
 | `submodule` | `35` | `0` | `0` | `docs/cli/matrices/submodule_v2_47.tsv` | `6` | `0` | `0` | `0` | `6` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `docs/cli/matrices/symbolic_ref_v2_47.tsv` | `8` | `7` | `0` | `0` | `1` | no |

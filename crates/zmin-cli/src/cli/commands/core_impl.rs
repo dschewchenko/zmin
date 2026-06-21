@@ -1046,8 +1046,23 @@ pub(crate) fn show_index() -> Result<()> {
             entry.crc32
         );
         Ok(())
-    })?;
+    })
+    .map_err(show_index_error)?;
     Ok(())
+}
+
+fn show_index_error(error: io::Error) -> CliError {
+    if error.kind() == io::ErrorKind::InvalidData
+        && error
+            .to_string()
+            .starts_with("unsupported pack index version ")
+    {
+        return CliError::Fatal {
+            code: 128,
+            message: "unknown index version".into(),
+        };
+    }
+    CliError::Io(error)
 }
 
 pub(crate) fn update_server_info() -> Result<()> {

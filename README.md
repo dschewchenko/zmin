@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `32/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
+| Commands with any matrix rows | `33/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `index-pack`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `239/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `985` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `767/985` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/985` | written rows that still do not match stock Git |
-| Invalid input rows | `218/985` | rows where stock Git rejects the input |
+| Written behavior rows | `986` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `767/986` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/986` | written rows that still do not match stock Git |
+| Invalid input rows | `219/986` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `767/985` as Git compatibility. It only means `767` of the `985`
+Do not read `767/986` as Git compatibility. It only means `767` of the `986`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `218/985` additional rows are
+unexpanded surface is not counted yet, and `219/986` additional rows are
 stock-compatible invalid inputs. Do not read `239/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -217,8 +217,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `17` | `7` | `0` | `10` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `44` |
-| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `23` | `7` | `0` | `16` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`985`** | **`767`** | **`0`** | **`218`** |
+| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `24` | `7` | `0` | `17` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`986`** | **`767`** | **`0`** | **`219`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -257,6 +257,7 @@ Current command-level matrices:
 | `reflog` | `13` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
 | `rerere` | `7` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-parse` | `72` | `0` | `24` | `52` | `46` | `0` | `0` | `6` | no |
+| `show-index` | `1` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
 | `submodule` | `35` | `0` | `0` | `6` | `0` | `0` | `0` | `6` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |

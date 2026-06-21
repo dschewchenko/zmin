@@ -408,6 +408,43 @@ pub fn command_any_output_with_stdin(
     )
 }
 
+pub fn command_any_output_with_stdin_bytes(
+    command: &str,
+    cwd: &std::path::Path,
+    args: &[&str],
+    stdin: &[u8],
+    label: &str,
+) -> (i32, String, String) {
+    let mut child = Command::new(test_command_program(command))
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("spawn {label}: {err}"));
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin pipe")
+        .write_all(stdin)
+        .unwrap_or_else(|err| panic!("write {label} stdin: {err}"));
+    let output = child
+        .wait_with_output()
+        .unwrap_or_else(|err| panic!("wait {label}: {err}"));
+    (
+        output.status.code().expect("process exit code"),
+        String::from_utf8(output.stdout)
+            .expect("stdout utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("stderr utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
 pub fn command_output_with_env(
     command: &str,
     cwd: &std::path::Path,

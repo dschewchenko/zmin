@@ -3,11 +3,13 @@ mod common;
 use std::{collections::BTreeSet, fs};
 
 use tempfile::TempDir;
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    clone_repo_fixture, command_stdout_bytes, configure_identity, git, git_args, git_init,
-    git_status, git_with_env, git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args,
-    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
+    clone_repo_fixture, command_any_output_with_stdin_bytes, command_stdout_bytes,
+    configure_identity, git, git_args, git_init, git_status, git_with_env, git_with_stdin,
+    git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_status, run_zmin_with_env,
+    run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
 };
 
 fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
@@ -18,6 +20,17 @@ fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
         .collect::<Vec<_>>();
     paths.sort();
     paths.into_iter().next().expect("pack index")
+}
+
+fn rewrite_pack_index_version(path: &std::path::Path, version: u32) -> Vec<u8> {
+    let mut bytes = fs::read(path).expect("read pack index");
+    bytes[4..8].copy_from_slice(&version.to_be_bytes());
+    let checksum_start = bytes.len() - GitHashAlgorithm::Sha1.digest_len();
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&bytes[..checksum_start]);
+    let checksum = hasher.finalize();
+    bytes[checksum_start..].copy_from_slice(checksum.as_bytes());
+    bytes
 }
 
 fn two_commit_repo() -> TempDir {
@@ -802,6 +815,22 @@ fn show_index_matches_stock_git_for_pack_index_stdin() {
     assert_eq!(
         run_zmin_with_stdin_bytes(repo.path(), ["show-index"], &idx),
         git_with_stdin_bytes(repo.path(), ["show-index"], &idx)
+    );
+}
+
+#[test]
+fn show_index_rejects_unsupported_pack_index_version_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"hello\n").expect("write fixture");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["repack", "-adq"]);
+    let idx = rewrite_pack_index_version(&first_pack_index(repo.path()), 3);
+
+    assert_eq!(
+        command_any_output_with_stdin_bytes(zmin_bin(), repo.path(), &["show-index"], &idx, "zmin"),
+        command_any_output_with_stdin_bytes("git", repo.path(), &["show-index"], &idx, "git")
     );
 }
 
