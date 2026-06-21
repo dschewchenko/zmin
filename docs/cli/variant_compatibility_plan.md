@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1091 written rows / 821 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1092 written rows / 822 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,18 +266,18 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is an invalid `clone --ref-format` value:
+The latest completed slice is the documented blob-to-blob `diff` operand form:
 
-`git clone --ref-format=bogus <path> dst`
+`git diff <blob> <blob>`
 
-Stock Git exits `128`, leaves stdout empty, prints
-`fatal: unknown ref storage format 'bogus'` and does not create the destination
-directory. Zmin already matched that invalid-input shape, so this slice records
-the row in `docs/cli/matrices/clone_v2_47.tsv` with focused evidence in
-`git_clone_ref_format_compat::clone_ref_format_unknown_value_matches_stock_git`.
-The adjacent `--ref-format=reftable` row remains open because stock Git creates
-a reftable clone while Zmin still exits through
-`reftable ref storage is not supported yet`.
+Stock Git accepts two direct blob object ids, prints a normal blob patch for
+different blobs, exits `0` with empty stdout/stderr for identical blobs, and
+does not change repository state. Zmin now has focused stock-oracle evidence
+for both shapes in
+`git_diff_compat::diff_blob_to_blob_operands_match_stock_git`, and
+`docs/cli/matrices/diff_v2_47.tsv` records the row. A separately observed
+mixed tree/blob invalid form still differs and should be handled as its own
+future row instead of being hidden by this supported operand slice.
 
 ### No-Skip Rule
 
@@ -623,7 +623,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1091` written-row
+This card is the exact handoff target after the current `1092` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -642,7 +642,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1091`; the `1/1091` open row and the still incomplete command/doc-option
+`0/1092`; the `1/1092` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -746,6 +746,7 @@ until a full matrix is expanded and verified.
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
 | `log` replacement directory pathspec NUL output | `1` | `0` | `-z --format=%H%x00%s -1 -- dir` through the `git` shim |
+| `diff` blob-to-blob operands | `1` | `0` | `git diff <blob> <blob>` renders stock blob patch output and empty output for identical blobs |
 | `diff` replacement worktree NUL name-status | `1` | `0` | `--name-status -z` through the `git` shim with a modified tracked file |
 | `diff` replacement worktree NUL name-only | `1` | `0` | `--name-only -z` through the `git` shim with a modified tracked file |
 | `diff` replacement pathspec NUL name-status | `1` | `0` | `--name-status -z -- dir` through the `git` shim with a dirty nested tracked file |
@@ -906,7 +907,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `676` verified variants.
+Tracked closed blocks in this table: `677` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

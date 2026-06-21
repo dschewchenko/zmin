@@ -81,6 +81,25 @@ fn diff_dirstat_matches_stock_git_for_treeish_pairs() {
 }
 
 #[test]
+fn diff_blob_to_blob_operands_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    let left = git_with_stdin(repo.path(), ["hash-object", "-w", "--stdin"], "one\n");
+    let right = git_with_stdin(repo.path(), ["hash-object", "-w", "--stdin"], "two\n");
+
+    for args in [
+        ["diff", left.as_str(), right.as_str()].as_slice(),
+        ["diff", right.as_str(), right.as_str()].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "blob-to-blob diff should match stock Git for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn diff_tree_combined_raw_for_merge_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
