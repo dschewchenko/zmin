@@ -12526,6 +12526,24 @@ fn fetch_with_repo_and_location(
         }
         if let Some((source_name, destination)) = refspec.split_once(':')
             && !source_name.is_empty()
+            && destination.is_empty()
+            && !source_name.contains(':')
+        {
+            let source = local_clone_source(&source_path)?;
+            let source_refs = refs_adapter_from_git_dir(&source.git_dir);
+            return fetch_branch_without_destination_ref(
+                &repo,
+                &source,
+                &source_refs,
+                source_name,
+                &location,
+                update_shallow,
+                tags,
+                quiet,
+            );
+        }
+        if let Some((source_name, destination)) = refspec.split_once(':')
+            && !source_name.is_empty()
             && !destination.is_empty()
             && !destination.contains(':')
         {
@@ -13451,7 +13469,12 @@ fn fetch_branch_without_destination_ref(
         }
         return Ok(());
     }
-    write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
+    write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)?;
+    if !quiet {
+        eprintln!("From {}", fetch_head_url_display(url));
+        eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    }
+    Ok(())
 }
 
 fn fetch_branch_without_destination_ref_depth(
