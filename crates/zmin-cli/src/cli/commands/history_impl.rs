@@ -44,11 +44,19 @@ const BLAME_USAGE: &str = r#"usage: git blame [<options>] [<rev-opts>] [<rev>] [
     -L <range>            process only line range <start>,<end> or function :<funcname>
     --[no-]abbrev[=<n>]   use <n> digits to display object names
 "#;
+const BLAME_USAGE_LINE: &str = "usage: git blame [<options>] [<rev-opts>] [<rev>] [--] <file>";
 
 fn blame_unknown_option(option: &str) -> CliError {
     CliError::Stderr {
         code: 129,
         text: format!("error: unknown option `{option}'\n{BLAME_USAGE}"),
+    }
+}
+
+fn blame_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!("{BLAME_USAGE_LINE}\n"),
     }
 }
 
@@ -2220,7 +2228,7 @@ fn parse_blame_abbrev(value: &str) -> Result<usize> {
 fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
     if let Some(function) = value.strip_prefix(':') {
         if function.is_empty() {
-            return Err(unsupported_blame_line_range(value));
+            return Err(blame_usage_error());
         }
         return Ok(BlameLineRange::Function(function.to_owned()));
     }
@@ -2270,6 +2278,9 @@ fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
 
 fn parse_blame_regex_line_range(value: &str) -> Result<BlameLineRange> {
     let Some(pattern_end) = closing_blame_regex_delimiter(value) else {
+        if value == "/" {
+            return Err(blame_usage_error());
+        }
         return Err(unsupported_blame_line_range(value));
     };
     let pattern = value[1..pattern_end].to_owned();
