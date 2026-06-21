@@ -330,6 +330,25 @@ fn ls_files_stage_preserves_stock_git_raw_regular_index_modes() {
 }
 
 #[test]
+fn ls_files_stage_preserves_stock_git_raw_unknown_index_modes() {
+    for mode in [0o000000, 0o200000, 0o777777] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+            git(repo, ["add", "a.txt"]);
+            set_first_index_entry_mode(repo, mode);
+        }
+
+        assert_eq!(
+            command_output_any(zmin_bin(), zmin_repo.path(), &["ls-files", "--stage"]),
+            command_output_any("git", git_repo.path(), &["ls-files", "--stage"]),
+            "index mode {mode:o}"
+        );
+    }
+}
+
+#[test]
 fn ls_files_stage_reads_stock_git_index_v4() {
     let repo = git_init();
     git(repo.path(), ["config", "index.version", "4"]);

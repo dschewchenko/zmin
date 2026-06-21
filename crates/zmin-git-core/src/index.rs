@@ -58,10 +58,11 @@ impl IndexMode {
             }
             0o120001..=0o120777 => Ok(Self::Symlink),
             0o160001..=0o160777 => Ok(Self::Gitlink),
-            _ => Err(io::Error::new(
+            0o040000 => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unsupported git index mode",
             )),
+            _ => Ok(Self::File),
         }
     }
 
