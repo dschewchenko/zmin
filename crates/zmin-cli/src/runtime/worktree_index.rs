@@ -2562,7 +2562,7 @@ fn start_worktree_process_filter(repo: &GitRepo, command: &str) -> Result<Proces
         capabilities: HashSet::new(),
         aborted: false,
     };
-    process.handshake()?;
+    process.handshake(command)?;
     Ok(process)
 }
 
@@ -2584,7 +2584,7 @@ fn process_filter_request_write_failed(error: &CliError) -> bool {
 }
 
 impl ProcessFilter {
-    fn handshake(&mut self) -> Result<()> {
+    fn handshake(&mut self, command: &str) -> Result<()> {
         self.write_pkt_line(b"git-filter-client")?;
         self.write_pkt_line(b"version=2")?;
         self.write_flush()?;
@@ -2611,7 +2611,9 @@ impl ProcessFilter {
                 _ => {
                     return Err(CliError::Fatal {
                         code: 128,
-                        message: format!("unsupported filter capability '{capability}'"),
+                        message: format!(
+                            "subprocess '{command}' requested unsupported capability '{capability}'"
+                        ),
                     });
                 }
             }
