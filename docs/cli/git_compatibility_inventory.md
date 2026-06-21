@@ -116,7 +116,7 @@ focused parity evidence checks the same surface.
 - `docs/cli/variant_compatibility_plan.md` tracks closed behavior blocks and
   open hard-fail clusters.
 - `docs/cli/matrices/add_v2_47.tsv` tracks the first `add` process-filter
-  invalid-input variant.
+  invalid-input variants.
 - `docs/cli/matrices/bisect_v2_47.tsv` tracks the first `bisect`
   invalid-input variant.
 - `docs/cli/matrices/blame_v2_47.tsv` tracks the first `blame`
@@ -227,11 +227,11 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `48/151` | no | audit rows exist for `add`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `251/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1074` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `811/1074` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1074` | no | written rows with incomplete parity |
-| Open written rows | `1/1074` | no | written rows that still do not match stock Git |
-| Invalid input rows | `262/1074` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Written behavior rows | `1075` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `811/1075` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1075` | no | written rows with incomplete parity |
+| Open written rows | `1/1075` | no | written rows that still do not match stock Git |
+| Invalid input rows | `263/1075` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -262,7 +262,7 @@ Current generated summary:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` | `8` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `7` | `5` | `0` | `1` | `1` | `2` |
-| Basic Snapshotting | `9` | `0` | `371` | `0` | `83` | `66` | `0` | `0` | `17` | `99` |
+| Basic Snapshotting | `9` | `0` | `371` | `0` | `84` | `66` | `0` | `0` | `18` | `99` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `84` | `55` | `0` | `0` | `29` | `45` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `300` | `283` | `0` | `0` | `17` | `159` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` | `26` |
@@ -274,7 +274,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` | `116` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `48` | `21` | `0` | `0` | `27` | `39` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1074`** | **`811`** | **`0`** | **`1`** | **`262`** | **`683`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1075`** | **`811`** | **`0`** | **`1`** | **`263`** | **`683`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -285,9 +285,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `251/4632`
-represented option pairs or `811/1074` passing written rows as a Git support
-percentage. The `811/1074` number is audit progress for supported rows already
-written down; `0/1074` rows are partial, `1/1074` rows are open and `262/1074`
+represented option pairs or `811/1075` passing written rows as a Git support
+percentage. The `811/1075` number is audit progress for supported rows already
+written down; `0/1075` rows are partial, `1/1075` rows are open and `263/1075`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -302,7 +302,7 @@ variants.
 
 | Command | Git doc option seed | Complete doc option pairs | Doc spellings represented by rows | Matrix | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `add` | `34` | `0` | `0` | `docs/cli/matrices/add_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
+| `add` | `34` | `0` | `0` | `docs/cli/matrices/add_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
 | `archive` | `17` | `0` | `1` | `docs/cli/matrices/archive_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `docs/cli/matrices/bisect_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `blame` | `39` | `0` | `6` | `docs/cli/matrices/blame_v2_47.tsv` | `101` | `21` | `0` | `0` | `80` | no |

@@ -2450,6 +2450,7 @@ enum ProcessFilterStatus {
     Error,
     Abort,
     Delayed,
+    Invalid,
 }
 
 static WORKTREE_PROCESS_FILTERS: OnceLock<Mutex<HashMap<ProcessFilterKey, ProcessFilter>>> =
@@ -2524,6 +2525,16 @@ fn run_worktree_process_filter(
     match status {
         ProcessFilterResponse::Content(content) => Ok(Some(WorktreeFilterResult::Content(content))),
         ProcessFilterResponse::Delayed => Ok(Some(WorktreeFilterResult::Delayed { key })),
+        ProcessFilterResponse::InvalidStatus => {
+            filters.remove(&key);
+            if required {
+                return Err(worktree_filter_protocol_failed_error(
+                    command, filter, relative, direction,
+                ));
+            }
+            eprintln!("error: external filter '{command}' failed");
+            Ok(Some(WorktreeFilterResult::Content(content.to_vec())))
+        }
         ProcessFilterResponse::Rejected { abort } => {
             if abort && let Some(process) = filters.get_mut(&key) {
                 process.aborted = true;
@@ -2569,7 +2580,30 @@ fn start_worktree_process_filter(repo: &GitRepo, command: &str) -> Result<Proces
 enum ProcessFilterResponse {
     Content(Vec<u8>),
     Delayed,
+    InvalidStatus,
     Rejected { abort: bool },
+}
+
+fn worktree_filter_protocol_failed_error(
+    command: &str,
+    filter: &str,
+    relative: &[u8],
+    direction: &str,
+) -> CliError {
+    let filter_display = if direction == "clean" {
+        format!("'{filter}'")
+    } else {
+        filter.to_owned()
+    };
+    CliError::Stderr {
+        code: 128,
+        text: format!(
+            "error: external filter '{command}' failed\n\
+             error: {command} died of signal 15\n\
+             fatal: {}: {direction} filter {filter_display} failed\n",
+            String::from_utf8_lossy(relative)
+        ),
+    }
 }
 
 fn process_filter_request_write_failed(error: &CliError) -> bool {
@@ -2650,6 +2684,9 @@ impl ProcessFilter {
             ProcessFilterStatus::Delayed => {
                 return Ok(ProcessFilterResponse::Delayed);
             }
+            ProcessFilterStatus::Invalid => {
+                return Ok(ProcessFilterResponse::InvalidStatus);
+            }
         }
         let filtered = self.read_packetized_content()?;
         if let Some(final_status) = self.read_status_list()? {
@@ -2660,6 +2697,7 @@ impl ProcessFilter {
             ProcessFilterStatus::Error => Ok(ProcessFilterResponse::Rejected { abort: false }),
             ProcessFilterStatus::Abort => Ok(ProcessFilterResponse::Rejected { abort: true }),
             ProcessFilterStatus::Delayed => Ok(ProcessFilterResponse::Delayed),
+            ProcessFilterStatus::Invalid => Ok(ProcessFilterResponse::InvalidStatus),
         }
     }
 
@@ -2681,6 +2719,10 @@ impl ProcessFilter {
                 code: 128,
                 message: "filter process list_available_blobs returned delayed".to_owned(),
             }),
+            Some(ProcessFilterStatus::Invalid) => Err(CliError::Fatal {
+                code: 128,
+                message: "filter process list_available_blobs returned invalid status".to_owned(),
+            }),
             None => Err(CliError::Fatal {
                 code: 128,
                 message: "filter process list_available_blobs did not include a status".to_owned(),
@@ -2700,12 +2742,7 @@ impl ProcessFilter {
                 "error" => ProcessFilterStatus::Error,
                 "abort" => ProcessFilterStatus::Abort,
                 "delayed" => ProcessFilterStatus::Delayed,
-                _ => {
-                    return Err(CliError::Fatal {
-                        code: 128,
-                        message: format!("unsupported filter process status '{value}'"),
-                    });
-                }
+                _ => ProcessFilterStatus::Invalid,
             });
         }
         Ok(status)

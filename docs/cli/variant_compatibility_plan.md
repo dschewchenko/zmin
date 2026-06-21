@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 251/4632 represented doc-option pairs / 1074 written rows / 811 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 251/4632 represented doc-option pairs / 1075 written rows / 811 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -263,16 +263,16 @@ appear, add those rows before continuing guard classification.
 ### Latest Completed Slice
 
 The latest completed guard-classification slice is `add` with a required
-process filter that advertises an unsupported capability:
+process filter that returns an unsupported status:
 
 `git add a.bad`
 
-Stock Git rejects a process-filter handshake that replies with
-`capability=bogus`, exits `128`, leaves stdout empty, prints the stock
-`subprocess '<command>' requested unsupported capability 'bogus'` diagnostic
-and leaves the index unchanged. Zmin now matches that invalid-input shape. The
-row is recorded in `docs/cli/matrices/add_v2_47.tsv` with focused evidence in
-`git_add_compat::add_process_filter_unknown_capability_matches_stock_git`.
+Stock Git treats a process-filter response with `status=bogus` as an external
+filter protocol failure, exits `128`, leaves stdout empty, prints the stock
+external-filter diagnostics and leaves the index unchanged. Zmin now matches
+that invalid-input shape. The row is recorded in
+`docs/cli/matrices/add_v2_47.tsv` with focused evidence in
+`git_add_compat::add_process_filter_unknown_status_matches_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -587,6 +587,14 @@ the stock subprocess diagnostic and leaves the index unchanged. Zmin now emits
 the same shape instead of the former custom `unsupported filter capability`
 fatal message.
 
+The latest adjacent stock-compatible invalid-input guard classification is
+`runtime/worktree_index.rs` process-filter response status validation. Stock
+Git treats `status=bogus` from a required clean filter as an external-filter
+protocol failure with exit `128`, empty stdout, stock `error: external filter`
+diagnostics, final `fatal: <path>: clean filter '<name>' failed`, and an
+unchanged index. Zmin now emits the same shape instead of the former custom
+`unsupported filter process status` fatal message.
+
 The latest closed behavior slice is `history_impl.rs` parent-filter bad output
 for `git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits
 `1` after printing rewrite progress and commit-tree diagnostics, leaving
@@ -600,7 +608,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1074` written-row
+This card is the exact handoff target after the current `1075` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -619,7 +627,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1074`; the `1/1074` open row and the still incomplete command/doc-option
+`0/1075`; the `1/1075` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -947,6 +955,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git push` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/push_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` former `reference repositories are not supported for dumb HTTP clone yet` guard | Git-supported clone reference and reference-if-able behavior now accepted for dumb HTTP sources with stock-shaped alternates | `docs/cli/matrices/clone_v2_47.tsv`; `git_transport_http_compat::clone_reference_dumb_http_matches_stock_git`; `git_transport_http_compat::clone_reference_if_able_dumb_http_matches_stock_git` |
 | `runtime/worktree_index.rs` former `unsupported filter capability` process-filter handshake guard | stock-compatible invalid input for a required process filter that replies with an unsupported capability during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_unknown_capability_matches_stock_git` |
+| `runtime/worktree_index.rs` former `unsupported filter process status` process-filter response guard | stock-compatible invalid input for a required process filter that returns an unsupported status during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_unknown_status_matches_stock_git` |
 | `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
@@ -964,8 +973,8 @@ Raw code scan from 2026-06-21:
 
 `rg -n "unsupported|not supported yet|not implemented yet" crates/zmin-cli/src crates/zmin-git-core/src --glob '*.rs'`
 
-This found `93` code hits. This is not the variant denominator and does not
-mean `93` Git features are missing. Each hit must be classified as one of:
+This found `92` code hits. This is not the variant denominator and does not
+mean `92` Git features are missing. Each hit must be classified as one of:
 
 - Git-supported user variant to implement and test
 - parser validation for invalid input
@@ -983,7 +992,7 @@ Largest raw clusters:
 | `history_impl.rs` | `6` | split blame ranges/options, reflog formats and diff/log decorators; bad parent-filter output is now closed |
 | `pack.rs` | `6` | classify pack format guards versus corrupt-storage invalid inputs |
 | `maintenance_impl.rs` / `core_impl.rs` / `admin_impl.rs` | `12` | classify parser/runtime validation and Zmin-only hook validation |
-| remaining files | `16` | classify small parser/runtime guards individually |
+| remaining files | `15` | classify small parser/runtime guards individually |
 
 ## Audit Order
 
