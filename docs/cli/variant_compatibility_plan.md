@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 43/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1046 written rows / 787 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 44/151 commands with matrix rows / 245/4632 represented doc-option pairs / 1047 written rows / 787 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -534,15 +534,16 @@ that repository with exit `128`, empty stdout and invalid config diagnostics
 that include the local `.git/config` line number. Zmin now checks object format
 during status setup and emits the same diagnostics.
 
-The latest transport invalid-input row is
-`git ls-remote zminproto://example/repo`. Stock Git attempts the remote helper,
-exits `128`, prints the missing `remote-zminproto` helper diagnostic and the
-remote-helper aborted-session fatal text. Zmin already matches that shape, and
-`ls_remote_v2_47.tsv` now records the first `ls-remote` matrix row.
+The latest transport invalid-input row is `git push origin main` when
+`origin` uses the unsupported `zminproto://example/repo` remote-helper URL.
+Stock Git attempts the remote helper, exits `128`, prints the missing
+`remote-zminproto` helper diagnostic and the remote-helper aborted-session
+fatal text. Zmin already matches that shape, and `push_v2_47.tsv` now records
+the first `push` matrix row.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1046` written-row
+This card is the exact handoff target after the current `1047` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -561,7 +562,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1046`; the complete command matrices and complete doc-option matrices remain
+`0/1047`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -872,6 +873,7 @@ behavior, invalid input, or corrupt-format handling.
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 | `history_impl.rs` `unsupported_blame_line_range` fallback in `git blame -L` parsing/resolution | stock-compatible invalid input and supported rich range behavior for expanded blame line-range forms | `docs/cli/matrices/blame_v2_47.tsv`; `git_history_query_compat::blame_zero_line_range_matches_stock_git_failure`; `git_history_query_compat::blame_invalid_regex_line_ranges_match_stock_git_failure`; `git_history_query_compat::blame_basic_regex_invalid_backreferences_match_stock_git_failure` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git ls-remote` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/ls_remote_v2_47.tsv`; `git_transport_local_compat::ls_remote_unsupported_remote_helper_failure_matches_stock_git` |
+| `transport_impl.rs` `unsupported_remote_helper_error` in `git push` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/push_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
