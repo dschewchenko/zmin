@@ -659,13 +659,17 @@ fn parse_cat_file_filter(spec: &str) -> Result<CatFileFilter> {
             text: "fatal: sparse:path filters support has been dropped\n".into(),
         });
     }
-    if let Some((name, _)) = spec.split_once('=') {
+    if let Some((name, _)) = spec.split_once('=')
+        && cat_file_filter_is_known_unsupported(name)
+    {
         return Err(CliError::Stderr {
             code: 129,
             text: format!("usage: objects filter not supported: '{name}'\n"),
         });
     }
-    if let Some((name, _)) = spec.split_once(':') {
+    if let Some((name, _)) = spec.split_once(':')
+        && cat_file_filter_is_known_unsupported(name)
+    {
         return Err(CliError::Stderr {
             code: 129,
             text: format!("usage: objects filter not supported: '{name}'\n"),
@@ -675,6 +679,10 @@ fn parse_cat_file_filter(spec: &str) -> Result<CatFileFilter> {
         code: 128,
         message: format!("invalid filter-spec '{spec}'"),
     })
+}
+
+fn cat_file_filter_is_known_unsupported(name: &str) -> bool {
+    matches!(name, "tree" | "sparse:oid" | "combine")
 }
 
 fn parse_blob_limit_filter(raw_limit: &str) -> Result<usize> {

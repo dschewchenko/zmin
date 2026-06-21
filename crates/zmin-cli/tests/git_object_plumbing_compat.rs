@@ -245,6 +245,33 @@ fn hash_object_and_cat_file_match_stock_git() {
 }
 
 #[test]
+fn cat_file_unknown_filter_names_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"hello\n").expect("write fixture");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    let blob = git(repo.path(), ["rev-parse", "HEAD:a.txt"]);
+    let stdin = format!("{blob}\n");
+
+    for filter in ["bad:name", "bad=name"] {
+        let arg = format!("--filter={filter}");
+        let args = ["cat-file", "--batch", arg.as_str()];
+        assert_eq!(
+            command_any_output_with_stdin_bytes(
+                zmin_bin(),
+                repo.path(),
+                &args,
+                stdin.as_bytes(),
+                "zmin",
+            ),
+            command_any_output_with_stdin_bytes("git", repo.path(), &args, stdin.as_bytes(), "git",),
+            "filter: {filter}"
+        );
+    }
+}
+
+#[test]
 fn cat_file_promisor_remote_hydrates_missing_blob_on_demand() {
     let source = git_init();
     configure_identity(source.path());
