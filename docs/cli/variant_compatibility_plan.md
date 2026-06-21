@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1078 written rows / 813 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1079 written rows / 814 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -267,17 +267,16 @@ appear, add those rows before continuing guard classification.
 ### Latest Completed Slice
 
 The latest completed slice is `fetch --prune` with an explicit local path
-branch refspec:
+HEAD fetch:
 
-`git fetch --prune <path> main`
+`git fetch --prune <path>`
 
 Stock Git accepts this option combination, writes `FETCH_HEAD` for the
-explicit source, leaves destination refs empty and exits successfully. Zmin now
-routes this direct-location branch fetch through the branch-without-destination
-handler instead of the catch-all explicit-location unsupported branch. The row
-is recorded in
+explicit source HEAD, leaves destination refs empty and exits successfully.
+Zmin already matches that behavior, so the slice adds focused oracle evidence
+and records the row in
 `docs/cli/matrices/fetch_v2_47.tsv` with focused evidence in
-`git_transport_local_compat::fetch_prune_direct_location_branch_fetch_head_matches_stock_git`.
+`git_transport_local_compat::fetch_prune_direct_location_head_fetch_head_matches_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -626,7 +625,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1078` written-row
+This card is the exact handoff target after the current `1079` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -645,7 +644,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1078`; the `1/1078` open row and the still incomplete command/doc-option
+`0/1079`; the `1/1079` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
