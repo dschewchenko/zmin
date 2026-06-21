@@ -406,7 +406,7 @@ pub(crate) fn fast_import(date_format: Option<&str>) -> Result<()> {
         &ref_repo,
         &store,
         &refs,
-        FastImportDateFormat::from_cli(date_format)?,
+        FastImportDateFormat::from_cli(date_format, &repo.git_dir)?,
     )
     .parse()
 }
@@ -419,15 +419,16 @@ enum FastImportDateFormat {
 }
 
 impl FastImportDateFormat {
-    fn from_cli(value: Option<&str>) -> Result<Self> {
+    fn from_cli(value: Option<&str>, git_dir: &std::path::Path) -> Result<Self> {
         match value {
             None | Some("raw") => Ok(Self::Raw),
             Some("rfc2822") => Ok(Self::Rfc2822),
             Some("now") => Ok(Self::Now),
-            Some(value) => Err(CliError::Fatal {
-                code: 128,
-                message: format!("unsupported fast-import date format: {value}"),
-            }),
+            Some(value) => Err(fast_import_crash_error(
+                git_dir,
+                format!("unknown --date-format argument {value}"),
+                None,
+            )?),
         }
     }
 }
@@ -800,27 +801,43 @@ impl<'a> FastImportParser<'a> {
     }
 
     fn unsupported_fast_import_command(&self, line: &str) -> Result<CliError> {
-        let crash_file = format!("fast_import_crash_{}", std::process::id());
-        let crash_path = self.repo.git_dir.join(&crash_file);
-        fs::write(&crash_path, fast_import_crash_report(line))?;
-        Ok(CliError::Fatal {
-            code: 128,
-            message: format!(
-                "Unsupported command: {line}\nfast-import: dumping crash report to .git/{crash_file}"
-            ),
-        })
+        fast_import_crash_error(
+            &self.repo.git_dir,
+            format!("Unsupported command: {line}"),
+            Some(line),
+        )
     }
 }
 
-fn fast_import_crash_report(line: &str) -> String {
+fn fast_import_crash_error(
+    git_dir: &std::path::Path,
+    fatal: String,
+    recent_command: Option<&str>,
+) -> Result<CliError> {
+    let crash_file = format!("fast_import_crash_{}", std::process::id());
+    let crash_path = git_dir.join(&crash_file);
+    fs::write(
+        &crash_path,
+        fast_import_crash_report(&fatal, recent_command),
+    )?;
+    Ok(CliError::Fatal {
+        code: 128,
+        message: format!("{fatal}\nfast-import: dumping crash report to .git/{crash_file}"),
+    })
+}
+
+fn fast_import_crash_report(fatal: &str, recent_command: Option<&str>) -> String {
+    let recent_command = recent_command
+        .map(|command| format!("* {command}\n"))
+        .unwrap_or_default();
     format!(
         "fast-import crash report:\n\
              \n\
-             fatal: Unsupported command: {line}\n\
+             fatal: {fatal}\n\
              \n\
              Most Recent Commands Before Crash\n\
              ---------------------------------\n\
-             * {line}\n\
+             {recent_command}\
              \n\
              Active Branch LRU\n\
              -----------------\n\

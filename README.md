@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `35/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `241/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1001` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `770/1001` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `1/1001` | written rows with incomplete parity |
-| Open written rows | `0/1001` | written rows that still do not match stock Git |
-| Invalid input rows | `230/1001` | rows where stock Git rejects the input |
+| Written behavior rows | `1002` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `770/1002` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `1/1002` | written rows with incomplete parity |
+| Open written rows | `0/1002` | written rows that still do not match stock Git |
+| Invalid input rows | `231/1002` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `770/1001` as Git compatibility. It only means `770` of the `1001`
+Do not read `770/1002` as Git compatibility. It only means `770` of the `1002`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `1/1001` row is only partially matching
-stock Git and `230/1001` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `1/1002` row is only partially matching
+stock Git and `231/1002` additional rows are stock-compatible invalid inputs. Do
 not read `241/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -219,8 +219,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `28` | `10` | `0` | `0` | `18` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `195` | `151` | `0` | `0` | `44` |
-| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `27` | `7` | `1` | `0` | `19` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1001`** | **`770`** | **`1`** | **`0`** | **`230`** |
+| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `28` | `7` | `1` | `0` | `20` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1002`** | **`770`** | **`1`** | **`0`** | **`231`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -246,7 +246,7 @@ Current command-level matrices:
 | `status` | `26` | `0` | `22` | `75` | `66` | `0` | `0` | `9` | no |
 | `fetch` | `73` | `0` | `30` | `290` | `283` | `0` | `0` | `7` | no |
 | `diff` | `133` | `0` | `31` | `65` | `65` | `0` | `0` | `0` | no |
-| `fast-import` | `25` | `0` | `1` | `3` | `0` | `1` | `0` | `2` | no |
+| `fast-import` | `25` | `0` | `1` | `4` | `0` | `1` | `0` | `3` | no |
 | `log` | `282` | `0` | `32` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
 | `index-pack` | `18` | `0` | `1` | `3` | `0` | `0` | `0` | `3` | no |

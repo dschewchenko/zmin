@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 35/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1001 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 35/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1002 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -265,9 +265,14 @@ command inside a commit record. Stock Git again exits `128`, writes
 the same unreferenced loose object count for the in-progress commit. Zmin now
 matches that classified side-effect shape.
 
+The latest fast-import option-value classification is
+`--date-format=bogus`. Stock Git exits `128`, prints
+`fatal: unknown --date-format argument bogus` plus a crash-report path, and
+writes `.git/fast_import_crash_*`. Zmin now matches that invalid-input shape.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1001` written-row
+This card is the exact handoff target after the current `1002` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -286,7 +291,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1001`; the complete command matrices and complete doc-option matrices remain
+`0/1002`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
