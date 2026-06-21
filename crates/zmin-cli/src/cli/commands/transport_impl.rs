@@ -12065,6 +12065,8 @@ pub(crate) fn fetch_with_repo_and_remote(
                 branch,
                 &url,
                 false,
+                false,
+                quiet,
             )?;
         }
         if set_upstream {
@@ -12595,6 +12597,8 @@ fn fetch_with_repo_and_location(
                 refspec,
                 &location,
                 update_shallow,
+                tags,
+                quiet,
             );
         }
     }
@@ -13350,6 +13354,8 @@ fn fetch_branch_without_destination_ref(
     branch: &str,
     url: &str,
     update_shallow: bool,
+    include_tags: bool,
+    quiet: bool,
 ) -> Result<()> {
     let ref_name = branch_ref_name(branch)?;
     let id = source_refs
@@ -13360,9 +13366,22 @@ fn fetch_branch_without_destination_ref(
     validate_destination_object_store_no_symlinks(&repo.objects_dir)?;
     let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let pack_missing_threshold = fetch_unpack_pack_threshold(repo)?;
+    let mut roots = Vec::with_capacity(if include_tags {
+        transport_ref_collection_capacity(2)
+    } else {
+        1
+    });
+    roots.push(id.clone());
+    if include_tags {
+        source_refs.for_each_resolved_ref("refs/tags/", |_, tag_id| {
+            roots.push(tag_id.clone());
+            Ok::<(), CliError>(())
+        })?;
+        sort_dedup_object_ids(&mut roots);
+    }
     let mut seen = HashSet::with_capacity(copy_reachable_seen_initial_capacity(
         source_store.object_id_capacity_hint()?,
-        1,
+        roots.len(),
     ));
     if let Some(shallow_boundaries) = read_repo_shallow_boundaries(&source_repo)? {
         if !update_shallow {
@@ -13377,21 +13396,30 @@ fn fetch_branch_without_destination_ref(
         copy_reachable_objects_from_shallow_source_into(
             &source_store,
             &destination_store,
-            std::slice::from_ref(&id),
+            &roots,
             &shallow_boundaries,
             &mut seen,
         )?;
         write_shallow_file(repo, sorted_object_ids_from_set(&shallow_boundaries))?;
     } else {
-        copy_reachable_objects_inner(
+        copy_reachable_objects_into_many(
             &source_repo,
             &source_store,
             &destination_store,
-            &id,
+            &roots,
+            &[],
             &mut seen,
             PackEncodeOptions::delta(10, 50),
             pack_missing_threshold,
         )?;
+    }
+    if include_tags {
+        copy_configured_fetch_tags(source_refs, &refs_adapter_from_git_dir(&repo.git_dir))?;
+        write_branch_fetch_head_with_tags_file(repo, &id, &ref_name, source_refs, url)?;
+        if !quiet {
+            print_branch_fetch_with_tags(url, branch, source_refs)?;
+        }
+        return Ok(());
     }
     write_branch_fetch_head_file(repo, &id, &ref_name, url, false, false)
 }
@@ -13553,7 +13581,16 @@ fn fetch_branch_without_destination_ref_deepen(
     deepen: usize,
 ) -> Result<()> {
     let Some(shallow_boundaries) = read_repo_shallow_boundaries(repo)? else {
-        return fetch_branch_without_destination_ref(repo, source, source_refs, branch, url, false);
+        return fetch_branch_without_destination_ref(
+            repo,
+            source,
+            source_refs,
+            branch,
+            url,
+            false,
+            false,
+            true,
+        );
     };
     let ref_name = branch_ref_name(branch)?;
     let id = source_refs
@@ -13590,7 +13627,16 @@ fn fetch_branch_without_destination_ref_unshallow(
             message: "--unshallow on a complete repository does not make sense".into(),
         });
     }
-    fetch_branch_without_destination_ref(repo, source, source_refs, branch, url, false)?;
+    fetch_branch_without_destination_ref(
+        repo,
+        source,
+        source_refs,
+        branch,
+        url,
+        false,
+        false,
+        true,
+    )?;
     copy_local_unshallow_objects(source, repo, source_refs, Some(branch), &[], 128)?;
     write_shallow_file(repo, Vec::new())
 }
@@ -15070,6 +15116,48 @@ fn write_branch_fetch_head_file(
         fetch_head_url_display(url)
     );
     write_fetch_head_content(repo, row.as_bytes(), append)
+}
+
+fn write_branch_fetch_head_with_tags_file(
+    repo: &GitRepo,
+    id: &ObjectId,
+    source_ref: &str,
+    source_refs: &RefStore,
+    url: &str,
+) -> Result<()> {
+    let branch = source_ref.strip_prefix("refs/heads/").unwrap_or(source_ref);
+    let display_url = fetch_head_url_display(url);
+    let mut rows = vec![format!(
+        "{}\t\tbranch '{}' of {}\n",
+        id.to_hex(),
+        branch,
+        display_url
+    )];
+    source_refs.for_each_ref_name("refs/tags/", |ref_name| {
+        let tag = ref_name.strip_prefix("refs/tags/").unwrap_or(ref_name);
+        let id = match source_refs.read_ref(ref_name)? {
+            RefTarget::Direct(id) => id,
+            RefTarget::Symbolic(target) => source_refs.resolve(&target)?,
+        };
+        rows.push(format!(
+            "{}\tnot-for-merge\ttag '{}' of {}\n",
+            id.to_hex(),
+            tag,
+            display_url
+        ));
+        Ok::<(), CliError>(())
+    })?;
+    write_fetch_head_content(repo, rows.concat().as_bytes(), false)
+}
+
+fn print_branch_fetch_with_tags(url: &str, branch: &str, source_refs: &RefStore) -> Result<()> {
+    eprintln!("From {}", fetch_head_url_display(url));
+    eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    source_refs.for_each_ref_name("refs/tags/", |ref_name| {
+        let tag = ref_name.strip_prefix("refs/tags/").unwrap_or(ref_name);
+        eprintln!(" * [new tag]         {tag:<11}-> {tag}");
+        Ok::<(), CliError>(())
+    })
 }
 
 fn write_fetch_head_content(repo: &GitRepo, content: &[u8], append: bool) -> Result<()> {
