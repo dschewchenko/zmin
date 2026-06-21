@@ -431,6 +431,54 @@ fn for_each_repo_missing_repo_failures_match_stock_git() {
 }
 
 #[test]
+fn repo_command_is_tracked_zmin_only_extension() {
+    let repo = git_init();
+
+    let stock = Command::new(common::stock_git_bin())
+        .args(["repo", "-h"])
+        .current_dir(repo.path())
+        .output()
+        .expect("run stock git repo");
+    assert_eq!(stock.status.code().expect("stock git repo exit"), 1);
+    assert!(stock.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&stock.stderr).starts_with("git: 'repo' is not a git command."),
+        "unexpected stock git repo stderr: {}",
+        String::from_utf8_lossy(&stock.stderr)
+    );
+
+    assert_eq!(
+        run_zmin(repo.path(), ["repo", "info", "--all"]),
+        "layout.bare=false\nlayout.shallow=false\nobject.format=sha1\nreferences.format=files"
+    );
+    assert_eq!(
+        run_zmin(repo.path(), ["repo", "structure", "--format=lines"]),
+        "references.count=0\nobjects.loose.count=0\nobjects.packed.count=0\nobjects.total.count=0"
+    );
+
+    let nul_output = Command::new(zmin_bin())
+        .args(["repo", "info", "--keys", "-z"])
+        .current_dir(repo.path())
+        .output()
+        .expect("zmin repo info -z");
+    assert!(nul_output.status.success());
+    assert_eq!(
+        nul_output.stdout,
+        b"layout.bare\0layout.shallow\0object.format\0references.format\0"
+    );
+    assert!(nul_output.stderr.is_empty());
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["repo", "info", "--format=bogus", "--all"]),
+        (
+            129,
+            String::new(),
+            "fatal: unsupported repo output format 'bogus'".to_owned()
+        )
+    );
+}
+
+#[test]
 fn bugreport_creates_report_file_in_output_directory() {
     let repo = git_init();
     let output = TempDir::new().expect("bugreport output");

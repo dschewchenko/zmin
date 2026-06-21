@@ -263,6 +263,11 @@ Validation:
 - `tools/parallels-windows-runner.sh validate targeted git_clone_compat
   clone_worktree_first_rejects_non_worktree_or_remote_modes`
 
+`zmin repo` is an additive repository-inspection command. Stock Git `2.47.1`
+does not provide `git repo`, so its `info` and `structure` output modes are
+tracked only in `docs/cli/zmin_extensions_inventory.md`, not in the Git
+compatibility denominator.
+
 `zmin hooks` is additive Zmin porcelain; it does not replace or change the
 Git-compatible `git hook run` command. The first managed hooks slice supports:
 

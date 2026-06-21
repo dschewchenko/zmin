@@ -10,9 +10,9 @@ coverage numbers in the Git compatibility matrix.
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Zmin-only commands | `8` | additive top-level commands that are not Git command names |
+| Zmin-only commands | `9` | additive top-level commands that are not Git command names |
 | Zmin-only options on Git commands | `4` | additive options on existing Git-compatible commands |
-| Stable extensions | `2` | implemented and covered by focused tests |
+| Stable extensions | `3` | implemented and covered by focused tests |
 | Experimental extensions | `2` | implemented but still preview-only |
 | Planned extensions | `1` | designed backlog, not implemented |
 
@@ -21,6 +21,7 @@ coverage numbers in the Git compatibility matrix.
 | Command | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | `zmin hooks` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | supports `init`, `add [--force]`, `list`, and `remove` managed-hook subcommands |
+| `zmin repo` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | exposes Zmin-only repository metadata and structure summaries; stock Git has no `git repo` command |
 | `zmin save <message>` | experimental | `git_cms_porcelain_compat` | CMS-style `add -A` plus `commit -m` wrapper |
 | `zmin changes` | experimental | `git_cms_porcelain_compat` | human-readable status wrapper |
 | `zmin publish` | experimental | `git_cms_porcelain_compat` | safe push wrapper |

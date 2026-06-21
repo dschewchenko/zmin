@@ -304,15 +304,15 @@ Current extension inventory:
 
 | Layer | Count |
 | --- | ---: |
-| Zmin-only commands | `8` |
+| Zmin-only commands | `9` |
 | Zmin-only options on Git commands | `4` |
-| Stable extensions | `2` |
+| Stable extensions | `3` |
 | Experimental extensions | `2` |
 | Planned extensions | `1` |
 
 Implemented extensions include `zmin clone --instant`, managed `zmin hooks`
-commands and CMS-style porcelain such as `zmin save`, `zmin changes`,
-`zmin publish` and `zmin update`.
+commands, `zmin repo` metadata summaries and CMS-style porcelain such as
+`zmin save`, `zmin changes`, `zmin publish` and `zmin update`.
 
 The staged-file hook runner is planned as a Zmin-only extension, with an API
 shape like `zmin hooks run pre-commit --staged -- command ...`. It will be

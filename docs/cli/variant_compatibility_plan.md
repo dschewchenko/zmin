@@ -220,6 +220,12 @@ The latest source-scan classification pass covers the `pack.rs` /
 Git also rejects invalid input or corrupt storage formats; they are not open
 Git-supported feature gaps as long as the mapped oracle rows keep passing.
 
+The latest Zmin-only guard classification is `reference_impl.rs`
+`unsupported repo output format`. Stock Git has no `git repo` command, so this
+guard is tracked under `docs/cli/zmin_extensions_inventory.md` instead of the
+Git `2.47.1` matrix. The focused extension test covers `repo info`,
+`repo structure`, NUL key output and invalid output-format validation.
+
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
 Local stock Git advertises `gui` and `citool` in `git help -a`, but this
@@ -243,7 +249,7 @@ state. Finish it before choosing another guard or command.
 | --- | --- |
 | Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at the next remaining `unsupported` / `not supported` guard in `crates/zmin-cli/src/cli/commands/pack_impl.rs` or `crates/zmin-git-core/src/pack.rs` unless a new WebStorm replacement trace appears first |
+| Implementation area | start at the next remaining unmapped `unsupported` / `not supported` guard outside the already mapped `pack.rs` / `pack_impl.rs` and `reference_impl.rs` `zmin repo` guards, unless a new WebStorm replacement trace appears first |
 | Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
@@ -542,6 +548,7 @@ behavior, invalid input, or corrupt-format handling.
 | `zmin-git-core/src/pack.rs` `unsupported pack index version {raw_version}` while reading pack indexes | corrupt/unsupported pack-index storage format with command-specific stock diagnostics | `docs/cli/matrices/show_index_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_object_plumbing_compat::show_index_rejects_unsupported_pack_index_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_index_version_like_stock_git` |
 | `zmin-git-core/src/pack.rs` `unsupported pack reverse index signature` and `unsupported pack reverse index version` | corrupt/unsupported reverse-index sidecar files validated through `index-pack --verify` | `docs/cli/matrices/index_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_signature_like_stock_git`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_version_like_stock_git` |
 | `zmin-git-core/src/pack.rs` `unsupported pack file version {version}` while reading pack headers | corrupt/unsupported pack storage format with command-specific stock diagnostics | `docs/cli/matrices/index_pack_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_unsupported_pack_file_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_file_version_like_stock_git` |
+| `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 
 ## Code Guard Classification
 
