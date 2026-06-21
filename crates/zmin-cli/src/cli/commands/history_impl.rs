@@ -2412,7 +2412,7 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
         return Err(blame_line_range_regex_empty(pattern, from_line));
     }
     let regex = regex::bytes::Regex::new(pattern).map_err(|_| {
-        if pattern == "[" {
+        if blame_regex_has_unbalanced_bracket(pattern) {
             blame_line_range_regex_unbalanced_brackets(pattern, from_line)
         } else {
             unsupported_blame_line_range(pattern)
@@ -2424,6 +2424,27 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
         .find(|line| regex.is_match(&line.content))
         .map(|line| line.line_no)
         .ok_or_else(|| blame_line_range_regex_no_match(pattern, from_line))
+}
+
+fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
+    let mut escaped = false;
+    let mut open = false;
+    for byte in pattern.bytes() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+        if byte == b'[' {
+            open = true;
+        } else if byte == b']' && open {
+            open = false;
+        }
+    }
+    open
 }
 
 fn blame_function_line_matches(line: &[u8], function: &[u8]) -> bool {
