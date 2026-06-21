@@ -599,6 +599,13 @@ diagnostics, final `fatal: <path>: clean filter '<name>' failed`, and an
 unchanged index. Zmin now emits the same shape instead of the former custom
 `unsupported filter process status` fatal message.
 
+The latest Zmin-only guard classification is `transport_impl.rs`
+`unsupported ZMIN_GIT_HTTP_VERSION`. Stock Git has no
+`ZMIN_GIT_HTTP_VERSION` control, so this is additive Zmin HTTP helper
+validation and is tracked under `docs/cli/zmin_extensions_inventory.md`
+instead of the Git `2.47.1` matrix. Existing focused unit evidence covers
+invalid values such as `h1`.
+
 The latest closed behavior slice is `history_impl.rs` parent-filter bad output
 for `git filter-branch -f --parent-filter 'printf bad' HEAD`. Stock Git exits
 `1` after printing rewrite progress and commit-tree diagnostics, leaving
@@ -970,6 +977,7 @@ behavior, invalid input, or corrupt-format handling.
 | `worktree_impl.rs` `error: unsupported option '{other}'` in `git status --column=<value>` parsing | stock-compatible invalid input for unsupported status column mode tokens | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_column_mode_matches_stock_git` |
 | `transport_impl.rs` `unsupported index-pack option '{arg}'` in `http-fetch --packfile` delegated index-pack parsing | stock-compatible invalid input for invalid delegated `index-pack` arguments | `docs/cli/matrices/http_fetch_v2_47.tsv`; `git_transport_http_compat::http_fetch_packfile_rejects_bad_index_pack_arg_like_stock_git` |
 | `runtime/worktree_index.rs` `unsupported object format '{value}'` while reading repository object format | stock-compatible invalid repository config for unsupported local `extensions.objectFormat` values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_object_format_config_matches_stock_git` |
+| `transport_impl.rs` `unsupported ZMIN_GIT_HTTP_VERSION '{raw}'` in HTTP remote-helper setup | Zmin-only environment validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `transport_impl::tests::remote_http_helper_version_arg_rejects_unsupported_values` |
 
 ## Code Guard Classification
 

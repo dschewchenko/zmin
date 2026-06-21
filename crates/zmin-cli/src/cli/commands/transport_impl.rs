@@ -25013,7 +25013,7 @@ mod transport_request_tests {
 
         assert_eq!(
             request.len(),
-            upload_pack_request_capacity(&roots, &[], Some(123_456), None, &[], &[], false)
+            upload_pack_request_capacity(&roots, &[], Some(123_456), None, &[], &[], false, None)
         );
         assert!(
             request
@@ -25032,7 +25032,7 @@ mod transport_request_tests {
         let mut request =
             Vec::with_capacity(daemon_service_request_capacity(&url, "git-upload-pack"));
 
-        write_daemon_service_request(&mut request, &url, "git-upload-pack")
+        write_daemon_service_request(&mut request, &url, "git-upload-pack", &[])
             .expect("daemon request");
 
         assert_eq!(
@@ -25052,7 +25052,7 @@ mod transport_request_tests {
         let mut request =
             Vec::with_capacity(daemon_service_request_capacity(&url, "git-upload-pack"));
 
-        write_daemon_service_request(&mut request, &url, "git-upload-pack")
+        write_daemon_service_request(&mut request, &url, "git-upload-pack", &[])
             .expect("daemon request");
 
         assert_eq!(

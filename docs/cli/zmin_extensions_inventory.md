@@ -12,6 +12,7 @@ coverage numbers in the Git compatibility matrix.
 | --- | ---: | --- |
 | Zmin-only commands | `9` | additive top-level commands that are not Git command names |
 | Zmin-only options on Git commands | `4` | additive options on existing Git-compatible commands |
+| Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
 | Stable extensions | `3` | implemented and covered by focused tests |
 | Experimental extensions | `2` | implemented but still preview-only |
 | Planned extensions | `1` | designed backlog, not implemented |
@@ -38,6 +39,12 @@ coverage numbers in the Git compatibility matrix.
 | `zmin clone` | `--instant` | stable | `git_clone_compat`, `git_transport_http_compat clone_instant_` | alias for worktree-first clone mode |
 | `zmin clone` | `--background-fetch` | experimental | `git_transport_http_compat clone_instant_` | starts a detached `fetch origin` after an instant remote clone |
 | `zmin clone` | `--demand-hydrate` | experimental | `git_transport_http_compat clone_instant_` | marks instant remote clones as promisor-backed for missing-object hydration |
+
+## Zmin-Only Environment Controls
+
+| Variable | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| `ZMIN_GIT_HTTP_VERSION` | stable | `transport_impl::tests::remote_http_helper_version_arg_rejects_unsupported_values` | selects the Zmin HTTP remote-helper protocol preference; accepted values are `auto`, `http1`, `http2` and `http3`; invalid values are Zmin-only validation and do not count toward Git `2.47.1` compatibility |
 
 ## Planned: Staged Hook Runner
 
