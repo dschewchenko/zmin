@@ -2414,6 +2414,11 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
     if let Some(error) = blame_basic_regex_interval_error(pattern, from_line) {
         return Err(error);
     }
+    if blame_regex_has_invalid_character_range(pattern) {
+        return Err(blame_line_range_regex_invalid_character_range(
+            pattern, from_line,
+        ));
+    }
     let translated_pattern = translate_blame_basic_regex(pattern);
     let regex = regex::bytes::Regex::new(&translated_pattern).map_err(|_| {
         if blame_regex_has_unbalanced_bracket(pattern) {
@@ -2573,6 +2578,62 @@ fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
     open
 }
 
+fn blame_regex_has_invalid_character_range(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'[' {
+            index += 1;
+            continue;
+        }
+        let class_start = index;
+        index += 1;
+        if bytes.get(index) == Some(&b'^') {
+            index += 1;
+        }
+        let mut class_bytes = Vec::new();
+        let mut escaped = false;
+        let mut closed = false;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if escaped {
+                class_bytes.push(byte);
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if byte == b']' {
+                closed = true;
+                break;
+            }
+            class_bytes.push(byte);
+            index += 1;
+        }
+        if closed && blame_character_class_has_invalid_range(&class_bytes) {
+            return true;
+        }
+        index = if closed { index + 1 } else { class_start + 1 };
+    }
+    false
+}
+
+fn blame_character_class_has_invalid_range(class_bytes: &[u8]) -> bool {
+    if class_bytes.len() < 3 {
+        return false;
+    }
+    for index in 1..class_bytes.len().saturating_sub(1) {
+        if class_bytes[index] == b'-' && class_bytes[index - 1] > class_bytes[index + 1] {
+            return true;
+        }
+    }
+    false
+}
+
 fn blame_function_line_matches(line: &[u8], function: &[u8]) -> bool {
     !function.is_empty()
         && line
@@ -2639,6 +2700,15 @@ fn blame_line_range_regex_unbalanced_brackets(pattern: &str, start_line: usize) 
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: brackets ([ ]) not balanced"
+        ),
+    }
+}
+
+fn blame_line_range_regex_invalid_character_range(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: invalid character range"
         ),
     }
 }
