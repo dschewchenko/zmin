@@ -617,6 +617,12 @@ not through a Git `2.47.1` CLI command path. Keep them outside the Git
 compatibility denominator until that primitive API is stabilized with its own
 non-Git extension tests.
 
+The latest closed guard mapping is `import_impl.rs`
+`unsupported_fast_import_command` for unknown fast-import stream commands. It
+is already represented by invalid-input rows for both top-level unknown
+commands and unknown commands inside a commit record; both use stock-Git crash
+report evidence and remain classified as invalid input, not open feature gaps.
+
 The latest closed behavior slice is the invalid mixed-object `diff` operand
 form. Stock Git rejects `git diff HEAD^{tree} <blob>` and the reverse order
 with exit `129`, empty stdout and the full `git diff` usage text. Zmin now
@@ -968,6 +974,7 @@ behavior, invalid input, or corrupt-format handling.
 | `import_impl.rs` former `unsupported fast-import command` path for top-level `checkpoint` | Git-supported stream command now accepted and stock-shaped fast-import statistics stderr is emitted after successful import | `docs/cli/matrices/fast_import_v2_47.tsv`; `git_fast_import_date_compat::fast_import_checkpoint_matches_stock_git_statistics` |
 | `import_impl.rs` former `unsupported fast-import command` path for top-level `progress` | Git-supported stream command now accepted and stock-shaped fast-import statistics stderr is emitted after successful import | `docs/cli/matrices/fast_import_v2_47.tsv`; `git_fast_import_date_compat::fast_import_progress_matches_stock_git_statistics` |
 | `import_impl.rs` former `unsupported fast-import command` path for top-level `done` | Git-supported stream terminator now accepted and stock-shaped fast-import statistics stderr is emitted after successful import | `docs/cli/matrices/fast_import_v2_47.tsv`; `git_fast_import_date_compat::fast_import_done_matches_stock_git_statistics` |
+| `import_impl.rs` `unsupported_fast_import_command` path for unknown top-level and commit-body stream commands | stock-compatible invalid input for unknown fast-import stream commands that trigger crash reports | `docs/cli/matrices/fast_import_v2_47.tsv`; `git_fast_import_date_compat::fast_import_unknown_top_level_command_matches_stock_git_crash_shape`; `git_fast_import_date_compat::fast_import_unknown_commit_command_matches_stock_git_crash_shape` |
 | `diff_render.rs` `unsupported --diff-filter status` parser path | stock-compatible invalid input for unknown `--diff-filter` change classes | `docs/cli/matrices/diff_v2_47.tsv`; `git_diff_compat::diff_filter_invalid_change_classes_match_stock_git` |
 | `maintenance_impl.rs` `unsupported maintenance schedule '{schedule}'` in `maintenance run` strategy selection | stock-compatible invalid input for invalid `maintenance run --schedule` values and schedule/task combinations | `docs/cli/matrices/maintenance_v2_47.tsv`; `git_maintenance_compat::maintenance_run_invalid_schedule_failure_matches_stock_git`; `git_maintenance_compat::maintenance_run_schedule_task_and_auto_failures_match_stock_git` |
 | `maintenance_impl.rs` former `unsupported maintenance scheduler '{other}'` guard in `maintenance start` scheduler selection | stock-compatible invalid input for unknown `maintenance start --scheduler=<value>` values | `docs/cli/matrices/maintenance_v2_47.tsv`; `git_maintenance_compat::maintenance_unknown_scheduler_failure_matches_stock_git` |
