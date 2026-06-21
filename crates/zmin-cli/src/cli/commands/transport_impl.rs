@@ -7178,18 +7178,14 @@ fn validate_clone_plan_for_options(
 
 fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     let _trace = phase_trace("clone_http");
-    if !options.references.is_empty() || !options.reference_if_able.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "reference repositories are not supported for dumb HTTP clone yet".into(),
-        });
-    }
     let _ = (
         options.remote_submodules,
         options.shallow_submodules,
         options.keep_partial_on_missing_branch,
     );
     validate_remote_name(&options.remote_name)?;
+    let mut reference_object_dirs = reference_object_dirs(&options.references)?;
+    reference_object_dirs.extend(reference_if_able_object_dirs(&options.reference_if_able));
     let _ = options.reject_shallow;
 
     let destination = match &options.directory {
@@ -7256,6 +7252,9 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     if let Err(error) = apply_clone_configs(&repo, &options.configs) {
         cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
         return Err(error);
+    }
+    if !options.dissociate {
+        write_alternates_file(&repo.objects_dir, &reference_object_dirs)?;
     }
 
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());

@@ -834,6 +834,17 @@ fn assert_no_alternates(repo: &std::path::Path) {
     );
 }
 
+fn canonical_alternates(path: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fs::read_to_string(path)
+        .expect("read alternates")
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(std::path::PathBuf::from)
+        .map(|path| fs::canonicalize(&path).unwrap_or(path))
+        .collect()
+}
+
 impl WritableHttpServer {
     fn new() -> Self {
         let root = TempDir::new().expect("writable http root");
@@ -10817,6 +10828,79 @@ fn clone_shared_is_ignored_for_dumb_http_like_stock_git() {
     );
     assert_no_alternates(&git_clone);
     assert_no_alternates(&zmin_clone);
+}
+
+#[test]
+fn clone_reference_dumb_http_matches_stock_git() {
+    ensure_remote_http_helper();
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let reference = dir.path().join("reference");
+    let git_clone = dir.path().join("git-reference-clone");
+    let zmin_clone = dir.path().join("zmin-reference-clone");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("a.txt"), b"hello\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    git(&source, ["update-server-info"]);
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            reference.to_str().expect("reference path"),
+        ],
+    );
+    configure_identity(&reference);
+    fs::write(reference.join("reference.txt"), b"reference\n").expect("write reference");
+    git(&reference, ["add", "-A"]);
+    git_with_env(&reference, ["commit", "-m", "reference"]);
+
+    let server = StaticHttpServer::new(source.clone());
+    let url = format!("http://127.0.0.1:{}/.git", server.port);
+    git(
+        dir.path(),
+        [
+            "clone",
+            "--reference",
+            reference.to_str().expect("reference path"),
+            url.as_str(),
+            git_clone.to_str().expect("git clone path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--reference",
+            reference.to_str().expect("reference path"),
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+    );
+
+    assert_eq!(
+        canonical_alternates(&zmin_clone.join(".git/objects/info/alternates")),
+        canonical_alternates(&git_clone.join(".git/objects/info/alternates"))
+    );
+    assert_eq!(
+        git(&zmin_clone, ["rev-parse", "HEAD"]),
+        git(&git_clone, ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_clone, ["cat-file", "-p", "HEAD^{tree}"]),
+        git(&git_clone, ["cat-file", "-p", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        run_zmin(&zmin_clone, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_clone, ["status", "--porcelain=v1", "--branch"])
+    );
 }
 
 #[test]
