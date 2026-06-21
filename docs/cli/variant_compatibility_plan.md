@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 284/4632 represented doc-option pairs / 1273 written rows / 990 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 285/4632 represented doc-option pairs / 1277 written rows / 994 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands already-covered `diff --diff-filter` cached
+The latest completed slice expands already-covered `diff --relative` cached
 rows from existing stock-oracle evidence:
 
-`git diff --cached --name-status --diff-filter=A`
+`git diff --cached --relative=sub --name-only`
 
-`docs/cli/matrices/diff_v2_47.tsv` now records concrete `--diff-filter` values
-for `A`, `D`, `M`, lowercase all-or-none forms, combined class filters and
-star forms across cached name-status, stat, patch, numstat and shortstat
-formats with focused evidence in
-`git_diff_compat::diff_filter_matches_stock_git_for_cached_formats`.
+`docs/cli/matrices/diff_v2_47.tsv` now records concrete `--relative=sub`
+cached output formats for name-only, name-status, stat and patch, plus the
+order-sensitive `--no-relative` override, with focused evidence in
+`git_diff_compat::diff_relative_matches_stock_git_for_cached_formats`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -634,7 +633,7 @@ branch and short output modes. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1273` written-row
+This card is the exact handoff target after the current `1277` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -653,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1273`; the `1/1273` open row and the still incomplete command/doc-option
+`0/1277`; the `1/1277` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
