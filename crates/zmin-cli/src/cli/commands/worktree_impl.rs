@@ -4990,9 +4990,9 @@ fn sparse_checkout_set(patterns: &[String]) -> Result<()> {
 }
 
 fn sparse_checkout_add(patterns: &[String]) -> Result<()> {
-    let options = parse_sparse_checkout_options(patterns, true, SparseCheckoutUsage::Add)?;
     let repo = find_repo()?;
     ensure_sparse_checkout_enabled(&repo, "no sparse-checkout to add to")?;
+    let options = parse_sparse_checkout_options(patterns, true, SparseCheckoutUsage::Add)?;
     apply_sparse_checkout_config_options(&repo, &options)?;
     set_config_value(&repo, "core.sparseCheckout", "true")?;
     let mut combined = read_sparse_checkout_patterns(&repo)?;

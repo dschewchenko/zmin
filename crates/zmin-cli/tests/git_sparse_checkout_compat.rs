@@ -123,6 +123,7 @@ fn sparse_checkout_non_sparse_failures_match_stock_git() {
     for args in [
         ["sparse-checkout", "list"].as_slice(),
         ["sparse-checkout", "add", "docs"].as_slice(),
+        ["sparse-checkout", "add", "--bad"].as_slice(),
         ["sparse-checkout", "reapply"].as_slice(),
     ] {
         assert_eq!(
