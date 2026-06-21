@@ -64,6 +64,7 @@ Administration	bundle
 Server Admin	daemon
 Server Admin	update-server-info
 Plumbing Commands	cat-file
+Plumbing Commands	check-attr
 Plumbing Commands	check-ignore
 Plumbing Commands	checkout-index
 Plumbing Commands	commit-tree
