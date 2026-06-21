@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1084 written rows / 818 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1085 written rows / 818 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,17 +266,19 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is an explicit local path malformed refspec
+The latest completed slice is a required clean process-filter delayed-status
 invalid-input case:
 
-`git fetch <path> main:bad:ref`
+`git add a.bad`
 
-Stock Git rejects this refspec with exit `128`, empty stdout, `fatal: invalid
-refspec 'main:bad:ref'` on stderr and no `FETCH_HEAD`. Zmin now routes this
-remaining explicit-location parser shape to the stock invalid-refspec fatal
-instead of the generic `not supported yet` guard. The row is recorded in
-`docs/cli/matrices/fetch_v2_47.tsv` with focused evidence in
-`git_transport_local_compat::fetch_malformed_explicit_location_refspec_matches_stock_git_failure`.
+Stock Git rejects a required clean process filter that returns
+`status=delayed` without a `can-delay=1` request. It exits `128`, leaves stdout
+empty, reports the external filter failure plus the stock signal-15 diagnostic,
+and leaves the index unchanged. Zmin now maps that delayed clean response to
+the same protocol-failure shape instead of the custom
+`filter process delayed response is not supported here` fatal. The row is
+recorded in `docs/cli/matrices/add_v2_47.tsv` with focused evidence in
+`git_add_compat::add_process_filter_delayed_clean_status_matches_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -625,7 +627,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1084` written-row
+This card is the exact handoff target after the current `1085` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -644,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1084`; the `1/1084` open row and the still incomplete command/doc-option
+`0/1085`; the `1/1085` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -982,6 +984,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` former `reference repositories are not supported for dumb HTTP clone yet` guard | Git-supported clone reference and reference-if-able behavior now accepted for dumb HTTP sources with stock-shaped alternates | `docs/cli/matrices/clone_v2_47.tsv`; `git_transport_http_compat::clone_reference_dumb_http_matches_stock_git`; `git_transport_http_compat::clone_reference_if_able_dumb_http_matches_stock_git` |
 | `runtime/worktree_index.rs` former `unsupported filter capability` process-filter handshake guard | stock-compatible invalid input for a required process filter that replies with an unsupported capability during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_unknown_capability_matches_stock_git` |
 | `runtime/worktree_index.rs` former `unsupported filter process status` process-filter response guard | stock-compatible invalid input for a required process filter that returns an unsupported status during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_unknown_status_matches_stock_git` |
+| `runtime/worktree_index.rs` former `filter process delayed response is not supported here` clean-filter response guard | stock-compatible invalid input for a required clean process filter that returns delayed status without a `can-delay=1` request during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_delayed_clean_status_matches_stock_git` |
 | `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |

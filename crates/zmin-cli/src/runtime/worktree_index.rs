@@ -2524,7 +2524,19 @@ fn run_worktree_process_filter(
     };
     match status {
         ProcessFilterResponse::Content(content) => Ok(Some(WorktreeFilterResult::Content(content))),
-        ProcessFilterResponse::Delayed => Ok(Some(WorktreeFilterResult::Delayed { key })),
+        ProcessFilterResponse::Delayed if metadata.iter().any(|item| item == "can-delay=1") => {
+            Ok(Some(WorktreeFilterResult::Delayed { key }))
+        }
+        ProcessFilterResponse::Delayed => {
+            filters.remove(&key);
+            if required {
+                return Err(worktree_filter_protocol_failed_error(
+                    command, filter, relative, direction,
+                ));
+            }
+            eprintln!("error: external filter '{command}' failed");
+            Ok(Some(WorktreeFilterResult::Content(content.to_vec())))
+        }
         ProcessFilterResponse::InvalidStatus => {
             filters.remove(&key);
             if required {
