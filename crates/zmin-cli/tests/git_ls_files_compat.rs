@@ -318,6 +318,30 @@ fn ls_files_stage_preserves_stock_git_raw_regular_index_modes() {
 }
 
 #[test]
+fn ls_files_stage_reads_stock_git_index_v4() {
+    let repo = git_init();
+    git(repo.path(), ["config", "index.version", "4"]);
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::create_dir_all(repo.path().join("docs")).expect("create docs");
+    fs::write(repo.path().join("a.txt"), b"a\n").expect("write a");
+    fs::write(repo.path().join("dir/b.txt"), b"b\n").expect("write b");
+    fs::write(repo.path().join("dir/c.txt"), b"c\n").expect("write c");
+    fs::write(repo.path().join("docs/d.txt"), b"d\n").expect("write d");
+    git(repo.path(), ["add", "-A"]);
+
+    let index = fs::read(repo.path().join(".git/index")).expect("read index");
+    assert_eq!(
+        u32::from_be_bytes([index[4], index[5], index[6], index[7]]),
+        4
+    );
+
+    assert_eq!(
+        command_output_any(zmin_bin(), repo.path(), &["ls-files", "--stage"]),
+        command_output_any("git", repo.path(), &["ls-files", "--stage"])
+    );
+}
+
+#[test]
 fn ls_files_eol_untracked_text_binary_classification_matches_stock_git() {
     let repo = git_init();
     let strt = b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";

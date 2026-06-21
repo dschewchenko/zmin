@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 955 written rows / 756 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 956 written rows / 757 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,11 +209,9 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git ls-files --stage` with a raw
-regular-file index mode such as `100640`. Stock Git accepts non-canonical
-regular-file permission bits in the index and prints the raw mode in stage
-output. Zmin now preserves raw index mode bits for read/write/display while
-using the canonical file/executable/symlink/gitlink mode for behavior.
+The latest closed guard classification is `git ls-files --stage` with a stock
+Git index v4. Stock Git supports version 4 indexes with prefix-compressed
+paths. Zmin now decodes v4 path compression and matches stock stage output.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -225,17 +223,17 @@ or an explicit product decision brings the GUI surface into scope.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `955` written-row
+This card is the exact handoff target after the current `956` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
-| Slice | classify one remaining `unsupported` / `not supported` Rust guard |
-| Stock-Git oracle | run a focused stock Git probe for the selected guard before changing implementation |
-| Implementation area | start with fresh non-GUI scan candidate `crates/zmin-git-core/src/index.rs:770` (`unsupported git index version`) unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest index-reading compat test that proves stdout, stderr, exit code and repository state against stock Git |
-| Matrix update | add the row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
-| Expected count movement | depends on the selected guard; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Slice | classify the remaining bad-version side of the `unsupported git index version` guard |
+| Stock-Git oracle | probe stock Git for bad index versions such as v1/v5 before changing diagnostics |
+| Implementation area | continue at `crates/zmin-git-core/src/index.rs:776` (`unsupported git index version`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest `ls-files` invalid-input compat test that proves stdout, stderr, exit code and repository state against stock Git |
+| Matrix update | add the invalid-input row to `docs/cli/matrices/ls_files_v2_47.tsv` before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
+| Expected count movement | likely `956 -> 957` written rows and `199 -> 200` invalid-input rows; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
 | Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
 
@@ -244,7 +242,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/955`; the complete command matrices and complete doc-option matrices remain
+`0/956`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -403,6 +401,7 @@ until a full matrix is expanded and verified.
 | `ls-files` replacement deleted plus modified NUL output | `1` | `0` | `-z --deleted --modified` through the `git` shim on a cloned repository with deleted and modified tracked files |
 | `ls-files` replacement mixed worktree NUL output | `1` | `0` | `-z --modified --deleted --others --exclude-standard` through the `git` shim on a cloned repository with untracked, deleted and modified tracked files |
 | `ls-files --stage` raw regular index mode bits | `1` | `0` | `git ls-files --stage` preserves raw `100640` mode output from a checksum-valid index while using canonical file behavior internally |
+| `ls-files --stage` stock Git index v4 | `1` | `0` | `git ls-files --stage` reads stock Git version 4 indexes with prefix-compressed paths |
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
 | `rev-parse` replacement git-dir discovery | `1` | `0` | `--git-dir` through the `git` shim on a cloned repository root |
@@ -477,7 +476,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `605` verified variants.
+Tracked closed blocks in this table: `606` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

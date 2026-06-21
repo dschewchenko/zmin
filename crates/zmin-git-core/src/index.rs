@@ -12,6 +12,7 @@ use crate::tree::TreeMode;
 const INDEX_SIGNATURE: &[u8; 4] = b"DIRC";
 const INDEX_VERSION_V2: u32 = 2;
 const INDEX_VERSION_V3: u32 = 3;
+const INDEX_VERSION_V4: u32 = 4;
 const ENTRY_FIXED_LEN: usize = 62;
 const CHECKSUM_LEN: usize = 20;
 const ENTRY_FLAG_ASSUME_VALID: u16 = 0x8000;
@@ -726,11 +727,13 @@ pub fn read_index(path: impl AsRef<Path>) -> io::Result<GitIndex> {
 }
 
 fn decode_index(bytes: &[u8]) -> io::Result<GitIndex> {
-    let (count, checksum_offset) = decode_index_header(bytes)?;
+    let (version, count, checksum_offset) = decode_index_header(bytes)?;
     let mut cursor = 12;
     let mut entries = Vec::with_capacity(index_entry_initial_capacity(count));
+    let mut previous_path = Vec::new();
     for _ in 0..count {
-        let (entry, next) = decode_entry(bytes, cursor, checksum_offset)?;
+        let (entry, next) = decode_entry(bytes, cursor, checksum_offset, version, &previous_path)?;
+        previous_path.clone_from(&entry.path);
         entries.push(entry);
         cursor = next;
     }
@@ -742,7 +745,7 @@ fn index_entry_initial_capacity(count: usize) -> usize {
     count.min(INDEX_ENTRY_INITIAL_CAPACITY_LIMIT)
 }
 
-fn decode_index_header(bytes: &[u8]) -> io::Result<(usize, usize)> {
+fn decode_index_header(bytes: &[u8]) -> io::Result<(u32, usize, usize)> {
     if bytes.len() < 12 + CHECKSUM_LEN {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -764,13 +767,16 @@ fn decode_index_header(bytes: &[u8]) -> io::Result<(usize, usize)> {
         ));
     }
     let version = read_u32(bytes, 4)?;
-    if !matches!(version, INDEX_VERSION_V2 | INDEX_VERSION_V3) {
+    if !matches!(
+        version,
+        INDEX_VERSION_V2 | INDEX_VERSION_V3 | INDEX_VERSION_V4
+    ) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unsupported git index version",
         ));
     }
-    Ok((read_u32(bytes, 8)? as usize, checksum_offset))
+    Ok((version, read_u32(bytes, 8)? as usize, checksum_offset))
 }
 
 fn decode_index_extensions(
@@ -933,7 +939,13 @@ fn index_version_for_index(index: &GitIndex) -> u32 {
     }
 }
 
-fn decode_entry(bytes: &[u8], start: usize, limit: usize) -> io::Result<(IndexEntry, usize)> {
+fn decode_entry(
+    bytes: &[u8],
+    start: usize,
+    limit: usize,
+    version: u32,
+    previous_path: &[u8],
+) -> io::Result<(IndexEntry, usize)> {
     let fixed_end = start.checked_add(ENTRY_FIXED_LEN).ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidData,
@@ -974,12 +986,18 @@ fn decode_entry(bytes: &[u8], start: usize, limit: usize) -> io::Result<(IndexEn
     } else {
         (false, false)
     };
-    let path_nul = bytes[path_start..limit]
-        .iter()
-        .position(|byte| *byte == 0)
-        .map(|offset| path_start + offset)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "git index path missing NUL"))?;
-    let path = bytes[path_start..path_nul].to_vec();
+    let (path, path_nul) = if version == INDEX_VERSION_V4 {
+        decode_v4_entry_path(bytes, path_start, limit, previous_path)?
+    } else {
+        let path_nul = bytes[path_start..limit]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|offset| path_start + offset)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "git index path missing NUL")
+            })?;
+        (bytes[path_start..path_nul].to_vec(), path_nul)
+    };
     if declared_path_len != 0x0fff && declared_path_len != path.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -989,8 +1007,10 @@ fn decode_entry(bytes: &[u8], start: usize, limit: usize) -> io::Result<(IndexEn
     validate_index_path(&path)?;
 
     let mut next = path_nul + 1;
-    while !(next - start).is_multiple_of(8) {
-        next += 1;
+    if version != INDEX_VERSION_V4 {
+        while !(next - start).is_multiple_of(8) {
+            next += 1;
+        }
     }
     if next > limit {
         return Err(io::Error::new(
@@ -1020,6 +1040,73 @@ fn decode_entry(bytes: &[u8], start: usize, limit: usize) -> io::Result<(IndexEn
         },
         next,
     ))
+}
+
+fn decode_v4_entry_path(
+    bytes: &[u8],
+    path_start: usize,
+    limit: usize,
+    previous_path: &[u8],
+) -> io::Result<(Vec<u8>, usize)> {
+    let (remove_len, suffix_start) = read_index_v4_path_remove_len(bytes, path_start, limit)?;
+    if remove_len > previous_path.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index v4 path prefix underflow",
+        ));
+    }
+    let path_nul = bytes[suffix_start..limit]
+        .iter()
+        .position(|byte| *byte == 0)
+        .map(|offset| suffix_start + offset)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "git index path missing NUL"))?;
+    let prefix_len = previous_path.len() - remove_len;
+    let mut path = Vec::with_capacity(prefix_len + path_nul - suffix_start);
+    path.extend_from_slice(&previous_path[..prefix_len]);
+    path.extend_from_slice(&bytes[suffix_start..path_nul]);
+    Ok((path, path_nul))
+}
+
+fn read_index_v4_path_remove_len(
+    bytes: &[u8],
+    start: usize,
+    limit: usize,
+) -> io::Result<(usize, usize)> {
+    let first = *bytes.get(start).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index v4 path compression is truncated",
+        )
+    })?;
+    let mut cursor = start + 1;
+    let mut value = (first & 0x7f) as usize;
+    let mut byte = first;
+    while byte & 0x80 != 0 {
+        byte = *bytes.get(cursor).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "git index v4 path compression is truncated",
+            )
+        })?;
+        cursor += 1;
+        value = value
+            .checked_add(1)
+            .and_then(|next| next.checked_shl(7))
+            .and_then(|next| next.checked_add((byte & 0x7f) as usize))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "git index v4 path compression overflow",
+                )
+            })?;
+    }
+    if cursor > limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index v4 path compression is truncated",
+        ));
+    }
+    Ok((value, cursor))
 }
 
 fn flags_for_entry(entry: &IndexEntry) -> u16 {
