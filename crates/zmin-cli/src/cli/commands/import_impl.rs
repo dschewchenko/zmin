@@ -483,6 +483,8 @@ impl<'a> FastImportParser<'a> {
                 self.parse_commit(ref_name)?;
             } else if let Some(ref_name) = line.strip_prefix("reset ") {
                 self.parse_reset(ref_name)?;
+            } else if line == "checkpoint" {
+                continue;
             } else {
                 return Err(self.unsupported_fast_import_command(&line)?);
             }
@@ -878,7 +880,10 @@ fn fast_import_parse_error() -> CliError {
 }
 
 fn is_fast_import_top_level_command(line: &str) -> bool {
-    line == "blob" || line.starts_with("commit ") || line.starts_with("reset ")
+    line == "blob"
+        || line == "checkpoint"
+        || line.starts_with("commit ")
+        || line.starts_with("reset ")
 }
 
 fn fast_import_should_write_reflog(repo: &GitRepo, ref_name: &str) -> Result<bool> {

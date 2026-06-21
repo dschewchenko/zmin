@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 247/4632 represented doc-option pairs / 1052 written rows / 790 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 247/4632 represented doc-option pairs / 1053 written rows / 790 written rows matching stock Git / 2 partial written rows / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -319,11 +319,16 @@ The current macOS oracle host rejects a `bad-\xff.txt` filesystem path with
 `Illegal byte sequence` before stock Git checkout behavior can be observed, so
 this cannot be closed without a Windows/non-Unix oracle run.
 
-The latest partial behavior row is `fast-import --date-format=rfc2822`.
-Zmin now parses RFC2822 author and committer dates and imports matching commit
-metadata and tree content, but the row stays `partial` because stock Git also
-prints `fast-import statistics:` to stderr and Zmin does not yet match that
-output.
+The latest partial behavior row is top-level `fast-import` `checkpoint`.
+Stock Git accepts `checkpoint` between a blob and later commit record. Zmin now
+accepts the command and imports matching tree content, but the row stays
+`partial` because stock Git also prints `fast-import statistics:` to stderr and
+Zmin does not yet match that output.
+
+The adjacent partial behavior row is `fast-import --date-format=rfc2822`.
+Zmin parses RFC2822 author and committer dates and imports matching commit
+metadata and tree content, but the row stays `partial` for the same
+fast-import statistics stderr gap.
 
 The latest stock-compatible invalid-input guard classification is
 `import_impl.rs` `unsupported fast-import command`. Stock Git rejects an
@@ -541,7 +546,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1052` written-row
+This card is the exact handoff target after the current `1053` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -560,7 +565,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1052`; the complete command matrices and complete doc-option matrices remain
+`0/1053`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -863,6 +868,7 @@ behavior, invalid input, or corrupt-format handling.
 | `core_impl.rs` `usage: objects filter not supported` path for unknown `cat-file --filter` names | stock-compatible invalid input for arbitrary unknown object-filter names, while known unsupported object-filter families keep stock usage diagnostics | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_unknown_filter_names_match_stock_git` |
 | `core_impl.rs` `usage: objects filter not supported` path for known `cat-file --filter` families | stock-compatible invalid input for documented-but-unsupported object-filter families that stock Git rejects with usage diagnostics | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_known_unsupported_filters_match_stock_git` |
 | `core_impl.rs` `sparse:path filters support has been dropped` path in `cat-file --filter` parsing | stock-compatible invalid input for the dropped sparse path object-filter family | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_sparse_path_filter_matches_stock_git` |
+| `import_impl.rs` former `unsupported fast-import command` path for top-level `checkpoint` | Git-supported stream command now accepted; row remains partial until Zmin emits stock fast-import statistics stderr | `docs/cli/matrices/fast_import_v2_47.tsv`; `git_fast_import_date_compat::fast_import_checkpoint_imports_stock_shape_but_stats_stderr_is_open` |
 | `diff_render.rs` `unsupported --diff-filter status` parser path | stock-compatible invalid input for unknown `--diff-filter` change classes | `docs/cli/matrices/diff_v2_47.tsv`; `git_diff_compat::diff_filter_invalid_change_classes_match_stock_git` |
 | `maintenance_impl.rs` `unsupported maintenance schedule '{schedule}'` in `maintenance run` strategy selection | stock-compatible invalid input for invalid `maintenance run --schedule` values and schedule/task combinations | `docs/cli/matrices/maintenance_v2_47.tsv`; `git_maintenance_compat::maintenance_run_invalid_schedule_failure_matches_stock_git`; `git_maintenance_compat::maintenance_run_schedule_task_and_auto_failures_match_stock_git` |
 | `maintenance_impl.rs` former `unsupported maintenance scheduler '{other}'` guard in `maintenance start` scheduler selection | stock-compatible invalid input for unknown `maintenance start --scheduler=<value>` values | `docs/cli/matrices/maintenance_v2_47.tsv`; `git_maintenance_compat::maintenance_unknown_scheduler_failure_matches_stock_git` |
