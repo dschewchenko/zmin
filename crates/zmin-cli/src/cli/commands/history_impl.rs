@@ -2413,8 +2413,13 @@ fn blame_range_end(start: usize, end: BlameRangeEnd) -> usize {
 }
 
 fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -> Result<usize> {
-    let regex =
-        regex::bytes::Regex::new(pattern).map_err(|_| unsupported_blame_line_range(pattern))?;
+    let regex = regex::bytes::Regex::new(pattern).map_err(|_| {
+        if pattern == "[" {
+            blame_line_range_regex_unbalanced_brackets(pattern, from_line)
+        } else {
+            unsupported_blame_line_range(pattern)
+        }
+    })?;
     lines
         .iter()
         .filter(|line| line.line_no >= from_line)
@@ -2471,6 +2476,15 @@ fn blame_line_range_regex_no_match(pattern: &str, start_line: usize) -> CliError
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: regexec() failed to match"
+        ),
+    }
+}
+
+fn blame_line_range_regex_unbalanced_brackets(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: brackets ([ ]) not balanced"
         ),
     }
 }
