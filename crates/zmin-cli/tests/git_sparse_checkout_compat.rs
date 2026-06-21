@@ -144,6 +144,17 @@ fn sparse_checkout_unknown_subcommand_matches_stock_git() {
 }
 
 #[test]
+fn sparse_checkout_set_unknown_option_matches_stock_git_usage() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    assert_eq!(
+        run_zmin_failure_output(zmin_repo.path(), &["sparse-checkout", "set", "--bad"]),
+        git_failure_output(git_repo.path(), &["sparse-checkout", "set", "--bad"]),
+    );
+}
+
+#[test]
 fn sparse_checkout_stdin_and_config_options_match_stock_git() {
     let git_repo = sparse_checkout_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

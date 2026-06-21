@@ -4980,7 +4980,7 @@ fn branch_checked_out_worktree(repo: &GitRepo, ref_name: &str) -> Result<Option<
 }
 
 fn sparse_checkout_set(patterns: &[String]) -> Result<()> {
-    let options = parse_sparse_checkout_options(patterns, true)?;
+    let options = parse_sparse_checkout_options(patterns, true, SparseCheckoutUsage::Set)?;
     let repo = find_repo()?;
     apply_sparse_checkout_config_options(&repo, &options)?;
     set_config_value(&repo, "core.sparseCheckout", "true")?;
@@ -4990,7 +4990,7 @@ fn sparse_checkout_set(patterns: &[String]) -> Result<()> {
 }
 
 fn sparse_checkout_add(patterns: &[String]) -> Result<()> {
-    let options = parse_sparse_checkout_options(patterns, true)?;
+    let options = parse_sparse_checkout_options(patterns, true, SparseCheckoutUsage::Add)?;
     let repo = find_repo()?;
     ensure_sparse_checkout_enabled(&repo, "no sparse-checkout to add to")?;
     apply_sparse_checkout_config_options(&repo, &options)?;
@@ -5007,7 +5007,7 @@ fn sparse_checkout_add(patterns: &[String]) -> Result<()> {
 }
 
 fn sparse_checkout_init(args: &[String]) -> Result<()> {
-    let options = parse_sparse_checkout_options(args, false)?;
+    let options = parse_sparse_checkout_options(args, false, SparseCheckoutUsage::Init)?;
     if !options.patterns.is_empty() || options.stdin {
         return Err(CliError::Fatal {
             code: 129,
@@ -5236,9 +5236,17 @@ impl SparseCheckoutOptions {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum SparseCheckoutUsage {
+    Set,
+    Add,
+    Init,
+}
+
 fn parse_sparse_checkout_options(
     args: &[String],
     allow_stdin: bool,
+    usage: SparseCheckoutUsage,
 ) -> Result<SparseCheckoutOptions> {
     let mut options = SparseCheckoutOptions::default();
     for arg in args {
@@ -5250,10 +5258,7 @@ fn parse_sparse_checkout_options(
             "--no-sparse-index" => options.sparse_index = Some(false),
             "--skip-checks" => {}
             option if option.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unknown sparse-checkout option '{option}'"),
-                });
+                return Err(sparse_checkout_unknown_option_error(option, usage));
             }
             pattern => options.patterns.push(pattern.to_owned()),
         }
@@ -5275,6 +5280,42 @@ fn parse_sparse_checkout_options(
             .collect();
     }
     Ok(options)
+}
+
+fn sparse_checkout_unknown_option_error(option: &str, usage: SparseCheckoutUsage) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: unknown option `{}'\n{}",
+            option.trim_start_matches('-'),
+            sparse_checkout_usage(usage)
+        ),
+    }
+}
+
+fn sparse_checkout_usage(usage: SparseCheckoutUsage) -> &'static str {
+    match usage {
+        SparseCheckoutUsage::Set => concat!(
+            "usage: git sparse-checkout set [--[no-]cone] [--[no-]sparse-index] [--skip-checks] (--stdin | <patterns>)\n",
+            "\n",
+            "    --[no-]cone           initialize the sparse-checkout in cone mode\n",
+            "    --[no-]sparse-index   toggle the use of a sparse index\n",
+            "    --skip-checks         skip some sanity checks on the given paths that might give false positives\n",
+            "    --stdin               read patterns from standard in\n",
+        ),
+        SparseCheckoutUsage::Add => concat!(
+            "usage: git sparse-checkout add [--skip-checks] (--stdin | <patterns>)\n",
+            "\n",
+            "    --skip-checks         skip some sanity checks on the given paths that might give false positives\n",
+            "    --[no-]stdin          read patterns from standard in\n",
+        ),
+        SparseCheckoutUsage::Init => concat!(
+            "usage: git sparse-checkout init [--cone] [--[no-]sparse-index]\n",
+            "\n",
+            "    --[no-]cone           initialize the sparse-checkout in cone mode\n",
+            "    --[no-]sparse-index   toggle the use of a sparse index\n",
+        ),
+    }
 }
 
 fn apply_sparse_checkout_config_options(
