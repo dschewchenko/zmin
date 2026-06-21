@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 247/4632 represented doc-option pairs / 1069 written rows / 808 written rows matching stock Git / 0 partial written rows / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 248/4632 represented doc-option pairs / 1070 written rows / 808 written rows matching stock Git / 0 partial written rows / 1 open written row`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -331,7 +331,7 @@ four former partial rows: `--date-format=rfc2822`, top-level `checkpoint`,
 top-level `progress` and top-level `done`. Zmin now emits stock-shaped
 `fast-import statistics:` stderr with matching object, branch, mark and path
 atom counters for those streams; oracle tests normalize host memory and
-page-size fields. There are currently `0/1069` partial written rows.
+page-size fields. There are currently `0/1070` partial written rows.
 
 The latest stock-compatible invalid-input guard classification is
 `import_impl.rs` `unsupported fast-import command`. Stock Git rejects an
@@ -542,6 +542,13 @@ that repository with exit `128`, empty stdout and invalid config diagnostics
 that include the local `.git/config` line number. Zmin now checks object format
 during status setup and emits the same diagnostics.
 
+The latest open guard classification is `transport_impl.rs`
+`reftable ref storage is not supported yet` for
+`git clone --ref-format=reftable <path> dst`. Stock Git in the current oracle
+environment creates a reftable clone and reports `reftable` from
+`rev-parse --show-ref-format`; Zmin currently exits `128` before destination
+creation. This is now an open Git-supported behavior row, not invalid input.
+
 The latest `init` rows are `git init -q -b main repo` and
 `git init --quiet -b main repo`. Zmin suppresses init output and creates the
 requested initial branch like stock Git; `init_v2_47.tsv` now records the
@@ -549,7 +556,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1055` written-row
+This card is the exact handoff target after the current `1070` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -567,8 +574,8 @@ After this card is committed and pushed, update the pointer to either the next
 small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
-Do not publish a support percentage just because open and partial written rows
-are now `0/1069`; the complete command matrices and complete doc-option
+Do not publish a support percentage just because partial written rows are now
+`0/1070`; the `1/1070` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -851,6 +858,16 @@ keeps the behavior explicitly out of scope.
 | `commit_impl.rs` `git gui` / `git citool` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` and `citool` in `git help -a`, but `git gui --help` and `git citool --help` fail because the `git-gui` executable is not installed in this oracle environment | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the GUI surface into current CLI scope |
 | `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |
 
+## Open Code Guard Mappings
+
+Open guard mappings are known Git-supported behaviors where Zmin currently
+does not match stock Git. They must stay visible in counts and matrix rows
+until implementation and focused parity evidence close them.
+
+| Source guard | Classification | Matrix / evidence |
+| --- | --- | --- |
+| `transport_impl.rs` `reftable ref storage is not supported yet` in `git clone --ref-format=reftable` parsing | open Git-supported feature gap; stock Git creates a reftable clone in the current oracle environment | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_reftable_is_open_gap_against_stock_git` |
+
 ## Closed Code Guard Mappings
 
 Closed guard mappings connect raw source hits from the `unsupported` scan to
@@ -915,7 +932,7 @@ Largest raw clusters:
 
 | Area | Raw hits | Next action |
 | --- | ---: | --- |
-| `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, reftable, HTTP/env guards |
+| `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, HTTP/env guards; reftable clone is now recorded as an open row |
 | `pack_impl.rs` | `14` | classify pack/bundle format guards versus stock-supported variants |
 | `worktree_impl.rs` | `9` | split remaining ls-files, submodule, sparse-checkout, stash and worktree guards |
 | `history_impl.rs` | `7` | split blame ranges/options, reflog formats, diff/log decorators, filter-branch |
