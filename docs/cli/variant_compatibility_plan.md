@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 247/4632 represented doc-option pairs / 1060 written rows / 799 written rows matching stock Git / 0 partial written rows / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 46/151 commands with matrix rows / 247/4632 represented doc-option pairs / 1069 written rows / 808 written rows matching stock Git / 0 partial written rows / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -319,19 +319,19 @@ The current macOS oracle host rejects a `bad-\xff.txt` filesystem path with
 `Illegal byte sequence` before stock Git checkout behavior can be observed, so
 this cannot be closed without a Windows/non-Unix oracle run.
 
-The latest matrix inventory slice records additional `stash list --format`
-pretty-format atom families for reflog selector/subject atoms,
-author/committer identity and object atoms, date atoms, reflog identity atoms,
-and human/relative date atoms. Existing stock-Git oracle coverage in
-`git_stash_compat::stash_list_formats_match_stock_git` proves the rows, but
-this does not make the `stash` command matrix complete.
+The latest matrix inventory slice records the remaining `stash list --format`
+pretty-format atom families already covered by
+`git_stash_compat::stash_list_formats_match_stock_git`: message and decoration
+atoms, RFC2822/date-local-part atoms, GPG/signature atoms, unknown literal and
+prefixed atoms, color atoms and width truncation atoms. This expands the
+written `stash` matrix, but still does not make the command matrix complete.
 
 The latest closed behavior slice is `fast-import` statistics stderr for the
 four former partial rows: `--date-format=rfc2822`, top-level `checkpoint`,
 top-level `progress` and top-level `done`. Zmin now emits stock-shaped
 `fast-import statistics:` stderr with matching object, branch, mark and path
 atom counters for those streams; oracle tests normalize host memory and
-page-size fields. There are currently `0/1060` partial written rows.
+page-size fields. There are currently `0/1069` partial written rows.
 
 The latest stock-compatible invalid-input guard classification is
 `import_impl.rs` `unsupported fast-import command`. Stock Git rejects an
@@ -568,7 +568,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open and partial written rows
-are now `0/1060`; the complete command matrices and complete doc-option
+are now `0/1069`; the complete command matrices and complete doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
