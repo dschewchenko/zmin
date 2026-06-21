@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 284/4632 represented doc-option pairs / 1236 written rows / 953 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 284/4632 represented doc-option pairs / 1240 written rows / 957 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -623,16 +623,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `status` rows already covered by
-`git_status_compat`: explicit `--verbose` / `-v` / `-vv` and `--no-verbose`
-ordering, `--long` / `--no-long` ordering with `--short`, `--show-stash` and
-`--no-show-stash` ordering across human, porcelain v2 and NUL modes, plus
-`--column` / `--no-column` values and `column.status=always` overrides. No
+The latest matrix inventory slice expands `status` rename-detection rows
+already covered by `git_status_compat::status_rename_modes_match_stock_git`.
+`status_v2_47.tsv` now records default porcelain v1 rename detection plus
+explicit `--renames` in porcelain v1, porcelain v2, short and human modes. No
 Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1236` written-row
+This card is the exact handoff target after the current `1240` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +650,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1236`; the `1/1236` open row and the still incomplete command/doc-option
+`0/1240`; the `1/1240` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
