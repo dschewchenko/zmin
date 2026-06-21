@@ -2296,17 +2296,21 @@ fn parse_blame_range_end_spec(value: &str, full_range: &str) -> Result<BlameRang
     if value.is_empty() {
         Ok(BlameRangeEndSpec::ToEnd)
     } else if let Some(count) = value.strip_prefix('+') {
-        Ok(BlameRangeEndSpec::Count(
-            count
-                .parse::<usize>()
-                .map_err(|_| unsupported_blame_line_range(full_range))?,
-        ))
+        let count = count
+            .parse::<usize>()
+            .map_err(|_| unsupported_blame_line_range(full_range))?;
+        if count == 0 {
+            return Err(invalid_blame_empty_range());
+        }
+        Ok(BlameRangeEndSpec::Count(count))
     } else if let Some(count) = value.strip_prefix('-') {
-        Ok(BlameRangeEndSpec::NegativeCount(
-            count
-                .parse::<usize>()
-                .map_err(|_| unsupported_blame_line_range(full_range))?,
-        ))
+        let count = count
+            .parse::<usize>()
+            .map_err(|_| unsupported_blame_line_range(full_range))?;
+        if count == 0 {
+            return Err(invalid_blame_empty_range());
+        }
+        Ok(BlameRangeEndSpec::NegativeCount(count))
     } else if value.starts_with('/') {
         Ok(BlameRangeEndSpec::Regex(parse_complete_blame_regex(
             value, full_range,
@@ -2445,6 +2449,13 @@ fn invalid_blame_line_number(line: usize) -> CliError {
     CliError::Fatal {
         code: 128,
         message: format!("-L invalid line number: {line}"),
+    }
+}
+
+fn invalid_blame_empty_range() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "-L invalid empty range".into(),
     }
 }
 
