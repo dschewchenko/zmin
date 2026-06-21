@@ -2862,14 +2862,12 @@ fn blame_regex_has_invalid_character_class(pattern: &str) -> bool {
                     index += 1;
                     continue;
                 };
-                if bytes.get(name_end + 2) == Some(&b']') {
-                    let name = &pattern[name_start..name_end];
-                    if !blame_posix_character_class_supported(name) {
-                        return true;
-                    }
-                    index = name_end + 3;
-                    continue;
+                let name = &pattern[name_start..name_end];
+                if !blame_posix_character_class_supported(name) {
+                    return true;
                 }
+                index = name_end + 2;
+                continue;
             }
             index += 1;
         }

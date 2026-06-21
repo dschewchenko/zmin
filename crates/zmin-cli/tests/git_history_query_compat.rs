@@ -764,6 +764,9 @@ fn blame_invalid_posix_character_classes_match_stock_git_failure() {
         ["blame", "-L", "/[[:word:]]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[[:ascii:]]/", "a.txt"].as_slice(),
         ["blame", "-L", "/[[:bogus:]]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[[:digit:][:bogus:]]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[[:bogus:][:digit:]]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[[:bogus:]/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),
