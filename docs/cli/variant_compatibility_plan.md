@@ -456,6 +456,14 @@ with exit `129`, empty stdout and command-specific usage diagnostics. Existing
 Zmin behavior and focused evidence already match those rows, so this slice only
 maps the source guard to the `clean_v2_47.tsv` invalid-input rows.
 
+The latest source-guard classification is `history_impl.rs`
+`unsupported_blame_line_range`. The remaining raw source hit is a defensive
+fallback behind the expanded `git blame -L` parser and resolver. Existing
+`blame_v2_47.tsv` rows cover stock-compatible invalid line numbers, empty
+ranges, malformed numeric and regex ranges, no-match regex/function ranges,
+invalid BRE syntax, and supported reversed/rich range forms, so this slice maps
+the guard to those focused rows instead of adding a new behavior row.
+
 The latest stock-compatible invalid-input guard classification is
 `worktree_impl.rs` `unsupported stash {operation} option` handling for
 reference-style stash operations. Stock Git rejects `git stash apply --bad`,
@@ -856,6 +864,7 @@ behavior, invalid input, or corrupt-format handling.
 | `maintenance_impl.rs` former `unsupported prune expiry '{value}'` guard in `git prune --expire` parsing | stock-compatible invalid input for malformed `prune --expire=<value>` dates | `docs/cli/matrices/prune_v2_47.tsv`; `git_maintenance_compat::prune_invalid_expire_value_matches_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
+| `history_impl.rs` `unsupported_blame_line_range` fallback in `git blame -L` parsing/resolution | stock-compatible invalid input and supported rich range behavior for expanded blame line-range forms | `docs/cli/matrices/blame_v2_47.tsv`; `git_history_query_compat::blame_zero_line_range_matches_stock_git_failure`; `git_history_query_compat::blame_invalid_regex_line_ranges_match_stock_git_failure`; `git_history_query_compat::blame_basic_regex_invalid_backreferences_match_stock_git_failure` |
 | `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
