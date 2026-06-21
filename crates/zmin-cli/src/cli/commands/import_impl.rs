@@ -485,6 +485,8 @@ impl<'a> FastImportParser<'a> {
                 self.parse_reset(ref_name)?;
             } else if line == "checkpoint" {
                 continue;
+            } else if line.starts_with("progress ") {
+                println!("{line}");
             } else {
                 return Err(self.unsupported_fast_import_command(&line)?);
             }
@@ -883,6 +885,7 @@ fn is_fast_import_top_level_command(line: &str) -> bool {
     line == "blob"
         || line == "checkpoint"
         || line.starts_with("commit ")
+        || line.starts_with("progress ")
         || line.starts_with("reset ")
 }
 
