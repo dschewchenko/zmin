@@ -2035,8 +2035,8 @@ fn prune_expire_cutoff(expire: Option<&str>) -> Result<Option<std::time::SystemT
         Some("now" | "all") => Ok(Some(now)),
         Some("never") => Ok(None),
         Some(value) => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported prune expiry '{value}'"),
+            code: 128,
+            message: format!("malformed expiration date '{value}'"),
         }),
     }
 }

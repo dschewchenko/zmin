@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 39/151 commands with matrix rows / 243/4632 represented doc-option pairs / 1029 written rows / 778 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 40/151 commands with matrix rows / 244/4632 represented doc-option pairs / 1036 written rows / 784 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -246,6 +246,13 @@ The latest stock-compatible invalid-input guard classification is
 Stock Git rejects unsupported column mode tokens with exit `129` and the same
 diagnostic, so the guard remains in code as parser validation and is mapped to
 the existing `column_v2_47.tsv` invalid-input row.
+
+The latest stock-compatible invalid-input guard classification is
+`maintenance_impl.rs` `unsupported prune expiry`. Stock Git rejects
+`git prune --expire=bogus` with exit `128` and `fatal: malformed expiration
+date 'bogus'`; Zmin now maps invalid expiry values to the same diagnostic and
+`prune_v2_47.tsv` starts the `prune` matrix with expiry and negated-option
+rows.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -382,7 +389,7 @@ atom. Zmin now matches that literal-preservation behavior and
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1029` written-row
+This card is the exact handoff target after the current `1036` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -401,7 +408,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1029`; the complete command matrices and complete doc-option matrices remain
+`0/1036`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -630,6 +637,7 @@ until a full matrix is expanded and verified.
 | `fetch --dry-run smart HTTP submodule recursion` | `2` | `0` | default/on-demand and explicit `--recurse-submodules` smart HTTP parent/local-submodule dry-runs leave parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
 | `fetch` invalid bundle file | `1` | `0` | `git fetch bad.bundle HEAD:refs/heads/from-bundle` exits `128` with stock unreadable-remote diagnostics, writes empty `FETCH_HEAD`, leaves the destination ref absent and installs no pack files |
 | `maintenance run` invalid schedule/task usage | `4` | `0` | `--schedule=invalid`, `--schedule=invalid --task=gc`, `--auto --schedule=daily`, and `--task=missing --schedule=daily` match stock invalid-input diagnostics |
+| `prune --expire` loose-object expiry modes | `7` | `0` | default expiry, `--expire=now` dry-run/prune/reflog-reachable modes, `--expire=never` with `--no-exclude-promisor-objects`, negated dry-run/verbose flags, and invalid `--expire=bogus` diagnostics |
 | `commit-graph verify` header variants | `3` | `0` | checksum-valid bad signature, bad version and bad hash version commit-graph files reject with stock diagnostics and exit `1` |
 | `pack-objects --index-version` value variants | `10` | `0` | accepted numeric major/minor forms `0`, `0,64`, `1,64`, `2,128` plus invalid `3`, `3,0`, `foo`, `2,foo`, `1,foo`, and `-1` diagnostics |
 | `bundle create --version` value variants | `8` | `0` | accepted `2`, `3` and `-1` forms plus invalid `1`, `4`, `1k`, `foo` and empty-value diagnostics with matching bundle file side effects |
@@ -659,7 +667,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `663` verified variants.
+Tracked closed blocks in this table: `670` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
@@ -702,6 +710,7 @@ behavior, invalid input, or corrupt-format handling.
 | `core_impl.rs` `sparse:path filters support has been dropped` path in `cat-file --filter` parsing | stock-compatible invalid input for the dropped sparse path object-filter family | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_sparse_path_filter_matches_stock_git` |
 | `diff_render.rs` `unsupported --diff-filter status` parser path | stock-compatible invalid input for unknown `--diff-filter` change classes | `docs/cli/matrices/diff_v2_47.tsv`; `git_diff_compat::diff_filter_invalid_change_classes_match_stock_git` |
 | `maintenance_impl.rs` `unsupported maintenance schedule '{schedule}'` in `maintenance run` strategy selection | stock-compatible invalid input for invalid `maintenance run --schedule` values and schedule/task combinations | `docs/cli/matrices/maintenance_v2_47.tsv`; `git_maintenance_compat::maintenance_run_invalid_schedule_failure_matches_stock_git`; `git_maintenance_compat::maintenance_run_schedule_task_and_auto_failures_match_stock_git` |
+| `maintenance_impl.rs` former `unsupported prune expiry '{value}'` guard in `git prune --expire` parsing | stock-compatible invalid input for malformed `prune --expire=<value>` dates | `docs/cli/matrices/prune_v2_47.tsv`; `git_maintenance_compat::prune_invalid_expire_value_matches_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 

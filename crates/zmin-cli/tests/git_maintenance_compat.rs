@@ -2595,3 +2595,14 @@ fn prune_matches_stock_git_for_negated_options() {
         loose_object_exists(git_repo.path(), &git_pruned)
     );
 }
+
+#[test]
+fn prune_invalid_expire_value_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    assert_eq!(
+        run_zmin_failure_output(zmin_repo.path(), &["prune", "--expire=bogus"]),
+        git_failure_output(git_repo.path(), &["prune", "--expire=bogus"])
+    );
+}
