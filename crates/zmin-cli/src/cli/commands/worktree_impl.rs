@@ -7365,11 +7365,7 @@ where
         'c' => render_stash_signature_atom(chars, out, &commit.committer, "c")?,
         'G' => render_stash_gpg_atom(chars, out)?,
         'C' => {
-            let Some(sequence) = consume_stash_color_atom(chars) else {
-                out.push_str("%C");
-                return Ok(());
-            };
-            out.push_str(&sequence);
+            render_stash_color_atom(chars, out);
         }
         '<' | '>' => render_stash_width_atom(atom, chars, out, index, entry, commit)?,
         'w' => return Err(unsupported_stash_list_format_atom("%w")),
@@ -7507,6 +7503,13 @@ struct StashWidthSpec {
     truncation: StashWidthTruncation,
 }
 
+enum StashColorAtom {
+    Valid(String),
+    Unterminated(String),
+    Invalid,
+    Missing,
+}
+
 fn render_stash_width_atom<I>(
     atom: char,
     chars: &mut std::iter::Peekable<I>,
@@ -7623,28 +7626,47 @@ fn apply_stash_width_truncation(
     }
 }
 
-fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> Option<String>
+fn render_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String)
+where
+    I: Iterator<Item = char> + Clone,
+{
+    match consume_stash_color_atom(chars) {
+        StashColorAtom::Valid(sequence) => out.push_str(&sequence),
+        StashColorAtom::Unterminated(literal) => {
+            out.push_str("%C");
+            out.push_str(&literal);
+        }
+        StashColorAtom::Invalid => out.push_str("%C"),
+        StashColorAtom::Missing => out.push_str("%C"),
+    }
+}
+
+fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> StashColorAtom
 where
     I: Iterator<Item = char> + Clone,
 {
     if matches!(chars.peek(), Some('(')) {
         chars.next();
+        let mut literal = String::from("(");
         let mut spec = String::new();
         for ch in chars.by_ref() {
             if ch == ')' {
                 return if let Some((mode, color)) = spec.split_once(',') {
                     if mode.trim() == "always" {
                         config_commands::parse_config_color(color.trim())
+                            .map(StashColorAtom::Valid)
+                            .unwrap_or(StashColorAtom::Invalid)
                     } else {
-                        Some(String::new())
+                        StashColorAtom::Valid(String::new())
                     }
                 } else {
-                    Some(String::new())
+                    StashColorAtom::Valid(String::new())
                 };
             }
+            literal.push(ch);
             spec.push(ch);
         }
-        return None;
+        return StashColorAtom::Unterminated(literal);
     }
 
     let color_atoms = [
@@ -7661,10 +7683,10 @@ where
         for _ in 0..atom.chars().count() {
             chars.next();
         }
-        return Some(String::new());
+        return StashColorAtom::Valid(String::new());
     }
 
-    None
+    StashColorAtom::Missing
 }
 
 fn stash_format_literal_atom(out: &mut String, prefix: &str, atom: char) {

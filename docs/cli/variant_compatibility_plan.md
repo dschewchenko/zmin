@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 38/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1015 written rows / 776 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 38/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1016 written rows / 777 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -347,9 +347,15 @@ pretty-format atoms as literal text in `git stash list --format=<format>`
 instead of failing. Zmin now matches that literal-preservation behavior and
 `stash_v2_47.tsv` records the focused row.
 
+The latest adjacent stash list format guard classification is unterminated
+`%C(...)` color atoms. Stock Git preserves `%C(`, `%C(red` and
+`%C(always,red` as literal text in `git stash list --format=<format>` instead
+of failing or truncating the malformed atom. Zmin now matches that
+literal-preservation behavior and `stash_v2_47.tsv` records the focused row.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1015` written-row
+This card is the exact handoff target after the current `1016` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -368,7 +374,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1015`; the complete command matrices and complete doc-option matrices remain
+`0/1016`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
