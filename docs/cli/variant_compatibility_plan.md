@@ -248,11 +248,11 @@ diagnostic, so the guard remains in code as parser validation and is mapped to
 the existing `column_v2_47.tsv` invalid-input row.
 
 The latest stock-compatible invalid-input guard classification is
-`maintenance_impl.rs` former `unsupported maintenance scheduler` handling.
-Stock Git rejects `git maintenance start --scheduler=bogus` with exit `129`
-and `error: unrecognized --scheduler argument 'bogus'`; Zmin now maps unknown
-scheduler values to the same diagnostic and `maintenance_v2_47.tsv` records the
-focused invalid-input row.
+`worktree_impl.rs` `unsupported porcelain version` handling for
+`git status --porcelain=<value>`. Stock Git rejects
+`git status --porcelain=v3` with exit `128` and a fatal unsupported-version
+diagnostic, so this source hit is parser validation mapped to the existing
+`status_v2_47.tsv` invalid-input row.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -714,6 +714,7 @@ behavior, invalid input, or corrupt-format handling.
 | `maintenance_impl.rs` former `unsupported prune expiry '{value}'` guard in `git prune --expire` parsing | stock-compatible invalid input for malformed `prune --expire=<value>` dates | `docs/cli/matrices/prune_v2_47.tsv`; `git_maintenance_compat::prune_invalid_expire_value_matches_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
+| `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 
 ## Code Guard Classification
 
