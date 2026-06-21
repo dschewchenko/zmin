@@ -7562,9 +7562,12 @@ where
             return Ok(());
         }
     };
-    let Some('%') = chars.next() else {
-        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+    let Some(next) = chars.next() else {
+        return Ok(());
     };
+    if next != '%' {
+        return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
+    }
     let Some(next_atom) = chars.next() else {
         return Err(unsupported_stash_list_format_atom(&format!("%{atom}")));
     };
