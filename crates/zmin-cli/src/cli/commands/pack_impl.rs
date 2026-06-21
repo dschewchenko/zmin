@@ -608,10 +608,29 @@ fn verify_multi_pack_index_bytes(bytes: &[u8]) -> Result<()> {
             message: "multi-pack-index file is too small".into(),
         });
     }
-    if &bytes[..4] != b"MIDX" || bytes[4] != 1 || bytes[5] != 1 || bytes[7] != 0 {
+    if &bytes[..4] != b"MIDX" {
+        let actual = u32::from_be_bytes(bytes[..4].try_into().expect("midx signature bytes"));
+        let expected = u32::from_be_bytes(*b"MIDX");
         return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "multi-pack-index signature {actual:#010x} does not match signature {expected:#010x}"
+            ),
+        });
+    }
+    if bytes[4] != 1 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("multi-pack-index version {} not recognized", bytes[4]),
+        });
+    }
+    if bytes[5] != 1 {
+        return Err(CliError::Stderr {
             code: 1,
-            message: "unsupported multi-pack-index header".into(),
+            text: format!(
+                "error: multi-pack-index hash version {} does not match version 1\nerror: multi-pack-index file exists, but failed to parse\n",
+                bytes[5]
+            ),
         });
     }
     let chunk_count = bytes[6] as usize;

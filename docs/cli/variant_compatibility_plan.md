@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 29/151 commands with matrix rows / 238/4632 represented doc-option pairs / 966 written rows / 760 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 30/151 commands with matrix rows / 238/4632 represented doc-option pairs / 970 written rows / 761 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,11 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is an unsupported pack file version for
-`git index-pack --verify` and `git verify-pack`. Stock Git rejects a
-checksum-valid pack with version `4` as `fatal: pack version 4 unsupported`,
-and Zmin now preserves the raw pack version and maps that validation error to
-the stock diagnostic.
+The latest closed guard classification is multi-pack-index header validation
+for `git multi-pack-index verify`. Stock Git rejects checksum-valid bad
+signature and version headers with fatal diagnostics, rejects unsupported hash
+versions with parse diagnostics, and accepts a nonzero reserved byte. Zmin now
+matches those stdout, stderr and exit-code shapes.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -231,14 +231,14 @@ this cannot be closed without a Windows/non-Unix oracle run.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `966` written-row
+This card is the exact handoff target after the current `970` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
 | Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at `crates/zmin-cli/src/cli/commands/pack_impl.rs:614` (`unsupported multi-pack-index header`) unless a new WebStorm replacement trace appears first |
+| Implementation area | start at `crates/zmin-cli/src/runtime/object.rs:486` (`unsupported peel operator`) unless a new WebStorm replacement trace appears first |
 | Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
@@ -250,7 +250,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/966`; the complete command matrices and complete doc-option matrices remain
+`0/970`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -417,6 +417,7 @@ until a full matrix is expanded and verified.
 | `index-pack --verify` bad reverse-index signature | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` with a bad signature using stock sha1 validation diagnostics |
 | `index-pack --verify` bad reverse-index version | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` version `2` using stock sha1 validation diagnostics |
 | `pack commands unsupported pack file version` | `2` | `0` | `git index-pack --verify` and `git verify-pack` reject a checksum-valid pack version `4` using stock fatal pack-version diagnostics |
+| `multi-pack-index verify` header variants | `4` | `0` | bad signature, bad version, unsupported hash version and nonzero reserved byte in checksum-valid MIDX files |
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
 | `rev-parse` nested symbolic HEAD resolution | `1` | `0` | `HEAD -> refs/heads/alias -> refs/heads/main` resolves to the final commit id like stock Git |
@@ -492,7 +493,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `615` verified variants.
+Tracked closed blocks in this table: `619` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

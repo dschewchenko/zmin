@@ -3,14 +3,14 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 
-use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 use tempfile::TempDir;
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    command_failure_output_with_env, command_output_with_env, command_stdout_bytes,
-    configure_identity, git, git_failure_output, git_init, git_status, git_with_env,
-    git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_failure_output, zmin_bin,
-    write_file,
+    command_any_output, command_failure_output_with_env, command_output_with_env,
+    command_stdout_bytes, configure_identity, git, git_failure_output, git_init, git_status,
+    git_with_env, git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_failure_output,
+    write_file, zmin_bin,
 };
 
 fn pack_refs_fixture_repo() -> TempDir {
@@ -125,6 +125,22 @@ fn rewrite_midx_first_offset_to_loff(repo: &std::path::Path) {
     hasher.update(&out);
     out.extend_from_slice(hasher.finalize().as_bytes());
     fs::write(path, out).expect("write midx with LOFF");
+}
+
+fn rewrite_midx_header(repo: &std::path::Path, offset: usize, replacement: &[u8]) {
+    let path = repo.join(".git/objects/pack/multi-pack-index");
+    let mut bytes = fs::read(&path).expect("read midx");
+    assert_eq!(&bytes[..4], b"MIDX");
+    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    let checksum_start = bytes.len() - digest_len;
+    assert!(offset + replacement.len() <= checksum_start);
+    bytes[offset..offset + replacement.len()].copy_from_slice(replacement);
+
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&bytes[..checksum_start]);
+    let checksum = hasher.finalize();
+    bytes[checksum_start..].copy_from_slice(checksum.as_bytes());
+    fs::write(path, bytes).expect("write rewritten midx header");
 }
 
 fn duplicate_packed_head_as_loose(repo: &std::path::Path) -> String {
@@ -392,6 +408,39 @@ fn multi_pack_index_verify_accepts_large_offset_chunk() {
     );
     assert_eq!(run_zmin(repo.path(), ["multi-pack-index", "verify"]), "");
     assert_eq!(git_status(repo.path(), ["multi-pack-index", "verify"]), 0);
+}
+
+#[test]
+fn multi_pack_index_verify_header_variants_match_stock_git() {
+    for (label, offset, replacement) in [
+        ("bad signature", 0, b"BAD!".as_slice()),
+        ("bad version", 4, b"\x02".as_slice()),
+        ("bad hash version", 5, b"\x02".as_slice()),
+        ("reserved byte", 7, b"\x01".as_slice()),
+    ] {
+        let git_repo = two_pack_midx_fixture();
+        let zmin_repo = two_pack_midx_fixture();
+        git(git_repo.path(), ["multi-pack-index", "write"]);
+        git(zmin_repo.path(), ["multi-pack-index", "write"]);
+        rewrite_midx_header(git_repo.path(), offset, replacement);
+        rewrite_midx_header(zmin_repo.path(), offset, replacement);
+
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["multi-pack-index", "verify"],
+                "zmin",
+            ),
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["multi-pack-index", "verify"],
+                "git",
+            ),
+            "{label}"
+        );
+    }
 }
 
 #[test]
@@ -2341,10 +2390,7 @@ fn maintenance_prefetch_unsupported_remote_helper_failure_matches_stock_git() {
     }
 
     assert_eq!(
-        run_zmin_failure_output(
-            zmin_repo.path(),
-            &["maintenance", "run", "--task=prefetch"]
-        ),
+        run_zmin_failure_output(zmin_repo.path(), &["maintenance", "run", "--task=prefetch"]),
         git_failure_output(git_repo.path(), &["maintenance", "run", "--task=prefetch"])
     );
 }
