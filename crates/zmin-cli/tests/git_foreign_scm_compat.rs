@@ -4,8 +4,8 @@ use std::fs;
 use std::process::Command;
 
 use common::{
-    configure_identity, git, git_init, git_with_env, run_zmin, run_zmin_status,
-    run_zmin_with_stdin, zmin_bin,
+    configure_identity, git, git_failure_output, git_init, git_with_env, run_zmin,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_stdin, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -270,6 +270,27 @@ fn p4_submit_opens_changed_files_and_submits_head() {
 }
 
 #[test]
+fn p4_unknown_subcommand_matches_stock_git_usage() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let stock = git_failure_output(git_repo.path(), &["p4", "unknown"]);
+    if !stock
+        .1
+        .contains("valid commands: submit, commit, sync, rebase, clone, branches, unshelve")
+    {
+        return;
+    }
+    let zmin = run_zmin_failure_output(zmin_repo.path(), &["p4", "unknown"]);
+
+    assert_eq!(zmin.0, stock.0);
+    assert_eq!(
+        normalize_git_p4_usage_stdout(&zmin.1),
+        normalize_git_p4_usage_stdout(&stock.1)
+    );
+    assert_eq!(zmin.2, stock.2);
+}
+
+#[test]
 fn svn_clone_imports_head_tree_into_git_svn_ref_and_worktree() {
     let dir = TempDir::new().expect("temp dir");
     let bin = dir.path().join("bin");
@@ -449,7 +470,7 @@ fn foreign_scm_adapters_cover_unsupported_and_client_failures() {
 
     assert_eq!(run_zmin_status(dir.path(), ["p4", "clone"]), 129);
     assert_eq!(run_zmin_status(dir.path(), ["p4", "submit"]), 128);
-    assert_eq!(run_zmin_status(dir.path(), ["p4", "unknown"]), 129);
+    assert_eq!(run_zmin_status(dir.path(), ["p4", "unknown"]), 2);
     assert_eq!(
         run_zmin_with_path_status(
             dir.path(),
@@ -544,6 +565,26 @@ fn run_zmin_with_path_status<const N: usize>(
         .status
         .code()
         .expect("zmin exited by signal")
+}
+
+fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
+    stdout
+        .lines()
+        .map(|line| {
+            if let Some(rest) = line.strip_prefix("usage: ") {
+                if rest.ends_with("git-p4 <command> [options]") {
+                    return "usage: git-p4 <command> [options]".to_owned();
+                }
+            }
+            if let Some(rest) = line.strip_prefix("Try ") {
+                if rest.ends_with("git-p4 <command> --help for command specific help.") {
+                    return "Try git-p4 <command> --help for command specific help.".to_owned();
+                }
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(unix)]

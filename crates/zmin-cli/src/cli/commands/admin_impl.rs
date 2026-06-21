@@ -2627,11 +2627,19 @@ fn p4(args: Vec<String>) -> Result<()> {
             println!("git-p4 version {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported p4 command '{command}'"),
-        }),
+        _ => p4_unknown_command(command),
     }
+}
+
+fn p4_unknown_command(command: &str) -> Result<()> {
+    let text = format!(
+        "unknown command {command}\n\n\
+         usage: git-p4 <command> [options]\n\n\
+         valid commands: submit, commit, sync, rebase, clone, branches, unshelve\n\n\
+         Try git-p4 <command> --help for command specific help.\n\n"
+    );
+    io::stdout().write_all(text.as_bytes())?;
+    Err(CliError::Exit(2))
 }
 
 fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {

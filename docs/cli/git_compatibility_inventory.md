@@ -214,9 +214,9 @@ Do not collapse these layers into one percentage.
 | Commands with any matrix rows | `41/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `245/4632` | no | documented command-option pairs with at least one behavior row |
 | Written behavior rows | `1041` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `784/1041` | yes, row by row | supported-behavior rows with parity evidence |
+| Written rows matching stock Git | `785/1041` | yes, row by row | supported-behavior rows with parity evidence |
 | Partial written rows | `1/1041` | no | written rows with incomplete parity |
-| Open written rows | `1/1041` | no | written rows that still do not match stock Git |
+| Open written rows | `0/1041` | no | written rows that still do not match stock Git |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -258,8 +258,8 @@ Current generated summary:
 | Administration | `8` | `0` | `147` | `0` | `34` | `11` | `0` | `0` | `23` | `34` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` | `116` |
-| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `44` | `16` | `1` | `1` | `26` | `39` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1041`** | **`784`** | **`1`** | **`1`** | **`255`** | **`673`** |
+| Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `44` | `17` | `1` | `0` | `26` | `39` |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1041`** | **`785`** | **`1`** | **`0`** | **`255`** | **`673`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -270,9 +270,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `245/4632`
-represented option pairs or `784/1041` passing written rows as a Git support
-percentage. The `784/1041` number is audit progress for supported rows already
-written down; `1/1041` row is partial, `1/1041` row is open and `255/1041` additional rows are
+represented option pairs or `785/1041` passing written rows as a Git support
+percentage. The `785/1041` number is audit progress for supported rows already
+written down; `1/1041` row is partial and `255/1041` additional rows are
 stock-compatible invalid inputs. It says nothing about the still unexpanded
 rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -311,7 +311,7 @@ variants.
 | `merge-base` | `27` | `0` | `2` | `docs/cli/matrices/merge_base_v2_47.tsv` | `12` | `10` | `0` | `0` | `2` | no |
 | `multi-pack-index` | `10` | `0` | `0` | `docs/cli/matrices/multi_pack_index_v2_47.tsv` | `4` | `1` | `0` | `0` | `3` | no |
 | `notes` | `33` | `0` | `0` | `docs/cli/matrices/notes_v2_47.tsv` | `6` | `0` | `0` | `0` | `6` | no |
-| `p4` | `40` | `0` | `0` | `docs/cli/matrices/p4_v2_47.tsv` | `1` | `0` | `0` | `1` | `0` | no |
+| `p4` | `40` | `0` | `0` | `docs/cli/matrices/p4_v2_47.tsv` | `1` | `1` | `0` | `0` | `0` | no |
 | `pack-objects` | `44` | `0` | `1` | `docs/cli/matrices/pack_objects_v2_47.tsv` | `10` | `4` | `0` | `0` | `6` | no |
 | `prune` | `7` | `0` | `1` | `docs/cli/matrices/prune_v2_47.tsv` | `7` | `6` | `0` | `0` | `1` | no |
 | `rebase` | `103` | `0` | `1` | `docs/cli/matrices/rebase_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
