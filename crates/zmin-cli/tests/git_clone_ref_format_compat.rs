@@ -57,3 +57,29 @@ fn clone_ref_format_reftable_is_open_gap_against_stock_git() {
     assert!(zmin.2.contains("reftable ref storage is not supported yet"));
     assert!(!dir.path().join("zmin-reftable").exists());
 }
+
+#[test]
+fn clone_ref_format_unknown_value_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    write_file(&source, "README.md", "hello\n");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "init"]);
+
+    let args = [
+        "clone",
+        "--ref-format=bogus",
+        source.to_str().expect("source path"),
+        "dst",
+    ];
+    assert_eq!(
+        command_any_output(common::zmin_bin(), dir.path(), &args, "zmin clone"),
+        command_any_output("git", dir.path(), &args, "git clone")
+    );
+    assert!(!dir.path().join("dst").exists());
+}
