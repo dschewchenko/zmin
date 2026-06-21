@@ -2363,7 +2363,7 @@ fn resolve_blame_line_range(lines: &[BlameLine], range: &BlameLineRange) -> Resu
     match range {
         BlameLineRange::Numeric { start, end } => Ok((*start, *end)),
         BlameLineRange::NumericToRegex { start, pattern } => {
-            let end = find_blame_regex_line(lines, *start, pattern)?;
+            let end = find_blame_regex_line(lines, start.saturating_add(1), pattern)?;
             if end < *start {
                 return Err(unsupported_blame_line_range(pattern));
             }
@@ -2382,7 +2382,7 @@ fn resolve_blame_line_range(lines: &[BlameLine], range: &BlameLineRange) -> Resu
             end_pattern,
         } => {
             let start = find_blame_regex_line(lines, 1, start_pattern)?;
-            let end = find_blame_regex_line(lines, start, end_pattern)?;
+            let end = find_blame_regex_line(lines, start.saturating_add(1), end_pattern)?;
             Ok((start, end.max(start)))
         }
         BlameLineRange::Function(function) => {
