@@ -125,6 +125,21 @@ fn blame_line_range_fixture_repo() -> TempDir {
     repo
 }
 
+fn blame_basic_regex_literal_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\nparen (\nbrace {\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "A",
+        "a@example.test",
+        "1700000000 +0000",
+        "base",
+    );
+    repo
+}
+
 fn whatchanged_cases() -> Vec<Vec<&'static str>> {
     if !stock_git_version_at_least(2, 54) {
         return Vec::new();
@@ -608,6 +623,39 @@ fn blame_end_regex_line_ranges_reject_suffix_like_stock_git() {
         ["blame", "-L", "/one/,/two/3", "a.txt"].as_slice(),
         ["blame", "-L", "/one/,/two/+1", "a.txt"].as_slice(),
         ["blame", "-L", "/one/,/two//four/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn blame_basic_regex_literal_metacharacters_match_stock_git() {
+    let git_repo = blame_basic_regex_literal_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+
+    for args in [
+        ["blame", "-L", "/(/", "a.txt"].as_slice(),
+        ["blame", "-L", "/{/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn blame_basic_regex_literal_metacharacters_no_match_like_stock_git() {
+    let repo = blame_line_range_fixture_repo();
+
+    for args in [
+        ["blame", "-L", "/(/", "a.txt"].as_slice(),
+        ["blame", "-L", "/{/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),

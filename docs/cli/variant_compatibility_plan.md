@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 900 written rows / 742 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 904 written rows / 744 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,10 +195,9 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git blame -L 1,/two/3 a.txt`,
-`git blame -L 1,/two/+1 a.txt`, `git blame -L 1,/two//four/ a.txt`,
-`git blame -L /one/,/two/3 a.txt`, `git blame -L /one/,/two/+1 a.txt`, and
-`git blame -L /one/,/two//four/ a.txt` end-regex suffix usage errors.
+The latest closed guard classification is `git blame -L /(/ a.txt` and
+`git blame -L /{/ a.txt` for Git basic-regex literal matching and no-match
+behavior.
 The next default slice remains the second active lane: run a fresh
 `unsupported` / `not supported` code scan, choose one small remaining guard
 that is not entangled with unrelated staged changes, then classify it as
@@ -206,7 +205,7 @@ Git-supported behavior, stock-compatible invalid input, intentional deferral or
 Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/900`; the complete command matrices and complete doc-option matrices remain
+`0/904`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -256,6 +255,7 @@ until a full matrix is expanded and verified.
 | `blame -L` empty start-regex failures | `3` | `0` | `git blame -L // a.txt`, `git blame -L //,+1 a.txt`, and `git blame -L ^// a.txt` exit `128` with stock empty-subexpression diagnostics instead of custom unsupported-line-range fatal diagnostics |
 | `blame -L` regex-range suffix usage errors | `3` | `0` | `git blame -L /one/+1 a.txt`, `git blame -L /one/2 a.txt`, and `git blame -L /one//two/ a.txt` exit `129` with stock compact usage instead of accepting a suffix without the required comma |
 | `blame -L` end-regex suffix usage errors | `6` | `0` | `git blame -L 1,/two/3 a.txt`, `git blame -L 1,/two/+1 a.txt`, `git blame -L 1,/two//four/ a.txt`, `git blame -L /one/,/two/3 a.txt`, `git blame -L /one/,/two/+1 a.txt`, and `git blame -L /one/,/two//four/ a.txt` exit `129` with stock compact usage instead of custom unsupported-line-range fatal diagnostics |
+| `blame -L` basic-regex literal metacharacters | `4` | `0` | `git blame -L /(/ a.txt` and `git blame -L /{/ a.txt` match literal lines when present and exit `128` with stock no-match diagnostics when absent |
 | `blame --progress` non-tty form | `1` | `0` | `git blame --progress a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --minimal` small tracked-file form | `1` | `0` | `git blame --minimal a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --color-lines` non-tty form | `1` | `0` | `git blame --color-lines a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |

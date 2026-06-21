@@ -2411,7 +2411,8 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
     if pattern.is_empty() {
         return Err(blame_line_range_regex_empty(pattern, from_line));
     }
-    let regex = regex::bytes::Regex::new(pattern).map_err(|_| {
+    let translated_pattern = translate_blame_basic_regex(pattern);
+    let regex = regex::bytes::Regex::new(&translated_pattern).map_err(|_| {
         if blame_regex_has_unbalanced_bracket(pattern) {
             blame_line_range_regex_unbalanced_brackets(pattern, from_line)
         } else {
@@ -2424,6 +2425,31 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
         .find(|line| regex.is_match(&line.content))
         .map(|line| line.line_no)
         .ok_or_else(|| blame_line_range_regex_no_match(pattern, from_line))
+}
+
+fn translate_blame_basic_regex(pattern: &str) -> String {
+    let mut translated = String::with_capacity(pattern.len());
+    let mut escaped = false;
+    for ch in pattern.chars() {
+        if escaped {
+            translated.push('\\');
+            translated.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if matches!(ch, '(' | ')' | '{' | '}') {
+            translated.push('\\');
+        }
+        translated.push(ch);
+    }
+    if escaped {
+        translated.push('\\');
+    }
+    translated
 }
 
 fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
