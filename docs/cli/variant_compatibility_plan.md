@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 54/151 commands with matrix rows / 349/4632 represented doc-option pairs / 1434 written rows / 1148 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1443 written rows / 1157 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,14 +269,14 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice finishes the already-tested `var` invalid-input rows
-from existing stock-oracle evidence:
+The latest completed slice adds the first `remote` command matrix rows from
+existing stock-oracle evidence:
 
-`git var GIT_UNKNOWN`
+`git remote add origin https://example.com/repo.git`
 
-`docs/cli/matrices/var_v2_47.tsv` now records the unknown-variable and
-`-l`-with-extra-argument usage failures from
-`git_admin_tools_compat::var_list_and_failures_match_stock_git`.
+`docs/cli/matrices/remote_v2_47.tsv` now records add, list, verbose list,
+get-url, set-url, rename and remove rows from
+`git_admin_tools_compat::remote_config_commands_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -625,14 +625,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice adds the remaining `var_v2_47.tsv`
-invalid-input rows already covered by
-`git_admin_tools_compat::var_list_and_failures_match_stock_git`: unknown
-variable and `-l` with an extra variable argument. No Rust behavior changed.
+The latest matrix inventory slice adds the first `remote_v2_47.tsv` rows
+already covered by
+`git_admin_tools_compat::remote_config_commands_match_stock_git`: add, list,
+verbose list, get-url, set-url, rename and remove. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1434` written-row
+This card is the exact handoff target after the current `1443` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1434`; the `1/1434` open row and the still incomplete command/doc-option
+`0/1443`; the `1/1443` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
