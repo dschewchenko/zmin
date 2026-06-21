@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `44/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `http-fetch`, `index-pack`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
 | Documented option spellings represented by rows | `245/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1047` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `787/1047` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `1/1047` | written rows with incomplete parity |
-| Open written rows | `0/1047` | written rows that still do not match stock Git |
-| Invalid input rows | `259/1047` | rows where stock Git rejects the input |
+| Written behavior rows | `1048` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `787/1048` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `1/1048` | written rows with incomplete parity |
+| Open written rows | `0/1048` | written rows that still do not match stock Git |
+| Invalid input rows | `260/1048` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `787/1047` as Git compatibility. It only means `787` of the `1047`
+Do not read `787/1048` as Git compatibility. It only means `787` of the `1048`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `1/1047` row is only partially matching,
-and `259/1047` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `1/1048` row is only partially matching,
+and `260/1048` additional rows are stock-compatible invalid inputs. Do
 not read `245/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -210,7 +210,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `82` | `66` | `0` | `0` | `16` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `70` | `41` | `0` | `0` | `29` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `299` | `283` | `0` | `0` | `16` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `300` | `283` | `0` | `0` | `17` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `153` | `147` | `0` | `0` | `6` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `45` | `17` | `1` | `0` | `27` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1047`** | **`787`** | **`1`** | **`0`** | **`259`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1048`** | **`787`** | **`1`** | **`0`** | **`260`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -244,7 +244,7 @@ Current command-level matrices:
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
 | `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
 | `status` | `26` | `0` | `22` | `76` | `66` | `0` | `0` | `10` | no |
-| `fetch` | `73` | `0` | `30` | `290` | `283` | `0` | `0` | `7` | no |
+| `fetch` | `73` | `0` | `30` | `291` | `283` | `0` | `0` | `8` | no |
 | `diff` | `133` | `0` | `31` | `66` | `65` | `0` | `0` | `1` | no |
 | `fast-import` | `25` | `0` | `1` | `4` | `0` | `1` | `0` | `3` | no |
 | `log` | `282` | `0` | `32` | `87` | `82` | `0` | `0` | `5` | no |
