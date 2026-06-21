@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1082 written rows / 817 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 48/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1083 written rows / 818 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,19 +266,18 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is an explicit local path source-only branch
-refspec fetch:
+The latest completed slice is an explicit local path empty-colon HEAD refspec
+fetch:
 
-`git fetch <path> main:`
+`git fetch <path> :`
 
-Stock Git treats the trailing colon without a destination as a
-FETCH_HEAD-only branch fetch, exits successfully, emits the stock branch update
-line on stderr, writes the branch row to `FETCH_HEAD` and creates no
-destination refs. Zmin now routes that source-only refspec away from the former
-explicit-location `not supported yet` guard and matches those side effects.
-The row is recorded in
+Stock Git treats the empty colon refspec as a FETCH_HEAD-only HEAD fetch,
+exits successfully, emits the stock HEAD update line on stderr, writes the
+source URL row to `FETCH_HEAD` and creates no destination refs. Zmin now routes
+that refspec away from the former explicit-location `not supported yet` guard
+and matches those side effects. The row is recorded in
 `docs/cli/matrices/fetch_v2_47.tsv` with focused evidence in
-`git_transport_local_compat::fetch_source_only_refspec_explicit_location_branch_matches_stock_git`.
+`git_transport_local_compat::fetch_empty_colon_refspec_explicit_location_head_matches_stock_git`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -627,7 +626,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1082` written-row
+This card is the exact handoff target after the current `1083` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1082`; the `1/1082` open row and the still incomplete command/doc-option
+`0/1083`; the `1/1083` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -976,6 +975,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git push` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/push_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` former named-remote branch tag omission for `git fetch --tags origin main` | Git-supported named local remote branch fetch with `--tags` now follows annotated and lightweight tags, writes tag rows to `FETCH_HEAD`, emits stock-shaped branch/tag/remote-tracking update stderr and keeps `refs/remotes/origin/main` updated | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_tags_named_local_remote_branch_follows_tags_like_stock_git` |
 | `transport_impl.rs` former branch-without-destination tag omission for `git fetch --tags <path> main` | Git-supported explicit local-path branch fetch with `--tags` now follows annotated and lightweight tags, writes tag rows to `FETCH_HEAD` and emits stock-shaped branch/tag update stderr | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_tags_direct_location_branch_follows_tags_like_stock_git` |
+| `transport_impl.rs` former `fetch from explicit location ... is not supported yet` path for `git fetch <path> :` | Git-supported explicit local-path empty-colon refspec now fetches HEAD to `FETCH_HEAD`, emits stock-shaped HEAD update stderr and creates no destination refs | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_empty_colon_refspec_explicit_location_head_matches_stock_git` |
 | `transport_impl.rs` former `fetch from explicit location ... is not supported yet` path for `git fetch <path> main:` | Git-supported explicit local-path source-only branch refspec now fetches to `FETCH_HEAD`, emits stock-shaped branch update stderr and creates no destination refs | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_source_only_refspec_explicit_location_branch_matches_stock_git` |
 | `transport_impl.rs` former `fetch from explicit location ... is not supported yet` path for `git fetch --prune <path> main` | Git-supported explicit local-path branch fetch with `--prune` now routed to the branch-without-destination handler and writes only `FETCH_HEAD` | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_prune_direct_location_branch_fetch_head_matches_stock_git` |
 | `transport_impl.rs` former `fetch from explicit location ... is not supported yet` path for `git fetch --prune <path> main:refs/remotes/origin/main` | Git-supported explicit local-path one-to-one refspec with `--prune` now routed to the direct refspec handler | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_prune_direct_location_one_to_one_refspec_matches_stock_git` |

@@ -12424,6 +12424,17 @@ fn fetch_with_repo_and_location(
         });
     }
     if let Some(refspec) = branch.as_deref() {
+        if refspec == ":" {
+            let source = local_clone_source(&source_path)?;
+            return fetch_direct_location_head(
+                &repo,
+                &source,
+                &location,
+                quiet,
+                dry_run,
+                write_fetch_head,
+            );
+        }
         if shallow_since.is_some() && refspec.contains(':') {
             return Err(CliError::Fatal {
                 code: 128,
