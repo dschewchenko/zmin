@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `38/151` | `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
 | Documented option spellings represented by rows | `241/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1023` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `778/1023` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `1/1023` | written rows with incomplete parity |
-| Open written rows | `0/1023` | written rows that still do not match stock Git |
-| Invalid input rows | `244/1023` | rows where stock Git rejects the input |
+| Written behavior rows | `1024` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `778/1024` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `1/1024` | written rows with incomplete parity |
+| Open written rows | `0/1024` | written rows that still do not match stock Git |
+| Invalid input rows | `245/1024` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `778/1023` as Git compatibility. It only means `778` of the `1023`
+Do not read `778/1024` as Git compatibility. It only means `778` of the `1024`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `1/1023` row is only partially matching
-stock Git and `244/1023` additional rows are stock-compatible invalid inputs. Do
+unexpanded surface is not counted yet, `1/1024` row is only partially matching
+stock Git and `245/1024` additional rows are stock-compatible invalid inputs. Do
 not read `241/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -218,9 +218,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `29` | `11` | `0` | `0` | `18` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `200` | `151` | `0` | `0` | `49` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `201` | `151` | `0` | `0` | `50` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `36` | `10` | `1` | `0` | `25` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1023`** | **`778`** | **`1`** | **`0`** | **`244`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1024`** | **`778`** | **`1`** | **`0`** | **`245`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -238,7 +238,7 @@ Current command-level matrices:
 | `blame` | `39` | `0` | `6` | `101` | `21` | `0` | `0` | `80` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `bundle` | `15` | `0` | `1` | `11` | `3` | `0` | `0` | `8` | no |
-| `cat-file` | `21` | `0` | `1` | `6` | `0` | `0` | `0` | `6` | no |
+| `cat-file` | `21` | `0` | `1` | `7` | `0` | `0` | `0` | `7` | no |
 | `clean` | `13` | `0` | `3` | `12` | `8` | `0` | `0` | `4` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |

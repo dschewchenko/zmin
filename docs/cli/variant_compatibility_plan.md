@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 38/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1023 written rows / 778 written rows matching stock Git / 1 partial written row / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 38/151 commands with matrix rows / 241/4632 represented doc-option pairs / 1024 written rows / 778 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -382,7 +382,7 @@ atom. Zmin now matches that literal-preservation behavior and
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1023` written-row
+This card is the exact handoff target after the current `1024` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -401,7 +401,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/1023`; the complete command matrices and complete doc-option matrices remain
+`0/1024`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -641,6 +641,7 @@ until a full matrix is expanded and verified.
 | `cat-file` batch unknown atom usage | `1` | `0` | `git cat-file --batch='%(bad)'` exits `128` with stock fatal bad-format diagnostic instead of a custom unsupported-atom fatal diagnostic |
 | `cat-file --filter` unknown object-filter names | `2` | `0` | `bad:name` and `bad=name` values with `--batch` exit `128` with stock invalid-filter diagnostics instead of using the known-unsupported-filter usage path |
 | `cat-file --filter` known unsupported object-filter families | `3` | `0` | `tree:1`, `sparse:oid=deadbeef` and `combine:blob:none+tree:1` values with `--batch` exit `129` with stock unsupported-filter usage diagnostics |
+| `cat-file --filter` dropped sparse path filter | `1` | `0` | `sparse:path=foo` with `--batch` exits `128` with stock support-dropped fatal diagnostic |
 | `for-each-ref` date format atoms | `16` | `0` | `committerdate` and `taggerdate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` author atoms | `10` | `0` | `authorname`, `authoremail`, and `authordate` in default, `unix`, `raw`, `iso`, `iso-strict`, `rfc`, `rfc2822`, and `short` formats |
 | `for-each-ref` tagger identity atoms | `2` | `0` | `taggername` and `taggeremail` for commit refs and annotated tag refs |
@@ -656,7 +657,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `655` verified variants.
+Tracked closed blocks in this table: `656` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
@@ -696,6 +697,7 @@ behavior, invalid input, or corrupt-format handling.
 | `runtime/commit_graph.rs` `unsupported commit-graph header` while reading commit-graph files | corrupt commit-graph storage format with stock diagnostics through `commit-graph verify` | `docs/cli/matrices/commit_graph_v2_47.tsv`; `git_maintenance_compat::commit_graph_verify_header_variants_match_stock_git` |
 | `core_impl.rs` `usage: objects filter not supported` path for unknown `cat-file --filter` names | stock-compatible invalid input for arbitrary unknown object-filter names, while known unsupported object-filter families keep stock usage diagnostics | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_unknown_filter_names_match_stock_git` |
 | `core_impl.rs` `usage: objects filter not supported` path for known `cat-file --filter` families | stock-compatible invalid input for documented-but-unsupported object-filter families that stock Git rejects with usage diagnostics | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_known_unsupported_filters_match_stock_git` |
+| `core_impl.rs` `sparse:path filters support has been dropped` path in `cat-file --filter` parsing | stock-compatible invalid input for the dropped sparse path object-filter family | `docs/cli/matrices/cat_file_v2_47.tsv`; `git_object_plumbing_compat::cat_file_sparse_path_filter_matches_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 

@@ -299,6 +299,29 @@ fn cat_file_known_unsupported_filters_match_stock_git() {
 }
 
 #[test]
+fn cat_file_sparse_path_filter_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"hello\n").expect("write fixture");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    let blob = git(repo.path(), ["rev-parse", "HEAD:a.txt"]);
+    let stdin = format!("{blob}\n");
+    let args = ["cat-file", "--batch", "--filter=sparse:path=foo"];
+
+    assert_eq!(
+        command_any_output_with_stdin_bytes(
+            zmin_bin(),
+            repo.path(),
+            &args,
+            stdin.as_bytes(),
+            "zmin"
+        ),
+        command_any_output_with_stdin_bytes("git", repo.path(), &args, stdin.as_bytes(), "git",),
+    );
+}
+
+#[test]
 fn cat_file_promisor_remote_hydrates_missing_blob_on_demand() {
     let source = git_init();
     configure_identity(source.path());
