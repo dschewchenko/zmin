@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 283/4632 represented doc-option pairs / 1211 written rows / 928 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 52/151 commands with matrix rows / 284/4632 represented doc-option pairs / 1236 written rows / 953 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -623,27 +623,27 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice records eight more supported local `clone`
-rows already covered by `git_clone_compat::clone_local_repo_matches_stock_git_state`:
-custom origin name, `--no-tags`, `--tags`, local `--reference`,
-local `--reference-if-able`, missing `--reference-if-able`, `--dissociate`
-with reference, and `--shared --dissociate`. No Rust behavior changed; the
-slice imports existing stock-oracle evidence into `clone_v2_47.tsv`.
+The latest matrix inventory slice expands `status` rows already covered by
+`git_status_compat`: explicit `--verbose` / `-v` / `-vv` and `--no-verbose`
+ordering, `--long` / `--no-long` ordering with `--short`, `--show-stash` and
+`--no-show-stash` ordering across human, porcelain v2 and NUL modes, plus
+`--column` / `--no-column` values and `column.status=always` overrides. No
+Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1211` written-row
+This card is the exact handoff target after the current `1236` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
-| Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
-| Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at the next remaining unmapped `unsupported` / `not supported` guard outside the already mapped `pack.rs` / `pack_impl.rs` and `reference_impl.rs` `zmin repo` guards, unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
-| Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
-| Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
-| Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
+| Slice | import the next dense batch of already-covered high-use command rows, or classify the next remaining `unsupported` / `not supported` guard if no dense tested rows are available |
+| Stock-Git oracle | use existing focused stock-vs-Zmin tests first; otherwise probe stock Git behavior for the selected guard before changing implementation |
+| Implementation area | start with high-use matrices from `status`, `log`, `diff`, `ls-files`, `rev-parse`, `config`, `fetch`, `clone` or `filter-branch`; for guard work, stay on one narrow guard class |
+| Evidence test | focused compat test already proving stdout, stderr, exit code and repository state against stock Git, or the smallest new compat test for a guard classification |
+| Matrix update | add 3-10 rows from one existing focused test file when safe; for implementation work add the exact row before changing code |
+| Expected count movement | docs-only evidence imports should increase written rows and closed rows; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Required gates | focused oracle test, TSV 12-column check, `git diff --check`, readiness/status summaries, docs/count stale scan; add `cargo check -p zmin-cli --bin zmin --profile compat` only for Rust behavior changes |
 | Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
 
 After this card is committed and pushed, update the pointer to either the next
@@ -651,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1211`; the `1/1211` open row and the still incomplete command/doc-option
+`0/1236`; the `1/1236` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
