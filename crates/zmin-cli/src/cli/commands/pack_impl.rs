@@ -4087,7 +4087,7 @@ pub(crate) fn fetch_bundle_refspecs(
     if depth_ignored {
         eprintln!("warning: option \"depth\" is ignored for {location}");
     }
-    let bundle = parse_bundle_header(file)?;
+    let bundle = parse_fetch_bundle_header(repo, file, location)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     verify_bundle_prerequisites(Some(&store), &bundle.prerequisites)?;
     let pack_dir = repo.objects_dir.join("pack");
@@ -4321,6 +4321,25 @@ fn parse_bundle_command_header(path: &std::path::Path) -> Result<ParsedBundleHea
                 text: format!(
                     "error: '{}' does not look like a v2 or v3 bundle file\n",
                     path.display()
+                ),
+            }
+        }
+        other => other,
+    })
+}
+
+fn parse_fetch_bundle_header(
+    repo: &GitRepo,
+    path: &std::path::Path,
+    location: &str,
+) -> Result<ParsedBundleHeader> {
+    parse_bundle_header(path).map_err(|error| match error {
+        CliError::Fatal { code: 128, message } if message == "unsupported bundle format" => {
+            let _ = fs::write(repo.git_dir.join("FETCH_HEAD"), b"");
+            CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "fatal: invalid gitfile format: {location}\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n"
                 ),
             }
         }

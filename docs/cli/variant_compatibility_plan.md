@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 34/151 commands with matrix rows / 240/4632 represented doc-option pairs / 997 written rows / 770 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 34/151 commands with matrix rows / 240/4632 represented doc-option pairs / 998 written rows / 770 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,12 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `bundle` unsupported bundle format
-validation for `verify`, `list-heads` and `unbundle`. Stock Git rejects files
-that do not start with a v2/v3 bundle header with `error: '<path>' does not
-look like a v2 or v3 bundle file`, exit `1`, empty stdout and no pack side
-effects. Zmin now maps that bundle-subcommand surface to the same diagnostics
-while leaving fetch-from-bundle invalid-file behavior as a separate surface.
+The latest closed guard classification is `fetch` from an invalid bundle file.
+Stock Git treats `git fetch bad.bundle HEAD:refs/heads/from-bundle` as an
+unreadable remote repository, exits `128`, writes an empty `FETCH_HEAD`, leaves
+the destination ref absent and installs no pack files. Zmin now maps that
+fetch-from-bundle surface to the same diagnostics and side effects.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -232,14 +231,14 @@ this cannot be closed without a Windows/non-Unix oracle run.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `997` written-row
+This card is the exact handoff target after the current `998` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
 | Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at the `fetch bad.bundle HEAD:...` surface for `crates/zmin-cli/src/cli/commands/pack_impl.rs:4262` (`unsupported bundle format`) unless a new WebStorm replacement trace appears first |
+| Implementation area | start at the next remaining `unsupported` / `not supported` guard in `crates/zmin-cli/src/cli/commands/pack_impl.rs` or `crates/zmin-git-core/src/pack.rs` unless a new WebStorm replacement trace appears first |
 | Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
@@ -251,7 +250,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/997`; the complete command matrices and complete doc-option matrices remain
+`0/998`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -477,6 +476,7 @@ until a full matrix is expanded and verified.
 | `fetch --recurse-submodules SSH/git-daemon submodule remotes` | `2` | `0` | on-demand recursion with smart HTTP parent and SSH or git-daemon submodule remotes fetches the changed gitlink commit without checking it out |
 | `fetch --jobs submodule recursion values` | `2` | `1` | accepted `--jobs=2` and `-j -1` with smart HTTP parent/local submodule recursion, plus invalid non-integer `--jobs`/`-j` diagnostics |
 | `fetch --dry-run smart HTTP submodule recursion` | `2` | `0` | default/on-demand and explicit `--recurse-submodules` smart HTTP parent/local-submodule dry-runs leave parent refs and `FETCH_HEAD` unchanged while fetching the changed submodule object like stock Git |
+| `fetch` invalid bundle file | `1` | `0` | `git fetch bad.bundle HEAD:refs/heads/from-bundle` exits `128` with stock unreadable-remote diagnostics, writes empty `FETCH_HEAD`, leaves the destination ref absent and installs no pack files |
 | `commit-graph verify` header variants | `3` | `0` | checksum-valid bad signature, bad version and bad hash version commit-graph files reject with stock diagnostics and exit `1` |
 | `pack-objects --index-version` value variants | `10` | `0` | accepted numeric major/minor forms `0`, `0,64`, `1,64`, `2,128` plus invalid `3`, `3,0`, `foo`, `2,foo`, `1,foo`, and `-1` diagnostics |
 | `bundle create --version` value variants | `8` | `0` | accepted `2`, `3` and `-1` forms plus invalid `1`, `4`, `1k`, `foo` and empty-value diagnostics with matching bundle file side effects |
@@ -500,7 +500,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `646` verified variants.
+Tracked closed blocks in this table: `647` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

@@ -92,6 +92,20 @@ fn sorted_shallow_file(path: &Path) -> Vec<String> {
     lines
 }
 
+fn pack_dir_files(repo: &Path) -> Vec<std::path::PathBuf> {
+    let pack_dir = repo.join(".git/objects/pack");
+    if !pack_dir.exists() {
+        return Vec::new();
+    }
+    let mut paths = fs::read_dir(pack_dir)
+        .expect("read pack dir")
+        .map(|entry| entry.expect("pack entry").path())
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
 #[test]
 fn fetch_local_remote_updates_remote_refs_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
@@ -4243,6 +4257,40 @@ fn fetch_depth_bundle_multiple_explicit_refspecs_ignores_depth_like_stock_git() 
     );
     assert!(!zmin_client.join(".git/shallow").exists());
     assert!(!git_client.join(".git/shallow").exists());
+}
+
+#[test]
+fn fetch_invalid_bundle_file_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    git(dir.path(), ["init", "-b", "main", "git-client"]);
+    run_zmin(dir.path(), ["init", "-b", "main", "zmin-client"]);
+    fs::write(git_client.join("bad.bundle"), b"not a bundle\n\nPACK").expect("write git bundle");
+    fs::write(zmin_client.join("bad.bundle"), b"not a bundle\n\nPACK").expect("write zmin bundle");
+
+    let args = ["fetch", "bad.bundle", "HEAD:refs/heads/from-bundle"];
+    assert_eq!(
+        command_any_output(zmin_bin(), &zmin_client, &args, "zmin"),
+        command_any_output("git", &git_client, &args, "git")
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        git_status_args(
+            &zmin_client,
+            &["show-ref", "--verify", "refs/heads/from-bundle"]
+        ),
+        git_status_args(
+            &git_client,
+            &["show-ref", "--verify", "refs/heads/from-bundle"]
+        )
+    );
+    assert!(pack_dir_files(&zmin_client).is_empty());
+    assert!(pack_dir_files(&git_client).is_empty());
 }
 
 #[test]
