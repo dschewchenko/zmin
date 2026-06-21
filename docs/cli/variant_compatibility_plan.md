@@ -216,6 +216,14 @@ leaves `.git/rebase-merge` state for edit/continue or abort, moves HEAD to the
 same in-progress rebase point as stock Git, and supports `git rebase --abort`
 cleanup from that state.
 
+The latest deferred guard classification is the `git gui` / `git citool`
+external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
+Local stock Git advertises `gui` and `citool` in `git help -a`, but this
+environment does not ship the `git-gui` executable, so it cannot provide a
+stdout/stderr/exit/side-effect oracle for GUI behavior. Keep those guards out
+of closed Git compatibility counts until a real `git-gui` oracle environment
+or an explicit product decision brings the GUI surface into scope.
+
 ### Current Slice Card
 
 This card is the exact handoff target after the current `953` written-row
@@ -225,8 +233,8 @@ state. Finish it before choosing another guard or command.
 | --- | --- |
 | Slice | classify one remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | run a focused stock Git probe for the selected guard before changing implementation |
-| Implementation area | start with fresh scan candidate `crates/zmin-cli/src/cli/commands/commit_impl.rs:1095` (`unsupported gui command`) unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest commit/gui compat test that proves stdout, stderr, exit code and repository state against stock Git, or record an intentional deferral if the Git GUI surface is explicitly out of current scope |
+| Implementation area | start with fresh non-GUI scan candidate `crates/zmin-cli/src/cli/commands/text_impl.rs:80` (`unsupported option`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest text-tools compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add the row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on the selected guard; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
@@ -477,6 +485,16 @@ workflow plus platform.
 
 The global denominator is still being audited. Until then, do not publish a
 global compatibility percentage.
+
+## Deferred Guard Classifications
+
+Deferred guards are not closed Git compatibility rows. They remain visible
+until a later slice either provides a real stock-Git oracle and matrix row or
+keeps the behavior explicitly out of scope.
+
+| Guard | Classification | Evidence | Next action |
+| --- | --- | --- | --- |
+| `commit_impl.rs` `git gui` / `git citool` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` and `citool` in `git help -a`, but `git gui --help` and `git citool --help` fail because the `git-gui` executable is not installed in this oracle environment | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the GUI surface into current CLI scope |
 
 ## Code Guard Classification
 
