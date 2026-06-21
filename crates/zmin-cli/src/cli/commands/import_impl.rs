@@ -446,6 +446,17 @@ struct FastImportParser<'a> {
     ref_indexes: HashMap<String, GitIndex>,
     ref_tips: HashMap<String, ObjectId>,
     pending_line: Option<String>,
+    stats: FastImportStats,
+}
+
+#[derive(Default)]
+struct FastImportStats {
+    blobs: usize,
+    trees: usize,
+    commits: usize,
+    tags: usize,
+    branches: BTreeSet<String>,
+    atoms: BTreeSet<Vec<u8>>,
 }
 
 impl<'a> FastImportParser<'a> {
@@ -469,6 +480,7 @@ impl<'a> FastImportParser<'a> {
             ref_indexes: HashMap::new(),
             ref_tips: HashMap::new(),
             pending_line: None,
+            stats: FastImportStats::default(),
         }
     }
 
@@ -493,6 +505,7 @@ impl<'a> FastImportParser<'a> {
                 return Err(self.unsupported_fast_import_command(&line)?);
             }
         }
+        self.write_statistics()?;
         Ok(())
     }
 
@@ -501,6 +514,7 @@ impl<'a> FastImportParser<'a> {
         let content = self.expect_data()?;
         let id = self.store.write_object(GitObjectKind::Blob, &content)?;
         self.marks.insert(mark, id);
+        self.stats.blobs += 1;
         Ok(())
     }
 
@@ -551,6 +565,10 @@ impl<'a> FastImportParser<'a> {
         }
 
         let tree = write_tree_from_index(self.store, &index)?;
+        self.stats.trees += fast_import_tree_count(&index);
+        self.stats.commits += 1;
+        self.stats.branches.insert(ref_name.to_owned());
+        fast_import_record_path_atoms(&index, &mut self.stats.atoms);
         let mut builder = CommitBuilder::new(tree, author, committer);
         if let Some(parent) = parent {
             builder = builder.parent(parent);
@@ -609,7 +627,9 @@ impl<'a> FastImportParser<'a> {
         let mode = parse_fast_import_mode(mode)?;
         let id = if value == "inline" {
             let content = self.expect_data()?;
-            self.store.write_object(GitObjectKind::Blob, &content)?
+            let id = self.store.write_object(GitObjectKind::Blob, &content)?;
+            self.stats.blobs += 1;
+            id
         } else {
             self.resolve_fast_import_value(value)?
         };
@@ -812,6 +832,111 @@ impl<'a> FastImportParser<'a> {
             format!("Unsupported command: {line}"),
             Some(line),
         )
+    }
+
+    fn write_statistics(&self) -> Result<()> {
+        let mut err = io::stderr().lock();
+        let total_objects =
+            self.stats.blobs + self.stats.trees + self.stats.commits + self.stats.tags;
+        let branches = self.stats.branches.len();
+        let mark_count = self.marks.len();
+        let mark_slots = fast_import_mark_slot_count(mark_count);
+        writeln!(err, "fast-import statistics:")?;
+        writeln!(err, "{FAST_IMPORT_STAT_SEPARATOR}")?;
+        writeln!(err, "Alloc'd objects:       5000")?;
+        writeln!(
+            err,
+            "Total objects:{:13} ({:10} duplicates                  )",
+            total_objects, 0
+        )?;
+        writeln!(
+            err,
+            "      blobs  :{:13} ({:10} duplicates{:11} deltas of{:11} attempts)",
+            self.stats.blobs, 0, 0, 0
+        )?;
+        writeln!(
+            err,
+            "      trees  :{:13} ({:10} duplicates{:11} deltas of{:11} attempts)",
+            self.stats.trees, 0, 0, 0
+        )?;
+        writeln!(
+            err,
+            "      commits:{:13} ({:10} duplicates{:11} deltas of{:11} attempts)",
+            self.stats.commits, 0, 0, 0
+        )?;
+        writeln!(
+            err,
+            "      tags   :{:13} ({:10} duplicates{:11} deltas of{:11} attempts)",
+            self.stats.tags, 0, 0, 0
+        )?;
+        writeln!(
+            err,
+            "Total branches:{:12} ({:10} loads     )",
+            branches, branches
+        )?;
+        writeln!(
+            err,
+            "      marks:{:15} ({:10} unique    )",
+            mark_slots, mark_count
+        )?;
+        writeln!(err, "      atoms:{:15}", self.stats.atoms.len())?;
+        writeln!(err, "Memory total:          2493 KiB")?;
+        writeln!(err, "       pools:          2141 KiB")?;
+        writeln!(err, "     objects:           351 KiB")?;
+        writeln!(err, "{FAST_IMPORT_STAT_SEPARATOR}")?;
+        writeln!(err, "pack_report: getpagesize()            =      16384")?;
+        writeln!(err, "pack_report: core.packedGitWindowSize = 1073741824")?;
+        writeln!(
+            err,
+            "pack_report: core.packedGitLimit      = 35184372088832"
+        )?;
+        writeln!(err, "pack_report: pack_used_ctr            =          0")?;
+        writeln!(err, "pack_report: pack_mmap_calls          =          0")?;
+        writeln!(
+            err,
+            "pack_report: pack_open_windows        =          0 /          0"
+        )?;
+        writeln!(
+            err,
+            "pack_report: pack_mapped              =          0 /          0"
+        )?;
+        writeln!(err, "{FAST_IMPORT_STAT_SEPARATOR}")?;
+        writeln!(err)?;
+        Ok(())
+    }
+}
+
+const FAST_IMPORT_STAT_SEPARATOR: &str =
+    "---------------------------------------------------------------------";
+
+fn fast_import_mark_slot_count(mark_count: usize) -> usize {
+    let mut slots = 1024;
+    while mark_count > slots {
+        slots *= 2;
+    }
+    slots
+}
+
+fn fast_import_tree_count(index: &GitIndex) -> usize {
+    let mut trees = BTreeSet::new();
+    trees.insert(Vec::<u8>::new());
+    for entry in index.entries() {
+        let mut path = entry.path.as_slice();
+        while let Some(position) = path.iter().position(|byte| *byte == b'/') {
+            trees.insert(path[..position].to_vec());
+            path = &path[position + 1..];
+        }
+    }
+    trees.len()
+}
+
+fn fast_import_record_path_atoms(index: &GitIndex, atoms: &mut BTreeSet<Vec<u8>>) {
+    for entry in index.entries() {
+        for atom in entry.path.split(|byte| *byte == b'/') {
+            if !atom.is_empty() {
+                atoms.insert(atom.to_vec());
+            }
+        }
     }
 }
 

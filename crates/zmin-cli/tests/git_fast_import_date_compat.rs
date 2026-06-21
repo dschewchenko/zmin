@@ -50,6 +50,27 @@ fn normalize_fast_import_crash_stderr(stderr: &str, expected_fatal: &str) -> Str
     format!("{expected_fatal}\nfast-import: dumping crash report to .git/fast_import_crash_<pid>")
 }
 
+fn normalize_fast_import_statistics_stderr(stderr: &str) -> String {
+    assert!(
+        stderr.contains("fast-import statistics:"),
+        "stderr should include import statistics: {stderr}"
+    );
+    let mut normalized = stderr
+        .lines()
+        .filter(|line| {
+            !line.starts_with("Memory total:")
+                && !line.starts_with("       pools:")
+                && !line.starts_with("     objects:")
+                && !line.starts_with("pack_report: getpagesize()")
+                && !line.starts_with("pack_report: core.packedGitWindowSize")
+                && !line.starts_with("pack_report: core.packedGitLimit")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    normalized.push('\n');
+    normalized
+}
+
 fn fast_import_crash_reports(repo: &Path) -> Vec<String> {
     let mut reports = fs::read_dir(repo.join(".git"))
         .expect("read .git")
@@ -90,7 +111,7 @@ fn loose_object_file_count(repo: &Path) -> usize {
 }
 
 #[test]
-fn fast_import_rfc2822_date_format_imports_stock_shape_but_stats_stderr_is_open() {
+fn fast_import_rfc2822_date_format_matches_stock_git_statistics() {
     let git_repo = git_init();
     let zmin_repo = git_init();
     let stream = "\
@@ -121,15 +142,9 @@ EOF
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert!(
-        git_output.2.contains("fast-import statistics:"),
-        "stock Git stderr should include import statistics: {}",
-        git_output.2
-    );
-    assert!(
-        zmin_output.2.is_empty(),
-        "Zmin still lacks stock fast-import statistics stderr: {}",
-        zmin_output.2
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
     );
     assert_eq!(
         git(
@@ -148,7 +163,7 @@ EOF
 }
 
 #[test]
-fn fast_import_checkpoint_imports_stock_shape_but_stats_stderr_is_open() {
+fn fast_import_checkpoint_matches_stock_git_statistics() {
     let git_repo = git_init();
     let zmin_repo = git_init();
     let stream = "\
@@ -172,15 +187,9 @@ M 100644 :1 a.txt
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert!(
-        git_output.2.contains("fast-import statistics:"),
-        "stock Git stderr should include import statistics: {}",
-        git_output.2
-    );
-    assert!(
-        zmin_output.2.is_empty(),
-        "Zmin still lacks stock fast-import statistics stderr: {}",
-        zmin_output.2
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
     );
     assert_eq!(
         git(
@@ -192,7 +201,7 @@ M 100644 :1 a.txt
 }
 
 #[test]
-fn fast_import_progress_imports_stock_shape_but_stats_stderr_is_open() {
+fn fast_import_progress_matches_stock_git_statistics() {
     let git_repo = git_init();
     let zmin_repo = git_init();
     let stream = "\
@@ -216,15 +225,9 @@ M 100644 :1 a.txt
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert!(
-        git_output.2.contains("fast-import statistics:"),
-        "stock Git stderr should include import statistics: {}",
-        git_output.2
-    );
-    assert!(
-        zmin_output.2.is_empty(),
-        "Zmin still lacks stock fast-import statistics stderr: {}",
-        zmin_output.2
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
     );
     assert_eq!(
         git(
@@ -236,7 +239,7 @@ M 100644 :1 a.txt
 }
 
 #[test]
-fn fast_import_done_imports_stock_shape_but_stats_stderr_is_open() {
+fn fast_import_done_matches_stock_git_statistics() {
     let git_repo = git_init();
     let zmin_repo = git_init();
     let stream = "\
@@ -260,15 +263,9 @@ done
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert!(
-        git_output.2.contains("fast-import statistics:"),
-        "stock Git stderr should include import statistics: {}",
-        git_output.2
-    );
-    assert!(
-        zmin_output.2.is_empty(),
-        "Zmin still lacks stock fast-import statistics stderr: {}",
-        zmin_output.2
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
     );
     assert_eq!(
         git(
