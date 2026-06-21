@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 47/151 commands with matrix rows / 250/4632 represented doc-option pairs / 1072 written rows / 810 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 47/151 commands with matrix rows / 251/4632 represented doc-option pairs / 1073 written rows / 811 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -262,10 +262,10 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed implementation slice is `clone --reference` over dumb
-HTTP:
+The latest completed implementation slice is `clone --reference-if-able` over
+dumb HTTP:
 
-`git clone --reference <path> http://host/repo.git dst`
+`git clone --reference-if-able <path> http://host/repo.git dst`
 
 Zmin now writes stock-shaped alternates for the local reference repository
 while cloning a dumb HTTP source, then matches stock Git `HEAD`, tree output
@@ -570,9 +570,9 @@ environment creates a reftable clone and reports `reftable` from
 `rev-parse --show-ref-format`; Zmin currently exits `128` before destination
 creation. This is now an open Git-supported behavior row, not invalid input.
 
-The latest closed transport slice is `transport_impl.rs`
-`reference repositories are not supported for dumb HTTP clone yet`. Zmin now
-accepts `git clone --reference <path> http://host/repo.git dst`, writes the
+The latest closed transport slice is `clone --reference-if-able` for dumb HTTP
+sources. Zmin now accepts
+`git clone --reference-if-able <path> http://host/repo.git dst`, writes the
 same local reference alternates as stock Git, fetches dumb HTTP objects and
 matches `HEAD`, tree output and porcelain status.
 
@@ -589,7 +589,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1072` written-row
+This card is the exact handoff target after the current `1073` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -608,12 +608,12 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1072`; the `1/1072` open row and the still incomplete command/doc-option
+`0/1073`; the `1/1073` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
-The most recent closed transport lane is `clone --reference` for dumb HTTP
-sources. Do not return to that lane unless a new stock-Git trace, upstream test
-or dogfood flow exposes a missing value, mode or side effect.
+The most recent closed transport lane is `clone --reference-if-able` for dumb
+HTTP sources. Do not return to that lane unless a new stock-Git trace,
+upstream test or dogfood flow exposes a missing value, mode or side effect.
 
 After each committed slice, update this pointer in the same docs/counts commit.
 The pointer is the durable handoff source; chat history is not the plan.
@@ -934,7 +934,7 @@ behavior, invalid input, or corrupt-format handling.
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git fetch` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git ls-remote` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/ls_remote_v2_47.tsv`; `git_transport_local_compat::ls_remote_unsupported_remote_helper_failure_matches_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git push` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/push_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
-| `transport_impl.rs` former `reference repositories are not supported for dumb HTTP clone yet` guard | Git-supported clone reference behavior now accepted for dumb HTTP sources with stock-shaped alternates | `docs/cli/matrices/clone_v2_47.tsv`; `git_transport_http_compat::clone_reference_dumb_http_matches_stock_git` |
+| `transport_impl.rs` former `reference repositories are not supported for dumb HTTP clone yet` guard | Git-supported clone reference and reference-if-able behavior now accepted for dumb HTTP sources with stock-shaped alternates | `docs/cli/matrices/clone_v2_47.tsv`; `git_transport_http_compat::clone_reference_dumb_http_matches_stock_git`; `git_transport_http_compat::clone_reference_if_able_dumb_http_matches_stock_git` |
 | `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |
@@ -965,7 +965,7 @@ Largest raw clusters:
 
 | Area | Raw hits | Next action |
 | --- | ---: | --- |
-| `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, HTTP/env guards; reftable clone remains open and dumb HTTP clone reference is now closed |
+| `transport_impl.rs` | `30` | split explicit-location fetch, remote helpers, HTTP/env guards; reftable clone remains open and dumb HTTP clone reference/reference-if-able are now closed |
 | `pack_impl.rs` | `14` | classify pack/bundle format guards versus stock-supported variants |
 | `worktree_impl.rs` | `9` | split remaining ls-files, submodule, sparse-checkout, stash and worktree guards |
 | `history_impl.rs` | `7` | split blame ranges/options, reflog formats and diff/log decorators; bad parent-filter output is now closed |

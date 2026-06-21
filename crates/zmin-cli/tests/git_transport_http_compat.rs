@@ -10904,6 +10904,79 @@ fn clone_reference_dumb_http_matches_stock_git() {
 }
 
 #[test]
+fn clone_reference_if_able_dumb_http_matches_stock_git() {
+    ensure_remote_http_helper();
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let reference = dir.path().join("reference");
+    let git_clone = dir.path().join("git-reference-if-able-clone");
+    let zmin_clone = dir.path().join("zmin-reference-if-able-clone");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("a.txt"), b"hello\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    git(&source, ["update-server-info"]);
+
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            reference.to_str().expect("reference path"),
+        ],
+    );
+    configure_identity(&reference);
+    fs::write(reference.join("reference.txt"), b"reference\n").expect("write reference");
+    git(&reference, ["add", "-A"]);
+    git_with_env(&reference, ["commit", "-m", "reference"]);
+
+    let server = StaticHttpServer::new(source.clone());
+    let url = format!("http://127.0.0.1:{}/.git", server.port);
+    git(
+        dir.path(),
+        [
+            "clone",
+            "--reference-if-able",
+            reference.to_str().expect("reference path"),
+            url.as_str(),
+            git_clone.to_str().expect("git clone path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            "--reference-if-able",
+            reference.to_str().expect("reference path"),
+            url.as_str(),
+            zmin_clone.to_str().expect("zmin clone path"),
+        ],
+    );
+
+    assert_eq!(
+        canonical_alternates(&zmin_clone.join(".git/objects/info/alternates")),
+        canonical_alternates(&git_clone.join(".git/objects/info/alternates"))
+    );
+    assert_eq!(
+        git(&zmin_clone, ["rev-parse", "HEAD"]),
+        git(&git_clone, ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_clone, ["cat-file", "-p", "HEAD^{tree}"]),
+        git(&git_clone, ["cat-file", "-p", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        run_zmin(&zmin_clone, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_clone, ["status", "--porcelain=v1", "--branch"])
+    );
+}
+
+#[test]
 fn clone_reject_shallow_allows_non_shallow_dumb_http_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
