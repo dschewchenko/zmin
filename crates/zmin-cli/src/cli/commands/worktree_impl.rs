@@ -3961,6 +3961,18 @@ pub(crate) fn restore(
             }
         }
         let checkout_index_entries = GitIndex::from_entries(checkout_entries)?;
+        let materialized_paths = checkout_index_entries
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+            .map(|entry| {
+                let path = repo
+                    .root
+                    .join(String::from_utf8_lossy(&entry.path).as_ref());
+                let existed = path_exists(&path);
+                (path, existed)
+            })
+            .collect::<Vec<_>>();
         checkout_index(
             &store,
             &checkout_index_entries,
@@ -3968,7 +3980,14 @@ pub(crate) fn restore(
             CheckoutIndexOptions { force: true },
         )?;
         let updated_paths = checkout_index_entries.entries().len();
-        smudge_worktree_filter_entries(&repo, &checkout_index_entries)?;
+        if let Err(error) = smudge_worktree_filter_entries(&repo, &checkout_index_entries) {
+            for (path, existed) in materialized_paths {
+                if !existed {
+                    let _ = fs::remove_file(path);
+                }
+            }
+            return Err(error);
+        }
         return Ok(updated_paths);
     }
 

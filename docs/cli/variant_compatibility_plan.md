@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 49/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1088 written rows / 820 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 50/151 commands with matrix rows / 252/4632 represented doc-option pairs / 1089 written rows / 820 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -266,15 +266,18 @@ appear, add those rows before continuing guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice is an explicit local-path `fetch --no-tags` case:
+The latest completed slice is a porcelain `checkout` process-filter failure
+case:
 
-`git fetch --no-tags <path>`
+`git checkout -- a.bad`
 
-Stock Git accepts an explicit local-path HEAD fetch with `--no-tags`, exits
-`0`, writes stock-shaped `FETCH_HEAD`, creates no destination refs and does
-not auto-follow a reachable tag. Zmin already matched that behavior. The row
-is recorded in `docs/cli/matrices/fetch_v2_47.tsv` with focused evidence in
-`git_transport_local_compat::fetch_no_tags_direct_location_head_skips_tags_like_stock_git`.
+Stock Git rejects a required smudge process filter that returns
+`status=delayed` without advertising delayed checkout support, exits `128`,
+leaves stdout empty, prints stock external-filter diagnostics and leaves the
+worktree file absent. Zmin now removes newly materialized raw checkout files
+when the subsequent smudge stage fails, matching that side effect. The row is
+recorded in `docs/cli/matrices/checkout_v2_47.tsv` with focused evidence in
+`git_worktree_state_compat::checkout_delayed_smudge_process_filter_matches_stock_git_failure`.
 The next default slice returns to the Immediate Slice Queue: classify one
 remaining `unsupported` or `not supported` Rust guard unless a new
 WebStorm/replacement-binary trace is blocking local dogfooding.
@@ -623,7 +626,7 @@ short and long quiet forms.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1088` written-row
+This card is the exact handoff target after the current `1089` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -642,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1088`; the `1/1088` open row and the still incomplete command/doc-option
+`0/1089`; the `1/1089` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -796,6 +799,7 @@ until a full matrix is expanded and verified.
 | `clean` unknown option usage | `1` | `0` | `git clean --bad` exits `129` with stock unknown-option usage text instead of a fatal unsupported-option diagnostic |
 | `clean` unknown short-switch usage | `1` | `0` | `git clean -Z` exits `129` with stock unknown-switch usage text instead of an unknown-option diagnostic |
 | `clean` exclude missing-value usage | `2` | `0` | `git clean -e` and `git clean --exclude` exit `129` with stock missing-value diagnostics instead of a fatal custom pattern diagnostic |
+| `checkout` delayed smudge process-filter failure | `1` | `0` | `git checkout -- a.bad` with a required smudge process filter returning `status=delayed` exits `128`, leaves stdout empty, emits stock external-filter diagnostics and leaves the worktree file absent |
 | `ls-files` replacement stage NUL output | `1` | `0` | `--stage -z` through the `git` shim on a clean cloned index |
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
 | `ls-files` replacement cached pathspec NUL output | `1` | `0` | `-z --cached -- dir` through the `git` shim on a cloned repository |
@@ -904,7 +908,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `671` verified variants.
+Tracked closed blocks in this table: `672` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
@@ -985,6 +989,7 @@ behavior, invalid input, or corrupt-format handling.
 | `runtime/worktree_index.rs` former `unsupported filter process status` process-filter response guard | stock-compatible invalid input for a required process filter that returns an unsupported status during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_unknown_status_matches_stock_git` |
 | `runtime/worktree_index.rs` former `filter process delayed response is not supported here` clean-filter response guard | stock-compatible invalid input for a required clean process filter that returns delayed status without a `can-delay=1` request during `git add` | `docs/cli/matrices/add_v2_47.tsv`; `git_add_compat::add_process_filter_delayed_clean_status_matches_stock_git` |
 | `runtime/worktree_index.rs` former `filter process delayed response is not supported here` smudge checkout-index response guard | stock-compatible invalid input for a required smudge process filter that returns delayed status without advertising `delay` during `git checkout-index` | `docs/cli/matrices/checkout_index_v2_47.tsv`; `git_worktree_state_compat::checkout_index_delayed_smudge_process_filter_matches_stock_git_failure` |
+| `runtime/worktree_index.rs` former `filter process delayed response is not supported here` smudge checkout response guard | stock-compatible invalid input for a required smudge process filter that returns delayed status during `git checkout -- <path>`; newly materialized raw files are removed on the smudge failure like stock Git | `docs/cli/matrices/checkout_v2_47.tsv`; `git_worktree_state_compat::checkout_delayed_smudge_process_filter_matches_stock_git_failure` |
 | `worktree_impl.rs` `unsupported clean option '{value}'` in `git clean` option parsing | stock-compatible invalid input for unknown long and short clean options | `docs/cli/matrices/clean_v2_47.tsv`; `git_clean_compat::clean_unknown_option_matches_stock_git`; `git_clean_compat::clean_unknown_short_switch_matches_stock_git` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash list format atom '%w'` guard | Git-supported stash list pretty-format wrapping atom | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_list_wrap_format_atoms_match_stock_git` |

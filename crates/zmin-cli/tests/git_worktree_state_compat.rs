@@ -797,6 +797,51 @@ fn checkout_index_delayed_smudge_process_filter_matches_stock_git_failure() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn checkout_delayed_smudge_process_filter_matches_stock_git_failure() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let helper_dir = TempDir::new().expect("helper tempdir");
+    let helper = helper_dir.path().join("delayed-smudge-filter.pl");
+    write_delayed_smudge_filter_helper(&helper);
+    let command = format!("perl {}", helper.display());
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(repo.join("a.bad"), b"hello\n").expect("write indexed file");
+        git(repo, ["add", "a.bad"]);
+        git_with_env(repo, ["commit", "-m", "initial"]);
+        fs::write(repo.join(".gitattributes"), b"*.bad filter=bad\n").expect("write attributes");
+        git(repo, ["config", "filter.bad.process", &command]);
+        git(repo, ["config", "filter.bad.required", "true"]);
+        fs::remove_file(repo.join("a.bad")).expect("remove worktree file");
+    }
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["checkout", "--", "a.bad"],
+            "zmin checkout delayed smudge process filter",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["checkout", "--", "a.bad"],
+            "git checkout delayed smudge process filter",
+        )
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("a.bad")).ok(),
+        fs::read(git_repo.path().join("a.bad")).ok()
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+}
+
 #[test]
 fn switch_create_matches_stock_git_state() {
     let git_repo = committed_repo();
