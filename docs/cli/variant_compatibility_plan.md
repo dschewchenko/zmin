@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1510 written rows / 1218 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1517 written rows / 1225 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands the `ls-files` command matrix with concrete
-pathspec rows from existing stock-oracle evidence:
+The latest completed slice expands the `status` command matrix with global
+no-op option rows from existing stock-oracle evidence:
 
-`git --glob-pathspecs --literal-pathspecs ls-files a*b.txt`
+`git --no-pager status --short`
 
-`docs/cli/matrices/ls_files_v2_47.tsv` now records the remaining rows from the
-former aggregate global pathspec batch: directory glob magic, exclude pathspecs,
-combined literal/noglob/icase/global mode ordering and literal/glob ordering from
-`git_global_cli_compat::global_pathspec_options_match_stock_git_for_ls_files`.
+`docs/cli/matrices/status_v2_47.tsv` now records the remaining global no-op
+option forms from
+`git_global_cli_compat::global_noop_options_match_stock_git_in_noninteractive_mode`:
+`-P`, `--no-pager`, `-p`, `--paginate`, `--no-replace-objects`,
+`--no-lazy-fetch` and `--no-advice`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,15 +627,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `ls_files_v2_47.tsv` with the
-remaining rows already covered by
-`git_global_cli_compat::global_pathspec_options_match_stock_git_for_ls_files`:
-directory glob magic, exclude pathspec forms, combined literal/noglob/icase
-global modes and literal/glob ordering. No Rust behavior changed.
+The latest matrix inventory slice expands `status_v2_47.tsv` with the remaining
+global no-op option rows already covered by
+`git_global_cli_compat::global_noop_options_match_stock_git_in_noninteractive_mode`:
+`-P`, `--no-pager`, `-p`, `--paginate`, `--no-replace-objects`,
+`--no-lazy-fetch` and `--no-advice`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1510` written-row
+This card is the exact handoff target after the current `1517` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -653,7 +654,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1510`; the `1/1510` open row and the still incomplete command/doc-option
+`0/1517`; the `1/1517` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
