@@ -231,12 +231,12 @@ Do not collapse these layers into one percentage.
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `50/151` | no | audit rows exist for `add`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
-| Git doc option pairs represented by rows | `262/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1106` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `835/1106` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1106` | no | written rows with incomplete parity |
-| Open written rows | `1/1106` | no | written rows that still do not match stock Git |
-| Invalid input rows | `270/1106` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Git doc option pairs represented by rows | `269/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `1114` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `843/1114` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1114` | no | written rows with incomplete parity |
+| Open written rows | `1/1114` | no | written rows that still do not match stock Git |
+| Invalid input rows | `270/1114` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -266,7 +266,7 @@ Current generated summary:
 | Git reference group | Git commands | Complete command matrices | Git doc option seed rows | Complete doc option pairs | Matrix rows | Written rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` | `8` |
-| Getting and Creating Projects | `2` | `0` | `66` | `0` | `8` | `5` | `0` | `1` | `2` | `2` |
+| Getting and Creating Projects | `2` | `0` | `66` | `0` | `16` | `13` | `0` | `1` | `2` | `10` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `85` | `66` | `0` | `0` | `19` | `99` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `86` | `56` | `0` | `0` | `30` | `50` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `310` | `292` | `0` | `0` | `18` | `160` |
@@ -279,7 +279,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `203` | `151` | `0` | `0` | `52` | `116` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `48` | `21` | `0` | `0` | `27` | `40` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1106`** | **`835`** | **`0`** | **`1`** | **`270`** | **`705`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1114`** | **`843`** | **`0`** | **`1`** | **`270`** | **`713`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -289,10 +289,10 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `262/4632`
-represented option pairs or `835/1106` passing written rows as a Git support
-percentage. The `835/1106` number is audit progress for supported rows already
-written down; `0/1106` rows are partial, `1/1106` rows are open and `270/1106`
+Never use `151/151` command presence, `4632` option spellings, `269/4632`
+represented option pairs or `843/1114` passing written rows as a Git support
+percentage. The `843/1114` number is audit progress for supported rows already
+written down; `0/1114` rows are partial, `1/1114` rows are open and `270/1114`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -317,7 +317,7 @@ variants.
 | `checkout` | `43` | `0` | `0` | `docs/cli/matrices/checkout_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `checkout-index` | `19` | `0` | `0` | `docs/cli/matrices/checkout_index_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `clean` | `13` | `0` | `3` | `docs/cli/matrices/clean_v2_47.tsv` | `12` | `8` | `0` | `0` | `4` | no |
-| `clone` | `56` | `0` | `3` | `docs/cli/matrices/clone_v2_47.tsv` | `6` | `3` | `0` | `1` | `2` | no |
+| `clone` | `56` | `0` | `10` | `docs/cli/matrices/clone_v2_47.tsv` | `14` | `11` | `0` | `1` | `2` | no |
 | `column` | `10` | `0` | `1` | `docs/cli/matrices/column_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `docs/cli/matrices/commit_graph_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
 | `config` | `243` | `0` | `17` | `docs/cli/matrices/config_v2_47.tsv` | `60` | `50` | `0` | `0` | `10` | no |
