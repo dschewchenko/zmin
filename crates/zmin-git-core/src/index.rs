@@ -773,7 +773,7 @@ fn decode_index_header(bytes: &[u8]) -> io::Result<(u32, usize, usize)> {
     ) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "unsupported git index version",
+            format!("bad index version {version}"),
         ));
     }
     Ok((version, read_u32(bytes, 8)? as usize, checksum_offset))

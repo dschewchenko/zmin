@@ -11,10 +11,27 @@ const PARALLEL_STAGE_REGULAR_MAX_WORKERS: usize = 4;
 
 pub(crate) fn read_repo_index(repo: &GitRepo) -> Result<GitIndex> {
     if repo.index_path.exists() {
-        Ok(read_index(&repo.index_path)?)
+        read_index(&repo.index_path).map_err(map_read_index_error)
     } else {
         Ok(GitIndex::new())
     }
+}
+
+fn map_read_index_error(error: std::io::Error) -> CliError {
+    if let Some(version) = bad_index_version(&error) {
+        return CliError::Stderr {
+            code: 128,
+            text: format!("error: bad index version {version}\nfatal: index file corrupt\n"),
+        };
+    }
+    CliError::Io(error)
+}
+
+fn bad_index_version(error: &std::io::Error) -> Option<String> {
+    error
+        .to_string()
+        .strip_prefix("bad index version ")
+        .map(str::to_owned)
 }
 
 pub(crate) fn stage_tracked_worktree_changes(

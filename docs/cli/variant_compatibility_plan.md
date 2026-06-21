@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 956 written rows / 757 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 957 written rows / 757 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,9 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git ls-files --stage` with a stock
-Git index v4. Stock Git supports version 4 indexes with prefix-compressed
-paths. Zmin now decodes v4 path compression and matches stock stage output.
+The latest closed guard classification is `git ls-files --stage` with
+checksum-valid bad index versions such as v1 and v5. Stock Git rejects those
+with `error: bad index version <n>`, `fatal: index file corrupt` and exit
+`128`. Zmin now returns the same invalid-input diagnostics through the shared
+worktree index reader.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -223,17 +225,17 @@ or an explicit product decision brings the GUI surface into scope.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `956` written-row
+This card is the exact handoff target after the current `957` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
-| Slice | classify the remaining bad-version side of the `unsupported git index version` guard |
-| Stock-Git oracle | probe stock Git for bad index versions such as v1/v5 before changing diagnostics |
-| Implementation area | continue at `crates/zmin-git-core/src/index.rs:776` (`unsupported git index version`) unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest `ls-files` invalid-input compat test that proves stdout, stderr, exit code and repository state against stock Git |
-| Matrix update | add the invalid-input row to `docs/cli/matrices/ls_files_v2_47.tsv` before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
-| Expected count movement | likely `956 -> 957` written rows and `199 -> 200` invalid-input rows; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Slice | classify the next `unsupported git index mode` guard |
+| Stock-Git oracle | probe stock Git for the selected mode bits before changing implementation |
+| Implementation area | start at `crates/zmin-git-core/src/index.rs:63` (`unsupported git index mode`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest index-reading compat test that proves stdout, stderr, exit code and repository state against stock Git |
+| Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
+| Expected count movement | depends on whether the selected mode is supported behavior or invalid input; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
 | Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
 
@@ -242,7 +244,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/956`; the complete command matrices and complete doc-option matrices remain
+`0/957`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named

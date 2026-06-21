@@ -56,12 +56,24 @@ fn set_first_index_entry_mode(repo: &std::path::Path, mode: u32) {
     let mut index = fs::read(&index_path).expect("read index");
     let mode_offset = 12 + 24;
     index[mode_offset..mode_offset + 4].copy_from_slice(&mode.to_be_bytes());
+    rewrite_index_checksum(&mut index);
+    fs::write(index_path, index).expect("write index");
+}
+
+fn set_index_version(repo: &std::path::Path, version: u32) {
+    let index_path = repo.join(".git/index");
+    let mut index = fs::read(&index_path).expect("read index");
+    index[4..8].copy_from_slice(&version.to_be_bytes());
+    rewrite_index_checksum(&mut index);
+    fs::write(index_path, index).expect("write index");
+}
+
+fn rewrite_index_checksum(index: &mut [u8]) {
     let checksum_offset = index.len() - GitHashAlgorithm::Sha1.digest_len();
     let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
     hasher.update(&index[..checksum_offset]);
     let checksum = hasher.finalize();
     index[checksum_offset..].copy_from_slice(checksum.as_bytes());
-    fs::write(index_path, index).expect("write index");
 }
 
 #[test]
@@ -339,6 +351,25 @@ fn ls_files_stage_reads_stock_git_index_v4() {
         command_output_any(zmin_bin(), repo.path(), &["ls-files", "--stage"]),
         command_output_any("git", repo.path(), &["ls-files", "--stage"])
     );
+}
+
+#[test]
+fn ls_files_rejects_bad_index_versions_like_stock_git() {
+    for version in [1, 5] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+            git(repo, ["add", "a.txt"]);
+            set_index_version(repo, version);
+        }
+
+        assert_eq!(
+            command_output_any(zmin_bin(), zmin_repo.path(), &["ls-files", "--stage"]),
+            command_output_any("git", git_repo.path(), &["ls-files", "--stage"]),
+            "index version {version}"
+        );
+    }
 }
 
 #[test]
