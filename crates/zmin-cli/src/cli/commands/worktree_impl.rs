@@ -7365,7 +7365,7 @@ where
         'c' => render_stash_signature_atom(chars, out, &commit.committer, "c")?,
         'G' => render_stash_gpg_atom(chars, out)?,
         'C' => {
-            render_stash_color_atom(chars, out);
+            render_stash_color_atom(chars, out)?;
         }
         '<' | '>' => render_stash_width_atom(atom, chars, out, index, entry, commit)?,
         'w' => return Err(unsupported_stash_list_format_atom("%w")),
@@ -7506,7 +7506,7 @@ struct StashWidthSpec {
 enum StashColorAtom {
     Valid(String),
     Unterminated(String),
-    Invalid,
+    Invalid(String),
     Missing,
 }
 
@@ -7626,7 +7626,7 @@ fn apply_stash_width_truncation(
     }
 }
 
-fn render_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String)
+fn render_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>, out: &mut String) -> Result<()>
 where
     I: Iterator<Item = char> + Clone,
 {
@@ -7636,9 +7636,12 @@ where
             out.push_str("%C");
             out.push_str(&literal);
         }
-        StashColorAtom::Invalid => out.push_str("%C"),
+        StashColorAtom::Invalid(value) => {
+            return Err(invalid_stash_list_color_atom(&value));
+        }
         StashColorAtom::Missing => out.push_str("%C"),
     }
+    Ok(())
 }
 
 fn consume_stash_color_atom<I>(chars: &mut std::iter::Peekable<I>) -> StashColorAtom
@@ -7655,7 +7658,7 @@ where
                     if mode.trim() == "always" {
                         config_commands::parse_config_color(color.trim())
                             .map(StashColorAtom::Valid)
-                            .unwrap_or(StashColorAtom::Invalid)
+                            .unwrap_or_else(|| StashColorAtom::Invalid(color.trim().to_owned()))
                     } else {
                         StashColorAtom::Valid(String::new())
                     }
@@ -7865,6 +7868,15 @@ fn unsupported_stash_list_format_atom(atom: &str) -> CliError {
     CliError::Fatal {
         code: 1,
         message: format!("unsupported stash list format atom '{atom}'"),
+    }
+}
+
+fn invalid_stash_list_color_atom(value: &str) -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: format!(
+            "error: invalid color value: {value}\nfatal: unable to parse --pretty format\n"
+        ),
     }
 }
 

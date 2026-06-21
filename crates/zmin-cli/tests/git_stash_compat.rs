@@ -1433,6 +1433,29 @@ fn stash_list_unterminated_color_format_atoms_match_stock_git_literals() {
 }
 
 #[test]
+fn stash_list_invalid_forced_color_format_atom_matches_stock_git() {
+    let git_repo = stash_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    write_file(git_repo.path(), "a.txt", "one\nstashed\n");
+    write_file(zmin_repo.path(), "a.txt", "one\nstashed\n");
+    git_with_env(git_repo.path(), ["stash", "push", "-m", "color"]);
+    run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-m", "color"]);
+
+    assert_eq!(
+        run_zmin_failure_output(
+            zmin_repo.path(),
+            &["stash", "list", "--format=%C(always,bad)%h"]
+        ),
+        git_failure_output(
+            git_repo.path(),
+            &["stash", "list", "--format=%C(always,bad)%h"]
+        )
+    );
+}
+
+#[test]
 fn stash_invalid_top_level_and_push_usage_match_stock_git_shape() {
     let repo = stash_fixture_repo();
 
