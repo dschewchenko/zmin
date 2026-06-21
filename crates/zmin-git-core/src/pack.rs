@@ -390,7 +390,7 @@ fn pack_index_object_count_from_header(header: &[u8]) -> io::Result<usize> {
         if raw_version != IDX_VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "unsupported pack index version",
+                format!("unsupported pack index version {raw_version}"),
             ));
         }
     }
@@ -4914,7 +4914,7 @@ fn validate_pack_index_layout(
         if raw_version != IDX_VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "unsupported pack index version",
+                format!("unsupported pack index version {raw_version}"),
             ));
         }
     }

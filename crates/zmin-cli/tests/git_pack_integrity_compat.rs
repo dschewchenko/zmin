@@ -8,9 +8,10 @@ use common::{
     configure_identity, git, git_args, git_init, git_status, git_status_args, git_with_env,
     git_with_stdin, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
     run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args, run_zmin_with_stdin_bytes,
-    zmin_bin, write_file,
+    write_file, zmin_bin,
 };
 use tempfile::TempDir;
+use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 #[test]
 fn fsck_matches_stock_git_for_healthy_repo_and_detects_corrupt_object() {
@@ -1820,6 +1821,24 @@ fn verify_pack_matches_stock_git_for_default_and_stats() {
 }
 
 #[test]
+fn verify_pack_rejects_unsupported_pack_index_version_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "file.txt", "content\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "pack me"]);
+    git(repo.path(), ["repack", "-adq"]);
+    let idx = first_pack_index(repo.path());
+    set_pack_index_version(&idx, 3);
+
+    let args = ["verify-pack", idx.to_str().expect("idx path")];
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &args, "zmin"),
+        command_any_output("git", repo.path(), &args, "git")
+    );
+}
+
+#[test]
 fn pack_redundant_matches_stock_git_for_redundant_pack_set() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -3356,6 +3375,31 @@ fn flip_last_byte(path: &std::path::Path) {
         fs::set_permissions(path, permissions).expect("make file writable for corruption");
     }
     fs::write(path, bytes).expect("write corrupted file");
+}
+
+fn set_pack_index_version(path: &std::path::Path, version: u32) {
+    let mut bytes = fs::read(path).expect("read pack index");
+    bytes[4..8].copy_from_slice(&version.to_be_bytes());
+    let checksum_offset = bytes.len() - GitHashAlgorithm::Sha1.digest_len();
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&bytes[..checksum_offset]);
+    let checksum = hasher.finalize();
+    bytes[checksum_offset..].copy_from_slice(checksum.as_bytes());
+    let mut permissions = fs::metadata(path)
+        .expect("pack index metadata before version mutation")
+        .permissions();
+    if permissions.readonly() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        #[cfg(windows)]
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).expect("make pack index writable");
+    }
+    fs::write(path, bytes).expect("write pack index version");
 }
 
 #[derive(Clone, Copy)]

@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 961 written rows / 760 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 28/151 commands with matrix rows / 237/4632 represented doc-option pairs / 962 written rows / 760 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,11 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git ls-files --stage` with an
-unknown required index extension. Stock Git rejects a checksum-valid lowercase
-`abcd` extension with `error: index uses abcd extension, which we do not
-understand` followed by `fatal: index file corrupt`, and Zmin now matches that
-exit/stderr behavior.
+The latest closed guard classification is `git verify-pack` with an
+unsupported pack index version. Stock Git rejects a checksum-valid `.idx`
+version `3` with `error: index file ... is version 3 and is not supported by
+this binary` followed by `fatal: Cannot open existing pack idx file`, and Zmin
+now matches that exit/stderr behavior.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -231,14 +231,14 @@ this cannot be closed without a Windows/non-Unix oracle run.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `961` written-row
+This card is the exact handoff target after the current `962` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
 | Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at `crates/zmin-git-core/src/pack.rs:393` (`unsupported pack index version`) unless a new WebStorm replacement trace appears first |
+| Implementation area | start at `crates/zmin-git-core/src/pack.rs:467` (`unsupported pack reverse index signature`) unless a new WebStorm replacement trace appears first |
 | Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
@@ -250,7 +250,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/961`; the complete command matrices and complete doc-option matrices remain
+`0/962`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -413,6 +413,7 @@ until a full matrix is expanded and verified.
 | `ls-files --sparse --stage` sparse index tree entries | `1` | `0` | `git ls-files --sparse --stage` prints stock sparse-directory `040000` tree entries from an index with the `sdir` marker |
 | `ls-files --stage` stock Git index v4 | `1` | `0` | `git ls-files --stage` reads stock Git version 4 indexes with prefix-compressed paths |
 | `ls-files --stage` unknown required index extension | `1` | `0` | `git ls-files --stage` rejects a checksum-valid lowercase `abcd` index extension with stock corrupt-index diagnostics |
+| `verify-pack` unsupported pack index version | `1` | `0` | `git verify-pack` rejects a checksum-valid `.idx` version `3` with stock unsupported-version diagnostics |
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
 | `rev-parse` nested symbolic HEAD resolution | `1` | `0` | `HEAD -> refs/heads/alias -> refs/heads/main` resolves to the final commit id like stock Git |
@@ -488,7 +489,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `610` verified variants.
+Tracked closed blocks in this table: `611` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

@@ -169,17 +169,17 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `27/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
+| Commands with any matrix rows | `28/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag`, `verify-pack` and `version` have started behavior matrices |
 | Documented option spellings represented by rows | `237/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `961` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `760/961` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/961` | written rows that still do not match stock Git |
-| Invalid input rows | `201/961` | rows where stock Git rejects the input |
+| Written behavior rows | `962` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `760/962` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/962` | written rows that still do not match stock Git |
+| Invalid input rows | `202/962` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `760/961` as Git compatibility. It only means `760` of the `961`
+Do not read `760/962` as Git compatibility. It only means `760` of the `962`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `201/961` additional rows are
+unexpanded surface is not counted yet, and `202/962` additional rows are
 stock-compatible invalid inputs. Do not read `237/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -216,9 +216,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `14` | `7` | `0` | `7` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `191` | `149` | `0` | `42` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `192` | `149` | `0` | `43` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`961`** | **`760`** | **`0`** | **`201`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`962`** | **`760`** | **`0`** | **`202`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -257,6 +257,7 @@ Current command-level matrices:
 | `submodule` | `35` | `0` | `0` | `6` | `0` | `0` | `0` | `6` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
+| `verify-pack` | `4` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `version` | `2` | `0` | `2` | `4` | `2` | `0` | `0` | `2` | no |
 
 Rows with `0` open items are still not complete command compatibility. They

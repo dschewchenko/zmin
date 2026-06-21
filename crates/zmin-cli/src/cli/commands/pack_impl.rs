@@ -5207,6 +5207,16 @@ fn verify_pack_integrity_error(error: io::Error) -> CliError {
 
 fn verify_pack_index_error(idx_path: &std::path::Path, error: io::Error) -> CliError {
     if error.kind() == io::ErrorKind::InvalidData {
+        if let Some(version) = unsupported_pack_index_version(&error) {
+            return CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "error: index file {} is version {version} and is not supported by this binary (try upgrading GIT to a newer version)\nfatal: Cannot open existing pack idx file for '{}'\n",
+                    idx_path.display(),
+                    idx_path.display()
+                ),
+            };
+        }
         CliError::Fatal {
             code: 1,
             message: format!("sha1 file '{}' validation error", idx_path.display()),
@@ -5214,6 +5224,13 @@ fn verify_pack_index_error(idx_path: &std::path::Path, error: io::Error) -> CliE
     } else {
         CliError::Io(error)
     }
+}
+
+fn unsupported_pack_index_version(error: &io::Error) -> Option<String> {
+    error
+        .to_string()
+        .strip_prefix("unsupported pack index version ")
+        .map(str::to_owned)
 }
 
 #[derive(Debug, Clone)]
