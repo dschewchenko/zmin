@@ -223,6 +223,12 @@ stdout/stderr/exit/side-effect oracle for GUI behavior. Keep those guards out
 of closed Git compatibility counts until a real `git-gui` oracle environment
 or an explicit product decision brings the GUI surface into scope.
 
+The latest platform-oracle deferral is `crates/zmin-git-core/src/checkout.rs`
+non-UTF8 index path handling. The guard is compiled only on non-Unix targets.
+The current macOS oracle host rejects a `bad-\xff.txt` filesystem path with
+`Illegal byte sequence` before stock Git checkout behavior can be observed, so
+this cannot be closed without a Windows/non-Unix oracle run.
+
 ### Current Slice Card
 
 This card is the exact handoff target after the current `961` written-row
@@ -232,7 +238,7 @@ state. Finish it before choosing another guard or command.
 | --- | --- |
 | Slice | classify the next remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | probe stock Git behavior for the selected guard before changing implementation |
-| Implementation area | start at `crates/zmin-git-core/src/checkout.rs:1642` (`non-utf8 index paths are not supported on this platform`) unless a new WebStorm replacement trace appears first |
+| Implementation area | start at `crates/zmin-git-core/src/pack.rs:393` (`unsupported pack index version`) unless a new WebStorm replacement trace appears first |
 | Evidence test | add or extend the smallest compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add a row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on whether the selected guard becomes supported behavior, invalid input or an intentional deferral; complete command and doc-option matrices stay `0/151` and `0/4632` |
@@ -501,6 +507,7 @@ keeps the behavior explicitly out of scope.
 | Guard | Classification | Evidence | Next action |
 | --- | --- | --- | --- |
 | `commit_impl.rs` `git gui` / `git citool` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` and `citool` in `git help -a`, but `git gui --help` and `git citool --help` fail because the `git-gui` executable is not installed in this oracle environment | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the GUI surface into current CLI scope |
+| `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |
 
 ## Code Guard Classification
 
