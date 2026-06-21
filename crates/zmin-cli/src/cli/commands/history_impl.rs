@@ -2411,6 +2411,9 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
     if pattern.is_empty() {
         return Err(blame_line_range_regex_empty(pattern, from_line));
     }
+    if let Some(error) = blame_basic_regex_interval_error(pattern, from_line) {
+        return Err(error);
+    }
     let translated_pattern = translate_blame_basic_regex(pattern);
     let regex = regex::bytes::Regex::new(&translated_pattern).map_err(|_| {
         if blame_regex_has_unbalanced_bracket(pattern) {
@@ -2485,6 +2488,68 @@ fn parse_blame_basic_regex_interval(chars: &[char]) -> Option<(String, usize)> {
         return None;
     }
     Some((chars[..index].iter().collect(), index + 2))
+}
+
+fn blame_basic_regex_interval_error(pattern: &str, start_line: usize) -> Option<CliError> {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut index = 0;
+    while let Some(ch) = chars.get(index).copied() {
+        if ch != '\\' {
+            index += 1;
+            continue;
+        }
+        let Some(next) = chars.get(index + 1).copied() else {
+            return None;
+        };
+        if next != '{' {
+            index += 2;
+            continue;
+        }
+        let interval_start = index + 2;
+        let Some(interval_end) = closing_blame_basic_regex_interval(&chars[interval_start..])
+        else {
+            return Some(blame_line_range_regex_braces_not_balanced(
+                pattern, start_line,
+            ));
+        };
+        let interval: String = chars[interval_start..interval_start + interval_end]
+            .iter()
+            .collect();
+        if !blame_basic_regex_interval_counts_valid(&interval) {
+            return Some(blame_line_range_regex_invalid_repetition_count(
+                pattern, start_line,
+            ));
+        }
+        index = interval_start + interval_end + 2;
+    }
+    None
+}
+
+fn closing_blame_basic_regex_interval(chars: &[char]) -> Option<usize> {
+    chars.windows(2).position(|window| window == ['\\', '}'])
+}
+
+fn blame_basic_regex_interval_counts_valid(interval: &str) -> bool {
+    let mut parts = interval.splitn(2, ',');
+    let Some(min) = parts.next() else {
+        return false;
+    };
+    if min.is_empty() || !min.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    let Some(max) = parts.next() else {
+        return true;
+    };
+    if max.is_empty() {
+        return true;
+    }
+    if !max.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    match (min.parse::<usize>(), max.parse::<usize>()) {
+        (Ok(min), Ok(max)) => min <= max,
+        _ => false,
+    }
 }
 
 fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
@@ -2574,6 +2639,24 @@ fn blame_line_range_regex_unbalanced_brackets(pattern: &str, start_line: usize) 
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: brackets ([ ]) not balanced"
+        ),
+    }
+}
+
+fn blame_line_range_regex_braces_not_balanced(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: braces not balanced"
+        ),
+    }
+}
+
+fn blame_line_range_regex_invalid_repetition_count(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: invalid repetition count(s)"
         ),
     }
 }
