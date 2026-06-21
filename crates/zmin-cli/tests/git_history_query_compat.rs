@@ -581,6 +581,23 @@ fn blame_empty_start_regex_line_ranges_match_stock_git_failure() {
 }
 
 #[test]
+fn blame_regex_line_ranges_require_comma_before_suffix_like_stock_git() {
+    let repo = blame_line_range_fixture_repo();
+
+    for args in [
+        ["blame", "-L", "/one/+1", "a.txt"].as_slice(),
+        ["blame", "-L", "/one/2", "a.txt"].as_slice(),
+        ["blame", "-L", "/one//two/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_progress_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
