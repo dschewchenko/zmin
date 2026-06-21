@@ -2428,19 +2428,32 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
 }
 
 fn translate_blame_basic_regex(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
     let mut translated = String::with_capacity(pattern.len());
-    let mut escaped = false;
-    for ch in pattern.chars() {
-        if escaped {
-            if !matches!(ch, '+' | '?' | '|' | '(' | ')') {
+    let mut index = 0;
+    while let Some(ch) = chars.get(index).copied() {
+        if ch == '\\' {
+            let Some(next) = chars.get(index + 1).copied() else {
+                translated.push('\\');
+                index += 1;
+                continue;
+            };
+            if next == '{' {
+                if let Some((interval, consumed)) =
+                    parse_blame_basic_regex_interval(&chars[index + 2..])
+                {
+                    translated.push('{');
+                    translated.push_str(&interval);
+                    translated.push('}');
+                    index += 2 + consumed;
+                    continue;
+                }
+            }
+            if !matches!(next, '+' | '?' | '|' | '(' | ')') {
                 translated.push('\\');
             }
-            translated.push(ch);
-            escaped = false;
-            continue;
-        }
-        if ch == '\\' {
-            escaped = true;
+            translated.push(next);
+            index += 2;
             continue;
         }
         if matches!(ch, '(' | ')' | '{' | '}' | '+' | '?' | '|')
@@ -2449,11 +2462,29 @@ fn translate_blame_basic_regex(pattern: &str) -> String {
             translated.push('\\');
         }
         translated.push(ch);
-    }
-    if escaped {
-        translated.push('\\');
+        index += 1;
     }
     translated
+}
+
+fn parse_blame_basic_regex_interval(chars: &[char]) -> Option<(String, usize)> {
+    let mut index = 0;
+    while chars.get(index).is_some_and(|ch| ch.is_ascii_digit()) {
+        index += 1;
+    }
+    if index == 0 {
+        return None;
+    }
+    if chars.get(index) == Some(&',') {
+        index += 1;
+        while chars.get(index).is_some_and(|ch| ch.is_ascii_digit()) {
+            index += 1;
+        }
+    }
+    if chars.get(index) != Some(&'\\') || chars.get(index + 1) != Some(&'}') {
+        return None;
+    }
+    Some((chars[..index].iter().collect(), index + 2))
 }
 
 fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {

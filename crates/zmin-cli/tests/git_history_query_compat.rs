@@ -653,6 +653,8 @@ fn blame_basic_regex_literal_metacharacters_match_stock_git() {
         ["blame", "-L", "/*/", "a.txt"].as_slice(),
         ["blame", "-L", "/x\\(y\\)/", "a.txt"].as_slice(),
         ["blame", "-L", "/x\\(y\\)*/", "a.txt"].as_slice(),
+        ["blame", "-L", "/x\\{2\\}/", "a.txt"].as_slice(),
+        ["blame", "-L", "/x\\{2,3\\}/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
@@ -674,6 +676,7 @@ fn blame_basic_regex_literal_metacharacters_no_match_like_stock_git() {
         ["blame", "-L", "/z|/", "a.txt"].as_slice(),
         ["blame", "-L", "/*/", "a.txt"].as_slice(),
         ["blame", "-L", "/q\\(r\\)/", "a.txt"].as_slice(),
+        ["blame", "-L", "/q\\{2\\}/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),
