@@ -2419,6 +2419,11 @@ fn find_blame_regex_line(lines: &[BlameLine], from_line: usize, pattern: &str) -
             pattern, from_line,
         ));
     }
+    if blame_basic_regex_has_invalid_backreference(pattern) {
+        return Err(blame_line_range_regex_invalid_backreference(
+            pattern, from_line,
+        ));
+    }
     if blame_regex_has_invalid_character_range(pattern) {
         return Err(blame_line_range_regex_invalid_character_range(
             pattern, from_line,
@@ -2583,6 +2588,36 @@ fn blame_basic_regex_grouping_unbalanced(pattern: &str) -> bool {
         }
     }
     depth != 0
+}
+
+fn blame_basic_regex_has_invalid_backreference(pattern: &str) -> bool {
+    let mut open_groups = Vec::new();
+    let mut closed_groups = Vec::new();
+    let mut next_group = 1usize;
+    let mut escaped = false;
+    for ch in pattern.chars() {
+        if escaped {
+            if ch == '(' {
+                open_groups.push(next_group);
+                next_group += 1;
+            } else if ch == ')' {
+                if let Some(group) = open_groups.pop() {
+                    closed_groups.push(group);
+                }
+            } else if let Some(reference) = ch.to_digit(10) {
+                let reference = reference as usize;
+                if reference != 0 && !closed_groups.contains(&reference) {
+                    return true;
+                }
+            }
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+        }
+    }
+    false
 }
 
 fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
@@ -2768,6 +2803,15 @@ fn blame_line_range_regex_parentheses_not_balanced(pattern: &str, start_line: us
         code: 128,
         message: format!(
             "-L parameter '{pattern}' starting at line {start_line}: parentheses not balanced"
+        ),
+    }
+}
+
+fn blame_line_range_regex_invalid_backreference(pattern: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!(
+            "-L parameter '{pattern}' starting at line {start_line}: invalid backreference number"
         ),
     }
 }

@@ -737,6 +737,23 @@ fn blame_basic_regex_unbalanced_grouping_matches_stock_git_failure() {
 }
 
 #[test]
+fn blame_basic_regex_invalid_backreferences_match_stock_git_failure() {
+    let repo = blame_line_range_fixture_repo();
+
+    for args in [
+        ["blame", "-L", "/\\1/", "a.txt"].as_slice(),
+        ["blame", "-L", "/x\\1/", "a.txt"].as_slice(),
+        ["blame", "-L", "/\\(x\\)\\2/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_basic_regex_invalid_intervals_match_stock_git_failure() {
     let repo = blame_line_range_fixture_repo();
 
