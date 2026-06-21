@@ -482,6 +482,22 @@ fn blame_empty_function_and_regex_ranges_match_stock_git_usage() {
 }
 
 #[test]
+fn blame_malformed_numeric_line_ranges_match_stock_git_usage() {
+    let repo = blame_line_range_fixture_repo();
+
+    for args in [
+        ["blame", "-L", "abc", "a.txt"].as_slice(),
+        ["blame", "-L", "1,abc", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_progress_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 876 written rows / 742 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 878 written rows / 742 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,8 +195,8 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git blame -L : a.txt` and
-`git blame -L / a.txt` compact usage range errors.
+The latest closed guard classification is `git blame -L abc a.txt` and
+`git blame -L 1,abc a.txt` malformed numeric range usage errors.
 The next default slice remains the second active lane: run a fresh
 `unsupported` / `not supported` code scan, choose one small remaining guard
 that is not entangled with unrelated staged changes, then classify it as
@@ -204,7 +204,7 @@ Git-supported behavior, stock-compatible invalid input, intentional deferral or
 Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/876`; the complete command matrices and complete doc-option matrices remain
+`0/878`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -246,6 +246,7 @@ until a full matrix is expanded and verified.
 | `blame -L` missing end-regex usage | `2` | `0` | `git blame -L 2,/missing/ a.txt` and `git blame -L /two/,/missing/ a.txt` exit `128` with stock fatal regexec no-match diagnostics from the next search line instead of the start line |
 | `blame -L` invalid regex usage | `2` | `0` | `git blame -L /[/ a.txt` and `git blame -L 1,/[/ a.txt` exit `128` with stock fatal unbalanced-brackets diagnostics instead of custom unsupported-line-range fatal diagnostics |
 | `blame -L` compact usage errors | `2` | `0` | `git blame -L : a.txt` and `git blame -L / a.txt` exit `129` with the stock compact usage line instead of custom unsupported-line-range fatal diagnostics |
+| `blame -L` malformed numeric usage errors | `2` | `0` | `git blame -L abc a.txt` and `git blame -L 1,abc a.txt` exit `129` with the stock compact usage line instead of custom unsupported-line-range fatal diagnostics |
 | `blame --progress` non-tty form | `1` | `0` | `git blame --progress a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --minimal` small tracked-file form | `1` | `0` | `git blame --minimal a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --color-lines` non-tty form | `1` | `0` | `git blame --color-lines a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |

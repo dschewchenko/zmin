@@ -2244,10 +2244,7 @@ fn parse_blame_line_range(value: &str) -> Result<BlameLineRange> {
     let start = if start.is_empty() {
         1
     } else {
-        start.parse::<usize>().map_err(|_| CliError::Fatal {
-            code: 129,
-            message: format!("unsupported blame line range '{value}'"),
-        })?
+        start.parse::<usize>().map_err(|_| blame_usage_error())?
     };
     if start == 0 {
         return Err(invalid_blame_line_number(start));
@@ -2327,9 +2324,7 @@ fn parse_blame_range_end_spec(value: &str, full_range: &str) -> Result<BlameRang
             value, full_range,
         )?))
     } else {
-        let line = value
-            .parse::<usize>()
-            .map_err(|_| unsupported_blame_line_range(full_range))?;
+        let line = value.parse::<usize>().map_err(|_| blame_usage_error())?;
         if line == 0 {
             return Err(invalid_blame_line_number(line));
         }
