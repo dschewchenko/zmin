@@ -4235,10 +4235,7 @@ pub(crate) fn submodule(args: Vec<String>) -> Result<()> {
         "summary" => summary_submodules(&prefixed_args(&args[1..])),
         "absorbgitdirs" => absorb_submodule_gitdirs(&prefixed_args(&args[1..])),
         "--cached" | "--quiet" => submodule_status(&args),
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: format!("unsupported submodule subcommand '{subcommand}'"),
-        }),
+        _ => Err(submodule_usage_error()),
     }
 }
 
