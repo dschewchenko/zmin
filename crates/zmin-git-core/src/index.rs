@@ -802,9 +802,10 @@ fn decode_index_extensions(
         }
         let signature = &bytes[cursor..cursor + 4];
         if signature.iter().any(u8::is_ascii_lowercase) && signature != SPARSE_DIRECTORY_EXTENSION {
+            let extension = index_extension_name(signature);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "git index has an unsupported required extension",
+                format!("index uses {extension} extension, which we do not understand"),
             ));
         }
         let len = read_u32(bytes, cursor + 4)? as usize;
@@ -825,6 +826,10 @@ fn decode_index_extensions(
         }
     }
     Ok(resolve_undo)
+}
+
+fn index_extension_name(signature: &[u8]) -> String {
+    String::from_utf8_lossy(signature).into_owned()
 }
 
 fn decode_resolve_undo_extension(body: &[u8]) -> io::Result<Vec<ResolveUndoEntry>> {

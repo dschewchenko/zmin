@@ -24,6 +24,12 @@ fn map_read_index_error(error: std::io::Error) -> CliError {
             text: format!("error: bad index version {version}\nfatal: index file corrupt\n"),
         };
     }
+    if let Some(extension_error) = unknown_required_index_extension(&error) {
+        return CliError::Stderr {
+            code: 128,
+            text: format!("error: {extension_error}\nfatal: index file corrupt\n"),
+        };
+    }
     CliError::Io(error)
 }
 
@@ -32,6 +38,17 @@ fn bad_index_version(error: &std::io::Error) -> Option<String> {
         .to_string()
         .strip_prefix("bad index version ")
         .map(str::to_owned)
+}
+
+fn unknown_required_index_extension(error: &std::io::Error) -> Option<String> {
+    let message = error.to_string();
+    if message.starts_with("index uses ")
+        && message.ends_with(" extension, which we do not understand")
+    {
+        Some(message)
+    } else {
+        None
+    }
 }
 
 pub(crate) fn stage_tracked_worktree_changes(

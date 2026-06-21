@@ -68,6 +68,22 @@ fn set_index_version(repo: &std::path::Path, version: u32) {
     fs::write(index_path, index).expect("write index");
 }
 
+fn append_required_index_extension(repo: &std::path::Path, signature: &[u8; 4], body: &[u8]) {
+    let index_path = repo.join(".git/index");
+    let mut index = fs::read(&index_path).expect("read index");
+    let checksum_len = GitHashAlgorithm::Sha1.digest_len();
+    let checksum_offset = index.len() - checksum_len;
+    index.truncate(checksum_offset);
+    index.extend_from_slice(signature);
+    index.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    index.extend_from_slice(body);
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&index);
+    let checksum = hasher.finalize();
+    index.extend_from_slice(checksum.as_bytes());
+    fs::write(index_path, index).expect("write index");
+}
+
 fn stock_git_output_any(cwd: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     command_output_any(stock_git_bin().to_str().expect("stock git path"), cwd, args)
 }
@@ -433,6 +449,22 @@ fn ls_files_rejects_bad_index_versions_like_stock_git() {
             "index version {version}"
         );
     }
+}
+
+#[test]
+fn ls_files_rejects_unknown_required_index_extensions_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+        git(repo, ["add", "a.txt"]);
+        append_required_index_extension(repo, b"abcd", b"");
+    }
+
+    assert_eq!(
+        command_output_any(zmin_bin(), zmin_repo.path(), &["ls-files", "--stage"]),
+        command_output_any("git", git_repo.path(), &["ls-files", "--stage"])
+    );
 }
 
 #[test]
