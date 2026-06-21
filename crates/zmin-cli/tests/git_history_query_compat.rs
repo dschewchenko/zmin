@@ -131,7 +131,7 @@ fn blame_basic_regex_literal_fixture_repo() -> TempDir {
     write_file(
         repo.path(),
         "a.txt",
-        "one\nparen (\nbrace {\nplus a+\nquestion a?\npipe a|\n",
+        "one\nparen (\nbrace {\nplus a+\nquestion a?\npipe a|\nstar *\n",
     );
     git(repo.path(), ["add", "-A"]);
     git_commit_with_author(
@@ -650,6 +650,7 @@ fn blame_basic_regex_literal_metacharacters_match_stock_git() {
         ["blame", "-L", "/a\\+/", "a.txt"].as_slice(),
         ["blame", "-L", "/a\\?/", "a.txt"].as_slice(),
         ["blame", "-L", "/z\\|a/", "a.txt"].as_slice(),
+        ["blame", "-L", "/*/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(zmin_repo.path(), args),
@@ -669,6 +670,7 @@ fn blame_basic_regex_literal_metacharacters_no_match_like_stock_git() {
         ["blame", "-L", "/z+/", "a.txt"].as_slice(),
         ["blame", "-L", "/z?/", "a.txt"].as_slice(),
         ["blame", "-L", "/z|/", "a.txt"].as_slice(),
+        ["blame", "-L", "/*/", "a.txt"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),

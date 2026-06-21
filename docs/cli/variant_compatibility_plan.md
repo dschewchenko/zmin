@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 913 written rows / 750 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 915 written rows / 751 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -195,9 +195,8 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is `git blame -L /a\+/ a.txt`,
-`git blame -L /a\?/ a.txt`, and `git blame -L /z\|a/ a.txt` for Git
-basic-regex escaped operator behavior.
+The latest closed guard classification is `git blame -L /*/ a.txt` for Git
+basic-regex leading-star literal matching and no-match behavior.
 The next default slice remains the second active lane: run a fresh
 `unsupported` / `not supported` code scan, choose one small remaining guard
 that is not entangled with unrelated staged changes, then classify it as
@@ -205,7 +204,7 @@ Git-supported behavior, stock-compatible invalid input, intentional deferral or
 Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/913`; the complete command matrices and complete doc-option matrices remain
+`0/915`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -258,6 +257,7 @@ until a full matrix is expanded and verified.
 | `blame -L` basic-regex literal metacharacters | `4` | `0` | `git blame -L /(/ a.txt` and `git blame -L /{/ a.txt` match literal lines when present and exit `128` with stock no-match diagnostics when absent |
 | `blame -L` basic-regex operator literals | `6` | `0` | `git blame -L /a+/ a.txt`, `git blame -L /a?/ a.txt`, and `git blame -L /a|/ a.txt` match literal lines, while `git blame -L /z+/ a.txt`, `git blame -L /z?/ a.txt`, and `git blame -L /z|/ a.txt` exit `128` with stock no-match diagnostics |
 | `blame -L` basic-regex escaped operators | `3` | `0` | `git blame -L /a\+/ a.txt`, `git blame -L /a\?/ a.txt`, and `git blame -L /z\|a/ a.txt` use stock Git basic-regex operator semantics instead of treating the escaped operator as a literal |
+| `blame -L` basic-regex leading-star literal | `2` | `0` | `git blame -L /*/ a.txt` matches a literal star line when present and exits `128` with stock no-match diagnostics when absent |
 | `blame --progress` non-tty form | `1` | `0` | `git blame --progress a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --minimal` small tracked-file form | `1` | `0` | `git blame --minimal a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |
 | `blame --color-lines` non-tty form | `1` | `0` | `git blame --color-lines a.txt` exits `0` with stock stdout and empty stderr for a small tracked-file blame |

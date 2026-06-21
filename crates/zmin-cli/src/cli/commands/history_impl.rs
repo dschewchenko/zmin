@@ -2443,7 +2443,9 @@ fn translate_blame_basic_regex(pattern: &str) -> String {
             escaped = true;
             continue;
         }
-        if matches!(ch, '(' | ')' | '{' | '}' | '+' | '?' | '|') {
+        if matches!(ch, '(' | ')' | '{' | '}' | '+' | '?' | '|')
+            || (ch == '*' && translated.is_empty())
+        {
             translated.push('\\');
         }
         translated.push(ch);
