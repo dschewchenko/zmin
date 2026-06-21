@@ -414,6 +414,7 @@ pub(crate) fn fast_import(date_format: Option<&str>) -> Result<()> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FastImportDateFormat {
     Raw,
+    Rfc2822,
     Now,
 }
 
@@ -421,6 +422,7 @@ impl FastImportDateFormat {
     fn from_cli(value: Option<&str>) -> Result<Self> {
         match value {
             None | Some("raw") => Ok(Self::Raw),
+            Some("rfc2822") => Ok(Self::Rfc2822),
             Some("now") => Ok(Self::Now),
             Some(value) => Err(CliError::Fatal {
                 code: 128,
@@ -645,8 +647,10 @@ impl<'a> FastImportParser<'a> {
     }
 
     fn parse_signature(&self, raw: &str) -> Result<Signature> {
-        if self.date_format != FastImportDateFormat::Now {
-            return signature_from_commit_bytes(raw.as_bytes());
+        match self.date_format {
+            FastImportDateFormat::Raw => return signature_from_commit_bytes(raw.as_bytes()),
+            FastImportDateFormat::Rfc2822 => return parse_fast_import_rfc2822_signature(raw),
+            FastImportDateFormat::Now => {}
         }
         let Some(name_email) = raw.strip_suffix(" now") else {
             return signature_from_commit_bytes(raw.as_bytes());
@@ -776,6 +780,22 @@ impl<'a> FastImportParser<'a> {
             self.cursor += 1;
         }
     }
+}
+
+fn parse_fast_import_rfc2822_signature(raw: &str) -> Result<Signature> {
+    let (name_email, date) = raw.rsplit_once("> ").ok_or_else(fast_import_parse_error)?;
+    let name_email = format!("{name_email}>");
+    let (name, email) = name_email
+        .rsplit_once(" <")
+        .and_then(|(name, email)| email.strip_suffix('>').map(|email| (name, email)))
+        .ok_or_else(fast_import_parse_error)?;
+    let date = chrono::DateTime::parse_from_rfc2822(date).map_err(|_| fast_import_parse_error())?;
+    Ok(Signature::new(
+        name,
+        email,
+        date.timestamp(),
+        date.format("%z").to_string(),
+    )?)
 }
 
 fn fast_import_parse_error() -> CliError {

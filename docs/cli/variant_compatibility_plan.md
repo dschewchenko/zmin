@@ -109,11 +109,11 @@ compatibility.
 
 Progress reports use these numbers:
 
-`complete command matrices / complete doc-option matrices / commands with matrix rows / represented doc-option pairs / written behavior rows / written rows matching stock Git / open written rows`
+`complete command matrices / complete doc-option matrices / commands with matrix rows / represented doc-option pairs / written behavior rows / written rows matching stock Git / partial written rows / open written rows`
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 34/151 commands with matrix rows / 240/4632 represented doc-option pairs / 998 written rows / 770 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 35/151 commands with matrix rows / 241/4632 represented doc-option pairs / 999 written rows / 770 written rows matching stock Git / 1 partial written row / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -246,9 +246,15 @@ The current macOS oracle host rejects a `bad-\xff.txt` filesystem path with
 `Illegal byte sequence` before stock Git checkout behavior can be observed, so
 this cannot be closed without a Windows/non-Unix oracle run.
 
+The latest partial behavior row is `fast-import --date-format=rfc2822`.
+Zmin now parses RFC2822 author and committer dates and imports matching commit
+metadata and tree content, but the row stays `partial` because stock Git also
+prints `fast-import statistics:` to stderr and Zmin does not yet match that
+output.
+
 ### Current Slice Card
 
-This card is the exact handoff target after the current `998` written-row
+This card is the exact handoff target after the current `999` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -267,7 +273,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/998`; the complete command matrices and complete doc-option matrices remain
+`0/999`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
