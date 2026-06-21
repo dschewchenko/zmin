@@ -1839,6 +1839,28 @@ fn verify_pack_rejects_unsupported_pack_index_version_like_stock_git() {
 }
 
 #[test]
+fn index_pack_verify_rejects_bad_reverse_index_signature_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "file.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "file.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    git(repo.path(), ["repack", "-adq"]);
+    let pack = first_pack_index(repo.path()).with_extension("pack");
+    let rev = pack.with_extension("rev");
+    set_pack_reverse_index_signature(&rev, *b"BAD!");
+
+    let args = ["index-pack", "--verify", pack.to_str().expect("pack path")];
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &args, "zmin"),
+        command_any_output("git", repo.path(), &args, "git")
+    );
+}
+
+#[test]
 fn pack_redundant_matches_stock_git_for_redundant_pack_set() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -3400,6 +3422,31 @@ fn set_pack_index_version(path: &std::path::Path, version: u32) {
         fs::set_permissions(path, permissions).expect("make pack index writable");
     }
     fs::write(path, bytes).expect("write pack index version");
+}
+
+fn set_pack_reverse_index_signature(path: &std::path::Path, signature: [u8; 4]) {
+    let mut bytes = fs::read(path).expect("read pack reverse index");
+    bytes[..4].copy_from_slice(&signature);
+    let checksum_offset = bytes.len() - GitHashAlgorithm::Sha1.digest_len();
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&bytes[..checksum_offset]);
+    let checksum = hasher.finalize();
+    bytes[checksum_offset..].copy_from_slice(checksum.as_bytes());
+    let mut permissions = fs::metadata(path)
+        .expect("pack reverse index metadata before signature mutation")
+        .permissions();
+    if permissions.readonly() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        #[cfg(windows)]
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions).expect("make pack reverse index writable");
+    }
+    fs::write(path, bytes).expect("write pack reverse index signature");
 }
 
 #[derive(Clone, Copy)]
