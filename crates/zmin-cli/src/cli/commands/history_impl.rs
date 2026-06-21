@@ -2558,24 +2558,46 @@ fn blame_basic_regex_interval_counts_valid(interval: &str) -> bool {
 }
 
 fn blame_regex_has_unbalanced_bracket(pattern: &str) -> bool {
-    let mut escaped = false;
-    let mut open = false;
-    for byte in pattern.bytes() {
-        if escaped {
-            escaped = false;
+    let bytes = pattern.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'[' {
+            index += 1;
             continue;
         }
-        if byte == b'\\' {
-            escaped = true;
-            continue;
+        index += 1;
+        let mut class_len = 0;
+        if bytes.get(index) == Some(&b'^') {
+            index += 1;
         }
-        if byte == b'[' {
-            open = true;
-        } else if byte == b']' && open {
-            open = false;
+        let mut escaped = false;
+        let mut closed = false;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if escaped {
+                class_len += 1;
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            if byte == b']' {
+                closed = true;
+                break;
+            }
+            class_len += 1;
+            index += 1;
         }
+        if !closed || class_len == 0 {
+            return true;
+        }
+        index += 1;
     }
-    open
+    false
 }
 
 fn blame_regex_has_invalid_character_range(pattern: &str) -> bool {

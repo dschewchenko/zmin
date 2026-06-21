@@ -518,6 +518,22 @@ fn blame_invalid_character_range_regexes_match_stock_git_failure() {
 }
 
 #[test]
+fn blame_empty_character_class_regexes_match_stock_git_failure() {
+    let repo = blame_line_range_fixture_repo();
+
+    for args in [
+        ["blame", "-L", "/[]/", "a.txt"].as_slice(),
+        ["blame", "-L", "/[^]/", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_empty_function_and_regex_ranges_match_stock_git_usage() {
     let repo = blame_line_range_fixture_repo();
 
