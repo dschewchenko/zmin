@@ -146,7 +146,7 @@ focused parity evidence checks the same surface.
 - `docs/cli/matrices/merge_base_v2_47.tsv` tracks the first `merge-base`
   plain, is-ancestor, commit-graph, octopus and invalid-input variants.
 - `docs/cli/matrices/reflog_v2_47.tsv` tracks the first `reflog`
-  invalid-input variant.
+  invalid-input and shorthand-ref variants.
 - `docs/cli/matrices/rerere_v2_47.tsv` tracks the first `rerere`
   invalid-operation variant.
 - `docs/cli/matrices/rev_parse_v2_47.tsv` tracks the first `rev-parse`
@@ -189,8 +189,8 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `27/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` |
 | Git doc option pairs represented by rows | `237/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `953` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `755/953` | yes, row by row | supported-behavior rows with parity evidence |
+| Written behavior rows | `954` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `755/954` | yes, row by row | supported-behavior rows with parity evidence |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -229,11 +229,11 @@ Current generated summary:
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` | `154` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `13` | `7` | `0` | `0` | `6` | `22` |
+| Administration | `8` | `0` | `147` | `0` | `14` | `7` | `0` | `0` | `7` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `184` | `144` | `0` | `0` | `40` | `101` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `0` | `4` | `5` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`953`** | **`755`** | **`0`** | **`0`** | **`198`** | **`603`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`954`** | **`755`** | **`0`** | **`0`** | **`199`** | **`604`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -244,9 +244,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `237/4632`
-represented option pairs or `755/953` passing written rows as a Git support
-percentage. The `755/953` number is audit progress for supported rows already
-written down; `198/953` additional rows are stock-compatible invalid inputs. It
+represented option pairs or `755/954` passing written rows as a Git support
+percentage. The `755/954` number is audit progress for supported rows already
+written down; `199/954` additional rows are stock-compatible invalid inputs. It
 says nothing about the still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
 order-sensitive combinations, repository states, transports and platforms have
@@ -279,7 +279,7 @@ variants.
 | `merge-base` | `27` | `0` | `2` | `docs/cli/matrices/merge_base_v2_47.tsv` | `12` | `10` | `0` | `0` | `2` | no |
 | `notes` | `33` | `0` | `0` | `docs/cli/matrices/notes_v2_47.tsv` | `6` | `0` | `0` | `0` | `6` | no |
 | `rebase` | `103` | `0` | `1` | `docs/cli/matrices/rebase_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
-| `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
+| `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
 | `rerere` | `7` | `0` | `0` | `docs/cli/matrices/rerere_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-parse` | `72` | `0` | `24` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `49` | `43` | `0` | `0` | `6` | no |
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |

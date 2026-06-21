@@ -41,6 +41,32 @@ fn reflog_show_list_and_exists_match_stock_git() {
 }
 
 #[test]
+fn reflog_shorthand_ref_and_invalid_ref_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
+
+    for args in [
+        ["reflog", "main"].as_slice(),
+        ["reflog", "refs/heads/main"].as_slice(),
+        ["reflog", "HEAD"].as_slice(),
+        ["reflog", "main", "--format=%H"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["reflog", "bogus"]),
+        git_failure_output(repo.path(), &["reflog", "bogus"])
+    );
+}
+
+#[test]
 fn reflog_show_date_modes_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

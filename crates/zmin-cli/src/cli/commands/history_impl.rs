@@ -522,11 +522,20 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                 "show" | "list" | "exists" | "expire" | "delete" | "drop"
             )
         })
-        .unwrap_or_else(|| "show".to_owned());
-    match command.as_str() {
-        "drop" => reflog_drop(&repo, args.collect()),
-        "delete" => reflog_delete(&repo, args.collect()),
-        "expire" => {
+        .map(|arg| match arg.as_str() {
+            "show" => ReflogCommand::Show,
+            "list" => ReflogCommand::List,
+            "exists" => ReflogCommand::Exists,
+            "expire" => ReflogCommand::Expire,
+            "delete" => ReflogCommand::Delete,
+            "drop" => ReflogCommand::Drop,
+            _ => unreachable!("reflog command parser only selects known subcommands"),
+        })
+        .unwrap_or(ReflogCommand::Show);
+    match command {
+        ReflogCommand::Drop => reflog_drop(&repo, args.collect()),
+        ReflogCommand::Delete => reflog_delete(&repo, args.collect()),
+        ReflogCommand::Expire => {
             let args = args.collect::<Vec<_>>();
             if args.iter().any(|arg| arg == "-h" || arg == "--help") {
                 print!("{}", reflog_expire_usage());
@@ -534,7 +543,7 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
             }
             reflog_expire(args)
         }
-        "show" => {
+        ReflogCommand::Show => {
             let mut date_mode = ReflogDateMode::Index;
             let mut no_abbrev_commit = false;
             let mut format = None;
@@ -575,7 +584,7 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                 },
             )
         }
-        "list" => {
+        ReflogCommand::List => {
             if let Some(arg) = args.next() {
                 return Err(CliError::Stderr {
                     code: 1,
@@ -584,7 +593,7 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
             }
             reflog_list(&repo)
         }
-        "exists" => {
+        ReflogCommand::Exists => {
             let Some(ref_name) = args.next() else {
                 return Err(CliError::Fatal {
                     code: 129,
@@ -597,11 +606,17 @@ pub(crate) fn reflog(args: Vec<String>) -> Result<()> {
                 Err(CliError::Exit(1))
             }
         }
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: "reflog command was not supported".into(),
-        }),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReflogCommand {
+    Show,
+    List,
+    Exists,
+    Expire,
+    Delete,
+    Drop,
 }
 
 fn reflog_expire_usage() -> &'static str {
@@ -1254,7 +1269,7 @@ fn reflog_show(repo: &GitRepo, options: ReflogShowOptions<'_>) -> Result<()> {
         }
         Err(error) => return Err(CliError::Io(error)),
     };
-    let display = reflog_display_name(ref_name, options.no_abbrev_commit);
+    let display = reflog_display_name(ref_name);
     let object_len = if options.no_abbrev_commit {
         GitHashAlgorithm::Sha1.digest_len() * 2
     } else {
@@ -1638,15 +1653,8 @@ fn reflog_path(repo: &GitRepo, ref_name: &str) -> Result<PathBuf> {
     Ok(repo.git_dir.join("logs").join(normalized))
 }
 
-fn reflog_display_name(ref_name: &str, full_ref_name: bool) -> String {
-    if full_ref_name {
-        ref_name.to_owned()
-    } else {
-        ref_name
-            .strip_prefix("refs/heads/")
-            .unwrap_or(ref_name)
-            .to_owned()
-    }
+fn reflog_display_name(ref_name: &str) -> String {
+    ref_name.to_owned()
 }
 
 pub(crate) fn shortlog(

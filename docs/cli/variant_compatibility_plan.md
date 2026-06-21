@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 953 written rows / 755 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 954 written rows / 755 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -209,12 +209,11 @@ Rust guard as a Git-supported gap, stock-compatible invalid input, intentional
 deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
-The latest closed guard classification is
-`GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` when the editor writes an
-unknown todo command. Zmin now reports stock invalid-command diagnostics,
-leaves `.git/rebase-merge` state for edit/continue or abort, moves HEAD to the
-same in-progress rebase point as stock Git, and supports `git rebase --abort`
-cleanup from that state.
+The latest closed guard classification is `git reflog bogus`. Stock Git treats
+an unknown-looking reflog token as the shorthand `show` ref argument, not as an
+unsupported subcommand. Zmin now keeps that parser shape explicit, matches the
+stock ambiguous-revision failure for invalid refs, and preserves the full
+`refs/heads/<name>` display when the user spells the ref that way.
 
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
@@ -226,15 +225,15 @@ or an explicit product decision brings the GUI surface into scope.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `953` written-row
+This card is the exact handoff target after the current `954` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
 | Slice | classify one remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | run a focused stock Git probe for the selected guard before changing implementation |
-| Implementation area | start with fresh non-GUI scan candidate `crates/zmin-cli/src/cli/commands/text_impl.rs:80` (`unsupported option`) unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest text-tools compat test that proves stdout, stderr, exit code and repository state against stock Git |
+| Implementation area | start with fresh non-GUI scan candidate `crates/zmin-git-core/src/index.rs:53` (`unsupported git index mode`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest index-reading compat test that proves stdout, stderr, exit code and repository state against stock Git |
 | Matrix update | add the row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on the selected guard; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
@@ -245,7 +244,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/953`; the complete command matrices and complete doc-option matrices remain
+`0/954`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -340,6 +339,7 @@ until a full matrix is expanded and verified.
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
+| `reflog` shorthand invalid ref usage | `1` | `0` | `git reflog bogus` is parsed as shorthand `show` ref and exits `128` with stock ambiguous-revision diagnostics instead of using an unsupported-subcommand branch |
 | `log --decorate` boolean value forms | `5` | `0` | `yes`, `on`, `1`, `off`, `0` |
 | `log --decorate` invalid value usage | `1` | `0` | `git log --decorate=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
@@ -476,7 +476,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `603` verified variants.
+Tracked closed blocks in this table: `604` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
