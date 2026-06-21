@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1500 written rows / 1208 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1510 written rows / 1218 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -272,11 +272,11 @@ continuing matrix expansion or guard classification.
 The latest completed slice expands the `ls-files` command matrix with concrete
 pathspec rows from existing stock-oracle evidence:
 
-`git --literal-pathspecs ls-files a*b.txt`
+`git --glob-pathspecs --literal-pathspecs ls-files a*b.txt`
 
-`docs/cli/matrices/ls_files_v2_47.tsv` now splits the former aggregate global
-pathspec row into exact rows for default globbing, global literal/glob/noglob
-modes and pathspec magic forms from
+`docs/cli/matrices/ls_files_v2_47.tsv` now records the remaining rows from the
+former aggregate global pathspec batch: directory glob magic, exclude pathspecs,
+combined literal/noglob/icase/global mode ordering and literal/glob ordering from
 `git_global_cli_compat::global_pathspec_options_match_stock_git_for_ls_files`.
 This is an evidence import only; no Rust behavior changed.
 
@@ -626,16 +626,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `ls_files_v2_47.tsv` with rows
-already covered by
+The latest matrix inventory slice expands `ls_files_v2_47.tsv` with the
+remaining rows already covered by
 `git_global_cli_compat::global_pathspec_options_match_stock_git_for_ls_files`:
-default pathspec globbing, global literal/glob/noglob pathspec modes and
-literal/glob/icase/bracket/directory pathspec magic forms. No Rust behavior
-changed.
+directory glob magic, exclude pathspec forms, combined literal/noglob/icase
+global modes and literal/glob ordering. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1500` written-row
+This card is the exact handoff target after the current `1510` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -654,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1500`; the `1/1500` open row and the still incomplete command/doc-option
+`0/1510`; the `1/1510` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
