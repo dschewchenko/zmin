@@ -220,6 +220,13 @@ The latest source-scan classification pass covers the `pack.rs` /
 Git also rejects invalid input or corrupt storage formats; they are not open
 Git-supported feature gaps as long as the mapped oracle rows keep passing.
 
+The latest stock-compatible corrupt-format guard classification is
+`runtime/commit_graph.rs` `unsupported commit-graph header`. This runtime
+reader guard is mapped to the existing `commit-graph verify` header validation
+rows for checksum-valid bad signature, version and hash-version inputs; stock
+Git rejects those corrupt commit-graph files with exit `1`, so this source hit
+is not an open user-facing Git feature gap.
+
 The latest Zmin-only guard classification is `reference_impl.rs`
 `unsupported repo output format`. Stock Git has no `git repo` command, so this
 guard is tracked under `docs/cli/zmin_extensions_inventory.md` instead of the
@@ -676,6 +683,7 @@ behavior, invalid input, or corrupt-format handling.
 | `zmin-git-core/src/pack.rs` `unsupported pack index version {raw_version}` while reading pack indexes | corrupt/unsupported pack-index storage format with command-specific stock diagnostics | `docs/cli/matrices/show_index_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_object_plumbing_compat::show_index_rejects_unsupported_pack_index_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_index_version_like_stock_git` |
 | `zmin-git-core/src/pack.rs` `unsupported pack reverse index signature` and `unsupported pack reverse index version` | corrupt/unsupported reverse-index sidecar files validated through `index-pack --verify` | `docs/cli/matrices/index_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_signature_like_stock_git`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_version_like_stock_git` |
 | `zmin-git-core/src/pack.rs` `unsupported pack file version {version}` while reading pack headers | corrupt/unsupported pack storage format with command-specific stock diagnostics | `docs/cli/matrices/index_pack_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_unsupported_pack_file_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_file_version_like_stock_git` |
+| `runtime/commit_graph.rs` `unsupported commit-graph header` while reading commit-graph files | corrupt commit-graph storage format with stock diagnostics through `commit-graph verify` | `docs/cli/matrices/commit_graph_v2_47.tsv`; `git_maintenance_compat::commit_graph_verify_header_variants_match_stock_git` |
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 
