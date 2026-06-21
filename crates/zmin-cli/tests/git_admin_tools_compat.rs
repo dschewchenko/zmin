@@ -1238,6 +1238,43 @@ fn managed_hooks_add_list_remove_and_protect_manual_hooks() {
 }
 
 #[test]
+fn managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation() {
+    let repo = git_init();
+
+    let stock = Command::new(common::stock_git_bin())
+        .args(["hooks", "-h"])
+        .current_dir(repo.path())
+        .output()
+        .expect("run stock git hooks");
+    assert_eq!(stock.status.code().expect("stock git hooks exit"), 1);
+    assert!(stock.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&stock.stderr).starts_with("git: 'hooks' is not a git command."),
+        "unexpected stock git hooks stderr: {}",
+        String::from_utf8_lossy(&stock.stderr)
+    );
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["hooks", "add", "pre-receive", "true"]),
+        (
+            1,
+            String::new(),
+            "fatal: unsupported hook 'pre-receive'".to_owned()
+        )
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["hooks", "remove", "pre-receive"]),
+        (
+            1,
+            String::new(),
+            "fatal: unsupported hook 'pre-receive'".to_owned()
+        )
+    );
+    assert_eq!(run_zmin(repo.path(), ["hooks", "list"]), "");
+    assert!(!repo.path().join(".git/hooks/pre-receive").exists());
+}
+
+#[test]
 fn version_command_reports_git_compatible_version_shape() {
     let repo = git_init();
 

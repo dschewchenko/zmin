@@ -403,6 +403,14 @@ such as `-o`, `--killed`, `--modified`, `--deleted`, `--unmerged`,
 Zmin and stock Git output/exit behavior for those modes, so this slice only
 closes the raw-source mapping and does not change counts.
 
+The latest Zmin-only guard classification is `admin_impl.rs`
+`unsupported hook '{hook_name}'` in managed-hook validation. Stock Git has
+`git hook`, but no `git hooks` command, so this guard is tracked in the
+Zmin-only extension inventory instead of the Git `2.47.1` matrix. The focused
+extension evidence proves stock Git rejects `git hooks`, while Zmin accepts
+supported managed hook names and rejects unsupported names such as
+`pre-receive` without creating hook files or config entries.
+
 ### Current Slice Card
 
 This card is the exact handoff target after the current `1040` written-row
@@ -734,6 +742,7 @@ behavior, invalid input, or corrupt-format handling.
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash {operation} option '{value}'` guard in `stash apply/drop/pop` option parsing | stock-compatible invalid input for unknown reference-style stash operation options | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_reference_unknown_options_match_stock_git_usage` |
 | `worktree_impl.rs` `ls-files --recurse-submodules unsupported mode` guard | stock-compatible invalid input for unsupported recurse-submodules combinations | `docs/cli/matrices/ls_files_v2_47.tsv`; `git_ls_files_compat::ls_files_recurse_submodules_matches_stock_git` |
+| `admin_impl.rs` `unsupported hook '{hook_name}'` in `zmin hooks` managed-hook validation | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation`; `/usr/bin/git hooks -h` reports that stock Git has no `hooks` command |
 
 ## Code Guard Classification
 
