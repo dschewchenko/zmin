@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 25/151 commands with matrix rows / 233/4632 represented doc-option pairs / 847 written rows / 732 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 25/151 commands with matrix rows / 233/4632 represented doc-option pairs / 848 written rows / 732 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -196,7 +196,7 @@ deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
 The latest closed guard classification is
-`git ls-files --recurse-submodules --killed`.
+`git ls-files --recurse-submodules --ignored --others --exclude-standard`.
 The next default slice remains the second
 active lane: run a fresh `unsupported` / `not supported` code scan, choose one
 small remaining guard that is not entangled with unrelated staged changes, then
@@ -204,7 +204,7 @@ classify it as Git-supported behavior, stock-compatible invalid input,
 intentional deferral or Zmin-only extension before implementing anything.
 
 Do not publish a support percentage just because open written rows are now
-`0/847`; the complete command matrices and complete doc-option matrices remain
+`0/848`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
