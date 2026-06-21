@@ -208,9 +208,9 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `38/151` | no | audit rows exist for `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `clean`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `for-each-ref`, `index-pack`, `log`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `pack-objects`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` |
 | Git doc option pairs represented by rows | `241/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1020` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `778/1020` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `1/1020` | no | written rows with incomplete parity |
+| Written behavior rows | `1023` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `778/1023` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `1/1023` | no | written rows with incomplete parity |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -251,9 +251,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `29` | `11` | `0` | `0` | `18` | `34` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `197` | `151` | `0` | `0` | `46` | `112` |
+| Plumbing Commands | `20` | `0` | `644` | `0` | `200` | `151` | `0` | `0` | `49` | `115` |
 | Other Git 2.47 commands | `71` | `0` | `1075` | `0` | `36` | `10` | `1` | `0` | `25` | `28` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1020`** | **`778`** | **`1`** | **`0`** | **`241`** | **`652`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1023`** | **`778`** | **`1`** | **`0`** | **`244`** | **`655`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -264,9 +264,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `241/4632`
-represented option pairs or `778/1020` passing written rows as a Git support
-percentage. The `778/1020` number is audit progress for supported rows already
-written down; `1/1020` row is partial and `241/1020` additional rows are
+represented option pairs or `778/1023` passing written rows as a Git support
+percentage. The `778/1023` number is audit progress for supported rows already
+written down; `1/1023` row is partial and `244/1023` additional rows are
 stock-compatible invalid inputs. It says nothing about the still unexpanded
 rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -286,7 +286,7 @@ variants.
 | `blame` | `39` | `0` | `6` | `docs/cli/matrices/blame_v2_47.tsv` | `101` | `21` | `0` | `0` | `80` | no |
 | `branch` | `51` | `0` | `13` | `docs/cli/matrices/branch_v2_47.tsv` | `31` | `18` | `0` | `0` | `13` | no |
 | `bundle` | `15` | `0` | `1` | `docs/cli/matrices/bundle_v2_47.tsv` | `11` | `3` | `0` | `0` | `8` | no |
-| `cat-file` | `21` | `0` | `1` | `docs/cli/matrices/cat_file_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
+| `cat-file` | `21` | `0` | `1` | `docs/cli/matrices/cat_file_v2_47.tsv` | `6` | `0` | `0` | `0` | `6` | no |
 | `clean` | `13` | `0` | `3` | `docs/cli/matrices/clean_v2_47.tsv` | `12` | `8` | `0` | `0` | `4` | no |
 | `column` | `10` | `0` | `1` | `docs/cli/matrices/column_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `docs/cli/matrices/commit_graph_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
