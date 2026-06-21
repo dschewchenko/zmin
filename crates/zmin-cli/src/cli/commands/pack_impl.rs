@@ -4009,7 +4009,7 @@ fn bundle_commit_subject(store: &LooseObjectStore, id: &ObjectId) -> Result<Opti
 }
 
 fn bundle_list_heads(file: PathBuf, patterns: Vec<String>) -> Result<()> {
-    let bundle = parse_bundle_header(&file)?;
+    let bundle = parse_bundle_command_header(&file)?;
     for head in bundle.heads {
         if bundle_head_matches(&patterns, &head.name) {
             println!("{} {}", head.id.to_hex(), head.name);
@@ -4020,7 +4020,7 @@ fn bundle_list_heads(file: PathBuf, patterns: Vec<String>) -> Result<()> {
 
 fn bundle_verify(file: PathBuf) -> Result<()> {
     let repo = find_repo().ok();
-    let bundle = parse_bundle_header(&file)?;
+    let bundle = parse_bundle_command_header(&file)?;
     let store = repo
         .as_ref()
         .map(|repo| LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1));
@@ -4048,7 +4048,7 @@ fn bundle_verify(file: PathBuf) -> Result<()> {
 
 fn bundle_unbundle(file: PathBuf, patterns: Vec<String>) -> Result<()> {
     let repo = find_repo()?;
-    let bundle = parse_bundle_header(&file)?;
+    let bundle = parse_bundle_command_header(&file)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     verify_bundle_prerequisites(Some(&store), &bundle.prerequisites)?;
     let pack_dir = repo.objects_dir.join("pack");
@@ -4310,6 +4310,21 @@ fn parse_bundle_header(path: &std::path::Path) -> Result<ParsedBundleHeader> {
         heads,
         prerequisites,
         pack_offset,
+    })
+}
+
+fn parse_bundle_command_header(path: &std::path::Path) -> Result<ParsedBundleHeader> {
+    parse_bundle_header(path).map_err(|error| match error {
+        CliError::Fatal { code: 128, message } if message == "unsupported bundle format" => {
+            CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "error: '{}' does not look like a v2 or v3 bundle file\n",
+                    path.display()
+                ),
+            }
+        }
+        other => other,
     })
 }
 

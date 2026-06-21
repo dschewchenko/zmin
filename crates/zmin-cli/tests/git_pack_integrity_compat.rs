@@ -3418,6 +3418,36 @@ fn bundle_create_version_values_match_stock_git() {
 }
 
 #[test]
+fn bundle_subcommands_reject_unsupported_bundle_format_like_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    let bundle_path = repo.path().join("bad.bundle");
+    fs::write(&bundle_path, b"not a bundle\n\nPACK").expect("write bad bundle");
+    let bundle = bundle_path.to_str().expect("bundle path");
+
+    for args in [
+        &["bundle", "verify", bundle][..],
+        &["bundle", "list-heads", bundle][..],
+        &["bundle", "unbundle", bundle][..],
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_any_output("git", repo.path(), args, "git"),
+            "{args:?}"
+        );
+    }
+    let pack_dir = repo.path().join(".git/objects/pack");
+    let pack_files = fs::read_dir(&pack_dir)
+        .expect("read pack dir")
+        .map(|entry| entry.expect("pack entry").path())
+        .collect::<Vec<_>>();
+    assert!(
+        pack_files.is_empty(),
+        "invalid bundle commands should not install pack files: {pack_files:?}"
+    );
+}
+
+#[test]
 fn bundle_create_accepts_since_option_for_upstream_fetch_suite() {
     let source = git_init();
     configure_identity(source.path());
