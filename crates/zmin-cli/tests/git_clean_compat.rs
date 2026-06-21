@@ -175,6 +175,26 @@ fn clean_no_option_toggles_match_stock_git_order() {
 
 #[test]
 fn clean_interactive_quit_matches_stock_git() {
+    let git_clean_repo = git_init();
+    let zmin_clean_repo = git_init();
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            zmin_clean_repo.path(),
+            &["clean", "--interactive"],
+            "",
+            "zmin",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            git_clean_repo.path(),
+            &["clean", "--interactive"],
+            "",
+            "git",
+        ),
+        "interactive clean no-candidates repo"
+    );
+
     for input in ["q\n", "quit\n", "5\n", ""] {
         let git_repo = git_init();
         let zmin_repo = git_init();
