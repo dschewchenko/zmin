@@ -410,6 +410,20 @@ fn blame_empty_line_range_matches_stock_git_failure() {
 }
 
 #[test]
+fn blame_missing_function_line_range_matches_stock_git_failure() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "fn one() {\n    alpha();\n}\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["blame", "-L", ":missing", "a.txt"]),
+        git_failure_output(repo.path(), &["blame", "-L", ":missing", "a.txt"])
+    );
+}
+
+#[test]
 fn blame_progress_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

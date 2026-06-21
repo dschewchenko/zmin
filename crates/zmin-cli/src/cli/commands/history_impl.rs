@@ -2389,7 +2389,7 @@ fn resolve_blame_line_range(lines: &[BlameLine], range: &BlameLineRange) -> Resu
             let start_index = lines
                 .iter()
                 .position(|line| blame_function_line_matches(&line.content, function.as_bytes()))
-                .ok_or_else(|| unsupported_blame_line_range(function))?;
+                .ok_or_else(|| blame_line_range_function_no_match(function, 1))?;
             let start = lines[start_index].line_no;
             let end = lines
                 .iter()
@@ -2456,6 +2456,13 @@ fn invalid_blame_empty_range() -> CliError {
     CliError::Fatal {
         code: 128,
         message: "-L invalid empty range".into(),
+    }
+}
+
+fn blame_line_range_function_no_match(function: &str, start_line: usize) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("-L parameter '{function}' starting at line {start_line}: no match"),
     }
 }
 
