@@ -93,6 +93,31 @@ fn rev_parse_short_head_lengths_match_stock_git() {
 }
 
 #[test]
+fn rev_parse_blob_peel_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    configure_identity(&repo);
+    fs::write(repo.join("tracked.txt"), "one\n").expect("write tracked file");
+    git(&repo, ["add", "tracked.txt"]);
+    git(&repo, ["commit", "-m", "initial"]);
+    let blob = git(&repo, ["rev-parse", "HEAD:tracked.txt"]);
+    git(&repo, ["tag", "-a", "blobtag", &blob, "-m", "blob tag"]);
+
+    for rev in [format!("{blob}^{{blob}}"), "blobtag^{blob}".to_owned()] {
+        let args = ["rev-parse", rev.as_str()];
+        assert_eq!(
+            command_any_output(zmin_bin(), &repo, &args, "zmin blob peel"),
+            command_any_output("git", &repo, &args, "git blob peel"),
+            "{rev}"
+        );
+    }
+}
+
+#[test]
 fn rev_parse_verify_quiet_modes_match_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let git_repo = dir.path().join("git");

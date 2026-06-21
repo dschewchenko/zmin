@@ -413,7 +413,14 @@ fn reflog_line_new_id(line: &str) -> Option<ObjectId> {
 }
 
 fn split_peel_suffix(objectish: &str) -> Option<(&str, &str)> {
-    for suffix in ["^{commit}", "^{tree}", "^{tag}", "^{object}", "^{}"] {
+    for suffix in [
+        "^{commit}",
+        "^{tree}",
+        "^{blob}",
+        "^{tag}",
+        "^{object}",
+        "^{}",
+    ] {
         if let Some(base) = objectish.strip_suffix(suffix) {
             return Some((base, suffix));
         }
@@ -457,21 +464,28 @@ fn resolve_typed_objectish(
                 ))
             }
         }
-        "^{}" | "^{commit}" => {
+        "^{blob}" | "^{}" | "^{commit}" => {
             for _ in 0..8 {
                 let object = store.read_object(&id)?;
                 match object.kind {
                     GitObjectKind::Tag => {
                         id = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
                     }
+                    GitObjectKind::Blob if peel == "^{blob}" || peel == "^{}" => {
+                        return Ok(id);
+                    }
                     GitObjectKind::Commit if peel == "^{commit}" || peel == "^{}" => {
                         return Ok(id);
                     }
                     _ if peel == "^{}" => return Ok(id),
                     _ => {
+                        let expected = match peel {
+                            "^{blob}" => "blob",
+                            _ => "commit",
+                        };
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            format!("revision `{base}` is not a commit"),
+                            format!("revision `{base}` is not a {expected}"),
                         ));
                     }
                 }
@@ -483,7 +497,7 @@ fn resolve_typed_objectish(
         }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("unsupported peel operator {peel}"),
+            format!("invalid peel operator {peel}"),
         )),
     }
 }
