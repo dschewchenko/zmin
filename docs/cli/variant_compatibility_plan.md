@@ -394,6 +394,15 @@ reference-style stash operations. Stock Git rejects `git stash apply --bad`,
 subcommand-specific usage text; Zmin now emits the same diagnostics and
 `stash_v2_47.tsv` records those three invalid-input rows.
 
+The latest source-guard classification is `worktree_impl.rs`
+`ls-files --recurse-submodules unsupported mode`. The guard is already mapped
+to written invalid-input rows for unsupported recurse-submodule combinations
+such as `-o`, `--killed`, `--modified`, `--deleted`, `--unmerged`,
+`--resolve-undo` and `--with-tree=HEAD`. Existing evidence in
+`git_ls_files_compat::ls_files_recurse_submodules_matches_stock_git` compares
+Zmin and stock Git output/exit behavior for those modes, so this slice only
+closes the raw-source mapping and does not change counts.
+
 ### Current Slice Card
 
 This card is the exact handoff target after the current `1040` written-row
@@ -724,6 +733,7 @@ behavior, invalid input, or corrupt-format handling.
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 | `worktree_impl.rs` `unsupported porcelain version '{value}'` in `git status --porcelain=<value>` parsing | stock-compatible invalid input for unsupported porcelain version values | `docs/cli/matrices/status_v2_47.tsv`; `git_status_compat::status_invalid_porcelain_version_matches_stock_git` |
 | `worktree_impl.rs` former `unsupported stash {operation} option '{value}'` guard in `stash apply/drop/pop` option parsing | stock-compatible invalid input for unknown reference-style stash operation options | `docs/cli/matrices/stash_v2_47.tsv`; `git_stash_compat::stash_reference_unknown_options_match_stock_git_usage` |
+| `worktree_impl.rs` `ls-files --recurse-submodules unsupported mode` guard | stock-compatible invalid input for unsupported recurse-submodules combinations | `docs/cli/matrices/ls_files_v2_47.tsv`; `git_ls_files_compat::ls_files_recurse_submodules_matches_stock_git` |
 
 ## Code Guard Classification
 
