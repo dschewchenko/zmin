@@ -203,6 +203,10 @@ fn clean_interactive_prompt(entries: &[Vec<u8>]) {
         print!("{}", String::from_utf8_lossy(entry));
     }
     println!();
+    clean_interactive_command_menu();
+}
+
+fn clean_interactive_command_menu() {
     println!("*** Commands ***");
     println!("    1: clean                2: filter by pattern    3: select by numbers");
     println!("    4: ask each             5: quit                 6: help");
@@ -243,10 +247,9 @@ fn clean_interactive_quit(entries: &[Vec<u8>]) -> Result<()> {
                 io::stdout().flush()?;
             }
             _ => {
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: format!("unsupported clean interactive command '{command}'"),
-                });
+                println!("Huh ({command})?");
+                clean_interactive_command_menu();
+                io::stdout().flush()?;
             }
         }
     }

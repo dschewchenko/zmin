@@ -259,6 +259,35 @@ fn clean_interactive_quit_matches_stock_git() {
 }
 
 #[test]
+fn clean_interactive_unknown_command_reprompts_like_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    fs::write(git_repo.path().join("untracked.txt"), b"untracked\n").expect("write git file");
+    fs::write(zmin_repo.path().join("untracked.txt"), b"untracked\n").expect("write zmin file");
+
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["clean", "--interactive"],
+            "bogus\nq\n",
+            "zmin",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            git_repo.path(),
+            &["clean", "--interactive"],
+            "bogus\nq\n",
+            "git",
+        )
+    );
+    assert_eq!(
+        zmin_repo.path().join("untracked.txt").exists(),
+        git_repo.path().join("untracked.txt").exists()
+    );
+}
+
+#[test]
 fn clean_nested_git_directories_require_double_force_like_stock_git() {
     for args in [
         vec!["clean", "-n", "-d"],
