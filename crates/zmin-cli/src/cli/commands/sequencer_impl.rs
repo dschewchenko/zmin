@@ -1569,16 +1569,21 @@ pub(crate) fn rebase(
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
     commits.reverse();
     let interactive_todo = if interactive {
+        checkout_worktree(&repo, &store, &new_base_id)?;
+        update_head_to_commit(&refs, &new_base_id)?;
         Some(edit_interactive_rebase_todo(
             &repo,
             &commit_cache,
             &commits,
+            &head,
         )?)
     } else {
         None
     };
-    checkout_worktree(&repo, &store, &new_base_id)?;
-    update_head_to_commit(&refs, &new_base_id)?;
+    if !interactive {
+        checkout_worktree(&repo, &store, &new_base_id)?;
+        update_head_to_commit(&refs, &new_base_id)?;
+    }
     if preserve_merges {
         return rebase_commits_preserving_merges(
             &repo,
@@ -1699,15 +1704,20 @@ fn edit_interactive_rebase_todo(
     repo: &GitRepo,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     commits: &[ObjectId],
+    orig_head: &ObjectId,
 ) -> Result<Vec<RebaseTodoItem>> {
     let rebase_dir = repo.git_dir.join("rebase-merge");
     fs::create_dir_all(&rebase_dir)?;
+    fs::write(
+        rebase_dir.join("orig-head"),
+        format!("{}\n", orig_head.to_hex()),
+    )?;
     let todo_path = rebase_dir.join("git-rebase-todo");
     let mut todo = String::new();
     for commit_id in commits {
         let commit = commit_cache.read_commit(commit_id)?;
         todo.push_str(&format!(
-            "pick {} {}\n",
+            "pick {} # {}\n",
             short_object_id(commit_id),
             commit_subject(&commit.message)
         ));
@@ -1722,8 +1732,9 @@ fn edit_interactive_rebase_todo(
     fs::write(&todo_path, todo)?;
     run_sequence_editor(repo, &todo_path)?;
     let edited = fs::read_to_string(&todo_path)?;
+    let parsed = parse_interactive_rebase_todo(repo, commit_cache, commits, &edited)?;
     remove_path_if_exists(&rebase_dir)?;
-    parse_interactive_rebase_todo(repo, commit_cache, commits, &edited)
+    Ok(parsed)
 }
 
 fn run_sequence_editor(repo: &GitRepo, path: &Path) -> Result<()> {
@@ -1774,16 +1785,29 @@ fn parse_interactive_rebase_todo(
             "fixup" | "f" => RebaseTodoCommand::Fixup,
             "drop" | "d" => RebaseTodoCommand::Drop,
             other => {
-                return Err(CliError::Fatal {
-                    code: 1,
-                    message: format!("unsupported interactive rebase command '{other}'"),
-                });
+                return Err(invalid_interactive_rebase_command(
+                    other,
+                    line_number + 1,
+                    line,
+                ));
             }
         };
         let commit = resolve_rebase_todo_commit(repo, commit_cache, commits, commit)?;
         out.push(RebaseTodoItem { command, commit });
     }
     Ok(out)
+}
+
+fn invalid_interactive_rebase_command(command: &str, line_number: usize, line: &str) -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: format!(
+            "error: invalid command '{command}'\n\
+             error: invalid line {line_number}: {line}\n\
+             You can fix this with 'git rebase --edit-todo' and then run 'git rebase --continue'.\n\
+             Or you can abort the rebase with 'git rebase --abort'.\n"
+        ),
+    }
 }
 
 fn resolve_rebase_todo_commit(

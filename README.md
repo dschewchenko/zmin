@@ -169,18 +169,18 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `26/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
-| Documented option spellings represented by rows | `236/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `952` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `755/952` | supported-behavior rows with focused parity evidence |
-| Open written rows | `0/952` | written rows that still do not match stock Git |
-| Invalid input rows | `197/952` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `27/151` | `archive`, `bisect`, `blame`, `branch`, `cat-file`, `clean`, `column`, `config`, `status`, `fetch`, `diff`, `log`, `for-each-ref`, `ls-files`, `ls-tree`, `merge`, `merge-base`, `notes`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-ref`, `submodule`, `symbolic-ref`, `tag` and `version` have started behavior matrices |
+| Documented option spellings represented by rows | `237/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `953` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `755/953` | supported-behavior rows with focused parity evidence |
+| Open written rows | `0/953` | written rows that still do not match stock Git |
+| Invalid input rows | `198/953` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `755/952` as Git compatibility. It only means `755` of the `952`
+Do not read `755/953` as Git compatibility. It only means `755` of the `953`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, and `197/952` additional rows are
-stock-compatible invalid inputs. Do not read `236/4632` as option support
+unexpanded surface is not counted yet, and `198/953` additional rows are
+stock-compatible invalid inputs. Do not read `237/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -210,7 +210,7 @@ Audit progress by git-scm reference group:
 | Branching and Merging | `9` | `0` | `581` | `0` | `59` | `35` | `0` | `24` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `295` | `283` | `0` | `12` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `152` | `147` | `0` | `5` |
-| Patching | `5` | `0` | `333` | `0` | `0` | `0` | `0` | `0` |
+| Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `1` |
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` |
@@ -218,7 +218,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `20` | `0` | `644` | `0` | `184` | `144` | `0` | `40` |
 | Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `6` | `2` | `0` | `4` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`952`** | **`755`** | **`0`** | **`197`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`953`** | **`755`** | **`0`** | **`198`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -249,6 +249,7 @@ Current command-level matrices:
 | `merge` | `69` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
 | `notes` | `33` | `0` | `0` | `6` | `0` | `0` | `0` | `6` | no |
+| `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `reflog` | `13` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `rerere` | `7` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-parse` | `72` | `0` | `24` | `49` | `43` | `0` | `0` | `6` | no |

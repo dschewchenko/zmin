@@ -113,7 +113,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 26/151 commands with matrix rows / 236/4632 represented doc-option pairs / 952 written rows / 755 written rows matching stock Git / 0 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 27/151 commands with matrix rows / 237/4632 represented doc-option pairs / 953 written rows / 755 written rows matching stock Git / 0 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -210,23 +210,23 @@ deferral or Zmin-only extension. If new WebStorm or replacement-shim traces
 appear, add those rows before continuing guard classification.
 
 The latest closed guard classification is
-`git blame -L /[a-b-c]/ a.txt`, `git blame -L /[0-9-a]/ a.txt`, and
-`git blame -L /[a--]/ a.txt` for Git basic-regex invalid multiple
-character-range operators. Edge literal-hyphen forms such as
-`git blame -L /[a-b-]/ a.txt` and `git blame -L /[-a-b]/ a.txt` remain covered
-by positive stock-Git oracle tests.
+`GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` when the editor writes an
+unknown todo command. Zmin now reports stock invalid-command diagnostics,
+leaves `.git/rebase-merge` state for edit/continue or abort, moves HEAD to the
+same in-progress rebase point as stock Git, and supports `git rebase --abort`
+cleanup from that state.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `952` written-row
+This card is the exact handoff target after the current `953` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
 | --- | --- |
 | Slice | classify one remaining `unsupported` / `not supported` Rust guard |
 | Stock-Git oracle | run a focused stock Git probe for the selected guard before changing implementation |
-| Implementation area | start with fresh scan candidate `crates/zmin-cli/src/cli/commands/sequencer_impl.rs:1779` (`unsupported interactive rebase command`) unless a new WebStorm replacement trace appears first |
-| Evidence test | add or extend the smallest sequencer/rebase compat test that proves stdout, stderr, exit code and repository state against stock Git |
+| Implementation area | start with fresh scan candidate `crates/zmin-cli/src/cli/commands/commit_impl.rs:1095` (`unsupported gui command`) unless a new WebStorm replacement trace appears first |
+| Evidence test | add or extend the smallest commit/gui compat test that proves stdout, stderr, exit code and repository state against stock Git, or record an intentional deferral if the Git GUI surface is explicitly out of current scope |
 | Matrix update | add the row to the relevant command matrix before implementation, or record an intentional deferral if stock Git behavior is out of current scope |
 | Expected count movement | depends on the selected guard; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, relevant command test file, `cargo check -p zmin-cli --bin zmin --profile compat`, readiness/status summaries, docs/count stale scan |
@@ -237,7 +237,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because open written rows are now
-`0/952`; the complete command matrices and complete doc-option matrices remain
+`0/953`; the complete command matrices and complete doc-option matrices remain
 `0/151` and `0/4632`.
 
 The most recent closed transport lane is `fetch --filter=blob:none` for named
@@ -337,6 +337,7 @@ until a full matrix is expanded and verified.
 | `log --diff-merges` separate stat forms | `3` | `0` | `separate`, `on`, `m`; skip empty parent diff blocks like stock Git |
 | `log --diff-merges` invalid value usage | `1` | `0` | `git log --diff-merges=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
+| `rebase -i` invalid todo command usage | `1` | `0` | `GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` with an unknown todo command exits `1` with stock invalid-command diagnostics, leaves `.git/rebase-merge` state for recovery, moves HEAD to the stock in-progress rebase point, and supports `git rebase --abort` cleanup instead of a custom unsupported-interactive-command fatal diagnostic |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
@@ -467,7 +468,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `602` verified variants.
+Tracked closed blocks in this table: `603` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
