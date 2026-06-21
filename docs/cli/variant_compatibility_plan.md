@@ -215,6 +215,11 @@ unreadable remote repository, exits `128`, writes an empty `FETCH_HEAD`, leaves
 the destination ref absent and installs no pack files. Zmin now maps that
 fetch-from-bundle surface to the same diagnostics and side effects.
 
+The latest source-scan classification pass covers the `pack.rs` /
+`pack_impl.rs` raw `unsupported` hits. These hits stay in the code where stock
+Git also rejects invalid input or corrupt storage formats; they are not open
+Git-supported feature gaps as long as the mapped oracle rows keep passing.
+
 The latest deferred guard classification is the `git gui` / `git citool`
 external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
 Local stock Git advertises `gui` and `citool` in `git help -a`, but this
@@ -520,6 +525,23 @@ keeps the behavior explicitly out of scope.
 | --- | --- | --- | --- |
 | `commit_impl.rs` `git gui` / `git citool` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` and `citool` in `git help -a`, but `git gui --help` and `git citool --help` fail because the `git-gui` executable is not installed in this oracle environment | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the GUI surface into current CLI scope |
 | `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |
+
+## Closed Code Guard Mappings
+
+Closed guard mappings connect raw source hits from the `unsupported` scan to
+specific oracle rows. They do not increase the Git compatibility denominator;
+they only prove that the source hit is already represented as stock-compatible
+behavior, invalid input, or corrupt-format handling.
+
+| Source guard | Classification | Matrix / evidence |
+| --- | --- | --- |
+| `pack_impl.rs` `unsupported index version {value}` in `pack-objects --index-version` parsing | stock-compatible invalid input for unsupported requested pack-index major versions | `docs/cli/matrices/pack_objects_v2_47.tsv`; `git_pack_integrity_compat::pack_objects_index_version_values_match_stock_git` |
+| `pack_impl.rs` `unsupported bundle version {other}` in `bundle create --version` parsing | stock-compatible invalid input for unsupported bundle versions | `docs/cli/matrices/bundle_v2_47.tsv`; `git_pack_integrity_compat::bundle_create_version_values_match_stock_git` |
+| `pack_impl.rs` `unsupported bundle format` in bundle header parsing | corrupt/invalid bundle input; mapped differently for bundle subcommands and fetch-from-bundle | `docs/cli/matrices/bundle_v2_47.tsv`; `docs/cli/matrices/fetch_v2_47.tsv`; `git_pack_integrity_compat::bundle_subcommands_reject_unsupported_bundle_format_like_stock_git`; `git_transport_local_compat::fetch_invalid_bundle_file_matches_stock_git` |
+| `pack_impl.rs` `pack version {version} unsupported` adapters for pack verification commands | corrupt/unsupported pack storage format with stock diagnostics | `docs/cli/matrices/index_pack_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_unsupported_pack_file_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_file_version_like_stock_git` |
+| `zmin-git-core/src/pack.rs` `unsupported pack index version {raw_version}` while reading pack indexes | corrupt/unsupported pack-index storage format with command-specific stock diagnostics | `docs/cli/matrices/show_index_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_object_plumbing_compat::show_index_rejects_unsupported_pack_index_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_index_version_like_stock_git` |
+| `zmin-git-core/src/pack.rs` `unsupported pack reverse index signature` and `unsupported pack reverse index version` | corrupt/unsupported reverse-index sidecar files validated through `index-pack --verify` | `docs/cli/matrices/index_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_signature_like_stock_git`; `git_pack_integrity_compat::index_pack_verify_rejects_bad_reverse_index_version_like_stock_git` |
+| `zmin-git-core/src/pack.rs` `unsupported pack file version {version}` while reading pack headers | corrupt/unsupported pack storage format with command-specific stock diagnostics | `docs/cli/matrices/index_pack_v2_47.tsv`; `docs/cli/matrices/verify_pack_v2_47.tsv`; `git_pack_integrity_compat::index_pack_verify_rejects_unsupported_pack_file_version_like_stock_git`; `git_pack_integrity_compat::verify_pack_rejects_unsupported_pack_file_version_like_stock_git` |
 
 ## Code Guard Classification
 
