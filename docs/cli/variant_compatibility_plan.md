@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 103/151 commands with matrix rows / 655/4632 represented doc-option pairs / 2726 written rows / 2338/2726 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 103/151 commands with matrix rows / 656/4632 represented doc-option pairs / 2727 written rows / 2339/2727 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,17 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `cat_file_v2_47.tsv` with an explicit
-`<positional:objects>` row backed by the existing focused cat-file schema
-oracle smoke.
+The latest completed slice extends `archive_v2_47.tsv` with an explicit
+`--list` row backed by existing focused stock-oracle evidence in
+`git_archive_compat.rs`.
 
-`cat_file_v2_47.tsv` now records the positional object argument surface for
-`git cat-file blob <oid>`, closing the Zmin schema `objects` argument without
-changing behavior. The evidence compares stock Git and Zmin stdout, stderr,
-exit status and clean worktree status for typed blob output.
+`archive_v2_47.tsv` now records the supported-format listing surface for
+`git archive --list`, closing the Zmin schema `list` parser surface, including
+the `-l` alias through shared `arg_id` evidence, without changing behavior.
+The evidence compares stock Git and Zmin output for the list mode.
 The oracle inventory now lists `703` represented/classified functions and
-`258` `missing_or_unclassified`. Current written rows are `2726`, with
-`2338/2726` matching stock Git, `1/2726` open and `387/2726` invalid-input. No
+`258` `missing_or_unclassified`. Current written rows are `2727`, with
+`2339/2727` matching stock Git, `1/2727` open and `387/2727` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
