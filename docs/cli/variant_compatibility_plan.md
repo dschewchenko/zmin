@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 66/151 commands with matrix rows / 403/4632 represented doc-option pairs / 1676 written rows / 1377 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 67/151 commands with matrix rows / 411/4632 represented doc-option pairs / 1686 written rows / 1387 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `cherry` matrix from existing
+The latest completed slice seeds the `rev-list` matrix from existing
 stock-oracle evidence:
 
-`git cherry -v upstream topic`
+`git rev-list --objects --no-object-names HEAD`
 
-`cherry_v2_47.tsv` now records command lines from
-`git_history_query_compat::cherry_matches_stock_git_for_patch_equivalence_and_upstream_default`:
-default upstream, explicit upstream/head, verbose output, abbreviation and
-limit forms.
+`rev_list_v2_47.tsv` now records command lines from
+`git_history_query_compat::add_commit_rev_list_and_log_match_stock_git_state`:
+linear history traversal, all refs, revision ranges, negative revisions,
+`--not`, count, parents, short max-count and object traversal forms.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `cherry_v2_47.tsv` with upstream/head,
-verbose, abbreviation and limit rows already covered by
-`git_history_query_compat::cherry_matches_stock_git_for_patch_equivalence_and_upstream_default`.
+The latest matrix inventory slice seeds `rev_list_v2_47.tsv` with traversal,
+range, exclusion, count, parents and object rows already covered by
+`git_history_query_compat::add_commit_rev_list_and_log_match_stock_git_state`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1676` written-row
+This card is the exact handoff target after the current `1686` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1676`; the `1/1676` open row and the still incomplete command/doc-option
+`0/1686`; the `1/1686` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -748,6 +748,7 @@ until a full matrix is expanded and verified.
 | `describe` tag, ref-filter and dirty forms | `10` | `0` | default describe, `--long`, `--abbrev=0`, `--abbrev=12`, `--tags`, `--all`, `--match`, `--exclude`, `--always` and `--dirty` already covered by `git_history_query_compat` |
 | `shortlog` author summary forms | `6` | `0` | default `HEAD`, `-s`, `-sn`, `-se`, `--no-merges` and `HEAD~2..HEAD` range forms already covered by `git_history_query_compat` |
 | `cherry` upstream/head comparison forms | `6` | `0` | default upstream, explicit upstream/head, `-v`, `--abbrev`, `--abbrev=12` and limit forms already covered by `git_history_query_compat` |
+| `rev-list` base traversal and object forms | `10` | `0` | `--max-count`, `--all`, revision range, negative revision, `--not`, `--count`, `--parents`, `-1`, `--objects` and `--objects --no-object-names` already covered by `git_history_query_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
