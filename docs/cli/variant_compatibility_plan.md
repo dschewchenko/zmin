@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2261 written rows / 1945/2261 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2265 written rows / 1949/2265 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -278,15 +278,16 @@ an incidental side effect of finding more existing tests.
 
 ### Latest Completed Slice
 
-The latest completed slice imports the `git_stash_compat.rs` stash reference
-`--quiet --no-quiet` backlog rows from
+The latest completed slice imports the `git_stash_compat.rs` stash branch
+backlog rows from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested `stash apply`, `stash pop` and
-`stash drop` rows where `--no-quiet` follows `--quiet`. The focused
-`git_stash_compat.rs` evidence covers stdout, stderr, exit status and stash
-stack/worktree side effects against stock Git. The oracle inventory reduced
-total `missing_or_unclassified` to `520`. No Rust behavior changed.
+`stash_v2_47.tsv` now records already-tested `stash branch` rows for selected
+stash entries, raw `stash create` commits, numeric stash selectors and
+apply-overwrite failure preservation. The focused `git_stash_compat.rs`
+evidence covers stdout, stderr, exit status, branch/status output, worktree
+content and stash stack side effects against stock Git. The oracle inventory
+reduced total `missing_or_unclassified` to `516`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -629,7 +630,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2261` written-row
+This card is the exact handoff target after the current `2265` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -648,7 +649,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2261`; the `1/2261` open row and the still incomplete command/doc-option
+`0/2265`; the `1/2265` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
