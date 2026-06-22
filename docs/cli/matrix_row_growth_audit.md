@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2752` | `+1658` |
-| Matching stock Git rows | `823` | `2364` | `+1541` |
+| Written behavior rows | `1094` | `2754` | `+1660` |
+| Matching stock Git rows | `823` | `2366` | `+1543` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `665/4632` | `+412` |
+| Represented doc-option pairs | `253/4632` | `667/4632` | `+414` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -170,7 +170,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `write-tree` | `0` | `2` | `+2` |
 | `am` | `0` | `1` | `+1` |
 | `bisect` | `0` | `1` | `+1` |
-| `checkout-index` | `0` | `5` | `+5` |
+| `checkout-index` | `0` | `7` | `+7` |
 | `merge` | `0` | `1` | `+1` |
 | `p4` | `0` | `1` | `+1` |
 | `rebase` | `0` | `1` | `+1` |
@@ -3355,4 +3355,41 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 `+4` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows, `+3` represented doc-option pairs and `-5`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `checkout-index` quiet schema
+surfaces, with new focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-checkout-index-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+2` for `checkout-index --quiet`
+  and `checkout-index -q`
+- implemented-but-unverified schema rows: expected `-2`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git checkout-index --quiet README.md`
+- `git checkout-index -q docs/guide.md`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr,
+worktree status and restored file contents for quiet long and short forms.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+2` represented doc-option pairs and `-2`
 implemented-but-unverified schema rows.

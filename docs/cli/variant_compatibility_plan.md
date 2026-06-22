@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 665/4632 represented doc-option pairs / 2752 written rows / 2364/2752 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 667/4632 represented doc-option pairs / 2754 written rows / 2366/2754 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,15 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `checkout_index_v2_47.tsv`, backed by
-existing focused stock-oracle evidence in `git_worktree_state_compat.rs`.
+The latest completed slice extends `checkout_index_v2_47.tsv`, backed by a
+new focused stock-oracle smoke script.
 
-`checkout_index_v2_47.tsv` now records `-a`, explicit path, `--prefix` and
-`--stdin` rows. These rows close exact checkout-index parser surfaces and
-worktree side effects without changing behavior. The oracle inventory moved to
-`707` represented/classified functions and `254` `missing_or_unclassified`.
-Current written rows are `2752`, with `2364/2752` matching stock Git,
-`1/2752` open and `387/2752` invalid-input. No Rust behavior changed.
+`checkout_index_v2_47.tsv` now records `--quiet` and `-q` rows in addition to
+the existing `-a`, explicit path, `--prefix` and `--stdin` rows. These rows
+close exact checkout-index quiet parser surfaces and worktree side effects
+without changing behavior. The oracle inventory remains `707`
+represented/classified functions and `254` `missing_or_unclassified` because
+the new evidence is a shell smoke, not a Rust test inventory function. Current
+written rows are `2754`, with `2366/2754` matching stock Git, `1/2754` open
+and `387/2754` invalid-input. No Rust behavior changed.
 
 ### No-Skip Rule
 
