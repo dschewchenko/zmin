@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2325 written rows / 1998/2325 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2332 written rows / 2005/2332 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,18 +285,17 @@ an incidental side effect of finding more existing tests.
 
 ### Latest Completed Slice
 
-The latest completed slice imports the remaining strong `git_stash_compat.rs`
-intent-to-add and interactive patch rows from
-`docs/cli/existing_oracle_test_inventory.tsv`.
+The latest completed slice imports the `git_reflog_compat.rs` show/date and
+double-dash pathspec rows from `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records an already-tested stock-compatible invalid-input
-row for `git add --intent-to-add file4; git stash`, plus closed rows for
-interactive `stash push --patch` `y/n` hunk selection, pathspec-limited `a`,
-`d` done, `q` quit and split-hunk `s/y/n` flows. The focused
-`git_stash_compat.rs` evidence covers exit status, stdout/stderr shape,
-stash list/show output and worktree file contents against stock Git. The
-oracle inventory reduced total `missing_or_unclassified` to `486`. No Rust
-behavior changed.
+`reflog_v2_47.tsv` now records already-tested closed rows for default
+`git reflog`, formatted `reflog show refs/heads/main --format=%H`, `reflog
+list`, `reflog exists HEAD`, common `--date=<mode>` rendering under a fixed
+oracle clock, and `reflog show -- <pathspec>` filtering for both matching and
+missing dash-prefixed paths. The focused `git_reflog_compat.rs` evidence covers
+stdout/stderr, exit status, date rendering and pathspec filtering against stock
+Git. The oracle inventory reduced total `missing_or_unclassified` to `483`. No
+Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -639,7 +638,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2325` written-row
+This card is the exact handoff target after the current `2332` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -658,7 +657,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2325`; the `1/2325` open row and the still incomplete command/doc-option
+`0/2332`; the `1/2332` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb

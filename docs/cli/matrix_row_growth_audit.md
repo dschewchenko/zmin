@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2325` | `+1231` |
-| Matching stock Git rows | `823` | `1998` | `+1175` |
+| Written behavior rows | `1094` | `2332` | `+1238` |
+| Matching stock Git rows | `823` | `2005` | `+1182` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `326` | `+56` |
 | Commands with rows | `50/151` | `96/151` | `+46` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `184` commits with `1320` TSV row
-additions and `43` TSV row deletions, for `+1277` text net. The strict behavior
-row count is `+1231` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `185` commits with `1327` TSV row
+additions and `43` TSV row deletions, for `+1284` text net. The strict behavior
+row count is `+1238` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`475` represented by matrix, extension or deferral evidence, and `486` still
+`478` represented by matrix, extension or deferral evidence, and `483` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -140,7 +140,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `486` missing or unclassified.
+  functions, currently `961` total with `483` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -293,7 +293,7 @@ Actual post-import movement matched the declaration: `+7` behavior rows,
 `+7` closed rows, `+0` open rows, `+0` invalid-input rows and `+7`
 represented oracle functions.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle tests already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -330,4 +330,42 @@ worktree file contents.
 
 Actual post-import movement matched the declaration: `+6` behavior rows,
 `+5` closed rows, `+0` open rows, `+1` invalid-input row and `+4`
+represented oracle functions.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_reflog_compat.rs`:
+
+- `git_reflog_compat::reflog_show_list_and_exists_match_stock_git`
+- `git_reflog_compat::reflog_show_date_modes_match_stock_git`
+- `git_reflog_compat::reflog_show_passes_pathspec_after_double_dash`
+
+Expected delta:
+
+- behavior rows: `+7`
+- closed rows: `+7`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+3`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git reflog`
+- `git reflog show refs/heads/main --format=%H`
+- `git reflog list`
+- `git reflog exists HEAD`
+- `GIT_TEST_DATE_NOW=1700003600 git reflog --date=<common-mode>`
+- `git reflog show -- --does-not-exist`
+- `git reflog show -- --a-file`
+
+The evidence compares stock Git and Zmin for default reflog show output,
+formatted ref output, reflog listing, exists exit status, date rendering under
+a fixed oracle clock and double-dash pathspec filtering.
+
+Actual post-import movement matched the declaration: `+7` behavior rows,
+`+7` closed rows, `+0` open rows, `+0` invalid-input rows and `+3`
 represented oracle functions.

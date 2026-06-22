@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `96/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `550/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2325` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1998/2325` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2325` | written rows with incomplete parity |
-| Open written rows | `1/2325` | written rows that still do not match stock Git |
-| Invalid input rows | `326/2325` | rows where stock Git rejects the input |
+| Written behavior rows | `2332` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2005/2332` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2332` | written rows with incomplete parity |
+| Open written rows | `1/2332` | written rows that still do not match stock Git |
+| Invalid input rows | `326/2332` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1998/2325` as Git compatibility. It only means `1998` of the `2325`
+Do not read `2005/2332` as Git compatibility. It only means `2005` of the `2332`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2325` rows are partially matching,
-`1/2325` rows are known open mismatches, and `326/2325` additional rows are
+unexpanded surface is not counted yet, `0/2332` rows are partially matching,
+`1/2332` rows are known open mismatches, and `326/2332` additional rows are
 stock-compatible invalid inputs. Do not read `550/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -216,11 +216,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `184` | `103` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `34` | `34` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `77` | `52` | `0` | `0` | `25` |
+| Administration | `8` | `0` | `147` | `0` | `84` | `59` | `0` | `0` | `25` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2325`** | **`1998`** | **`0`** | **`1`** | **`326`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2332`** | **`2005`** | **`0`** | **`1`** | **`326`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
