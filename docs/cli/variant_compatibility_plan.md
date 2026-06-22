@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 373/4632 represented doc-option pairs / 1580 written rows / 1288 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 373/4632 represented doc-option pairs / 1588 written rows / 1296 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands `diff --no-index` format matrix coverage from existing
-stock-oracle evidence:
+The latest completed slice expands the remaining `diff --no-index` format
+matrix coverage from existing stock-oracle evidence:
 
-`git diff --no-index --name-status a.txt b.txt`
+`git diff --no-index --patch-with-raw a.txt b.txt`
 
 `docs/cli/matrices/diff_v2_47.tsv` now records command lines from
-`git_diff_compat::diff_no_index_format_options_match_stock_git`: default
-patch, reverse, stat, numstat, shortstat, name-only and name-status variants
-for two outside-index files.
+`git_diff_compat::diff_no_index_format_options_match_stock_git`: raw,
+reverse raw, summary, patch-with-stat, patch-with-raw, no-patch, quiet and
+irreversible-delete variants for outside-index files.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `diff_v2_47.tsv` with no-index
-format rows already covered by
+The latest matrix inventory slice expands `diff_v2_47.tsv` with the remaining
+no-index format rows already covered by
 `git_diff_compat::diff_no_index_format_options_match_stock_git`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1580` written-row
+This card is the exact handoff target after the current `1588` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1580`; the `1/1580` open row and the still incomplete command/doc-option
+`0/1588`; the `1/1588` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
