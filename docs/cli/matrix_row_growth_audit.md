@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2332` | `+1238` |
-| Matching stock Git rows | `823` | `2005` | `+1182` |
+| Written behavior rows | `1094` | `2336` | `+1242` |
+| Matching stock Git rows | `823` | `2009` | `+1186` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `326` | `+56` |
 | Commands with rows | `50/151` | `96/151` | `+46` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `185` commits with `1327` TSV row
-additions and `43` TSV row deletions, for `+1284` text net. The strict behavior
-row count is `+1238` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `186` commits with `1331` TSV row
+additions and `43` TSV row deletions, for `+1288` text net. The strict behavior
+row count is `+1242` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`478` represented by matrix, extension or deferral evidence, and `483` still
+`482` represented by matrix, extension or deferral evidence, and `479` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -140,7 +140,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `483` missing or unclassified.
+  functions, currently `961` total with `479` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -332,7 +332,7 @@ Actual post-import movement matched the declaration: `+6` behavior rows,
 `+5` closed rows, `+0` open rows, `+1` invalid-input row and `+4`
 represented oracle functions.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle tests already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -368,4 +368,43 @@ a fixed oracle clock and double-dash pathspec filtering.
 
 Actual post-import movement matched the declaration: `+7` behavior rows,
 `+7` closed rows, `+0` open rows, `+0` invalid-input rows and `+3`
+represented oracle functions.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_reflog_compat.rs`:
+
+- `git_reflog_compat::reset_hard_records_branch_and_head_reflog`
+- `git_reflog_compat::commit_records_branch_and_head_reflog`
+- `git_reflog_compat::branch_create_reflog_handles_nested_branch_names`
+- `git_reflog_compat::log_reflog_orphan_checkout_uses_contiguous_commit_ordinals`
+
+Expected delta:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+4`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git reset --hard HEAD~1; git reflog show main`
+- `git commit --allow-empty -m one; git commit --allow-empty -m two; git reflog show main`
+- `git branch one/two main; git log -g --format=%gd\ %gs one/two`
+- `git log -g --format=%gd\ %gs HEAD` after orphan checkout commits
+
+The evidence compares stock Git and Zmin for reflog entries produced by reset,
+commit and branch creation plus `log -g` ordinal display after orphan-checkout
+reflog entries. The hidden zero-oid reflog row from
+`git_reflog_compat::log_reflog_keeps_ordinals_for_hidden_zero_oid_entries` was
+already represented in `log_v2_47.tsv`, so it is intentionally not counted in
+this import batch.
+
+Actual post-import movement matched the corrected declaration: `+4` behavior
+rows, `+4` closed rows, `+0` open rows, `+0` invalid-input rows and `+4`
 represented oracle functions.
