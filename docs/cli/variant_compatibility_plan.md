@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2544 written rows / 2170/2544 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2547 written rows / 2173/2547 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -286,17 +286,17 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `606`
-represented or classified and `355` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `609`
+represented or classified and `352` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `606` already represented
-or classified and `355` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `609` already represented
+or classified and `352` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. The default
-bucket order is local transport (`58`), HTTP transport (`57`), maintenance
+bucket order is HTTP transport (`57`), local transport (`55`), maintenance
 (`32`), pack integrity (`28`) and worktree state (`26`), unless a real
 replacement-binary blocker overrides it. A docs-only oracle import must reduce
 `missing_or_unclassified` by the declared number of evidence functions; any TSV
@@ -305,19 +305,22 @@ rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `clone_v2_47.tsv` with two closed default
-clone rows from existing focused stock-oracle evidence in
-`git_transport_http_compat.rs`.
+The latest completed slice extends `fetch_v2_47.tsv` with three closed local
+remote-HEAD rows from existing focused stock-oracle evidence in
+`git_transport_local_compat.rs`.
 
-`clone_v2_47.tsv` now records default `git clone` over git-daemon and SSH.
+`fetch_v2_47.tsv` now records `remote.origin.followRemoteHEAD=never`, default
+fetch preserving an existing `refs/remotes/origin/HEAD`, and explicit refspec
+fetch not updating remote HEAD even when followRemoteHEAD is `always`.
 Evidence comes from
-`git_transport_http_compat::clone_reads_git_daemon_remote_like_stock_git` and
-`git_transport_http_compat::clone_reads_ssh_remote_like_stock_git`, which assert
-successful execution and compare stock Git and Zmin checked-out file contents,
-`HEAD` and refs. The oracle inventory now lists `606` represented/classified
-functions and `355` `missing_or_unclassified`. Current written rows are `2544`,
-with `2170/2544` matching stock Git, `1/2544` open and `373/2544`
-invalid-input. No Rust behavior changed.
+`git_transport_local_compat::fetch_follow_remote_head_never_does_not_recreate_remote_head`,
+`git_transport_local_compat::fetch_default_follow_remote_head_preserves_existing_remote_head`
+and
+`git_transport_local_compat::fetch_explicit_refspec_does_not_update_remote_head_like_stock_git`.
+The oracle inventory now lists `609` represented/classified functions and
+`352` `missing_or_unclassified`. Current written rows are `2547`, with
+`2173/2547` matching stock Git, `1/2547` open and `373/2547` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 
