@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 81/151 commands with matrix rows / 463/4632 represented doc-option pairs / 1868 written rows / 1561 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 81/151 commands with matrix rows / 463/4632 represented doc-option pairs / 1873 written rows / 1566 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice adds `rev-list` symmetric-difference and separator
+The latest completed slice adds `rev-parse --path-format` cwd-specific path
 rows from existing stock-oracle evidence:
 
-`git rev-list left...main`
+`git rev-parse --path-format=absolute --git-dir`
 
-`rev_list_v2_47.tsv` now records symmetric difference traversal, count, reverse,
-object traversal, no-object-names, `--not` combination and `--objects HEAD --`
-separator forms, comparing stock Git and Zmin output through focused
-`git_history_query_compat` evidence. This is an evidence import only; no Rust
+`rev_parse_v2_47.tsv` now records root and nested cwd-specific
+`--path-format` path rows for `--git-dir`, `--git-common-dir` and relative
+`--show-toplevel`, comparing stock Git and Zmin output through focused
+`git_global_cli_compat` evidence. This is an evidence import only; no Rust
 behavior changed.
 
 ### No-Skip Rule
@@ -627,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1868` written-row
+This card is the exact handoff target after the current `1873` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1868`; the `1/1868` open row and the still incomplete command/doc-option
+`0/1873`; the `1/1873` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -863,6 +863,7 @@ until a full matrix is expanded and verified.
 | `rev-parse --short` object id lengths | `3` | `0` | default length, explicit `--short=12`, and overlarge `--short=100` for `HEAD` |
 | `rev-parse ^{blob}` peel variants | `2` | `0` | direct blob object id and annotated tag to blob target |
 | `rev-parse --verify` probing modes | `3` | `0` | verified `HEAD`, missing ref fatal diagnostics, and quiet missing-ref exit/status behavior |
+| `rev-parse --path-format` cwd-specific path rows | `5` | `0` | root and nested `--git-dir` / `--git-common-dir` forms plus relative `--show-toplevel` already covered by `git_global_cli_compat` |
 | `rev-parse` nested symbolic HEAD resolution | `1` | `0` | `HEAD -> refs/heads/alias -> refs/heads/main` resolves to the final commit id like stock Git |
 | `rev-parse` replacement git-dir discovery | `1` | `0` | `--git-dir` through the `git` shim on a cloned repository root |
 | `rev-parse` replacement inside-work-tree boolean | `1` | `0` | `--is-inside-work-tree` through the `git` shim on a cloned repository root |
@@ -952,7 +953,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `852` verified variants.
+Tracked closed blocks in this table: `857` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
