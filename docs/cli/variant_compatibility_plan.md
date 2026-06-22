@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 700/4632 represented doc-option pairs / 2795 written rows / 2407/2795 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 700/4632 represented doc-option pairs / 2796 written rows / 2408/2796 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,16 +298,16 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `commit_tree_v2_47.tsv`, backed by
-`tools/git-commit-tree-schema-oracle-smoke.sh`.
+The latest completed slice extends `read_tree_v2_47.tsv`, backed by
+`tools/git-read-tree-schema-oracle-smoke.sh`.
 
-`commit_tree_v2_47.tsv` now records an exact positional `<tree>` row for
-`git commit-tree <tree> -m root`. The row compares exit status, stdout, stderr
-and the stored commit object using fixed identity and timestamps. The oracle
+`read_tree_v2_47.tsv` now records an exact positional `<treeish>` row for
+`git read-tree <tree>`. The row compares exit status, stdout, stderr,
+`ls-files --stage`, `write-tree` output and worktree status. The oracle
 inventory remains `707` represented/classified functions and `254`
 `missing_or_unclassified` because the evidence is a shell smoke, not a Rust
-test inventory function. Current written rows are `2795`, with `2407/2795`
-matching stock Git, `1/2795` open and `387/2795` invalid-input.
+test inventory function. Current written rows are `2796`, with `2408/2796`
+matching stock Git, `1/2796` open and `387/2796` invalid-input.
 
 ### No-Skip Rule
 
