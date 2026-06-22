@@ -169,19 +169,19 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `99/151` | commands that have started behavior matrices; this is not support |
+| Commands with any matrix rows | `100/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `592/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2578` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2203/2578` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2578` | written rows with incomplete parity |
-| Open written rows | `1/2578` | written rows that still do not match stock Git |
-| Invalid input rows | `374/2578` | rows where stock Git rejects the input |
+| Written behavior rows | `2584` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2209/2584` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2584` | written rows with incomplete parity |
+| Open written rows | `1/2584` | written rows that still do not match stock Git |
+| Invalid input rows | `374/2584` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2203/2578` as Git compatibility. It only means `2203` of the `2578`
+Do not read `2209/2584` as Git compatibility. It only means `2209` of the `2584`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2578` rows are partially matching,
-`1/2578` rows are known open mismatches, and `374/2578` additional rows are
+unexpanded surface is not counted yet, `0/2584` rows are partially matching,
+`1/2584` rows are known open mismatches, and `374/2584` additional rows are
 stock-compatible invalid inputs. Do not read `592/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -219,8 +219,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `125` | `65` | `0` | `0` | `60` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `509` | `442` | `0` | `0` | `67` |
-| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2578`** | **`2203`** | **`0`** | **`1`** | **`374`** |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `136` | `101` | `0` | `0` | `35` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2584`** | **`2209`** | **`0`** | **`1`** | **`374`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -279,6 +279,7 @@ Current command-level matrices:
 | `get-tar-commit-id` | `0` | `0` | `0` | `2` | `1` | `0` | `0` | `1` | no |
 | `grep` | `75` | `0` | `4` | `12` | `12` | `0` | `0` | `0` | no |
 | `hash-object` | `7` | `0` | `2` | `4` | `4` | `0` | `0` | `0` | no |
+| `http-backend` | `0` | `0` | `0` | `6` | `6` | `0` | `0` | `0` | no |
 | `http-fetch` | `10` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `index-pack` | `18` | `0` | `1` | `3` | `0` | `0` | `0` | `3` | no |
 | `init` | `10` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
@@ -357,7 +358,7 @@ a complete matrix built from Git docs, upstream Git tests and real tool traces.
 - Administration: `clean`, `gc`, `fsck`, `reflog`, `filter-branch`, `instaweb`, `archive`, `bundle`
 - Server Admin: `daemon`, `update-server-info`
 - Plumbing Commands: `cat-file`, `check-ignore`, `checkout-index`, `commit-tree`, `count-objects`, `diff-index`, `for-each-ref`, `hash-object`, `ls-files`, `ls-tree`, `merge-base`, `read-tree`, `rev-list`, `rev-parse`, `show-ref`, `symbolic-ref`, `update-index`, `update-ref`, `verify-pack`, `write-tree`
-- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-backend`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `send-pack`, `sh-i18n`, `sh-setup`, `shell`, `show-branch`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
+- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `send-pack`, `sh-i18n`, `sh-setup`, `shell`, `show-branch`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
 
 </details>
 
