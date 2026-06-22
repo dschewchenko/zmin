@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `67/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `411/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1686` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1387/1686` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1686` | written rows with incomplete parity |
-| Open written rows | `1/1686` | written rows that still do not match stock Git |
-| Invalid input rows | `298/1686` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `68/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `415/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1696` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1396/1696` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1696` | written rows with incomplete parity |
+| Open written rows | `1/1696` | written rows that still do not match stock Git |
+| Invalid input rows | `299/1696` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1387/1686` as Git compatibility. It only means `1387` of the `1686`
+Do not read `1396/1696` as Git compatibility. It only means `1396` of the `1696`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1686` rows are partially matching,
-`1/1686` rows are known open mismatches, and `298/1686` additional rows are
-stock-compatible invalid inputs. Do not read `411/4632` as option support
+unexpanded surface is not counted yet, `0/1696` rows are partially matching,
+`1/1696` rows are known open mismatches, and `299/1696` additional rows are
+stock-compatible invalid inputs. Do not read `415/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -212,7 +212,7 @@ Audit progress by git-scm reference group:
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `265` | `258` | `0` | `0` | `7` |
-| Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
+| Patching | `5` | `0` | `333` | `0` | `11` | `9` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `376` | `313` | `0` | `0` | `63` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `71` | `38` | `0` | `0` | `33` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1686`** | **`1387`** | **`0`** | **`1`** | **`298`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1696`** | **`1396`** | **`0`** | **`1`** | **`299`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -234,6 +234,7 @@ Current command-level matrices:
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `add` | `34` | `0` | `2` | `6` | `3` | `0` | `0` | `3` | no |
+| `apply` | `39` | `0` | `4` | `10` | `9` | `0` | `0` | `1` | no |
 | `archive` | `17` | `0` | `3` | `11` | `10` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `blame` | `39` | `0` | `6` | `101` | `21` | `0` | `0` | `80` | no |
