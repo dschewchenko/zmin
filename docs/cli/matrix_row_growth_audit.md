@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2339` | `+1245` |
+| Written behavior rows | `1094` | `2344` | `+1250` |
 | Matching stock Git rows | `823` | `2012` | `+1189` |
 | Open rows | `1` | `1` | `0` |
-| Invalid-input rows | `270` | `326` | `+56` |
-| Commands with rows | `50/151` | `96/151` | `+46` |
+| Invalid-input rows | `270` | `331` | `+61` |
+| Commands with rows | `50/151` | `97/151` | `+47` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `187` commits with `1334` TSV row
-additions and `43` TSV row deletions, for `+1291` text net. The strict behavior
-row count is `+1245` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `188` commits with `1340` TSV row
+additions and `43` TSV row deletions, for `+1297` text net. The strict behavior
+row count is `+1250` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`485` represented by matrix, extension or deferral evidence, and `476` still
+`490` represented by matrix, extension or deferral evidence, and `471` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -80,6 +80,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `shortlog` | `0` | `6` | `+6` |
 | `patch-id` | `0` | `6` | `+6` |
 | `format-patch` | `0` | `6` | `+6` |
+| `fsck` | `0` | `5` | `+5` |
 | `cherry` | `0` | `6` | `+6` |
 | `check-mailmap` | `0` | `6` | `+6` |
 | `stripspace` | `0` | `5` | `+5` |
@@ -141,7 +142,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `476` missing or unclassified.
+  functions, currently `961` total with `471` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -410,7 +411,7 @@ Actual post-import movement matched the corrected declaration: `+4` behavior
 rows, `+4` closed rows, `+0` open rows, `+0` invalid-input rows and `+4`
 represented oracle functions.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle tests already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -448,3 +449,44 @@ row as represented.
 Actual post-import movement matched the declaration: `+3` behavior rows,
 `+3` closed rows, `+0` open rows, `+0` invalid-input rows and `+3`
 represented oracle functions.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_pack_integrity_compat.rs`:
+
+- `git_pack_integrity_compat::fsck_missing_email_severity_config_matches_stock_git`
+- `git_pack_integrity_compat::fsck_bad_email_severity_config_matches_stock_git`
+- `git_pack_integrity_compat::fsck_missing_author_severity_config_matches_stock_git`
+- `git_pack_integrity_compat::fsck_missing_committer_severity_config_matches_stock_git`
+- `git_pack_integrity_compat::fsck_missing_tagger_entry_severity_config_matches_stock_git`
+
+Expected delta:
+
+- behavior rows: `+5`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+5`
+- represented oracle functions: `+5`
+- commands with rows: `+1`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git -c fsck.missingEmail=bogus fsck`
+- `git -c fsck.badEmail=bogus fsck`
+- `git -c fsck.missingAuthor=bogus fsck`
+- `git -c fsck.missingCommitter=bogus fsck`
+- `git -c fsck.missingTaggerEntry=bogus fsck`
+
+The evidence compares stock Git and Zmin stdout/stderr and exit status for
+invalid `fsck.<message>` severity config values against malformed commit and
+tag objects. The accepted severity values from the same tests are not counted
+in this batch; they need separate closed rows to avoid mixing accepted and
+invalid-input statuses.
+
+Actual post-import movement matched the declaration: `+5` behavior rows,
+`+0` closed rows, `+0` open rows, `+5` invalid-input rows, `+5` represented
+oracle functions and `+1` command with rows.
