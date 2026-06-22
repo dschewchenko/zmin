@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2781` | `+1687` |
-| Matching stock Git rows | `823` | `2393` | `+1570` |
+| Written behavior rows | `1094` | `2783` | `+1689` |
+| Matching stock Git rows | `823` | `2395` | `+1572` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `690/4632` | `+437` |
+| Represented doc-option pairs | `253/4632` | `692/4632` | `+439` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -83,7 +83,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `status` | `76` | `135` | `+59` |
 | `branch` | `0` | `49` | `+49` |
 | `notes` | `0` | `42` | `+42` |
-| `add` | `3` | `49` | `+46` |
+| `add` | `3` | `51` | `+48` |
 | `fsck` | `0` | `35` | `+35` |
 | `for-each-ref` | `0` | `34` | `+34` |
 | `show` | `0` | `34` | `+34` |
@@ -3387,6 +3387,44 @@ Expected rows:
 
 The evidence compares stock Git and Zmin exit status, stdout, stderr,
 worktree status and restored file contents for quiet long and short forms.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `add --verbose` and `add -v`
+surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-add-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+2` for `add --verbose` and
+  `add -v`
+- implemented-but-unverified schema rows: expected `-2`
+- Rust behavior changes: yes, `add` now prints stock-compatible
+  `add '<path>'` rows for successful normal verbose staging
+
+Expected rows:
+
+- `git add --verbose verbose.txt`
+- `git add -v verbose.txt`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr,
+`status --short` and stable `ls-files --stage --debug` index fields.
 
 Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`

@@ -3029,7 +3029,7 @@ pub(crate) fn add(
     update: bool,
     intent_to_add: bool,
     refresh: bool,
-    _verbose: bool,
+    verbose: bool,
     ignore_errors: bool,
     ignore_missing: bool,
     chmod: Option<String>,
@@ -3254,7 +3254,7 @@ pub(crate) fn add(
             false
         };
         if !parallel_staged {
-            for (file, _) in stage_file_entries {
+            for (file, relative) in stage_file_entries {
                 let chmod_mode = if let Some(chmod) = chmod {
                     if let Err(error) = ensure_add_chmod_candidate(&repo, &index, &file, chmod) {
                         if chmod_error.is_none() {
@@ -3300,6 +3300,13 @@ pub(crate) fn add(
                     }
                     return Err(error);
                 }
+                if verbose {
+                    println!("add '{}'", String::from_utf8_lossy(&relative));
+                }
+            }
+        } else if verbose {
+            for (_, relative) in &stage_file_entries {
+                println!("add '{}'", String::from_utf8_lossy(relative));
             }
         }
         stage_files_trace.emit();

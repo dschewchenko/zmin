@@ -61,8 +61,8 @@ Generated on 2026-06-22 from the current branch census inputs.
 | Git doc option seed rows | `4632` | documented option spelling seed, not final denominator |
 | Zmin schema baseline commands | `151` | command entry points present in schema |
 | Zmin schema additional commands | `52` | outside Git `2.47.1` baseline |
-| Existing matrix rows | `2781` | evidence layer, not full denominator |
-| Verified exact rows | `2393` | closed behavior variants safe to skip exactly |
+| Existing matrix rows | `2783` | evidence layer, not full denominator |
+| Verified exact rows | `2395` | closed behavior variants safe to skip exactly |
 | Invalid-input parity rows | `387` | stock-compatible rejection variants |
 | Exact open or partial matrix rows | `1` | row exists but is not closed |
 | Implemented but unverified rows | `734` | schema args and additional schema paths without exact matrix evidence |
