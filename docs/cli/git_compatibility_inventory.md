@@ -335,12 +335,12 @@ Do not collapse these layers into one percentage.
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `102/151` | no | audit rows exist for `add`, `am`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit`, `commit-graph`, `commit-tree`, `config`, `count-objects`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `difftool`, `fast-import`, `fetch`, `fetch-pack`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `format-patch`, `fsck`, `get-tar-commit-id`, `grep`, `hash-object`, `http-backend`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `mktag`, `mktree`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `pull`, `push`, `quiltimport`, `range-diff`, `read-tree`, `rebase`, `reflog`, `remote`, `request-pull`, `replay`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `send-pack`, `show`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `unpack-file`, `update-server-info`, `var`, `verify-pack`, `version`, `worktree` and `write-tree` |
-| Git doc option pairs represented by rows | `618/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `2673` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `2287/2673` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/2673` | no | written rows with incomplete parity |
-| Open written rows | `1/2673` | no | written rows that still do not match stock Git |
-| Invalid input rows | `385/2673` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Git doc option pairs represented by rows | `631/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `2687` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `2300/2687` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/2687` | no | written rows with incomplete parity |
+| Open written rows | `1/2687` | no | written rows that still do not match stock Git |
+| Invalid input rows | `386/2687` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -369,10 +369,10 @@ Current generated summary:
 
 | Git reference group | Git commands | Complete command matrices | Git doc option seed rows | Complete doc option pairs | Matrix rows | Written rows matching stock Git | Matrix partial | Matrix open | Matrix invalid input | Closed block variants |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `0` | `276` | `0` | `151` | `135` | `0` | `0` | `16` | `24` |
+| Setup and Config | `6` | `0` | `276` | `0` | `155` | `138` | `0` | `0` | `17` | `24` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `76` | `64` | `0` | `1` | `11` | `47` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `294` | `261` | `0` | `0` | `33` | `145` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `272` | `229` | `0` | `0` | `43` | `50` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `279` | `236` | `0` | `0` | `43` | `50` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `413` | `388` | `0` | `0` | `25` | `160` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `403` | `394` | `0` | `0` | `9` | `52` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` | `11` |
@@ -381,9 +381,9 @@ Current generated summary:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `150` | `89` | `0` | `0` | `61` | `58` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `21` | `0` | `650` | `0` | `512` | `445` | `0` | `0` | `67` | `186` |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `515` | `448` | `0` | `0` | `67` | `186` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `161` | `124` | `0` | `0` | `37` | `102` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2673`** | **`2287`** | **`0`** | **`1`** | **`385`** | **`1018`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2687`** | **`2300`** | **`0`** | **`1`** | **`386`** | **`1018`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -393,10 +393,10 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `618/4632`
-represented option pairs or `2287/2673` passing written rows as a Git support
-percentage. The `2287/2673` number is audit progress for supported rows already
-written down; `0/2673` rows are partial, `1/2673` rows are open and `385/2673`
+Never use `151/151` command presence, `4632` option spellings, `631/4632`
+represented option pairs or `2300/2687` passing written rows as a Git support
+percentage. The `2300/2687` number is audit progress for supported rows already
+written down; `0/2687` rows are partial, `1/2687` rows are open and `386/2687`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,

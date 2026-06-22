@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 102/151 commands with matrix rows / 618/4632 represented doc-option pairs / 2673 written rows / 2287/2673 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 102/151 commands with matrix rows / 631/4632 represented doc-option pairs / 2687 written rows / 2300/2687 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -309,8 +309,8 @@ delegated `index-pack` arguments. Evidence compares stock Git and Zmin stdout,
 stderr, exit code, readable object side effects and `.pack/.idx/.rev/.keep`
 side effects for the covered forms.
 The oracle inventory now lists `703` represented/classified functions and
-`258` `missing_or_unclassified`. Current written rows are `2665`, with
-`2287/2665` matching stock Git, `1/2665` open and `377/2665` invalid-input. No
+`258` `missing_or_unclassified`. Current written rows are `2687`, with
+`2300/2687` matching stock Git, `1/2687` open and `386/2687` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
