@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Plumbing Commands	mktag	<none>	stdin valid tag object	<empty>	local repository with written blob	local	all	printf '<tag-object>' | git mktag	closed	git_object_plumbing_compat::mktag_matches_stock_git_for_valid_tag_object	valid tag object from stdin creates the same tag object id as stock Git
+Plumbing Commands	mktag	--strict	<empty>	stdin valid tag object	local repository with written blob	local	all	printf '<tag-object>' | git mktag --strict	closed	git_object_plumbing_compat::mktag_matches_stock_git_for_valid_tag_object	strict valid tag object from stdin creates the same tag object id as stock Git
