@@ -2,8 +2,8 @@
 
 This inventory prevents compatibility rows from being imported opportunistically.
 It lists focused tests that already compare Zmin behavior with stock Git, then
-shows whether the test function is already referenced by a behavior matrix row
-or by the Zmin-only extension inventory.
+shows whether the test function is already referenced by a behavior matrix row,
+by the Zmin-only extension inventory, or by an explicit oracle deferral.
 
 Generated TSV:
 
@@ -17,14 +17,15 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the remaining `git_diff_compat.rs` missing backlog
+Generated after reviewing the remaining `git_history_query_compat.rs` missing
+backlog
 on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row or extension inventory entry | `415` |
-| Test functions missing or not yet classified by matrix/extension evidence | `546` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `420` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `541` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -33,8 +34,9 @@ Each function still needs review:
 - Git invalid input: add invalid-input rows only when stock Git rejects the
   same surface and side effects match.
 - Zmin-only behavior: record under `docs/cli/zmin_extensions_inventory.md`.
-- Legacy or unavailable external tool behavior: defer until a real stock oracle
-  environment exists.
+- Version-mismatched, legacy or unavailable external tool behavior: record in
+  `docs/cli/oracle_test_deferrals.md` until a real Git `2.47.1` oracle row can
+  be added.
 - Broad smoke or acceptance tests: keep as gates, not behavior rows, unless an
   exact command shape is extracted.
 
@@ -66,7 +68,6 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_refs_compat.rs` | `7` |
 | `git_ref_resolution_compat.rs` | `6` |
 | `git_scalar_compat.rs` | `6` |
-| `git_history_query_compat.rs` | `5` |
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_object_plumbing_compat.rs` | `4` |
 

@@ -61,9 +61,14 @@ def collect_evidence_refs(root: Path) -> Counter[str]:
                 if "::" in evidence:
                     refs[evidence] += 1
 
-    extension_inventory = root / "docs/cli/zmin_extensions_inventory.md"
-    if extension_inventory.exists():
-        text = extension_inventory.read_text(errors="replace")
+    classification_docs = [
+        root / "docs/cli/zmin_extensions_inventory.md",
+        root / "docs/cli/oracle_test_deferrals.md",
+    ]
+    for classification_doc in classification_docs:
+        if not classification_doc.exists():
+            continue
+        text = classification_doc.read_text(errors="replace")
         for evidence in re.findall(r"`([A-Za-z0-9_]+::[A-Za-z0-9_]+)`", text):
             refs[evidence] += 1
     return refs
