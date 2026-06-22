@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2312` | `+1218` |
-| Matching stock Git rows | `823` | `1986` | `+1163` |
+| Written behavior rows | `1094` | `2319` | `+1225` |
+| Matching stock Git rows | `823` | `1993` | `+1170` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `325` | `+55` |
 | Commands with rows | `50/151` | `96/151` | `+46` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `182` commits with `1307` TSV row
-additions and `43` TSV row deletions, for `+1264` text net. The strict behavior
-row count is `+1218` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `183` commits with `1314` TSV row
+additions and `43` TSV row deletions, for `+1271` text net. The strict behavior
+row count is `+1225` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`464` represented by matrix, extension or deferral evidence, and `497` still
+`471` represented by matrix, extension or deferral evidence, and `490` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -140,7 +140,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `497` missing or unclassified.
+  functions, currently `961` total with `490` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -216,7 +216,7 @@ Actual post-import movement matched the declaration: `+5` behavior rows,
 `+5` closed rows, `+0` open rows, `+0` invalid-input rows and `+1`
 represented oracle function.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle test already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -250,3 +250,45 @@ stock Git.
 Actual post-import movement matched the declaration: `+5` behavior rows,
 `+5` closed rows, `+0` open rows, `+0` invalid-input rows and `+1`
 represented oracle function.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_stash_compat.rs`:
+
+- `git_stash_compat::stash_preserves_missing_skip_worktree_entry_like_stock_git`
+- `git_stash_compat::stash_uses_git_stash_identity_when_user_identity_is_missing_like_stock_git`
+- `git_stash_compat::stash_push_captures_same_size_rewrite_after_reset_like_stock_git`
+- `git_stash_compat::stash_pop_rejects_overlapping_dirty_paths_like_stock_git`
+- `git_stash_compat::stash_apply_and_drop_selected_stack_entry_match_stock_git`
+- `git_stash_compat::stash_save_rm_then_recreate_matches_stock_git`
+- `git_stash_compat::stash_save_file_to_directory_matches_stock_git`
+
+Expected delta:
+
+- behavior rows: `+7`
+- closed rows: `+7`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+7`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git stash` with a missing skip-worktree tracked entry
+- `git stash` without configured user identity, using `git stash <git@stash>`
+- `git stash; git stash drop stash@{1}; git stash apply` after same-size rewrites
+- `git stash pop` rejected by an overlapping dirty path
+- `git stash apply stash@{1}; git stash drop 1`
+- `git stash save "rm then recreate"; git stash apply`
+- `git stash save "file to directory"; git stash apply`
+
+The evidence compares stock Git and Zmin for stash commit contents, fallback
+stash identity, repeated rewrite capture, dirty-path rejection, selected stack
+entry operations and legacy `save` path-shape restoration.
+
+Actual post-import movement matched the declaration: `+7` behavior rows,
+`+7` closed rows, `+0` open rows, `+0` invalid-input rows and `+7`
+represented oracle functions.
