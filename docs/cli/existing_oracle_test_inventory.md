@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 ## Current Snapshot
 
 Generated after reviewing
-`git_diff_compat::diff_plumbing_reports_read_tree_stat_dirty_entries_until_refresh_like_stock_git`
+`git_diff_compat` symlink stat-dirty batch
 on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one TSV row | `404` |
-| Test functions missing or not yet classified in TSV evidence | `557` |
+| Test functions referenced by at least one TSV row | `406` |
+| Test functions missing or not yet classified in TSV evidence | `555` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -58,7 +58,7 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_worktree_compat.rs` | `15` |
 | `git_admin_tools_compat.rs` | `13` |
 | `git_merge_compat.rs` | `13` |
-| `git_diff_compat.rs` | `8` |
+| `git_diff_compat.rs` | `6` |
 | `git_sequencer_compat.rs` | `12` |
 | `git_reflog_compat.rs` | `10` |
 | `git_merge_plumbing_compat.rs` | `9` |
