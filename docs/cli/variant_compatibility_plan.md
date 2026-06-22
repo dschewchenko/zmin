@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 669/4632 represented doc-option pairs / 2757 written rows / 2369/2757 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 673/4632 represented doc-option pairs / 2763 written rows / 2375/2763 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,18 +298,20 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `add_v2_47.tsv`, backed by a new focused
-stock-oracle smoke script.
+The latest completed slice extends `bugreport_v2_47.tsv`, backed by a new
+focused stock-oracle smoke script.
 
-`add_v2_47.tsv` now records `--intent-to-add`, `-N` and positional path rows.
-These rows close exact add parser surfaces and index side effects without
-changing behavior. The same smoke found that `add --verbose` still lacks stock
-stdout, so `--verbose` and `-v` stay implemented-but-unverified instead of
-being counted as verified. The oracle inventory remains `707`
-represented/classified functions and `254` `missing_or_unclassified` because
-the new evidence is a shell smoke, not a Rust test inventory function. Current
-written rows are `2757`, with `2369/2757` matching stock Git, `1/2757` open
-and `387/2757` invalid-input. No Rust behavior changed.
+`bugreport_v2_47.tsv` now records `--no-suffix`, `-o`,
+`--output-directory`, `-s` and additional `--suffix` value forms. These rows
+compare exit status, stdout, stderr and created report filenames without
+changing behavior. The same probe found that `bugreport --diagnose=stats`
+emits different diagnostic payload, so `--diagnose` stays
+implemented-but-unverified instead of being counted as verified. The oracle
+inventory remains `707` represented/classified functions and `254`
+`missing_or_unclassified` because the new evidence is a shell smoke, not a
+Rust test inventory function. Current written rows are `2763`, with
+`2375/2763` matching stock Git, `1/2763` open and `387/2763` invalid-input.
+No Rust behavior changed.
 
 ### No-Skip Rule
 

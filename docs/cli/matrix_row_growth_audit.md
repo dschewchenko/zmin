@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2757` | `+1663` |
-| Matching stock Git rows | `823` | `2369` | `+1546` |
+| Written behavior rows | `1094` | `2763` | `+1669` |
+| Matching stock Git rows | `823` | `2375` | `+1552` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `669/4632` | `+416` |
+| Represented doc-option pairs | `253/4632` | `673/4632` | `+420` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -154,7 +154,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `send-pack` | `0` | `4` | `+4` |
 | `unpack-file` | `0` | `4` | `+4` |
 | `version` | `0` | `4` | `+4` |
-| `bugreport` | `0` | `3` | `+3` |
+| `bugreport` | `0` | `9` | `+9` |
 | `commit-graph` | `0` | `3` | `+3` |
 | `credential-store` | `0` | `3` | `+3` |
 | `http-fetch` | `1` | `4` | `+3` |
@@ -3434,4 +3434,51 @@ Actual post-import movement matched the declaration: `+3` behavior rows,
 `+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-3`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `bugreport` schema surfaces,
+with new focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-bugreport-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+4` for `bugreport --no-suffix`,
+  `bugreport -o`, `bugreport --output-directory` and `bugreport -s`; the
+  extra `--suffix` value-form rows extend an already represented option
+- implemented-but-unverified schema rows: expected `-1` because
+  `--no-suffix` closes a schema arg; `-o`, `--output-directory`, `-s` and
+  `--suffix` are documented option rows, but the matching schema arg IDs were
+  already covered by existing suffix evidence or remain doc-expansion work
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git bugreport -o <out> --no-suffix`
+- `git bugreport --output-directory <out> --no-suffix`
+- `git bugreport -o <out> -s custom`
+- `git bugreport -o <out> --suffix=eqcustom`
+- `git bugreport -o <out> --suffix sepcustom`
+- an explicit `-o` row using the no-suffix evidence
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and
+created report filenames. It does not count `bugreport --diagnose=stats`
+because that probe emits different diagnostic payload, so `--diagnose` remains
+implemented-but-unverified.
+
+Actual post-import movement matched the declaration: `+6` behavior rows,
+`+6` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+4` represented doc-option pairs and `-1`
 implemented-but-unverified schema rows.
