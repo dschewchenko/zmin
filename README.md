@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `95/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `524/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2055` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1744/2055` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2055` | written rows with incomplete parity |
-| Open written rows | `1/2055` | written rows that still do not match stock Git |
-| Invalid input rows | `310/2055` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `532/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `2065` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1754/2065` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2065` | written rows with incomplete parity |
+| Open written rows | `1/2065` | written rows that still do not match stock Git |
+| Invalid input rows | `310/2065` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1744/2055` as Git compatibility. It only means `1744` of the `2055`
+Do not read `1754/2065` as Git compatibility. It only means `1754` of the `2065`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2055` rows are partially matching,
-`1/2055` rows are known open mismatches, and `310/2055` additional rows are
-stock-compatible invalid inputs. Do not read `524/4632` as option support
+unexpanded surface is not counted yet, `0/2065` rows are partially matching,
+`1/2065` rows are known open mismatches, and `310/2065` additional rows are
+stock-compatible invalid inputs. Do not read `532/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -213,14 +213,14 @@ Audit progress by git-scm reference group:
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `373` | `365` | `0` | `0` | `8` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` |
-| Debugging | `3` | `0` | `132` | `0` | `134` | `53` | `0` | `0` | `81` |
+| Debugging | `3` | `0` | `132` | `0` | `144` | `63` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `34` | `34` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `70` | `46` | `0` | `0` | `24` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `490` | `423` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `114` | `80` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2055`** | **`1744`** | **`0`** | **`1`** | **`310`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2065`** | **`1754`** | **`0`** | **`1`** | **`310`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -238,7 +238,7 @@ Current command-level matrices:
 | `apply` | `39` | `0` | `4` | `20` | `19` | `0` | `0` | `1` | no |
 | `archive` | `17` | `0` | `3` | `11` | `10` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `blame` | `39` | `0` | `14` | `121` | `41` | `0` | `0` | `80` | no |
+| `blame` | `39` | `0` | `22` | `131` | `51` | `0` | `0` | `80` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `bugreport` | `8` | `0` | `1` | `3` | `3` | `0` | `0` | `0` | no |
 | `bundle` | `15` | `0` | `1` | `11` | `3` | `0` | `0` | `8` | no |
