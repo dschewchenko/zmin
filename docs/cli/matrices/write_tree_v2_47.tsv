@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Plumbing Commands	write-tree	<none>	<empty>	<none>	index with root file and nested file	local	all	git write-tree	closed	git_object_plumbing_compat::write_tree_and_commit_tree_match_stock_git_objects	default write-tree object id matches stock Git for staged index contents
+Plumbing Commands	write-tree	--prefix	src	<none>	index with root file and nested file	local	all	git write-tree --prefix=src	closed	git_object_plumbing_compat::write_tree_and_commit_tree_match_stock_git_objects	prefix-limited tree object id matches stock Git for staged nested contents

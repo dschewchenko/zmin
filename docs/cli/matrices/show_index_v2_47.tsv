@@ -1,2 +1,3 @@
 group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Other Git 2.47 commands	show-index	<stdin>	pack index	<empty>	stdin pack index from repacked repository	local	all	git show-index < pack-*.idx	closed	git_object_plumbing_compat::show_index_matches_stock_git_for_pack_index_stdin	normal pack index stdin output matches stock Git
 Other Git 2.47 commands	show-index	<stdin>	pack index version 3	checksum-valid unsupported idx version	stdin pack index	local	all	git show-index < pack-*.idx	invalid-input	git_object_plumbing_compat::show_index_rejects_unsupported_pack_index_version_like_stock_git	stock Git rejects unsupported pack index versions from stdin with fatal unknown-index-version diagnostics and exit 128
