@@ -53,6 +53,10 @@ coverage numbers in the Git compatibility matrix.
 The next hooks extension should stay Zmin-only and must not change standard Git
 hook semantics.
 
+Detailed command contract and acceptance rows live in
+`docs/cli/zmin_hooks_staged_runner.md` and
+`docs/cli/zmin_hooks_staged_runner_acceptance.tsv`.
+
 Candidate user-facing API:
 
 ```bash
@@ -77,10 +81,12 @@ Requirements:
 Suggested implementation order:
 
 1. Add an index-backed staged-file selector with tests for modified, added,
-   renamed and deleted paths.
-2. Add `hooks run <hook> --staged --list` as a non-executing preview.
-3. Add command execution after selector parity is covered.
-4. Add managed-hook wrapper integration so `pre-commit` can call the staged
+   renamed, deleted and unstaged-only paths.
+2. Add `hooks run <hook> --staged --list` as a non-executing preview and mark
+   the matching acceptance rows with evidence.
+3. Add extension and pathspec filters after the selector contract is stable.
+4. Add command execution after selector parity is covered.
+5. Add managed-hook wrapper integration so `pre-commit` can call the staged
    runner automatically.
 
 This staged runner remains separate from Git compatibility reporting because

@@ -1,0 +1,16 @@
+area	command	mode	input_state	expected_behavior	status	evidence	notes
+selector	zmin hooks run pre-commit --staged --list	list	added file in index	lists "A <path>"	planned	none	index-backed selector required before parser expansion
+selector	zmin hooks run pre-commit --staged --list	list	modified file staged and unstaged edit exists	lists staged path once; ignores unstaged-only content	planned	none	selection must compare HEAD to index, not worktree
+selector	zmin hooks run pre-commit --staged --list	list	renamed file staged	lists "R <old> -> <new>" and command mode uses <new>	planned	none	rename destination is the executable argument
+selector	zmin hooks run pre-commit --staged --list	list	deleted file staged	lists "D <path>" and command mode omits it	planned	none	deleted paths are visible but not executable by default
+selector	zmin hooks run pre-commit --staged --list	list	type change staged	lists changed destination when executable as a file	planned	none	symlink/submodule/file transitions need explicit evidence
+selector	zmin hooks run pre-commit --staged --list	list	no staged changes	exits 0 with no selected executable paths	planned	none	no-op is deterministic and script-friendly
+filter	zmin hooks run pre-commit --staged --ext rs,ts --list	list	mixed staged extensions	lists only .rs and .ts executable paths	planned	none	extension filter applies after staged selector
+filter	zmin hooks run pre-commit --staged -- pathspec --list	list	staged files inside and outside pathspec	lists only pathspec matches	planned	none	pathspec grammar should reuse existing repo pathspec logic
+execution	zmin hooks run pre-commit --staged -- command	exec	added and modified files	runs command with selected paths appended	planned	none	child process receives only selected staged executable paths
+execution	zmin hooks run pre-commit --staged -- command	exec	command exits 7	zmin exits 7	planned	none	exit-code propagation is required for hook correctness
+execution	zmin hooks run pre-commit --staged -- command	exec	no staged executable files	exits 0 and does not run command	planned	none	prevents expensive whole-project fallback
+execution	zmin hooks run pre-commit --staged --dry-run -- command	dry-run	selected staged files	prints command plus selected args; does not execute	planned	none	dry-run must share selector with exec mode
+managed-hooks	zmin hooks add pre-commit --force	run-wrapper	managed wrapper installed	wrapper can call staged runner without changing manual hook semantics	planned	none	manual hooks stay protected unless force is explicit
+platform	zmin hooks run pre-commit --staged --list	list	Windows-style filesystem paths	output uses repo-relative slash paths	planned	none	stable output across platforms
+scope	zmin hooks run pre-commit --staged	extension	stock Git comparison requested	classified as Zmin-only extension, not Git 2.47.1 parity	planned	docs/cli/zmin_extensions_inventory.md	keeps compatibility denominator clean
