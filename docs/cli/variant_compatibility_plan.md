@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 534/4632 represented doc-option pairs / 2085 written rows / 1774/2085 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 534/4632 represented doc-option pairs / 2095 written rows / 1784/2095 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -272,13 +272,14 @@ continuing matrix expansion or guard classification.
 The latest completed slice extends the `blame` matrix from existing
 stock-oracle evidence:
 
-`git blame --show-email --no-show-email a.txt`
+`git blame --date=human a.txt`
 
 `blame_v2_47.tsv` now records ten more already-tested supported rows for
-negative/reset forms for stats, show-name, show-number, show-email and
-progress output. Existing `git_history_query_compat` evidence compares stock
-Git and Zmin output for those simple linear-history cases. This is an evidence
-import only; no Rust behavior changed.
+final-disabled score-debug, color-lines, color-by-age and minimal toggles plus
+`--date=relative` and `--date=human`. Existing `git_history_query_compat`
+evidence compares stock Git and Zmin output for those simple linear-history
+cases, with deterministic `GIT_TEST_DATE_NOW` for relative and human dates.
+This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -622,17 +623,18 @@ report evidence and remain classified as invalid input, not open feature gaps.
 The latest completed slice extends the `blame` matrix from existing
 stock-oracle evidence:
 
-`git blame --show-email --no-show-email a.txt`
+`git blame --date=human a.txt`
 
 `blame_v2_47.tsv` now records ten more already-tested supported rows for
-negative/reset forms for stats, show-name, show-number, show-email and
-progress output. Existing `git_history_query_compat` evidence compares stock
-Git and Zmin output for those simple linear-history cases. This is an evidence
-import only; no Rust behavior changed.
+final-disabled score-debug, color-lines, color-by-age and minimal toggles plus
+`--date=relative` and `--date=human`. Existing `git_history_query_compat`
+evidence compares stock Git and Zmin output for those simple linear-history
+cases, with deterministic `GIT_TEST_DATE_NOW` for relative and human dates.
+This is an evidence import only; no Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2085` written-row
+This card is the exact handoff target after the current `2095` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2085`; the `1/2085` open row and the still incomplete command/doc-option
+`0/2095`; the `1/2095` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
