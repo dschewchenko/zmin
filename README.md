@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `98/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `574/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2451` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2105/2451` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2451` | written rows with incomplete parity |
-| Open written rows | `1/2451` | written rows that still do not match stock Git |
-| Invalid input rows | `345/2451` | rows where stock Git rejects the input |
+| Written behavior rows | `2456` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2110/2456` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2456` | written rows with incomplete parity |
+| Open written rows | `1/2456` | written rows that still do not match stock Git |
+| Invalid input rows | `345/2456` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2105/2451` as Git compatibility. It only means `2105` of the `2451`
+Do not read `2110/2456` as Git compatibility. It only means `2110` of the `2456`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2451` rows are partially matching,
-`1/2451` rows are known open mismatches, and `345/2451` additional rows are
+unexpanded surface is not counted yet, `0/2456` rows are partially matching,
+`1/2456` rows are known open mismatches, and `345/2456` additional rows are
 stock-compatible invalid inputs. Do not read `574/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -208,7 +208,7 @@ Audit progress by git-scm reference group:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `149` | `135` | `0` | `0` | `14` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `61` | `54` | `0` | `1` | `6` |
-| Basic Snapshotting | `9` | `0` | `371` | `0` | `245` | `222` | `0` | `0` | `23` |
+| Basic Snapshotting | `9` | `0` | `371` | `0` | `250` | `227` | `0` | `0` | `23` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `268` | `225` | `0` | `0` | `43` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `403` | `394` | `0` | `0` | `9` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2451`** | **`2105`** | **`0`** | **`1`** | **`345`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2456`** | **`2110`** | **`0`** | **`1`** | **`345`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -294,7 +294,7 @@ Current command-level matrices:
 | `mktag` | `6` | `0` | `1` | `2` | `2` | `0` | `0` | `0` | no |
 | `mktree` | `3` | `0` | `2` | `3` | `3` | `0` | `0` | `0` | no |
 | `multi-pack-index` | `10` | `0` | `0` | `4` | `1` | `0` | `0` | `3` | no |
-| `notes` | `33` | `0` | `0` | `37` | `30` | `0` | `0` | `7` | no |
+| `notes` | `33` | `0` | `0` | `42` | `35` | `0` | `0` | `7` | no |
 | `p4` | `40` | `0` | `0` | `1` | `1` | `0` | `0` | `0` | no |
 | `pack-objects` | `44` | `0` | `1` | `10` | `4` | `0` | `0` | `6` | no |
 | `patch-id` | `4` | `0` | `3` | `6` | `6` | `0` | `0` | `0` | no |
