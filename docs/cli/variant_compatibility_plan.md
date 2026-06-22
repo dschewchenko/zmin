@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 685/4632 represented doc-option pairs / 2776 written rows / 2388/2776 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 690/4632 represented doc-option pairs / 2781 written rows / 2393/2781 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,17 +298,20 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `commit_v2_47.tsv`, backed by `tools/git-commit-short-options-oracle-smoke.sh`.
+The latest completed slice extends `add_v2_47.tsv`, backed by
+`tools/git-add-oracle-smoke.sh`.
 
-`commit_v2_47.tsv` now records short/implemented option rows for `-q`, `-s`,
-`-o`, `-n`, `-t` and `--verbose`. The rows compare exit status, stdout,
-stderr, commit object, HEAD, porcelain status and hook-log presence where
-applicable, while disabling ambient commit signing with `-c commit.gpgsign=false`
-for deterministic evidence. The oracle inventory remains `707` represented/classified functions
-and `254` `missing_or_unclassified` because the evidence is a shell smoke, not
-a Rust test inventory function. Current written rows are `2776`, with
-`2388/2776` matching stock Git, `1/2776` open and `387/2776` invalid-input.
-No Rust behavior changed.
+`add_v2_47.tsv` now records exact rows for `--all`, `--force`,
+`--pathspec-file-nul`, `--update` and `-n`. The rows compare exit status,
+stdout, stderr, `status --short` and stable `ls-files --stage --debug` index
+fields. The same probe found that `add --verbose` and `add -v` still mismatch
+because stock Git prints `add 'verbose.txt'` while Zmin is silent, so those
+verbose surfaces remain unverified and are not counted. The oracle inventory
+remains `707` represented/classified functions and `254`
+`missing_or_unclassified` because the evidence is a shell smoke, not a Rust test
+inventory function. Current written rows are `2781`, with `2393/2781` matching
+stock Git, `1/2781` open and `387/2781` invalid-input. No Rust behavior
+changed.
 
 ### No-Skip Rule
 

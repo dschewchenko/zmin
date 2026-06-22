@@ -39,7 +39,10 @@ make_seed_repo() {
   "$GIT_BIN" -C "$repo" config user.name "Oracle"
   "$GIT_BIN" -C "$repo" config user.email "oracle@example.com"
   printf 'base\n' >"$repo/tracked.txt"
-  "$GIT_BIN" -C "$repo" add tracked.txt
+  mkdir "$repo/dir"
+  printf 'old\n' >"$repo/dir/one.txt"
+  printf '*.ignored\n' >"$repo/.gitignore"
+  "$GIT_BIN" -C "$repo" add tracked.txt dir/one.txt .gitignore
   "$GIT_BIN" -C "$repo" commit -qm "base"
 }
 
@@ -54,11 +57,26 @@ prepare_case() {
     add_positional_path)
       printf 'new\n' >"$work/new.txt"
       ;;
+    add_all_long)
+      printf 'changed\n' >"$work/tracked.txt"
+      printf 'new\n' >"$work/new.txt"
+      rm "$work/dir/one.txt"
+      ;;
+    add_force_long)
+      printf 'ignored\n' >"$work/force.ignored"
+      ;;
     add_pathspec_file_nul)
-      mkdir -p "$work/dir"
-      printf 'one\n' >"$work/dir/one.txt"
+      printf 'changed\n' >"$work/tracked.txt"
       printf 'two\n' >"$work/dir/two.txt"
-      printf 'dir/one.txt\0dir/two.txt\0' >"$work/paths.nul"
+      printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
+      ;;
+    add_update_long)
+      printf 'changed\n' >"$work/tracked.txt"
+      printf 'new\n' >"$work/new.txt"
+      rm "$work/dir/one.txt"
+      ;;
+    add_dry_run_short)
+      printf 'dry\n' >"$work/dry.txt"
       ;;
   esac
 }
@@ -107,3 +125,8 @@ make_seed_repo "$base_seed"
 run_case add_intent_long add --intent-to-add intent.txt
 run_case add_intent_short add -N intent.txt
 run_case add_positional_path add new.txt
+run_case add_all_long add --all
+run_case add_force_long add --force force.ignored
+run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
+run_case add_update_long add --update
+run_case add_dry_run_short add -n dry.txt
