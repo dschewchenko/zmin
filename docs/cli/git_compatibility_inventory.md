@@ -239,6 +239,8 @@ focused parity evidence checks the same surface.
   variants, plus the first update variants.
 - `docs/cli/matrices/request_pull_v2_47.tsv` tracks the first `request-pull`
   local pushed branch and file URL remote variant.
+- `docs/cli/matrices/replay_v2_47.tsv` tracks the first `replay` linear-range
+  usage failure and replay mode variants.
 - `docs/cli/matrices/rerere_v2_47.tsv` tracks the first `rerere`
   invalid-operation variant.
 - `docs/cli/matrices/rm_v2_47.tsv` tracks the first `rm` cached pathspec
@@ -299,13 +301,13 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `79/151` | no | audit rows exist for `add`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `fast-import`, `fetch`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `grep`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `push`, `rebase`, `reflog`, `remote`, `request-pull`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `var`, `verify-pack`, `version` and `worktree` |
-| Git doc option pairs represented by rows | `442/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1757` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `1457/1757` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1757` | no | written rows with incomplete parity |
-| Open written rows | `1/1757` | no | written rows that still do not match stock Git |
-| Invalid input rows | `299/1757` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Commands with any matrix rows | `80/151` | no | audit rows exist for `add`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `fast-import`, `fetch`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `grep`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `push`, `rebase`, `reflog`, `remote`, `request-pull`, `replay`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `var`, `verify-pack`, `version` and `worktree` |
+| Git doc option pairs represented by rows | `445/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `1761` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `1460/1761` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1761` | no | written rows with incomplete parity |
+| Open written rows | `1/1761` | no | written rows that still do not match stock Git |
+| Invalid input rows | `300/1761` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -347,8 +349,8 @@ Current generated summary:
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` | `47` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `376` | `313` | `0` | `0` | `63` | `131` |
-| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `102` | `69` | `0` | `0` | `33` | `98` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1757`** | **`1457`** | **`0`** | **`1`** | **`299`** | **`889`** |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `106` | `72` | `0` | `0` | `34` | `102` |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1761`** | **`1460`** | **`0`** | **`1`** | **`300`** | **`893`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -358,10 +360,10 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `442/4632`
-represented option pairs or `1457/1757` passing written rows as a Git support
-percentage. The `1457/1757` number is audit progress for supported rows already
-written down; `0/1757` rows are partial, `1/1757` rows are open and `299/1757`
+Never use `151/151` command presence, `4632` option spellings, `445/4632`
+represented option pairs or `1460/1761` passing written rows as a Git support
+percentage. The `1460/1761` number is audit progress for supported rows already
+written down; `0/1761` rows are partial, `1/1761` rows are open and `300/1761`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -437,6 +439,7 @@ variants.
 | `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
 | `remote` | `23` | `0` | `1` | `docs/cli/matrices/remote_v2_47.tsv` | `32` | `26` | `0` | `0` | `6` | no |
 | `request-pull` | `1` | `0` | `0` | `docs/cli/matrices/request_pull_v2_47.tsv` | `1` | `1` | `0` | `0` | `0` | no |
+| `replay` | `160` | `0` | `3` | `docs/cli/matrices/replay_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `rerere` | `7` | `0` | `0` | `docs/cli/matrices/rerere_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-list` | `165` | `0` | `8` | `docs/cli/matrices/rev_list_v2_47.tsv` | `10` | `10` | `0` | `0` | `0` | no |
 | `rev-parse` | `72` | `0` | `24` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `64` | `58` | `0` | `0` | `6` | no |

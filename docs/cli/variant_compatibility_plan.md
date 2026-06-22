@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 79/151 commands with matrix rows / 442/4632 represented doc-option pairs / 1757 written rows / 1457 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 445/4632 represented doc-option pairs / 1761 written rows / 1460 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `for-each-repo` matrix from existing
+The latest completed slice seeds the `replay` matrix from existing
 stock-oracle evidence:
 
-`git for-each-repo --config=test.repos rev-parse --is-inside-work-tree`
+`git replay --contained --advance topic <base>..<tip>`
 
-`for_each_repo_v2_47.tsv` now records configured repository iteration, missing
-repository failures with and without `--keep-going`, and a missing config key
-no-op, comparing stdout, stderr and exit status with stock Git through
-`git_admin_tools_compat::for_each_repo_matches_stock_git_for_configured_repositories`
-and `git_admin_tools_compat::for_each_repo_missing_repo_failures_match_stock_git`.
+`replay_v2_47.tsv` now records plain range usage failure, contained advance,
+advance with fixed committer date, and `--onto` replay forms, comparing output,
+stderr, exit status and topic ref side effects with stock Git through
+`git_admin_tools_compat::replay_matches_stock_git_for_linear_range`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -347,19 +346,12 @@ The current macOS oracle host rejects a `bad-\xff.txt` filesystem path with
 `Illegal byte sequence` before stock Git checkout behavior can be observed, so
 this cannot be closed without a Windows/non-Unix oracle run.
 
-The latest matrix inventory slice records the remaining `stash list --format`
-pretty-format atom families already covered by
-`git_stash_compat::stash_list_formats_match_stock_git`: message and decoration
-atoms, RFC2822/date-local-part atoms, GPG/signature atoms, unknown literal and
-prefixed atoms, color atoms and width truncation atoms. This expands the
-written `stash` matrix, but still does not make the command matrix complete.
-
-The latest closed behavior slice is `fast-import` statistics stderr for the
-four former partial rows: `--date-format=rfc2822`, top-level `checkpoint`,
-top-level `progress` and top-level `done`. Zmin now emits stock-shaped
-`fast-import statistics:` stderr with matching object, branch, mark and path
-atom counters for those streams; oracle tests normalize host memory and
-page-size fields. There are currently `0/1070` partial written rows.
+The latest matrix inventory slice records the `replay` linear-range modes
+already covered by
+`git_admin_tools_compat::replay_matches_stock_git_for_linear_range`: plain range
+usage failure, contained advance, fixed-date advance and `--onto` replay
+forms. This expands the written `replay` matrix, but still does not make the
+command matrix complete.
 
 The latest stock-compatible invalid-input guard classification is
 `import_impl.rs` `unsupported fast-import command`. Stock Git rejects an
@@ -627,15 +619,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `for_each_repo_v2_47.tsv` with
-configured repository iteration, missing repository failure, `--keep-going`
-missing repository failure and missing config key no-op rows already covered by
-`git_admin_tools_compat`.
+The latest matrix inventory slice seeds `replay_v2_47.tsv` with plain range
+usage failure, contained advance, fixed-date advance and `--onto` rows already
+covered by `git_admin_tools_compat::replay_matches_stock_git_for_linear_range`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1757` written-row
+This card is the exact handoff target after the current `1761` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -654,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1757`; the `1/1757` open row and the still incomplete command/doc-option
+`0/1761`; the `1/1761` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -763,6 +754,7 @@ until a full matrix is expanded and verified.
 | `request-pull` local pushed branch | `1` | `0` | local pushed-branch summary with file URL remote already covered by `git_mail_tools_compat` |
 | `bugreport` suffix filename modes | `3` | `0` | custom, strftime and path suffix report-file variants already covered by `git_admin_tools_compat` |
 | `for-each-repo` configured repository modes | `4` | `0` | configured repository iteration, missing repository failures with and without `--keep-going`, and missing config key no-op already covered by `git_admin_tools_compat` |
+| `replay` linear range modes | `4` | `1` | plain range usage failure plus contained advance, fixed-date advance and `--onto` replay forms already covered by `git_admin_tools_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
@@ -944,7 +936,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `737` verified variants.
+Tracked closed blocks in this table: `741` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
