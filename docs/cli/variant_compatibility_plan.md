@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 446/4632 represented doc-option pairs / 1802 written rows / 1499 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 446/4632 represented doc-option pairs / 1806 written rows / 1501 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands `diff` patch edge-case matrix rows
-from existing stock-oracle evidence:
+The latest completed slice expands `clone` local safety and ref-format matrix
+rows from existing stock-oracle evidence:
 
-`git diff --cached context.txt`
+`git clone --ref-format=files <path> dst`
 
-`diff_v2_47.tsv` now records context/no-newline, cached context,
-markdown-empty-binary-delete, YAML hunk-header, JSON/repeated-blank and
-binary-stat rows as separate patch/stat edge cases, comparing stdout, stderr
-and exit status with stock Git through focused `git_diff_compat` evidence.
-This is an evidence import only; no Rust behavior changed.
+`clone_v2_47.tsv` now records explicit files ref storage, symlinked source
+object-store root rejection, symlinked loose-object rejection and
+case-insensitive symlink/directory checkout collision as separate rows,
+comparing stock Git and Zmin behavior through focused `git_clone_compat`
+evidence. This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -627,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1802` written-row
+This card is the exact handoff target after the current `1806` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1802`; the `1/1802` open row and the still incomplete command/doc-option
+`0/1806`; the `1/1806` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -769,7 +769,7 @@ until a full matrix is expanded and verified.
 | `grep` tracked, cached and treeish text search forms | `12` | `0` | default pattern search, `-n`, `-l`, `-F`, pathspec, `--cached`, `HEAD -- <path>`, treeish line/filename modes, treeish directory pathspec and no-match exit behavior already covered by `git_grep_compat` |
 | `check-ref-format` common accepted and invalid forms | `11` | `0` | full refname validation, `--allow-onelevel`, `--normalize`, `--branch`, one-level rejection, invalid path components, trailing slash and invalid branch shorthand already covered by `git_check_ref_format_compat` |
 | `filter-branch` supported filters and options | `13` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, `-d` temp directory, `--commit-filter` passthrough, `--commit-filter` with `skip_commit`, initial `--state-branch`, and repeated state-branch forms already covered by `git_filter_branch_compat` |
-| `clone` local path options | `43` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, `--origin` long forms, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, `--single-branch`, local and file URL `--depth 1`, `-b`/`--branch feature`, `--checkout`/`--no-checkout` ordering, `--separate-git-dir`, `--no-single-branch` ordering, bare, mirror, shared bare/mirror and bare/mirror no-tags forms already covered by `git_clone_compat` |
+| `clone` local path options | `45` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, `--origin` long forms, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, `--single-branch`, local and file URL `--depth 1`, `-b`/`--branch feature`, `--checkout`/`--no-checkout` ordering, `--separate-git-dir`, `--no-single-branch` ordering, bare, mirror, shared bare/mirror and bare/mirror no-tags forms, explicit `--ref-format=files`, and case-insensitive symlink/directory collision checkout already covered by `git_clone_compat` |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
@@ -945,7 +945,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `790` verified variants.
+Tracked closed blocks in this table: `792` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
