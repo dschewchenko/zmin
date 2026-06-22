@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the remaining `git_clean_compat.rs` missing backlog
-on `compat/status-pathspec-matrix`.
+Generated after reviewing the remaining `git_archive_compat.rs`
+missing-or-unclassified backlog on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `424` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `537` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `426` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `535` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -59,8 +59,8 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_worktree_compat.rs` | `15` |
 | `git_merge_compat.rs` | `13` |
 | `git_sequencer_compat.rs` | `12` |
-| `git_reflog_compat.rs` | `10` |
 | `git_admin_tools_compat.rs` | `10` |
+| `git_reflog_compat.rs` | `10` |
 | `git_merge_plumbing_compat.rs` | `9` |
 | `git_foreign_scm_compat.rs` | `8` |
 | `git_global_cli_compat.rs` | `7` |
@@ -68,6 +68,7 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_ref_resolution_compat.rs` | `6` |
 | `git_scalar_compat.rs` | `6` |
 | `git_fast_import_export_compat.rs` | `5` |
+| `git_cms_porcelain_compat.rs` | `4` |
 | `git_object_plumbing_compat.rs` | `4` |
 
 The full TSV is the backlog. Do not treat the table above as complete by

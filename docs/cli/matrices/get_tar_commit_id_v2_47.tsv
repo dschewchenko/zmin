@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Other Git 2.47 commands	get-tar-commit-id	<stdin>	tar archive	commit archive with pax global header	committed tree	local	all	git archive --format=tar HEAD | git get-tar-commit-id	closed	git_archive_compat::get_tar_commit_id_matches_stock_git_archive_metadata	stdin tar commit id extraction matches stock Git for archives containing a pax commit id
+Other Git 2.47 commands	get-tar-commit-id	<stdin>	empty	no stdin	local repository	local	all	git get-tar-commit-id < /dev/null	invalid-input	git_archive_compat::get_tar_commit_id_matches_stock_git_archive_metadata	empty stdin exits 128 with empty stdout and stock EOF-before-tar-header fatal diagnostic

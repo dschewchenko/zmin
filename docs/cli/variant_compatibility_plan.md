@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2167 written rows / 1854/2167 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2170 written rows / 1856/2170 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -273,17 +273,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice finishes the remaining `git_clean_compat.rs`
+The latest completed slice finishes the remaining `git_archive_compat.rs`
 missing-or-unclassified backlog from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`clean_v2_47.tsv` now records already-tested quiet clean, nested Git directory
-dry-run/single-force/double-force behavior, `clean.requireForce=false`, and an
-invalid `clean.requireForce=maybe` boolean row. The focused
-`git_clean_compat.rs` evidence covers stdout, stderr, exit status and relevant
-file-system side effects against stock Git. The oracle inventory moved
-`git_clean_compat.rs` to zero missing-or-unclassified functions and reduced
-total `missing_or_unclassified` to `537`. No Rust behavior changed.
+`archive_v2_47.tsv` now records the already-tested `--mtime=bad` fallback to
+the current-time tar entry window, and `get_tar_commit_id_v2_47.tsv` records
+stdin tar commit-id extraction plus empty-stdin invalid-input parity. The
+focused `git_archive_compat.rs` evidence covers stdout, stderr, exit status
+and archive metadata against stock Git. The oracle inventory moved
+`git_archive_compat.rs` to zero missing-or-unclassified functions and reduced
+total `missing_or_unclassified` to `535`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -624,21 +624,21 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice finishes the remaining `git_clean_compat.rs`
+The latest completed slice finishes the remaining `git_archive_compat.rs`
 missing-or-unclassified backlog from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`clean_v2_47.tsv` now records already-tested quiet clean, nested Git directory
-dry-run/single-force/double-force behavior, `clean.requireForce=false`, and an
-invalid `clean.requireForce=maybe` boolean row. The focused
-`git_clean_compat.rs` evidence covers stdout, stderr, exit status and relevant
-file-system side effects against stock Git. The oracle inventory moved
-`git_clean_compat.rs` to zero missing-or-unclassified functions and reduced
-total `missing_or_unclassified` to `537`. No Rust behavior changed.
+`archive_v2_47.tsv` now records the already-tested `--mtime=bad` fallback to
+the current-time tar entry window, and `get_tar_commit_id_v2_47.tsv` records
+stdin tar commit-id extraction plus empty-stdin invalid-input parity. The
+focused `git_archive_compat.rs` evidence covers stdout, stderr, exit status
+and archive metadata against stock Git. The oracle inventory moved
+`git_archive_compat.rs` to zero missing-or-unclassified functions and reduced
+total `missing_or_unclassified` to `535`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2167` written-row
+This card is the exact handoff target after the current `2170` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -657,7 +657,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2167`; the `1/2167` open row and the still incomplete command/doc-option
+`0/2170`; the `1/2170` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
