@@ -115,7 +115,7 @@ The current census snapshot reports:
 - `2287` verified exact behavior rows
 - `377` invalid-input parity rows
 - `960` implemented-but-unverified schema rows
-- `4745` remaining rows to fix, expand or verify
+- `4744` remaining rows to fix, expand or verify
 
 These are checklist counts, not a compatibility percentage. Complete command
 matrices and complete doc-option matrices remain `0/151` and `0/4632`.

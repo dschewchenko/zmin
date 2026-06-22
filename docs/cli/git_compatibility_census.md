@@ -66,11 +66,11 @@ Generated on 2026-06-22 from committed branch state `4c53dd7`.
 | Invalid-input parity rows | `377` | stock-compatible rejection variants |
 | Exact open or partial matrix rows | `1` | row exists but is not closed |
 | Implemented but unverified rows | `960` | schema args and additional schema paths without exact matrix evidence |
-| Remaining checklist rows | `4745` | doc-option expansion, exact opens and unclassified guards |
+| Remaining checklist rows | `4744` | doc-option expansion, exact opens and unclassified guards |
 | Zmin-only or deferred rows | `33` | extension and deferral classifications outside the denominator |
 | Oracle evidence layer rows | `961` | existing tests, not the primary backlog |
 | Source hard-fail rows | `90` | raw guard hits in source scan |
-| Unclassified hard-fail rows | `63` | source guard hits not matched to classification docs |
+| Unclassified hard-fail rows | `62` | source guard hits not matched to classification docs |
 
 ## Bucket Rules
 

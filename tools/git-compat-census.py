@@ -75,6 +75,9 @@ HARD_FAIL_PATTERN = re.compile(r"unsupported|not supported yet|not implemented y
 EVIDENCE_REF_PATTERN = re.compile(r"[A-Za-z0-9_]+::[A-Za-z0-9_]+")
 LONG_OPTION_PATTERN = re.compile(r"(?<!\S)(--[A-Za-z0-9][A-Za-z0-9-]*)(?:[=\s]|$)")
 SHORT_OPTION_PATTERN = re.compile(r"(?<!\S)(-[A-Za-z])(?:[=\s]|$)")
+UNSUPPORTED_IDENTIFIER_PATTERN = re.compile(
+    r"\b[A-Za-z_][A-Za-z0-9_]*(?:unsupported|not_supported|not_implemented)[A-Za-z0-9_]*\b"
+)
 
 
 def die(message: str) -> None:
@@ -298,6 +301,20 @@ def matrix_option_spellings(row: dict[str, str]) -> set[str]:
     return spellings
 
 
+def hard_fail_is_documented(path: Path, stripped: str, docs_text: str) -> bool:
+    quoted = re.findall(r'"([^"]*(?:unsupported|not supported yet|not implemented yet)[^"]*)"', stripped)
+    if stripped in docs_text or any(fragment in docs_text for fragment in quoted):
+        return True
+
+    basename = path.name
+    if basename not in docs_text:
+        return False
+    return any(
+        identifier in docs_text
+        for identifier in UNSUPPORTED_IDENTIFIER_PATTERN.findall(stripped)
+    )
+
+
 def hard_fail_scan(root: Path) -> list[dict[str, str]]:
     docs_text = "\n".join(
         path.read_text(errors="replace")
@@ -322,8 +339,7 @@ def hard_fail_scan(root: Path) -> list[dict[str, str]]:
                 if not HARD_FAIL_PATTERN.search(line):
                     continue
                 stripped = line.strip()
-                quoted = re.findall(r'"([^"]*(?:unsupported|not supported yet|not implemented yet)[^"]*)"', stripped)
-                documented = stripped in docs_text or any(fragment in docs_text for fragment in quoted)
+                documented = hard_fail_is_documented(path, stripped, docs_text)
                 rows.append(
                     {
                         "file": str(path.relative_to(root)),
@@ -660,7 +676,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
                 "evidence_kind": "source_scan",
                 "source_detail": guard["text"],
                 "next_action": "verify documented classifications and classify unclassified hits",
-                "notes": "",
+                "notes": f"{guard['classification_status']} guard mapping",
             }
         )
 
