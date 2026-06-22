@@ -271,6 +271,11 @@ stock-compatible invalid input, intentional deferral or Zmin-only extension. If
 new WebStorm or replacement-shim traces appear, add those rows before
 continuing matrix expansion or guard classification.
 
+Before the next row-import batch, record the selected oracle bucket and expected
+row count, then run `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after
+the batch. This makes denominator growth an explicit audit artifact instead of
+an incidental side effect of finding more existing tests.
+
 ### Latest Completed Slice
 
 The latest completed slice imports the `git_stash_compat.rs` stash show quiet

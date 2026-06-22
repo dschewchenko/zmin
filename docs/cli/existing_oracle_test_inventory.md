@@ -74,15 +74,46 @@ currently unclassified stock-oracle test functions, not by product priority.
 The full TSV is the backlog. Do not treat the table above as complete by
 itself; it only summarizes the largest buckets.
 
+## Count-Growth Audit
+
+Behavior-row counts are allowed to grow when existing stock-oracle tests are
+split into exact Git `2.47.1` matrix rows. That growth must be explicit before
+the next batch starts.
+
+Use this audit before and after row-import batches:
+
+```bash
+tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD
+```
+
+The output lists commits that changed `docs/cli/matrices/*_v2_47.tsv`, sorted
+in commit order. Large deltas are not compatibility regressions by themselves;
+they mean the written denominator expanded. Each delta must be backed by one of
+these sources:
+
+- a focused stock-Git oracle test function in
+  `existing_oracle_test_inventory.tsv`;
+- an explicit Git `2.47.1` documented option/value/state row;
+- a stock-compatible invalid-input row;
+- a deferral or Zmin-only extension note outside the Git matrix.
+
+Before adding more rows from `missing_or_unclassified`, record the selected
+test file/function bucket and expected row count in the slice notes. After the
+batch, rerun the inventory and delta audit so the count increase is traceable
+to that bucket.
+
 ## Next-Row Rule
 
 Before importing any more already-tested rows:
 
 1. Filter `existing_oracle_test_inventory.tsv` to one test file and
    `missing_or_unclassified`.
-2. Read the selected test function body and identify the exact command lines.
-3. Check the command matrix for existing rows by command, option, value,
+2. Record the selected test file/function bucket and expected row count before
+   editing the matrix.
+3. Read the selected test function body and identify the exact command lines.
+4. Check the command matrix for existing rows by command, option, value,
    combination and repo state.
-4. Add a batch only when the rows share the same focused oracle function and
+5. Add a batch only when the rows share the same focused oracle function and
    do not need Rust behavior changes.
-5. Regenerate this inventory after the batch so the backlog stays current.
+6. Regenerate this inventory and run `git-matrix-row-delta-audit.sh` after the
+   batch so the backlog and denominator growth stay current.
