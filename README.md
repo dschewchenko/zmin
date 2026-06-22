@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `91/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `507/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2019` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1708/2019` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2019` | written rows with incomplete parity |
-| Open written rows | `1/2019` | written rows that still do not match stock Git |
-| Invalid input rows | `310/2019` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `92/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `509/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `2021` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1710/2021` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2021` | written rows with incomplete parity |
+| Open written rows | `1/2021` | written rows that still do not match stock Git |
+| Invalid input rows | `310/2021` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1708/2019` as Git compatibility. It only means `1708` of the `2019`
+Do not read `1710/2021` as Git compatibility. It only means `1710` of the `2021`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2019` rows are partially matching,
-`1/2019` rows are known open mismatches, and `310/2019` additional rows are
-stock-compatible invalid inputs. Do not read `507/4632` as option support
+unexpanded surface is not counted yet, `0/2021` rows are partially matching,
+`1/2021` rows are known open mismatches, and `310/2021` additional rows are
+stock-compatible invalid inputs. Do not read `509/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -219,8 +219,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `70` | `46` | `0` | `0` | `24` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `490` | `423` | `0` | `0` | `67` |
-| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `112` | `78` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2019`** | **`1708`** | **`0`** | **`1`** | **`310`** |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `114` | `80` | `0` | `0` | `34` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2021`** | **`1710`** | **`0`** | **`1`** | **`310`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -295,6 +295,7 @@ Current command-level matrices:
 | `patch-id` | `4` | `0` | `3` | `6` | `6` | `0` | `0` | `0` | no |
 | `prune` | `7` | `0` | `1` | `7` | `6` | `0` | `0` | `1` | no |
 | `push` | `57` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
+| `quiltimport` | `7` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
 | `read-tree` | `22` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `reflog` | `13` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
