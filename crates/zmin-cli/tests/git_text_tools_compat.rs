@@ -75,6 +75,29 @@ fn check_attr_matches_stock_git_for_common_attributes() {
             "main.rs\nfile.bin\n"
         )
     );
+
+    for args in [
+        ["check-attr", "--all", "--", "main.rs"].as_slice(),
+        ["check-attr", "-a", "--", "file.bin"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args)
+        );
+    }
+
+    assert_eq!(
+        run_zmin_with_stdin(
+            repo.path(),
+            ["check-attr", "--stdin", "--all"],
+            "main.rs\nfile.bin\n"
+        ),
+        git_with_stdin(
+            repo.path(),
+            ["check-attr", "--stdin", "--all"],
+            "main.rs\nfile.bin\n"
+        )
+    );
 }
 
 #[test]

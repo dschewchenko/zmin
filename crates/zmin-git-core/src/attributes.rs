@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -92,18 +92,9 @@ impl GitAttributes {
     }
 
     pub fn check_all(&self, path: &[u8]) -> Vec<(String, AttributeValue)> {
-        let values = self.values_for_path(path);
-        let names = values.keys().cloned().collect::<BTreeSet<_>>();
-        names
-            .iter()
-            .filter_map(|name| {
-                let value = values.get(name)?;
-                if value == &AttributeValue::Unspecified {
-                    None
-                } else {
-                    Some((name.clone(), value.clone()))
-                }
-            })
+        self.values_for_path_ordered(path)
+            .into_iter()
+            .filter(|(_, value)| value != &AttributeValue::Unspecified)
             .collect()
     }
 
@@ -114,18 +105,28 @@ impl GitAttributes {
     }
 
     fn values_for_path(&self, path: &[u8]) -> BTreeMap<String, AttributeValue> {
+        self.values_for_path_ordered(path).into_iter().collect()
+    }
+
+    fn values_for_path_ordered(&self, path: &[u8]) -> Vec<(String, AttributeValue)> {
         let relative = String::from_utf8_lossy(path).replace('\\', "/");
         let basename = relative.rsplit('/').next().unwrap_or(&relative);
         let mut values = BTreeMap::new();
+        let mut order = Vec::new();
         for rule in &self.rules {
             if !attribute_pattern_matches(&rule.pattern, &relative, basename) {
                 continue;
             }
             for assignment in &rule.assignments {
-                apply_assignment(&mut values, assignment);
+                apply_assignment(&mut values, &mut order, assignment);
             }
         }
-        values
+        let mut rows = order
+            .into_iter()
+            .filter_map(|name| values.remove(&name).map(|value| (name, value)))
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|(name, _)| check_attr_all_order_key(name));
+        rows
     }
 }
 
@@ -260,16 +261,48 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 fn apply_assignment(
     values: &mut BTreeMap<String, AttributeValue>,
+    order: &mut Vec<String>,
     assignment: &AttributeAssignment,
 ) {
     if assignment.name == "binary" && assignment.value == AttributeValue::Set {
-        values.insert("binary".to_owned(), AttributeValue::Set);
-        values.insert("diff".to_owned(), AttributeValue::Unset);
-        values.insert("merge".to_owned(), AttributeValue::Unset);
-        values.insert("text".to_owned(), AttributeValue::Unset);
+        for (name, value) in [
+            ("binary", AttributeValue::Set),
+            ("diff", AttributeValue::Unset),
+            ("merge", AttributeValue::Unset),
+            ("text", AttributeValue::Unset),
+        ] {
+            insert_attribute_value(values, order, name.to_owned(), value);
+        }
         return;
     }
-    values.insert(assignment.name.clone(), assignment.value.clone());
+    insert_attribute_value(
+        values,
+        order,
+        assignment.name.clone(),
+        assignment.value.clone(),
+    );
+}
+
+fn insert_attribute_value(
+    values: &mut BTreeMap<String, AttributeValue>,
+    order: &mut Vec<String>,
+    name: String,
+    value: AttributeValue,
+) {
+    if !values.contains_key(&name) {
+        order.push(name.clone());
+    }
+    values.insert(name, value);
+}
+
+fn check_attr_all_order_key(name: &str) -> usize {
+    match name {
+        "binary" => 0,
+        "diff" => 1,
+        "merge" => 2,
+        "text" => 3,
+        _ => 4,
+    }
 }
 
 fn parse_assignment(value: &str) -> Option<AttributeAssignment> {
@@ -386,6 +419,23 @@ mod tests {
         assert_eq!(
             attrs.check(b"readme.md", &["diff".to_owned()]),
             vec![("diff".to_owned(), AttributeValue::Unspecified)]
+        );
+        assert_eq!(
+            attrs.check_all(b"main.rs"),
+            vec![
+                ("diff".to_owned(), AttributeValue::Value("rust".to_owned())),
+                ("text".to_owned(), AttributeValue::Set),
+                ("custom".to_owned(), AttributeValue::Set),
+            ]
+        );
+        assert_eq!(
+            attrs.check_all(b"file.bin"),
+            vec![
+                ("binary".to_owned(), AttributeValue::Set),
+                ("diff".to_owned(), AttributeValue::Unset),
+                ("merge".to_owned(), AttributeValue::Unset),
+                ("text".to_owned(), AttributeValue::Unset),
+            ]
         );
     }
 }

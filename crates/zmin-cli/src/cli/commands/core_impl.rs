@@ -2084,6 +2084,9 @@ fn parse_check_attr_args(
         return Ok((args, Vec::new()));
     }
     let Some(separator) = separator else {
+        if all && !args.is_empty() {
+            return Ok((Vec::new(), args));
+        }
         return Err(CliError::Fatal {
             code: 129,
             message: "check-attr requires `--` before path arguments".into(),
