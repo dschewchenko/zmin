@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 574/4632 represented doc-option pairs / 2430 written rows / 2084/2430 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 574/4632 represented doc-option pairs / 2442 written rows / 2096/2442 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,15 +285,15 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `530`
-represented or classified and `431` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `531`
+represented or classified and `430` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `530` already represented
-or classified and `431` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `531` already represented
+or classified and `430` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -301,19 +301,18 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `notes_v2_47.tsv` with ten notes
-add/list/show/remove/append/copy rows from existing focused stock-oracle
-evidence in `git_notes_compat.rs`.
+The latest completed slice extends `notes_v2_47.tsv` with twelve `notes edit`
+message-source rows from existing focused stock-oracle evidence in
+`git_notes_compat.rs`.
 
-`notes_v2_47.tsv` now records closed rows for `git notes add -m`, `get-ref`,
-`list`, `show`, `remove`, `add -F`, `append -m`, `append -F` and `copy`, plus
-an invalid-input row for showing a removed/missing note. Evidence comes from
-`git_notes_compat::notes_add_list_show_remove_match_stock_git`, comparing stock
-Git and Zmin notes ref output, list/show output, missing-note status, append
-content and copy behavior. The oracle inventory now lists `530`
-represented/classified functions and `431` `missing_or_unclassified`. Current
-written rows are `2430`, with `2084/2430` matching stock Git, `1/2430` open
-and `345/2430` invalid-input. No Rust behavior changed.
+`notes_v2_47.tsv` now records closed rows for short, long and compact
+`notes edit` message, file, reuse-message and reedit-message forms. Evidence
+comes from `git_notes_compat::notes_edit_message_source_options_match_stock_git`,
+comparing stock Git and Zmin command output and resulting note contents. The
+oracle inventory now lists `531` represented/classified functions and `430`
+`missing_or_unclassified`. Current written rows are `2442`, with `2096/2442`
+matching stock Git, `1/2442` open and `345/2442` invalid-input. No Rust
+behavior changed.
 
 ### No-Skip Rule
 
