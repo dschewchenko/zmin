@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 549/4632 represented doc-option pairs / 2161 written rows / 1849/2161 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2167 written rows / 1854/2167 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -273,23 +273,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice finishes the remaining `git_history_query_compat.rs`
+The latest completed slice finishes the remaining `git_clean_compat.rs`
 missing-or-unclassified backlog from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`blame_v2_47.tsv` now records ten already-tested `git blame -L` range rows:
-backward counts, implicit starts, regex starts, end regexes, caret regex and
-function-name forms. `describe_v2_47.tsv` records `git describe --always` and
-default `git describe` behavior for an untagged root commit.
-`zmin_extensions_inventory.md` classifies `zmin last-modified` as a stable
-Zmin-only extension, outside the Git `2.47.1` denominator.
-`oracle_test_deferrals.md` records
-`git_history_query_compat::whatchanged_requires_explicit_opt_in_like_git_2_54`
-as a Git 2.54-shaped deferral, not Git 2.47 evidence. The oracle inventory now
-counts matrix rows, extension evidence and explicit deferrals as classified,
-moving `git_history_query_compat.rs` to zero missing-or-unclassified functions
-and reducing total `missing_or_unclassified` to `541`. No Rust behavior
-changed.
+`clean_v2_47.tsv` now records already-tested quiet clean, nested Git directory
+dry-run/single-force/double-force behavior, `clean.requireForce=false`, and an
+invalid `clean.requireForce=maybe` boolean row. The focused
+`git_clean_compat.rs` evidence covers stdout, stderr, exit status and relevant
+file-system side effects against stock Git. The oracle inventory moved
+`git_clean_compat.rs` to zero missing-or-unclassified functions and reduced
+total `missing_or_unclassified` to `537`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -630,27 +624,21 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice finishes the remaining `git_history_query_compat.rs`
+The latest completed slice finishes the remaining `git_clean_compat.rs`
 missing-or-unclassified backlog from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`blame_v2_47.tsv` now records ten already-tested `git blame -L` range rows:
-backward counts, implicit starts, regex starts, end regexes, caret regex and
-function-name forms. `describe_v2_47.tsv` records `git describe --always` and
-default `git describe` behavior for an untagged root commit.
-`zmin_extensions_inventory.md` classifies `zmin last-modified` as a stable
-Zmin-only extension, outside the Git `2.47.1` denominator.
-`oracle_test_deferrals.md` records
-`git_history_query_compat::whatchanged_requires_explicit_opt_in_like_git_2_54`
-as a Git 2.54-shaped deferral, not Git 2.47 evidence. The oracle inventory now
-counts matrix rows, extension evidence and explicit deferrals as classified,
-moving `git_history_query_compat.rs` to zero missing-or-unclassified functions
-and reducing total `missing_or_unclassified` to `541`. No Rust behavior
-changed.
+`clean_v2_47.tsv` now records already-tested quiet clean, nested Git directory
+dry-run/single-force/double-force behavior, `clean.requireForce=false`, and an
+invalid `clean.requireForce=maybe` boolean row. The focused
+`git_clean_compat.rs` evidence covers stdout, stderr, exit status and relevant
+file-system side effects against stock Git. The oracle inventory moved
+`git_clean_compat.rs` to zero missing-or-unclassified functions and reduced
+total `missing_or_unclassified` to `537`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2161` written-row
+This card is the exact handoff target after the current `2167` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -669,7 +657,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2161`; the `1/2161` open row and the still incomplete command/doc-option
+`0/2167`; the `1/2167` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
