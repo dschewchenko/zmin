@@ -91,8 +91,8 @@ awk -F '\t' 'NR>1 { total++; c[$7]++ } END { print total, c["represented"], c["m
 tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD
 ```
 
-The current frozen focused-oracle backlog is `961` functions: `597`
-represented or classified and `364` `missing_or_unclassified`. Treat
+The current frozen focused-oracle backlog is `961` functions: `599`
+represented or classified and `362` `missing_or_unclassified`. Treat
 `docs/cli/existing_oracle_test_inventory.tsv` as the complete current list to
 walk. A docs-only row import from that list must reduce
 `missing_or_unclassified` by the declared evidence-function count. If behavior
