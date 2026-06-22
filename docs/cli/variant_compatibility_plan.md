@@ -266,14 +266,15 @@ updates, project-note update, commit and push.
 ### Current Next Slice Pointer
 
 The replacement smoke currently has matrix evidence for every command label in
-`tools/git-replacement-dogfood-smoke.sh`. The next default slice is to keep
-importing dense batches from `docs/cli/existing_oracle_test_inventory.tsv`.
-Filter to `missing_or_unclassified`, read the selected test function, extract
-exact command/option/value/state rows, and only then update matrices. Start
-with high-use commands such as `diff`, `log`, `ls-files`, `rev-parse`,
-`config`, `fetch`, `clone` or `filter-branch` when their focused tests expose a
-dense batch. If no dense tested rows are available, classify one remaining
-`unsupported` or `not supported` Rust guard as a Git-supported gap,
+`tools/git-replacement-dogfood-smoke.sh`. The next default slice is to walk the
+frozen `missing_or_unclassified` oracle backlog in
+`docs/cli/existing_oracle_test_inventory.tsv`, using
+`docs/cli/matrix_row_growth_audit.md` as the bucket list and row-growth budget.
+Filter to `missing_or_unclassified`, choose one coherent file/function group,
+read the selected test functions, extract exact command/option/value/state
+rows, and only then update matrices. If no coherent docs-only batch is
+available from the current bucket, move to the next bucket or classify one
+remaining `unsupported` or `not supported` Rust guard as a Git-supported gap,
 stock-compatible invalid input, intentional deferral or Zmin-only extension. If
 new WebStorm or replacement-shim traces appear, add those rows before
 continuing matrix expansion or guard classification.
@@ -294,10 +295,13 @@ explain the mismatch before committing.
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
 backlog snapshot at `961` focused oracle functions: `597` already represented
 or classified and `364` still `missing_or_unclassified`. Treat that snapshot as
-the upper bound for already-known oracle-test denominator growth. A docs-only
-oracle import must reduce `missing_or_unclassified` by the declared number of
-evidence functions; any TSV row growth that does not do that must name a
-different source bucket before the rows are added.
+the upper bound for already-known oracle-test denominator growth. The default
+bucket order is HTTP transport (`66`), local transport (`58`), maintenance
+(`32`), pack integrity (`28`) and worktree state (`26`), unless a real
+replacement-binary blocker overrides it. A docs-only oracle import must reduce
+`missing_or_unclassified` by the declared number of evidence functions; any TSV
+row growth that does not do that must name a different source bucket before the
+rows are added.
 
 ### Latest Completed Slice
 

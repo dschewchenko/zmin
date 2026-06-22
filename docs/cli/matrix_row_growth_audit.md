@@ -196,23 +196,33 @@ Largest missing/unclassified buckets:
 | --- | ---: |
 | `git_transport_http_compat.rs` | `66` |
 | `git_transport_local_compat.rs` | `58` |
-| `git_pack_integrity_compat.rs` | `28` |
 | `git_maintenance_compat.rs` | `32` |
+| `git_pack_integrity_compat.rs` | `28` |
 | `git_worktree_state_compat.rs` | `26` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
 | `git_notes_compat.rs` | `14` |
-| `git_index_mutation_compat.rs` | `7` |
 | `git_merge_compat.rs` | `13` |
 | `git_sequencer_compat.rs` | `12` |
 | `git_admin_tools_compat.rs` | `10` |
 | `git_merge_plumbing_compat.rs` | `9` |
 | `git_foreign_scm_compat.rs` | `8` |
+| `git_index_mutation_compat.rs` | `7` |
 | `git_refs_compat.rs` | `7` |
-| `git_ref_resolution_compat.rs` | `6` |
 | `git_scalar_compat.rs` | `6` |
-| `git_fast_import_export_compat.rs` | `5` |
+| `git_ref_resolution_compat.rs` | `6` |
 | `git_global_cli_compat.rs` | `5` |
+| `git_fast_import_export_compat.rs` | `5` |
+| `git_object_plumbing_compat.rs` | `4` |
+| `git_cms_porcelain_compat.rs` | `4` |
+| `git_sparse_checkout_compat.rs` | `3` |
+| `git_mail_tools_compat.rs` | `3` |
+| `git_clone_compat.rs` | `2` |
+| `compatibility_command.rs` | `1` |
+| `git_stash_compat.rs` | `1` |
+| `git_repository_state_compat.rs` | `1` |
+| `git_mail_series_compat.rs` | `1` |
+| `git_cli_failure_compat.rs` | `1` |
 
 Largest command-hint buckets inside those `364` functions:
 
@@ -223,11 +233,46 @@ Largest command-hint buckets inside those `364` functions:
 | `worktree` | `47` |
 | `maintenance` | `34` |
 | `merge` | `29` |
-| `config` | `11` |
 | `refs` | `24` |
 | `branch` | `20` |
 | `commit` | `18` |
 | `submodule` | `17` |
+| `notes` | `14` |
+| `upload-pack` | `14` |
+| `add` | `13` |
+| `prune` | `12` |
+| `config` | `11` |
+| `rebase` | `11` |
+
+## Oracle Import Walk Order
+
+Until the `missing_or_unclassified` queue is empty, use this order for
+docs-only imports from existing focused tests:
+
+1. Prefer the largest file bucket that can produce a coherent 3-10 row batch
+   without Rust changes.
+2. Within that file, prefer functions that share one command and one behavior
+   shape, such as one config family, one transport mode or one state transition.
+3. Before editing TSV rows, write the exact evidence functions and expected
+   row/status delta in `Latest Declared Import`.
+4. After editing, regenerate `docs/cli/existing_oracle_test_inventory.tsv` and
+   require the missing count to decrease by the declared evidence-function
+   count.
+
+For the current snapshot, the default candidate order is:
+
+| Order | Bucket | Why first |
+| ---: | --- | --- |
+| 1 | `git_transport_http_compat.rs` (`66`) | largest remaining source and likely dense `remote`/`upload-pack` transport rows |
+| 2 | `git_transport_local_compat.rs` (`58`) | second-largest source with local/file transport and remote-management rows |
+| 3 | `git_maintenance_compat.rs` (`32`) | dense maintenance/repack/multi-pack-index rows with shared command shape |
+| 4 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 5 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
+
+If a new WebStorm or replacement-binary blocker appears, it overrides this
+walk order. If a selected bucket produces Zmin-only extension behavior or an
+intentional deferral instead of Git matrix rows, record that classification and
+do not increase written behavior rows.
 
 ## Latest Declared Import
 

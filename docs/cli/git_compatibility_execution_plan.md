@@ -99,6 +99,15 @@ walk. A docs-only row import from that list must reduce
 rows grow without that reduction, stop and fix the inventory or name a separate
 source bucket before committing.
 
+Use `docs/cli/matrix_row_growth_audit.md` as the ordered worklist for this
+backlog, not a partial `rg` result. The current default order is the largest
+coherent missing-or-unclassified buckets: `git_transport_http_compat.rs`,
+`git_transport_local_compat.rs`, `git_maintenance_compat.rs`,
+`git_pack_integrity_compat.rs` and `git_worktree_state_compat.rs`. Before any
+TSV edit, write the selected functions and expected row/status delta in the
+row-growth audit; after the edit, prove the generated inventory moved by that
+declared amount.
+
 ## Slice Loop
 
 Every compatibility slice follows this exact order:
