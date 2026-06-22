@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2533` | `+1439` |
-| Matching stock Git rows | `823` | `2159` | `+1336` |
+| Written behavior rows | `1094` | `2539` | `+1445` |
+| Matching stock Git rows | `823` | `2165` | `+1342` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `373` | `+103` |
 | Commands with rows | `50/151` | `98/151` | `+48` |
 | Represented doc-option pairs | `253/4632` | `589/4632` | `+336` |
 
-The text-level row delta audit reports `222` commits with `1530` TSV row
-additions and `43` TSV row deletions, for `+1487` text net. The strict behavior
-row count is `+1439` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `223` commits with `1536` TSV row
+additions and `43` TSV row deletions, for `+1493` text net. The strict behavior
+row count is `+1445` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`600` represented by matrix, extension or deferral evidence, and `361` still
+`601` represented by matrix, extension or deferral evidence, and `360` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -88,7 +88,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `stripspace` | `0` | `5` | `+5` |
 | `check-attr` | `0` | `5` | `+5` |
 | `fetch` | `300` | `304` | `+4` |
-| `ls-remote` | `2` | `17` | `+15` |
+| `ls-remote` | `2` | `23` | `+21` |
 | `replay` | `0` | `4` | `+4` |
 | `read-tree` | `0` | `4` | `+4` |
 | `mailinfo` | `0` | `4` | `+4` |
@@ -145,7 +145,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `361` missing or unclassified.
+  functions, currently `961` total with `360` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -187,15 +187,15 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `600` are already represented by matrix rows,
-extension rows or explicit deferrals, and `361` are
+focused oracle functions. `601` are already represented by matrix rows,
+extension rows or explicit deferrals, and `360` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_transport_http_compat.rs` | `63` |
+| `git_transport_http_compat.rs` | `62` |
 | `git_transport_local_compat.rs` | `58` |
 | `git_maintenance_compat.rs` | `32` |
 | `git_pack_integrity_compat.rs` | `28` |
@@ -225,12 +225,12 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `361` functions:
+Largest command-hint buckets inside those `360` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `86` |
-| `remote` | `55` |
+| `remote` | `54` |
 | `worktree` | `47` |
 | `maintenance` | `34` |
 | `merge` | `29` |
@@ -264,7 +264,7 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_transport_http_compat.rs` (`63`) | largest remaining source and likely dense `remote`/`upload-pack` transport rows |
+| 1 | `git_transport_http_compat.rs` (`62`) | largest remaining source and likely dense `remote`/`upload-pack` transport rows |
 | 2 | `git_transport_local_compat.rs` (`58`) | second-largest source with local/file transport and remote-management rows |
 | 3 | `git_maintenance_compat.rs` (`32`) | dense maintenance/repack/multi-pack-index rows with shared command shape |
 | 4 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
@@ -274,6 +274,47 @@ If a new WebStorm or replacement-binary blocker appears, it overrides this
 walk order. If a selected bucket produces Zmin-only extension behavior or an
 intentional deferral instead of Git matrix rows, record that classification and
 do not increase written behavior rows.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`, first frozen backlog bucket
+`git_transport_http_compat.rs`.
+
+Evidence function:
+
+- `git_transport_http_compat::ls_remote_reads_ssh_remote_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: `-1`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; `<repository>`, `--heads`,
+  `--tags`, `--refs` and `<pattern>` already had `ls-remote` rows
+- Rust behavior changes: no
+
+Expected rows:
+
+- `GIT_SSH_COMMAND=<fake-ssh> git ls-remote ssh://host/path/remote.git`
+- `GIT_SSH_COMMAND=<fake-ssh> git ls-remote --heads ssh://host/path/remote.git`
+- `GIT_SSH_COMMAND=<fake-ssh> git ls-remote --tags ssh://host/path/remote.git`
+- `GIT_SSH_COMMAND=<fake-ssh> git ls-remote --refs ssh://host/path/remote.git`
+- `GIT_SSH_COMMAND=<fake-ssh> git ls-remote ssh://host/path/remote.git v*`
+- `GIT_SSH_COMMAND=<fake-ssh> git ls-remote host:path/remote.git`
+
+The evidence asserts successful execution and compares stock Git and Zmin
+stdout for SSH transport across default repository listing, head filtering, tag
+filtering, `--refs` filtering, a pattern argument and scp-like URL syntax.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+6`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+1` represented oracle
+function, `-1` missing-or-unclassified oracle function, `+0` commands with rows
+and `+0` represented doc-option pairs.
 
 ## Latest Declared Import
 
