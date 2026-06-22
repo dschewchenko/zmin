@@ -210,6 +210,8 @@ focused parity evidence checks the same surface.
   `multi-pack-index verify` header validation variants.
 - `docs/cli/matrices/pack_objects_v2_47.tsv` tracks the first
   `pack-objects --index-version` value variants.
+- `docs/cli/matrices/patch_id_v2_47.tsv` tracks the first `patch-id`
+  default, stable, unstable and verbatim stdin patch stream variants.
 - `docs/cli/matrices/prune_v2_47.tsv` tracks the first `prune` expiry,
   negated-option and invalid-input variants.
 - `docs/cli/matrices/push_v2_47.tsv` tracks the first `push`
@@ -275,13 +277,13 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `68/151` | no | audit rows exist for `add`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `grep`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `remote`, `rerere`, `rev-list`, `rev-parse`, `rm`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `var`, `verify-pack`, `version` and `worktree` |
-| Git doc option pairs represented by rows | `415/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `1696` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `1396/1696` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/1696` | no | written rows with incomplete parity |
-| Open written rows | `1/1696` | no | written rows that still do not match stock Git |
-| Invalid input rows | `299/1696` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Commands with any matrix rows | `69/151` | no | audit rows exist for `add`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `grep`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `push`, `rebase`, `reflog`, `remote`, `rerere`, `rev-list`, `rev-parse`, `rm`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `var`, `verify-pack`, `version` and `worktree` |
+| Git doc option pairs represented by rows | `418/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `1702` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `1402/1702` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/1702` | no | written rows with incomplete parity |
+| Open written rows | `1/1702` | no | written rows that still do not match stock Git |
+| Invalid input rows | `299/1702` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -323,8 +325,8 @@ Current generated summary:
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` | `47` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `376` | `313` | `0` | `0` | `63` | `131` |
-| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `71` | `38` | `0` | `0` | `33` | `57` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1696`** | **`1396`** | **`0`** | **`1`** | **`299`** | **`828`** |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `77` | `44` | `0` | `0` | `33` | `63` |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1702`** | **`1402`** | **`0`** | **`1`** | **`299`** | **`834`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -334,10 +336,10 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `415/4632`
-represented option pairs or `1396/1696` passing written rows as a Git support
-percentage. The `1396/1696` number is audit progress for supported rows already
-written down; `0/1696` rows are partial, `1/1696` rows are open and `299/1696`
+Never use `151/151` command presence, `4632` option spellings, `418/4632`
+represented option pairs or `1402/1702` passing written rows as a Git support
+percentage. The `1402/1702` number is audit progress for supported rows already
+written down; `0/1702` rows are partial, `1/1702` rows are open and `299/1702`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -399,6 +401,7 @@ variants.
 | `notes` | `33` | `0` | `0` | `docs/cli/matrices/notes_v2_47.tsv` | `6` | `0` | `0` | `0` | `6` | no |
 | `p4` | `40` | `0` | `0` | `docs/cli/matrices/p4_v2_47.tsv` | `1` | `1` | `0` | `0` | `0` | no |
 | `pack-objects` | `44` | `0` | `1` | `docs/cli/matrices/pack_objects_v2_47.tsv` | `10` | `4` | `0` | `0` | `6` | no |
+| `patch-id` | `4` | `0` | `3` | `docs/cli/matrices/patch_id_v2_47.tsv` | `6` | `6` | `0` | `0` | `0` | no |
 | `prune` | `7` | `0` | `1` | `docs/cli/matrices/prune_v2_47.tsv` | `7` | `6` | `0` | `0` | `1` | no |
 | `push` | `57` | `0` | `0` | `docs/cli/matrices/push_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `rebase` | `103` | `0` | `1` | `docs/cli/matrices/rebase_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |

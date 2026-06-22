@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 68/151 commands with matrix rows / 415/4632 represented doc-option pairs / 1696 written rows / 1396 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 69/151 commands with matrix rows / 418/4632 represented doc-option pairs / 1702 written rows / 1402 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `apply` matrix from existing stock-oracle
+The latest completed slice seeds the `patch-id` matrix from existing stock-oracle
 evidence:
 
-`git apply --index < patch`
+`git patch-id --verbatim < diff.patch`
 
-`apply_v2_47.tsv` now records command lines from `git_apply_compat`: stdin
-patch check/default/cached/index modes, reverse binary literal and delta patch
-forms, rename patch modes, Unix mode-only patches and header-only invalid patch
-input. This is an evidence import only; no Rust behavior changed.
+`patch_id_v2_47.tsv` now records default, `--stable`, `--unstable` and
+`--verbatim` stdin diff patch forms plus stable and unstable multi-commit log
+patch streams from `git_apply_compat::patch_id_matches_stock_git_for_diff_and_log_patches`.
+This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -625,13 +625,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `apply_v2_47.tsv` with stdin patch,
-check, cached, index, reverse binary, rename, Unix mode-only and invalid patch
-input rows already covered by `git_apply_compat`. No Rust behavior changed.
+The latest matrix inventory slice seeds `patch_id_v2_47.tsv` with default,
+stable, unstable and verbatim stdin patch-id rows already covered by
+`git_apply_compat::patch_id_matches_stock_git_for_diff_and_log_patches`. No
+Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1696` written-row
+This card is the exact handoff target after the current `1702` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -650,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1696`; the `1/1696` open row and the still incomplete command/doc-option
+`0/1702`; the `1/1702` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -748,6 +749,7 @@ until a full matrix is expanded and verified.
 | `cherry` upstream/head comparison forms | `6` | `0` | default upstream, explicit upstream/head, `-v`, `--abbrev`, `--abbrev=12` and limit forms already covered by `git_history_query_compat` |
 | `rev-list` base traversal and object forms | `10` | `0` | `--max-count`, `--all`, revision range, negative revision, `--not`, `--count`, `--parents`, `-1`, `--objects` and `--objects --no-object-names` already covered by `git_history_query_compat` |
 | `apply` stdin patch modes | `10` | `0` | `git apply --check`, default stdin apply, `--cached`, `--index`, binary reverse `-R`, rename, Unix mode-only and header-only invalid patch forms already covered by `git_apply_compat` |
+| `patch-id` stdin patch modes | `6` | `0` | default, `--stable`, `--unstable`, `--verbatim` diff patch forms plus stable and unstable log patch streams already covered by `git_apply_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
