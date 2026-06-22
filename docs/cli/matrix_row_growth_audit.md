@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2748` | `+1654` |
-| Matching stock Git rows | `823` | `2360` | `+1537` |
+| Written behavior rows | `1094` | `2752` | `+1658` |
+| Matching stock Git rows | `823` | `2364` | `+1541` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `662/4632` | `+409` |
+| Represented doc-option pairs | `253/4632` | `665/4632` | `+412` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -170,7 +170,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `write-tree` | `0` | `2` | `+2` |
 | `am` | `0` | `1` | `+1` |
 | `bisect` | `0` | `1` | `+1` |
-| `checkout-index` | `0` | `1` | `+1` |
+| `checkout-index` | `0` | `5` | `+5` |
 | `merge` | `0` | `1` | `+1` |
 | `p4` | `0` | `1` | `+1` |
 | `rebase` | `0` | `1` | `+1` |
@@ -3313,3 +3313,46 @@ Actual post-import movement matched the declaration: `+6` behavior rows,
 `+6` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+1` command with rows and `+3` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `checkout-index` schema
+surfaces, then focused stock-oracle evidence already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+
+- `git_worktree_state_compat::checkout_index_matches_stock_git_for_all_paths_stdin_and_prefix`
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: `-1`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+3` for `checkout-index -a`,
+  `--prefix` and `--stdin`; the explicit path row is not represented in the
+  Git docs option seed
+- implemented-but-unverified schema rows: expected `-5` because `-a` closes
+  the shared `arg_id=all` parser surface for the `--all` alias
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git checkout-index -a`
+- `git checkout-index README.md`
+- `git checkout-index --prefix=out/ README.md docs/guide.md`
+- `printf 'docs/guide.md\n' | git checkout-index --stdin`
+
+The evidence compares stock Git and Zmin stdout, stderr and restored worktree
+file contents for all-path, explicit-path, prefixed-output and stdin-path
+flows.
+
+Actual post-import movement matched the declaration: `+4` behavior rows,
+`+4` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
+represented oracle function, `-1` missing-or-unclassified oracle function,
+`+0` commands with rows, `+3` represented doc-option pairs and `-5`
+implemented-but-unverified schema rows.
