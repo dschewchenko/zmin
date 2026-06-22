@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 382/4632 represented doc-option pairs / 1615 written rows / 1323 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 382/4632 represented doc-option pairs / 1620 written rows / 1328 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands `clone` local option and shallow matrix
+The latest completed slice expands `ls-files` mode and top-level pathspec
 coverage from existing stock-oracle evidence:
 
-`git clone --origin upstream --branch feature --single-branch <path> dst`
+`git ls-files -f --modified --deleted`
 
-`docs/cli/matrices/clone_v2_47.tsv` now records additional command lines from
-`git_clone_compat`: `--mirror`, `--shared --mirror`,
-`--mirror --no-tags`, long-form `--origin`/`--branch`/`--config` spellings
-and order-sensitive `--checkout`/`--no-checkout` variants for local source
-repositories.
+`docs/cli/matrices/ls_files_v2_47.tsv` now records additional command lines
+from `git_ls_files_compat::ls_files_modes_match_stock_git`: skip-worktree
+`-t`, `--debug -t`, force tag output with modified/deleted selectors,
+`:/a.txt`, and `--full-name :(top)a.txt` from a nested cwd.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -627,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `clone_v2_47.tsv` with local option,
-shallow, branch and checkout rows already covered by
-`git_clone_compat::clone_local_repo_matches_stock_git_state`.
+The latest matrix inventory slice expands `ls_files_v2_47.tsv` with mode and
+top-level pathspec rows already covered by
+`git_ls_files_compat::ls_files_modes_match_stock_git`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1615` written-row
+This card is the exact handoff target after the current `1620` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -653,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1615`; the `1/1615` open row and the still incomplete command/doc-option
+`0/1620`; the `1/1620` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -819,6 +818,7 @@ until a full matrix is expanded and verified.
 | `ls-files` replacement others pathspec NUL output | `1` | `0` | `-z --others --exclude-standard -- dir` through the `git` shim on a cloned repository with an untracked nested file |
 | `ls-files` replacement deleted plus modified NUL output | `1` | `0` | `-z --deleted --modified` through the `git` shim on a cloned repository with deleted and modified tracked files |
 | `ls-files` replacement mixed worktree NUL output | `1` | `0` | `-z --modified --deleted --others --exclude-standard` through the `git` shim on a cloned repository with untracked, deleted and modified tracked files |
+| `ls-files` mode and top-level pathspec forms | `5` | `0` | skip-worktree `-t`, `--debug -t`, `-f --modified --deleted`, `:/a.txt` and `--full-name :(top)a.txt` from existing stock-oracle evidence |
 | `ls-files --stage` raw regular index mode bits | `1` | `0` | `git ls-files --stage` preserves raw `100640` mode output from a checksum-valid index while using canonical file behavior internally |
 | `ls-files --stage` raw unknown non-tree index mode bits | `1` | `0` | `git ls-files --stage` preserves raw `000000`, `200000` and `777777` mode output from checksum-valid indexes while keeping sparse/tree mode `040000` for a separate slice |
 | `ls-files --sparse --stage` sparse index tree entries | `1` | `0` | `git ls-files --sparse --stage` prints stock sparse-directory `040000` tree entries from an index with the `sdir` marker |
