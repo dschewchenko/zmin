@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 103/151 commands with matrix rows / 655/4632 represented doc-option pairs / 2724 written rows / 2336/2724 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 103/151 commands with matrix rows / 655/4632 represented doc-option pairs / 2725 written rows / 2337/2725 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,17 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `check_ignore_v2_47.tsv` with an explicit
-`<positional:paths>` row backed by existing focused stock-oracle evidence in
-`git_check_ignore_compat.rs`.
+The latest completed slice extends `check_attr_v2_47.tsv` with an explicit
+`<positional:args>` row backed by existing focused stock-oracle evidence in
+`git_text_tools_compat.rs`.
 
-`check_ignore_v2_47.tsv` now records the multi-path positional surface for
-`git check-ignore target/a src/debug.log keep.txt`, closing the Zmin schema
-`paths` argument without changing behavior. The evidence compares stock Git
-and Zmin stdout, stderr and exit status for ignored and non-ignored paths.
+`check_attr_v2_47.tsv` now records the positional attribute/path argument
+surface for `git check-attr text diff custom -- main.rs`, closing the Zmin
+schema `args` argument without changing behavior. The evidence compares stock
+Git and Zmin stdout, stderr and exit status for common attribute queries.
 The oracle inventory now lists `703` represented/classified functions and
-`258` `missing_or_unclassified`. Current written rows are `2724`, with
-`2336/2724` matching stock Git, `1/2724` open and `387/2724` invalid-input. No
+`258` `missing_or_unclassified`. Current written rows are `2725`, with
+`2337/2725` matching stock Git, `1/2725` open and `387/2725` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
