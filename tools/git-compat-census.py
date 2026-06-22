@@ -308,6 +308,8 @@ def normalized_placeholder_names(option: str) -> set[str]:
         return set()
 
     names = {normalized}
+    if normalized.startswith("positional_"):
+        names.add(normalized.removeprefix("positional_"))
     if normalized.endswith("s"):
         names.add(normalized[:-1])
     aliases = {
