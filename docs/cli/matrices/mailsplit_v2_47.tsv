@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Email	mailsplit	-d	4	-f3 -o out mbox input	no repository state required	local	all	git mailsplit -d4 -f3 -oout mbox	closed	git_mail_tools_compat::mailsplit_matches_stock_git_for_mbox_and_maildir	mbox split stdout plus numbered output files match stock Git
+Email	mailsplit	-o	out	maildir input	no repository state required	local	all	git mailsplit -oout maildir	closed	git_mail_tools_compat::mailsplit_matches_stock_git_for_mbox_and_maildir	maildir split stdout plus output files match stock Git
