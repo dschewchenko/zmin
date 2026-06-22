@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 97/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2354 written rows / 2012/2354 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 552/4632 represented doc-option pairs / 2360 written rows / 2018/2360 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -284,8 +284,8 @@ the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `503` already represented
-or classified and `458` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `505` already represented
+or classified and `456` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -293,20 +293,20 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice fixes oracle inventory classification for TSV
-evidence cells that already contain multiple stock-oracle test references.
-`tools/git-existing-oracle-inventory.py` now extracts every `module::test`
-reference from matrix rows and classification docs instead of treating the
-entire evidence cell as one key.
+The latest completed slice imports the first `commit_v2_47.tsv` behavior rows
+from existing focused stock-oracle tests in `git_commit_compat.rs`.
 
-This reclassified three already-covered functions without adding behavior rows:
-`git_global_cli_compat::rev_parse_show_prefix_inside_git_dir_matches_stock_git`,
-`git_global_cli_compat::rev_parse_core_bare_config_affects_discovery_flags` and
-`git_status_compat::status_porcelain_v2_matches_stock_git_for_staged_states`.
-The oracle inventory now lists `503` represented/classified functions and
-`458` `missing_or_unclassified`. Written behavior rows stayed `2354`, with
-`2012/2354` matching stock Git, `1/2354` open and `341/2354` invalid-input. No
-Rust behavior changed.
+`commit_v2_47.tsv` now records six closed rows for the initial `git commit -m`
+setup used by the amend flow, `git commit --amend -m amended`, message-only
+amend, `--amend --no-edit`, editor-backed `--amend` with `GIT_EDITOR=:`, and
+the dot-pathspec form `git commit -m "add attrs" .`. Evidence comes from
+`git_commit_compat::commit_amend_matches_stock_git_state` and
+`git_commit_compat::commit_dot_pathspec_matches_stock_git_state`, comparing
+stock Git and Zmin commit objects, parent shape, commit count, porcelain status
+and index state. The oracle inventory now lists `505` represented/classified
+functions and `456` `missing_or_unclassified`. Current written rows are `2360`,
+with `2018/2360` matching stock Git, `1/2360` open and `341/2360`
+invalid-input. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -649,7 +649,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2354` written-row
+This card is the exact handoff target after the current `2360` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -668,7 +668,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2354`; the `1/2354` open row and the still incomplete command/doc-option
+`0/2360`; the `1/2360` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
