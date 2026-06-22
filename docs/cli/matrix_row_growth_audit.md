@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2783` | `+1689` |
-| Matching stock Git rows | `823` | `2395` | `+1572` |
+| Written behavior rows | `1094` | `2785` | `+1691` |
+| Matching stock Git rows | `823` | `2397` | `+1574` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `692/4632` | `+439` |
+| Represented doc-option pairs | `253/4632` | `694/4632` | `+441` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -104,7 +104,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `pack-objects` | `0` | `18` | `+18` |
 | `send-email` | `0` | `16` | `+16` |
 | `interpret-trailers` | `0` | `15` | `+15` |
-| `archive` | `1` | `15` | `+14` |
+| `archive` | `1` | `17` | `+16` |
 | `diff-index` | `0` | `14` | `+14` |
 | `http-backend` | `0` | `14` | `+14` |
 | `reflog` | `2` | `15` | `+13` |
@@ -3392,6 +3392,48 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `archive -l` and `archive -v`
+doc-option surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-archive-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+2` for `archive -l` and
+  `archive -v`
+- implemented-but-unverified schema rows: `+0`; these rows close short
+  documented alias evidence while the current census keeps schema args
+  unchanged
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git archive -l`
+- `git archive --format=tar -v --output=out.tar HEAD dir`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and
+worktree status. The `-v` row also compares the tar entry listing for the
+written output file. The same probe found `git archive --output=out.tar HEAD`
+produces a binary tar difference, so `--output` remains unverified and is not
+counted in this import.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+2` represented doc-option pairs and `+0`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import
