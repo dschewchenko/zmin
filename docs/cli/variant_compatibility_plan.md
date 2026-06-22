@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1530 written rows / 1238 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 55/151 commands with matrix rows / 350/4632 represented doc-option pairs / 1534 written rows / 1242 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,18 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands the global `--bare` matrix coverage with
-remaining non-`rev-parse` rows from existing stock-oracle evidence:
+The latest completed slice expands global `--git-dir` / `--work-tree` matrix
+coverage from existing stock-oracle evidence:
 
-`git --bare cat-file -t HEAD`
+`git --git-dir=<repo>/.git --work-tree=<repo> status --short`
 
-`docs/cli/matrices/cat_file_v2_47.tsv`, `show_ref_v2_47.tsv` and
-`status_v2_47.tsv` now record the remaining bare-repository command lines from
-`git_global_cli_compat::global_bare_option_matches_stock_git_ordering_and_discovery`:
-`git --bare cat-file -t HEAD`, `git --bare show-ref --heads` and
-`git --bare status --short`.
+`docs/cli/matrices/status_v2_47.tsv` and `rev_parse_v2_47.tsv` now record the
+explicit repository-path command lines from
+`git_global_cli_compat::global_git_dir_and_work_tree_options_match_stock_git`:
+`git --git-dir=<repo>/.git --work-tree=<repo> status --short`,
+`git -C <parent> --git-dir repo/.git --work-tree repo status --short`,
+`git --git-dir <repo>/.git --work-tree <repo> rev-parse --show-toplevel` and
+`git --git-dir <repo>/.git rev-parse --git-dir`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -627,16 +629,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `cat_file_v2_47.tsv`,
-`show_ref_v2_47.tsv` and `status_v2_47.tsv` with remaining bare-repository rows
-already covered by
-`git_global_cli_compat::global_bare_option_matches_stock_git_ordering_and_discovery`:
-`git --bare cat-file -t HEAD`, `git --bare show-ref --heads` and
-`git --bare status --short`. No Rust behavior changed.
+The latest matrix inventory slice expands `status_v2_47.tsv` and
+`rev_parse_v2_47.tsv` with global `--git-dir` / `--work-tree` rows already
+covered by
+`git_global_cli_compat::global_git_dir_and_work_tree_options_match_stock_git`.
+No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1530` written-row
+This card is the exact handoff target after the current `1534` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -655,7 +656,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1530`; the `1/1530` open row and the still incomplete command/doc-option
+`0/1534`; the `1/1534` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
