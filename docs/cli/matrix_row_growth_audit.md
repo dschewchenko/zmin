@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2307` | `+1213` |
-| Matching stock Git rows | `823` | `1981` | `+1158` |
+| Written behavior rows | `1094` | `2312` | `+1218` |
+| Matching stock Git rows | `823` | `1986` | `+1163` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `325` | `+55` |
 | Commands with rows | `50/151` | `96/151` | `+46` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `181` commits with `1302` TSV row
-additions and `43` TSV row deletions, for `+1259` text net. The strict behavior
-row count is `+1213` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `182` commits with `1307` TSV row
+additions and `43` TSV row deletions, for `+1264` text net. The strict behavior
+row count is `+1218` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`463` represented by matrix, extension or deferral evidence, and `498` still
+`464` represented by matrix, extension or deferral evidence, and `497` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -49,7 +49,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | Command | Rows at `9275ac4d` | Rows at `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
 | `diff` | `68` | `239` | `+171` |
-| `stash` | `25` | `189` | `+164` |
+| `stash` | `25` | `194` | `+169` |
 | `ls-files` | `72` | `155` | `+83` |
 | `diff-tree` | `0` | `74` | `+74` |
 | `blame` | `101` | `171` | `+70` |
@@ -140,7 +140,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `498` missing or unclassified.
+  functions, currently `961` total with `497` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -181,7 +181,7 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 `+0` closed rows, `+0` open rows, `+4` invalid-input rows and `+1`
 represented oracle function.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle test already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -211,6 +211,41 @@ The evidence compares stock Git and Zmin for the default tracked-change stash
 flow, including clean worktree/index after push, stash list/rev side effects,
 clearing the stack, applying a stash without dropping it and popping a stash
 while emptying the stack.
+
+Actual post-import movement matched the declaration: `+5` behavior rows,
+`+5` closed rows, `+0` open rows, `+0` invalid-input rows and `+1`
+represented oracle function.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+`git_stash_compat::stash_pop_drops_selected_stack_entry_like_stock_git` in
+`crates/zmin-cli/tests/git_stash_compat.rs`.
+
+Expected delta:
+
+- behavior rows: `+5`
+- closed rows: `+5`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git stash pop stash@{1}`
+- `git stash push --message=custom --no-message`
+- `git stash push --no-message --message=after-no`
+- `git stash push -m no-pathspec-file --pathspec-from-file=paths.txt --no-pathspec-from-file`
+- `git stash push -m no-pathspec-nul --pathspec-file-nul --no-pathspec-file-nul --pathspec-from-file=paths.txt`
+
+The evidence compares stock Git and Zmin for selected stash-pop stack updates,
+last-option-wins message/no-message push behavior, and negated pathspec file
+mode behavior while checking worktree status and stash show output against
+stock Git.
 
 Actual post-import movement matched the declaration: `+5` behavior rows,
 `+5` closed rows, `+0` open rows, `+0` invalid-input rows and `+1`

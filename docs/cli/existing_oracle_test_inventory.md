@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the `git_stash_compat.rs` default push/list/clear/apply/pop
+Generated after reviewing the `git_stash_compat.rs` selected pop and negated push-option
 flow backlog on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `463` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `498` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `464` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `497` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -57,8 +57,8 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
 | `git_merge_compat.rs` | `13` |
-| `git_stash_compat.rs` | `13` |
 | `git_sequencer_compat.rs` | `12` |
+| `git_stash_compat.rs` | `12` |
 | `git_admin_tools_compat.rs` | `10` |
 | `git_reflog_compat.rs` | `10` |
 | `git_merge_plumbing_compat.rs` | `9` |
