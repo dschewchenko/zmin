@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Plumbing Commands	update-index	--add	<empty>	<path>	local repository with untracked file	local	all	git update-index --add a.txt	closed	tools/git-update-index-schema-oracle-smoke.sh::update_index_add_path	adds an untracked path to the index and leaves index/status like stock Git
+Plumbing Commands	update-index	<positional:paths>	a.txt	<none>	local repository with tracked modified file	local	all	git update-index a.txt	closed	tools/git-update-index-schema-oracle-smoke.sh::update_index_positional_path	updates a tracked path in the index and leaves index/status like stock Git

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 701/4632 represented doc-option pairs / 2805 written rows / 2416/2805 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 106/151 commands with matrix rows / 702/4632 represented doc-option pairs / 2807 written rows / 2418/2807 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,17 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `rev_parse_v2_47.tsv`, backed by
-`tools/git-rev-parse-schema-oracle-smoke.sh`.
+The latest completed slice creates `update_index_v2_47.tsv`, backed by
+`tools/git-update-index-schema-oracle-smoke.sh`.
 
-`rev_parse_v2_47.tsv` now records an exact positional row for `git rev-parse
-HEAD`. The smoke compares stock Git and Zmin exit status, stdout, stderr and
-worktree status using copied workdirs from one seed repository so object ids
-match byte-for-byte. The oracle inventory remains `707`
-represented/classified functions and `254` `missing_or_unclassified` because
-the evidence is a shell smoke, not a Rust test inventory function. Current
-written rows are `2805`, with `2416/2805` matching stock Git, `1/2805` open
-and `388/2805` invalid-input.
+`update_index_v2_47.tsv` now records exact rows for `git update-index --add
+a.txt` and `git update-index a.txt`. The smoke compares stock Git and Zmin
+exit status, stdout, stderr, `ls-files --stage` output and worktree status
+for an untracked add case and a tracked modified path case. The oracle
+inventory remains `707` represented/classified functions and `254`
+`missing_or_unclassified` because the evidence is a shell smoke, not a Rust
+test inventory function. Current written rows are `2807`, with `2418/2807`
+matching stock Git, `1/2807` open and `388/2807` invalid-input.
 
 ### No-Skip Rule
 
