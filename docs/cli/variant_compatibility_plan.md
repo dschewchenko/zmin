@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2213 written rows / 1897/2213 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2218 written rows / 1902/2218 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -279,15 +279,16 @@ an incidental side effect of finding more existing tests.
 ### Latest Completed Slice
 
 The latest completed slice imports the `git_stash_compat.rs` stash show
-unified-context backlog rows from
+ignore-matching-lines backlog rows from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested `stash show` unified-context rows
-for `--unified=0 --patch`, `-U0 --patch`, `--unified=1 --patch`, and
-`--inter-hunk-context=6 --unified=0 --patch`. The
+`stash_v2_47.tsv` now records already-tested `stash show`
+ignore-matching-lines rows for `-IDEBUG|TRACE`,
+`--ignore-matching-lines=DEBUG|TRACE`, `--stat -IDEBUG|TRACE`,
+`--numstat -IDEBUG|TRACE`, and `--shortstat -IDEBUG|TRACE`. The
 focused `git_stash_compat.rs` evidence covers stdout, stderr and exit status
 against stock Git. The oracle inventory reduced total
-`missing_or_unclassified` to `528`. No Rust behavior changed.
+`missing_or_unclassified` to `527`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -629,19 +630,20 @@ commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
 The latest completed slice imports the `git_stash_compat.rs` stash show
-unified-context backlog rows from
+ignore-matching-lines backlog rows from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested `stash show` unified-context rows
-for `--unified=0 --patch`, `-U0 --patch`, `--unified=1 --patch`, and
-`--inter-hunk-context=6 --unified=0 --patch`. The
+`stash_v2_47.tsv` now records already-tested `stash show`
+ignore-matching-lines rows for `-IDEBUG|TRACE`,
+`--ignore-matching-lines=DEBUG|TRACE`, `--stat -IDEBUG|TRACE`,
+`--numstat -IDEBUG|TRACE`, and `--shortstat -IDEBUG|TRACE`. The
 focused `git_stash_compat.rs` evidence covers stdout, stderr and exit status
 against stock Git. The oracle inventory reduced total
-`missing_or_unclassified` to `528`. No Rust behavior changed.
+`missing_or_unclassified` to `527`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2213` written-row
+This card is the exact handoff target after the current `2218` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -660,7 +662,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2213`; the `1/2213` open row and the still incomplete command/doc-option
+`0/2218`; the `1/2218` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb

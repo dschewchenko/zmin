@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `96/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `550/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2213` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1897/2213` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2213` | written rows with incomplete parity |
-| Open written rows | `1/2213` | written rows that still do not match stock Git |
-| Invalid input rows | `315/2213` | rows where stock Git rejects the input |
+| Written behavior rows | `2218` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1902/2218` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2218` | written rows with incomplete parity |
+| Open written rows | `1/2218` | written rows that still do not match stock Git |
+| Invalid input rows | `315/2218` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1897/2213` as Git compatibility. It only means `1897` of the `2213`
+Do not read `1902/2218` as Git compatibility. It only means `1902` of the `2218`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2213` rows are partially matching,
-`1/2213` rows are known open mismatches, and `315/2213` additional rows are
+unexpanded surface is not counted yet, `0/2218` rows are partially matching,
+`1/2218` rows are known open mismatches, and `315/2218` additional rows are
 stock-compatible invalid inputs. Do not read `550/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -209,7 +209,7 @@ Audit progress by git-scm reference group:
 | Setup and Config | `6` | `0` | `276` | `0` | `149` | `135` | `0` | `0` | `14` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `61` | `54` | `0` | `1` | `6` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `156` | `124` | `0` | `0` | `32` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `161` | `129` | `0` | `0` | `32` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `402` | `393` | `0` | `0` | `9` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2213`** | **`1897`** | **`0`** | **`1`** | **`315`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2218`** | **`1902`** | **`0`** | **`1`** | **`315`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -315,7 +315,7 @@ Current command-level matrices:
 | `show-ref` | `14` | `0` | `5` | `11` | `8` | `0` | `0` | `3` | no |
 | `shortlog` | `164` | `0` | `4` | `6` | `6` | `0` | `0` | `0` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `8` | `3` | `0` | `0` | `5` | no |
-| `stash` | `30` | `0` | `0` | `95` | `89` | `0` | `0` | `6` | no |
+| `stash` | `30` | `0` | `0` | `100` | `94` | `0` | `0` | `6` | no |
 | `status` | `26` | `0` | `23` | `135` | `125` | `0` | `0` | `10` | no |
 | `stripspace` | `5` | `0` | `4` | `5` | `5` | `0` | `0` | `0` | no |
 | `submodule` | `35` | `0` | `0` | `7` | `0` | `0` | `0` | `7` | no |
