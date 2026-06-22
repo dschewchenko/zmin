@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 501/4632 represented doc-option pairs / 1985 written rows / 1674/1985 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 504/4632 represented doc-option pairs / 1995 written rows / 1684/1995 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -620,15 +620,22 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `diff_v2_47.tsv` patch edge-case
-coverage with context/no-newline, cached context, markdown-empty-binary-delete,
-YAML hunk-header, JSON/repeated-blank and binary-stat rows already covered by
-`git_diff_compat`.
-No Rust behavior changed.
+The latest completed slice imports `diff` cached copy-detection rows from
+existing stock-oracle evidence:
+
+`git diff --cached -C --find-copies-harder --name-status`
+
+`diff_v2_47.tsv` now records `-C` cached exact-copy output across name-status,
+name-only, summary, raw, stat, numstat and default patch forms, plus
+`--find-copies=50%`, compact `-C90%`, and `--find-copies-harder` spelling
+coverage for name-status copy detection. Existing
+`git_diff_compat::diff_find_copies_exact_matches_stock_git_for_cached_formats`
+evidence compares stock Git and Zmin output for all ten forms. This is an
+evidence import only; no Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1985` written-row
+This card is the exact handoff target after the current `1995` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -647,7 +654,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1985`; the `1/1985` open row and the still incomplete command/doc-option
+`0/1995`; the `1/1995` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
