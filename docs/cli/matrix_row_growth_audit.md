@@ -37,12 +37,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2616` | `+1522` |
-| Matching stock Git rows | `823` | `2239` | `+1416` |
+| Written behavior rows | `1094` | `2622` | `+1528` |
+| Matching stock Git rows | `823` | `2245` | `+1422` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `376` | `+106` |
 | Commands with rows | `50/151` | `102/151` | `+52` |
-| Represented doc-option pairs | `253/4632` | `598/4632` | `+345` |
+| Represented doc-option pairs | `253/4632` | `599/4632` | `+346` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -50,7 +50,7 @@ behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`676` represented by matrix, extension or deferral evidence, and `285` still
+`678` represented by matrix, extension or deferral evidence, and `283` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -157,7 +157,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `285` missing or unclassified.
+  functions, currently `961` total with `283` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -333,16 +333,16 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `676` are already represented by matrix rows,
-extension rows or explicit deferrals, and `285` are
+focused oracle functions. `678` are already represented by matrix rows,
+extension rows or explicit deferrals, and `283` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_transport_http_compat.rs` | `29` |
 | `git_pack_integrity_compat.rs` | `28` |
+| `git_transport_http_compat.rs` | `27` |
 | `git_worktree_state_compat.rs` | `26` |
 | `git_maintenance_compat.rs` | `24` |
 | `git_transport_local_compat.rs` | `24` |
@@ -371,14 +371,14 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `285` functions:
+Largest command-hint buckets inside those `283` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `69` |
 | `worktree` | `47` |
 | `merge` | `28` |
-| `remote` | `28` |
+| `remote` | `26` |
 | `maintenance` | `26` |
 | `refs` | `18` |
 | `submodule` | `17` |
@@ -407,8 +407,8 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_transport_http_compat.rs` (`29`) | network transport coverage over HTTP, SSH and git-daemon |
-| 2 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 1 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 2 | `git_transport_http_compat.rs` (`27`) | network transport coverage over HTTP, SSH and git-daemon |
 | 3 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
 | 4 | `git_maintenance_compat.rs` (`24`) | remaining dense maintenance/repack/multi-pack-index rows |
 | 5 | `git_transport_local_compat.rs` (`24`) | remaining local/file transport and remote-management rows |
@@ -991,6 +991,47 @@ Actual post-import movement matched the declaration: `+3` behavior rows,
 `+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows and `+0` represented doc-option pairs.
+
+### Declared: Push Network Transport Batch
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`, current largest missing bucket
+`git_transport_http_compat.rs`, push network transport behavior group.
+
+Evidence functions:
+
+- `git_transport_http_compat::push_writes_ssh_remote_like_stock_git`
+- `git_transport_http_compat::push_writes_smart_http_remote_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+2`
+- missing-or-unclassified oracle functions: `-2`
+- commands with rows: `+0`
+- represented doc-option pairs: to be confirmed by generated summary because
+  this extends existing `push` coverage and may add the first `push -u` row
+- Rust behavior changes: no
+
+Expected rows:
+
+- `GIT_SSH_COMMAND=<fake-ssh> git push -u origin main`
+- `GIT_SSH_COMMAND=<fake-ssh> git push origin feature`
+- `GIT_SSH_COMMAND=<fake-ssh> git push origin :feature`
+- `git push -u origin main` over smart HTTP
+- `git push origin feature` over smart HTTP
+- `git push origin :feature` over smart HTTP
+The evidence compares stock Git and Zmin remote refs, pushed object contents,
+feature branch creation/deletion and upstream branch config after pushes over
+SSH and smart HTTP transports.
+
+Actual post-import movement matched the declaration: `+6` behavior rows,
+`+6` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
+represented oracle functions, `-2` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+1` represented doc-option pair.
 
 ### Declared: Maintenance Prefetch Local Batch
 
