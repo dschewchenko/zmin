@@ -91,8 +91,8 @@ awk -F '\t' 'NR>1 { total++; c[$7]++ } END { print total, c["represented"], c["m
 tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD
 ```
 
-The current frozen focused-oracle backlog is `961` functions: `604`
-represented or classified and `357` `missing_or_unclassified`. Treat
+The current frozen focused-oracle backlog is `961` functions: `606`
+represented or classified and `355` `missing_or_unclassified`. Treat
 `docs/cli/existing_oracle_test_inventory.tsv` as the complete current list to
 walk. A docs-only row import from that list must reduce
 `missing_or_unclassified` by the declared evidence-function count. If behavior
@@ -101,8 +101,8 @@ source bucket before committing.
 
 Use `docs/cli/matrix_row_growth_audit.md` as the ordered worklist for this
 backlog, not a partial `rg` result. The current default order is the largest
-coherent missing-or-unclassified buckets: `git_transport_http_compat.rs`,
-`git_transport_local_compat.rs`, `git_maintenance_compat.rs`,
+coherent missing-or-unclassified buckets: `git_transport_local_compat.rs`,
+`git_transport_http_compat.rs`, `git_maintenance_compat.rs`,
 `git_pack_integrity_compat.rs` and `git_worktree_state_compat.rs`. Before any
 TSV edit, write the selected functions and expected row/status delta in the
 row-growth audit; after the edit, prove the generated inventory moved by that

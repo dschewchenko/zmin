@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `98/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `589/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2542` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2168/2542` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2542` | written rows with incomplete parity |
-| Open written rows | `1/2542` | written rows that still do not match stock Git |
-| Invalid input rows | `373/2542` | rows where stock Git rejects the input |
+| Written behavior rows | `2544` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2170/2544` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2544` | written rows with incomplete parity |
+| Open written rows | `1/2544` | written rows that still do not match stock Git |
+| Invalid input rows | `373/2544` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2168/2542` as Git compatibility. It only means `2168` of the `2542`
+Do not read `2170/2544` as Git compatibility. It only means `2170` of the `2544`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2542` rows are partially matching,
-`1/2542` rows are known open mismatches, and `373/2542` additional rows are
+unexpanded surface is not counted yet, `0/2544` rows are partially matching,
+`1/2544` rows are known open mismatches, and `373/2544` additional rows are
 stock-compatible invalid inputs. Do not read `589/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -207,7 +207,7 @@ Audit progress by git-scm reference group:
 | Git reference group | Git commands | Complete command matrices | Git doc option seed | Complete documented option matrices | Behavior rows written | Written rows matching stock Git | Partial written rows | Open written rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `149` | `135` | `0` | `0` | `14` |
-| Getting and Creating Projects | `2` | `0` | `66` | `0` | `61` | `54` | `0` | `1` | `6` |
+| Getting and Creating Projects | `2` | `0` | `66` | `0` | `63` | `56` | `0` | `1` | `6` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `292` | `261` | `0` | `0` | `31` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `268` | `225` | `0` | `0` | `43` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `370` | `345` | `0` | `0` | `25` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2542`** | **`2168`** | **`0`** | **`1`** | **`373`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2544`** | **`2170`** | **`0`** | **`1`** | **`373`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -252,7 +252,7 @@ Current command-level matrices:
 | `checkout-index` | `19` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `cherry` | `6` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
 | `clean` | `13` | `0` | `9` | `30` | `24` | `0` | `0` | `6` | no |
-| `clone` | `56` | `0` | `24` | `59` | `52` | `0` | `1` | `6` | no |
+| `clone` | `56` | `0` | `24` | `61` | `54` | `0` | `1` | `6` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
 | `commit-tree` | `7` | `0` | `2` | `4` | `4` | `0` | `0` | `0` | no |
