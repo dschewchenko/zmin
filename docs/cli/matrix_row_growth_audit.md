@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2476` | `+1382` |
-| Matching stock Git rows | `823` | `2126` | `+1303` |
+| Written behavior rows | `1094` | `2480` | `+1386` |
+| Matching stock Git rows | `823` | `2129` | `+1306` |
 | Open rows | `1` | `1` | `0` |
-| Invalid-input rows | `270` | `349` | `+79` |
+| Invalid-input rows | `270` | `350` | `+80` |
 | Commands with rows | `50/151` | `98/151` | `+48` |
 | Represented doc-option pairs | `253/4632` | `579/4632` | `+326` |
 
-The text-level row delta audit reports `213` commits with `1473` TSV row
-additions and `43` TSV row deletions, for `+1430` text net. The strict behavior
-row count is `+1382` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `214` commits with `1477` TSV row
+additions and `43` TSV row deletions, for `+1434` text net. The strict behavior
+row count is `+1386` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`556` represented by matrix, extension or deferral evidence, and `405` still
+`560` represented by matrix, extension or deferral evidence, and `401` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -98,7 +98,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `credential-cache` | `0` | `4` | `+4` |
 | `credential` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `4` | `+4` |
-| `add` | `3` | `26` | `+23` |
+| `add` | `3` | `30` | `+27` |
 | `unpack-file` | `0` | `3` | `+3` |
 | `range-diff` | `0` | `3` | `+3` |
 | `mktree` | `0` | `3` | `+3` |
@@ -144,7 +144,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `405` missing or unclassified.
+  functions, currently `961` total with `401` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -186,8 +186,8 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `556` are already represented by matrix rows,
-extension rows or explicit deferrals, and `405` are
+focused oracle functions. `560` are already represented by matrix rows,
+extension rows or explicit deferrals, and `401` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
@@ -197,9 +197,9 @@ Largest missing/unclassified buckets:
 | `git_transport_http_compat.rs` | `75` |
 | `git_transport_local_compat.rs` | `58` |
 | `git_pack_integrity_compat.rs` | `46` |
-| `git_index_mutation_compat.rs` | `21` |
 | `git_maintenance_compat.rs` | `32` |
 | `git_worktree_state_compat.rs` | `26` |
+| `git_index_mutation_compat.rs` | `17` |
 | `git_notes_compat.rs` | `14` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
@@ -214,11 +214,11 @@ Largest missing/unclassified buckets:
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_global_cli_compat.rs` | `5` |
 
-Largest command-hint buckets inside those `405` functions:
+Largest command-hint buckets inside those `401` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
-| `<none>` | `100` |
+| `<none>` | `96` |
 | `remote` | `31` |
 | `worktree` | `28` |
 | `config` | `21` |
@@ -283,6 +283,41 @@ Actual post-import movement matched the declaration: `+3` behavior rows,
 `+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows and `+0` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions:
+
+- `git_index_mutation_compat::add_escaped_bracket_pathspec_matches_literal_path_like_stock_git`
+- `git_index_mutation_compat::add_resolves_conflict_on_ignored_path_like_stock_git`
+- `git_index_mutation_compat::add_embedded_repository_warning_matches_stock_git`
+- `git_index_mutation_compat::add_empty_embedded_repository_error_matches_stock_git`
+
+Expected movement:
+
+- behavior rows: `+4`
+- matching stock Git rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+1`
+- represented oracle functions: `+4`
+- missing-or-unclassified oracle functions: `-4`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git add 'fo\[ou\]bar'`
+- `git add track-this` resolving an unmerged ignored path
+- `git add .` with embedded repositories that have commits
+- `git add empty` with an embedded repository that has no checked-out commit
+
+The evidence compares stock Git and Zmin pathspec handling, index entries,
+stdout/stderr, exit status and failure diagnostics for index mutation edge
+cases.
 
 ## Latest Declared Import
 
