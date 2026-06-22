@@ -29,6 +29,7 @@ ZMIN_PATTERNS = (
     "Zmin",
 )
 
+EVIDENCE_REF_PATTERN = re.compile(r"[A-Za-z0-9_]+::[A-Za-z0-9_]+")
 
 def parse_test_functions(path: Path) -> list[tuple[str, str]]:
     text = path.read_text(errors="replace")
@@ -58,7 +59,9 @@ def collect_evidence_refs(root: Path) -> Counter[str]:
         with matrix.open(newline="") as handle:
             for row in csv.DictReader(handle, delimiter="\t"):
                 evidence = row.get("evidence", "")
-                if "::" in evidence:
+                for evidence_ref in EVIDENCE_REF_PATTERN.findall(evidence):
+                    refs[evidence_ref] += 1
+                if "::" in evidence and not EVIDENCE_REF_PATTERN.search(evidence):
                     refs[evidence] += 1
 
     classification_docs = [
@@ -69,7 +72,7 @@ def collect_evidence_refs(root: Path) -> Counter[str]:
         if not classification_doc.exists():
             continue
         text = classification_doc.read_text(errors="replace")
-        for evidence in re.findall(r"`([A-Za-z0-9_]+::[A-Za-z0-9_]+)`", text):
+        for evidence in EVIDENCE_REF_PATTERN.findall(text):
             refs[evidence] += 1
     return refs
 

@@ -284,8 +284,8 @@ the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `500` already represented
-or classified and `461` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `503` already represented
+or classified and `458` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -293,19 +293,20 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice imports the next `git_pack_integrity_compat.rs`
-`fsck` invalid severity config rows for malformed tagger and author date
-objects from `docs/cli/existing_oracle_test_inventory.tsv`.
+The latest completed slice fixes oracle inventory classification for TSV
+evidence cells that already contain multiple stock-oracle test references.
+`tools/git-existing-oracle-inventory.py` now extracts every `module::test`
+reference from matrix rows and classification docs instead of treating the
+entire evidence cell as one key.
 
-`fsck_v2_47.tsv` now records stock-compatible invalid-input rows for
-`fsck.missingSpaceBeforeEmail=bogus`,
-`fsck.missingSpaceBeforeDate=bogus`, `fsck.zeroPaddedDate=bogus`,
-`fsck.badDate=bogus` and `fsck.badTimezone=bogus`. The focused
-`git_pack_integrity_compat.rs` evidence covers stdout/stderr and exit status
-against malformed tagger date, tagger identity, author date and author timezone
-objects. Accepted severity values from the same tests remain uncounted until
-they get separate closed rows. The oracle inventory reduced total
-`missing_or_unclassified` to `461`. No Rust behavior changed.
+This reclassified three already-covered functions without adding behavior rows:
+`git_global_cli_compat::rev_parse_show_prefix_inside_git_dir_matches_stock_git`,
+`git_global_cli_compat::rev_parse_core_bare_config_affects_discovery_flags` and
+`git_status_compat::status_porcelain_v2_matches_stock_git_for_staged_states`.
+The oracle inventory now lists `503` represented/classified functions and
+`458` `missing_or_unclassified`. Written behavior rows stayed `2354`, with
+`2012/2354` matching stock Git, `1/2354` open and `341/2354` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 

@@ -38,7 +38,7 @@ row count is `+1260` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`500` represented by matrix, extension or deferral evidence, and `461` still
+`503` represented by matrix, extension or deferral evidence, and `458` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -142,7 +142,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `461` missing or unclassified.
+  functions, currently `961` total with `458` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -158,9 +158,9 @@ stock-oracle tests. It is intentionally file-level, not row-level: each listed
 test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
-As of `5e182a2`, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `500` are already represented by matrix rows,
-extension rows or explicit deferrals, and `461` are
+As of `07a548c`, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
+focused oracle functions. `503` are already represented by matrix rows,
+extension rows or explicit deferrals, and `458` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
@@ -182,13 +182,13 @@ Largest missing/unclassified buckets:
 | `git_admin_tools_compat.rs` | `10` |
 | `git_merge_plumbing_compat.rs` | `9` |
 | `git_foreign_scm_compat.rs` | `8` |
-| `git_global_cli_compat.rs` | `7` |
 | `git_refs_compat.rs` | `7` |
 | `git_ref_resolution_compat.rs` | `6` |
 | `git_scalar_compat.rs` | `6` |
 | `git_fast_import_export_compat.rs` | `5` |
+| `git_global_cli_compat.rs` | `5` |
 
-Largest command-hint buckets inside those `461` functions:
+Largest command-hint buckets inside those `458` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
@@ -197,7 +197,7 @@ Largest command-hint buckets inside those `461` functions:
 | `worktree` | `48` |
 | `commit` | `44` |
 | `maintenance` | `34` |
-| `config` | `33` |
+| `config` | `32` |
 | `refs` | `30` |
 | `merge` | `29` |
 | `notes` | `23` |
@@ -213,7 +213,7 @@ Largest command-hint buckets inside those `461` functions:
 | `clean` | `5` |
 | `clone` | `5` |
 | `fast-import` | `5` |
-| `status` | `5` |
+| `status` | `4` |
 | `tag` | `5` |
 
 Use this snapshot as the upper bound for already-known oracle-import growth.
@@ -221,6 +221,38 @@ Future slices should reduce the `missing_or_unclassified` count by their
 declared evidence-function count. If a slice increases written TSV rows without
 reducing this count or without naming a different source bucket, that is a
 process error.
+
+## Latest Inventory Classification Fix
+
+Source bucket: focused stock-oracle inventory tooling for evidence cells that
+already contain multiple test references.
+
+The previous inventory script treated an entire TSV evidence cell as one key.
+Rows such as
+`git_status_compat::status_porcelain_matches_stock_git_for_clean_dirty_and_ignored_worktrees; git_status_compat::status_porcelain_v2_matches_stock_git_for_staged_states`
+therefore failed to credit the second evidence function. The inventory now
+extracts every `module::test` reference from matrix rows and classification
+docs.
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+3`
+- missing-or-unclassified oracle functions: `-3`
+- Rust behavior changes: no
+
+Reclassified functions:
+
+- `git_global_cli_compat::rev_parse_show_prefix_inside_git_dir_matches_stock_git`
+- `git_global_cli_compat::rev_parse_core_bare_config_affects_discovery_flags`
+- `git_status_compat::status_porcelain_v2_matches_stock_git_for_staged_states`
+
+Actual post-fix movement matched the declaration: inventory represented
+functions moved from `500` to `503`, and `missing_or_unclassified` moved from
+`461` to `458`. Written behavior rows stayed `2354`.
 
 ## Previous Declared Import
 
