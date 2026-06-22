@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 524/4632 represented doc-option pairs / 2045 written rows / 1734/2045 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 524/4632 represented doc-option pairs / 2055 written rows / 1744/2055 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -272,14 +272,14 @@ continuing matrix expansion or guard classification.
 The latest completed slice extends the `blame` matrix from existing
 stock-oracle evidence:
 
-`git blame --line-porcelain a.txt`
+`git blame --date=rfc2822 a.txt`
 
-`blame_v2_47.tsv` now records ten already-tested supported rows for default
-tracked-file output, long object IDs, porcelain, incremental and
-line-porcelain modes, show-name, show-number, show-email, explicit abbreviation
-width and full object IDs. Existing `git_history_query_compat` evidence
-compares stock Git and Zmin output for those simple linear-history cases. This
-is an evidence import only; no Rust behavior changed.
+`blame_v2_47.tsv` now records ten more already-tested supported rows for
+order-sensitive abbreviation forms and documented date modes: `iso`,
+`iso-strict`, `default`, `short`, `raw`, `unix`, `rfc` and `rfc2822`. Existing
+`git_history_query_compat` evidence compares stock Git and Zmin output for
+those simple linear-history cases. This is an evidence import only; no Rust
+behavior changed.
 
 ### No-Skip Rule
 
@@ -620,20 +620,21 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice extends the `show` matrix from existing root-commit
+The latest completed slice extends the `blame` matrix from existing
 stock-oracle evidence:
 
-`git -c log.showroot=false show --format=raw --root HEAD`
+`git blame --date=rfc2822 a.txt`
 
-`show_v2_47.tsv` now records `log.showroot=false` with `--root`, raw format
-with `log.showroot=false`, raw format plus explicit `--root`, and the empty
-root commit output shape. Existing `git_history_query_compat` evidence
-compares stock Git and Zmin output for those root-commit cases. This is an
-evidence import only; no Rust behavior changed.
+`blame_v2_47.tsv` now records ten more already-tested supported rows for
+order-sensitive abbreviation forms and documented date modes: `iso`,
+`iso-strict`, `default`, `short`, `raw`, `unix`, `rfc` and `rfc2822`. Existing
+`git_history_query_compat` evidence compares stock Git and Zmin output for
+those simple linear-history cases. This is an evidence import only; no Rust
+behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2045` written-row
+This card is the exact handoff target after the current `2055` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2045`; the `1/2045` open row and the still incomplete command/doc-option
+`0/2055`; the `1/2055` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
