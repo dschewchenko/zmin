@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `98/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `589/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2572` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2197/2572` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2572` | written rows with incomplete parity |
-| Open written rows | `1/2572` | written rows that still do not match stock Git |
-| Invalid input rows | `374/2572` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `99/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `592/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `2578` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2203/2578` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2578` | written rows with incomplete parity |
+| Open written rows | `1/2578` | written rows that still do not match stock Git |
+| Invalid input rows | `374/2578` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2197/2572` as Git compatibility. It only means `2197` of the `2572`
+Do not read `2203/2578` as Git compatibility. It only means `2203` of the `2578`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2572` rows are partially matching,
-`1/2572` rows are known open mismatches, and `374/2572` additional rows are
-stock-compatible invalid inputs. Do not read `589/4632` as option support
+unexpanded surface is not counted yet, `0/2578` rows are partially matching,
+`1/2578` rows are known open mismatches, and `374/2578` additional rows are
+stock-compatible invalid inputs. Do not read `592/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -218,9 +218,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `125` | `65` | `0` | `0` | `60` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
-| Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `509` | `442` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2572`** | **`2197`** | **`0`** | **`1`** | **`374`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2578`** | **`2203`** | **`0`** | **`1`** | **`374`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -269,6 +269,7 @@ Current command-level matrices:
 | `difftool` | `19` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `fast-import` | `25` | `0` | `1` | `7` | `4` | `0` | `0` | `3` | no |
 | `fetch` | `73` | `0` | `30` | `326` | `316` | `0` | `0` | `10` | no |
+| `fetch-pack` | `19` | `0` | `3` | `6` | `6` | `0` | `0` | `0` | no |
 | `filter-branch` | `37` | `0` | `11` | `14` | `14` | `0` | `0` | `0` | no |
 | `fmt-merge-msg` | `9` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
@@ -356,7 +357,7 @@ a complete matrix built from Git docs, upstream Git tests and real tool traces.
 - Administration: `clean`, `gc`, `fsck`, `reflog`, `filter-branch`, `instaweb`, `archive`, `bundle`
 - Server Admin: `daemon`, `update-server-info`
 - Plumbing Commands: `cat-file`, `check-ignore`, `checkout-index`, `commit-tree`, `count-objects`, `diff-index`, `for-each-ref`, `hash-object`, `ls-files`, `ls-tree`, `merge-base`, `read-tree`, `rev-list`, `rev-parse`, `show-ref`, `symbolic-ref`, `update-index`, `update-ref`, `verify-pack`, `write-tree`
-- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fetch-pack`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-backend`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `send-pack`, `sh-i18n`, `sh-setup`, `shell`, `show-branch`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
+- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-backend`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `send-pack`, `sh-i18n`, `sh-setup`, `shell`, `show-branch`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
 
 </details>
 
