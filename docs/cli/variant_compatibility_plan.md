@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 673/4632 represented doc-option pairs / 2763 written rows / 2375/2763 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 673/4632 represented doc-option pairs / 2764 written rows / 2376/2764 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,20 +298,16 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `bugreport_v2_47.tsv`, backed by a new
-focused stock-oracle smoke script.
+The latest completed slice extends `cat_file_v2_47.tsv`, backed by the
+existing focused stock-oracle smoke script.
 
-`bugreport_v2_47.tsv` now records `--no-suffix`, `-o`,
-`--output-directory`, `-s` and additional `--suffix` value forms. These rows
-compare exit status, stdout, stderr and created report filenames without
-changing behavior. The same probe found that `bugreport --diagnose=stats`
-emits different diagnostic payload, so `--diagnose` stays
-implemented-but-unverified instead of being counted as verified. The oracle
-inventory remains `707` represented/classified functions and `254`
-`missing_or_unclassified` because the new evidence is a shell smoke, not a
-Rust test inventory function. Current written rows are `2763`, with
-`2375/2763` matching stock Git, `1/2763` open and `387/2763` invalid-input.
-No Rust behavior changed.
+`cat_file_v2_47.tsv` now records `--no-filter` in `--batch-check` mode. The
+row compares exit status, stdout, stderr and clean worktree status without
+changing behavior. The oracle inventory remains `707` represented/classified
+functions and `254` `missing_or_unclassified` because the evidence is a shell
+smoke, not a Rust test inventory function. Current written rows are `2764`,
+with `2376/2764` matching stock Git, `1/2764` open and `387/2764`
+invalid-input. No Rust behavior changed.
 
 ### No-Skip Rule
 

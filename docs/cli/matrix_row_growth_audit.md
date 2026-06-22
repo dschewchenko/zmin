@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2763` | `+1669` |
-| Matching stock Git rows | `823` | `2375` | `+1552` |
+| Written behavior rows | `1094` | `2764` | `+1670` |
+| Matching stock Git rows | `823` | `2376` | `+1553` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
@@ -88,7 +88,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `for-each-ref` | `0` | `34` | `+34` |
 | `show` | `0` | `34` | `+34` |
 | `remote` | `0` | `32` | `+32` |
-| `cat-file` | `8` | `39` | `+31` |
+| `cat-file` | `8` | `40` | `+32` |
 | `ls-remote` | `2` | `31` | `+29` |
 | `rev-list` | `0` | `28` | `+28` |
 | `tag` | `0` | `27` | `+27` |
@@ -3482,3 +3482,39 @@ Actual post-import movement matched the declaration: `+6` behavior rows,
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+4` represented doc-option pairs and `-1`
 implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `cat-file --no-filter`
+schema surface, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-cat-file-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`; this is a Zmin schema surface and is
+  not represented as a separate Git doc option seed row by the current census
+- implemented-but-unverified schema rows: expected `-1`
+- Rust behavior changes: no
+
+Expected row:
+
+- `printf '<oid>\n' | git cat-file --batch-check --no-filter`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and clean
+worktree status in a repository with a committed blob.
+
+Actual post-import movement matched the declaration: `+1` behavior row,
+`+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+0` represented doc-option pairs and `-1`
+implemented-but-unverified schema row.

@@ -84,5 +84,6 @@ blob_oid="$("$GIT_BIN" -C "$base_seed" rev-parse HEAD:file.txt)"
 run_case cat_file_typed_blob "" cat-file blob "$blob_oid"
 run_case cat_file_batch_check_no_buffer "$blob_oid\n" cat-file --batch-check --no-buffer
 run_case cat_file_batch_check_follow_symlinks "$blob_oid\n" cat-file --batch-check --follow-symlinks
+run_case cat_file_batch_check_no_filter "$blob_oid\n" cat-file --batch-check --no-filter
 run_case cat_file_batch_check_z "$blob_oid\n" cat-file --batch-check -z
 run_case cat_file_batch_check_full_nul "$blob_oid\n" cat-file --batch-check -Z
