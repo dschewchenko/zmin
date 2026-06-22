@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Basic Snapshotting	rm	--cached	dir/*	pathspec glob	tracked index	local	all	git rm --cached 'dir/*'	closed	git_global_cli_compat::global_pathspec_options_match_stock_git_for_mutating_commands	cached removal honors pathspec globbing and leaves status output matching stock Git

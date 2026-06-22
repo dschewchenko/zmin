@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `50/151` | `add`, `archive`, `bisect`, `blame`, `branch`, `bundle`, `cat-file`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `config`, `diff`, `fast-import`, `fetch`, `filter-branch`, `for-each-ref`, `http-fetch`, `index-pack`, `init`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `maintenance`, `merge`, `merge-base`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `prune`, `push`, `rebase`, `reflog`, `rerere`, `rev-parse`, `show-index`, `show-ref`, `sparse-checkout`, `stash`, `status`, `submodule`, `symbolic-ref`, `tag`, `verify-pack`, `version` and `worktree` have started behavior matrices |
-| Documented option spellings represented by rows | `272/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1122` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `851/1122` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1122` | written rows with incomplete parity |
-| Open written rows | `1/1122` | written rows that still do not match stock Git |
-| Invalid input rows | `270/1122` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `56/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `353/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1538` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1246/1538` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1538` | written rows with incomplete parity |
+| Open written rows | `1/1538` | written rows that still do not match stock Git |
+| Invalid input rows | `291/1538` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `851/1122` as Git compatibility. It only means `851` of the `1122`
+Do not read `1246/1538` as Git compatibility. It only means `1246` of the `1538`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1122` rows are partially matching,
-`1/1122` rows are known open mismatches, and `270/1122` additional rows are
-stock-compatible invalid inputs. Do not read `272/4632` as option support
+unexpanded surface is not counted yet, `0/1538` rows are partially matching,
+`1/1538` rows are known open mismatches, and `291/1538` additional rows are
+stock-compatible invalid inputs. Do not read `353/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -206,21 +206,21 @@ Audit progress by git-scm reference group:
 
 | Git reference group | Git commands | Complete command matrices | Git doc option seed | Complete documented option matrices | Behavior rows written | Written rows matching stock Git | Partial written rows | Open written rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `0` | `276` | `0` | `60` | `50` | `0` | `0` | `10` |
+| Setup and Config | `6` | `0` | `276` | `0` | `132` | `119` | `0` | `0` | `13` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `24` | `21` | `0` | `1` | `2` |
-| Basic Snapshotting | `9` | `0` | `371` | `0` | `85` | `66` | `0` | `0` | `19` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `86` | `56` | `0` | `0` | `30` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `310` | `292` | `0` | `0` | `18` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `155` | `148` | `0` | `0` | `7` |
+| Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `208` | `201` | `0` | `0` | `7` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `48` | `25` | `0` | `0` | `23` |
+| Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `20` | `0` | `644` | `0` | `203` | `151` | `0` | `0` | `52` |
-| Other Git `2.47` commands | `71` | `0` | `1075` | `0` | `48` | `21` | `0` | `0` | `27` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1122`** | **`851`** | **`0`** | **`1`** | **`270`** |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `358` | `295` | `0` | `0` | `63` |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `48` | `21` | `0` | `0` | `27` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1538`** | **`1246`** | **`0`** | **`1`** | **`291`** | **`0`** | **`4632`** | **`0`** | **`1122`** | **`851`** | **`0`** | **`1`** | **`270`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -233,31 +233,33 @@ Current command-level matrices:
 
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `add` | `34` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
-| `archive` | `17` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
+| `add` | `34` | `0` | `2` | `6` | `3` | `0` | `0` | `3` | no |
+| `archive` | `17` | `0` | `3` | `11` | `10` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `blame` | `39` | `0` | `6` | `101` | `21` | `0` | `0` | `80` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `bundle` | `15` | `0` | `1` | `11` | `3` | `0` | `0` | `8` | no |
-| `cat-file` | `21` | `0` | `2` | `8` | `0` | `0` | `0` | `8` | no |
+| `cat-file` | `21` | `0` | `2` | `9` | `1` | `0` | `0` | `8` | no |
+| `check-attr` | `6` | `0` | `1` | `5` | `5` | `0` | `0` | `0` | no |
+| `check-ignore` | `10` | `0` | `7` | `19` | `9` | `0` | `0` | `10` | no |
 | `checkout` | `43` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `checkout-index` | `19` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `clean` | `13` | `0` | `3` | `12` | `8` | `0` | `0` | `4` | no |
 | `clone` | `56` | `0` | `13` | `22` | `19` | `0` | `1` | `2` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
-| `config` | `243` | `0` | `17` | `60` | `50` | `0` | `0` | `10` | no |
-| `status` | `26` | `0` | `22` | `76` | `66` | `0` | `0` | `10` | no |
-| `fetch` | `73` | `0` | `30` | `300` | `291` | `0` | `0` | `9` | no |
-| `diff` | `133` | `0` | `31` | `68` | `66` | `0` | `0` | `2` | no |
+| `config` | `243` | `0` | `17` | `120` | `110` | `0` | `0` | `10` | no |
+| `diff` | `133` | `0` | `43` | `110` | `108` | `0` | `0` | `2` | no |
+| `diff-tree` | `151` | `0` | `47` | `74` | `74` | `0` | `0` | `0` | no |
 | `fast-import` | `25` | `0` | `1` | `7` | `4` | `0` | `0` | `3` | no |
+| `fetch` | `73` | `0` | `30` | `304` | `294` | `0` | `0` | `10` | no |
 | `filter-branch` | `37` | `0` | `11` | `14` | `14` | `0` | `0` | `0` | no |
-| `log` | `282` | `0` | `32` | `87` | `82` | `0` | `0` | `5` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
 | `http-fetch` | `10` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `index-pack` | `18` | `0` | `1` | `3` | `0` | `0` | `0` | `3` | no |
 | `init` | `10` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
-| `ls-files` | `42` | `0` | `27` | `72` | `55` | `0` | `0` | `17` | no |
+| `log` | `282` | `0` | `37` | `98` | `93` | `0` | `0` | `5` | no |
+| `ls-files` | `42` | `0` | `28` | `115` | `97` | `0` | `0` | `18` | no |
 | `ls-remote` | `16` | `0` | `0` | `2` | `1` | `0` | `0` | `1` | no |
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
 | `maintenance` | `14` | `0` | `3` | `5` | `0` | `0` | `0` | `5` | no |
@@ -271,15 +273,19 @@ Current command-level matrices:
 | `push` | `57` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `reflog` | `13` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
+| `remote` | `23` | `0` | `1` | `32` | `26` | `0` | `0` | `6` | no |
 | `rerere` | `7` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `rev-parse` | `72` | `0` | `24` | `52` | `46` | `0` | `0` | `6` | no |
+| `rev-parse` | `72` | `0` | `24` | `64` | `58` | `0` | `0` | `6` | no |
+| `rm` | `20` | `0` | `1` | `1` | `1` | `0` | `0` | `0` | no |
 | `show-index` | `1` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `show-ref` | `14` | `0` | `5` | `10` | `7` | `0` | `0` | `3` | no |
+| `show-ref` | `14` | `0` | `5` | `11` | `8` | `0` | `0` | `3` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `8` | `3` | `0` | `0` | `5` | no |
-| `stash` | `30` | `0` | `0` | `25` | `21` | `0` | `0` | `4` | no |
+| `stash` | `30` | `0` | `0` | `52` | `48` | `0` | `0` | `4` | no |
+| `status` | `26` | `0` | `23` | `135` | `125` | `0` | `0` | `10` | no |
 | `submodule` | `35` | `0` | `0` | `7` | `0` | `0` | `0` | `7` | no |
 | `symbolic-ref` | `8` | `0` | `3` | `8` | `7` | `0` | `0` | `1` | no |
 | `tag` | `40` | `0` | `11` | `27` | `17` | `0` | `0` | `10` | no |
+| `var` | `3` | `0` | `1` | `12` | `9` | `0` | `0` | `3` | no |
 | `verify-pack` | `4` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
 | `version` | `2` | `0` | `2` | `4` | `2` | `0` | `0` | `2` | no |
 | `worktree` | `28` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
