@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 104/151 commands with matrix rows / 658/4632 represented doc-option pairs / 2740 written rows / 2352/2740 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 104/151 commands with matrix rows / 659/4632 represented doc-option pairs / 2742 written rows / 2354/2742 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,17 +298,16 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `request_pull_v2_47.tsv` with explicit
-`<positional:url>` and `<positional:end>` schema rows backed by existing
-focused stock-oracle evidence in `git_mail_tools_compat.rs`.
+The latest completed slice extends `mailsplit_v2_47.tsv` with explicit `-f`
+and `<positional:paths>` schema rows backed by existing focused stock-oracle
+evidence in `git_mail_tools_compat.rs`.
 
-`request_pull_v2_47.tsv` now records the `git request-pull <start>
-file://<remote> main` URL and end branch surfaces as explicit positional rows.
-These rows close those exact Zmin schema positional parser surfaces without
-changing behavior.
+`mailsplit_v2_47.tsv` now records the `git mailsplit -d4 -f3 -oout mbox`
+first-output-number and mbox input path surfaces as explicit rows. These rows
+close those exact Zmin schema parser surfaces without changing behavior.
 The oracle inventory remains at `705` represented/classified functions and
-`256` `missing_or_unclassified`. Current written rows are `2740`, with
-`2352/2740` matching stock Git, `1/2740` open and `387/2740` invalid-input. No
+`256` `missing_or_unclassified`. Current written rows are `2742`, with
+`2354/2742` matching stock Git, `1/2742` open and `387/2742` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule

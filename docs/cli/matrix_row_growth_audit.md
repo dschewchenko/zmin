@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2740` | `+1646` |
-| Matching stock Git rows | `823` | `2352` | `+1529` |
+| Written behavior rows | `1094` | `2742` | `+1648` |
+| Matching stock Git rows | `823` | `2354` | `+1531` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `104/151` | `+54` |
-| Represented doc-option pairs | `253/4632` | `658/4632` | `+405` |
+| Represented doc-option pairs | `253/4632` | `659/4632` | `+406` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -3237,3 +3237,38 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+0` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already represented in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+
+- `git_mail_tools_compat::mailsplit_matches_stock_git_for_mbox_and_maildir`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `mailsplit -f`; the
+  positional mbox input row is not represented in the Git docs option seed
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git mailsplit -d4 -f3 -oout mbox` as `-f 3`
+- `git mailsplit -d4 -f3 -oout mbox` as `<positional:paths> mbox`
+
+The evidence compares stock Git and Zmin stdout plus output files for the mbox
+split flow.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+1` represented doc-option pairs.
