@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 696/4632 represented doc-option pairs / 2788 written rows / 2400/2788 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 697/4632 represented doc-option pairs / 2790 written rows / 2402/2790 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,16 +298,18 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `count_objects_v2_47.tsv`, backed by
-`tools/git-count-objects-schema-oracle-smoke.sh`.
+The latest completed slice extends `credential_store_v2_47.tsv`, backed by
+`tools/git-credential-store-schema-oracle-smoke.sh`.
 
-`count_objects_v2_47.tsv` now records exact rows for `--verbose`,
-`--human-readable` and `--verbose --human-readable`. The rows compare exit
-status, stdout, stderr and worktree status. The oracle inventory remains `707`
-represented/classified functions and `254` `missing_or_unclassified` because
-the evidence is a shell smoke, not a Rust test inventory function. Current
-written rows are `2788`, with `2400/2788` matching stock Git, `1/2788` open and
-`387/2788` invalid-input.
+`credential_store_v2_47.tsv` now records exact rows for the explicit
+`--file <path>` store/get/erase flow and the positional `store`, `get` and
+`erase` action surface. The rows compare exit status, stdout, stderr, explicit
+credential file side effects and the absence of default HOME credential-file
+side effects. The oracle inventory remains `707` represented/classified
+functions and `254` `missing_or_unclassified` because the evidence is a shell
+smoke, not a Rust test inventory function. Current written rows are `2790`,
+with `2402/2790` matching stock Git, `1/2790` open and `387/2790`
+invalid-input.
 
 ### No-Skip Rule
 

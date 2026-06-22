@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2788` | `+1694` |
-| Matching stock Git rows | `823` | `2400` | `+1577` |
+| Written behavior rows | `1094` | `2790` | `+1696` |
+| Matching stock Git rows | `823` | `2402` | `+1579` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `696/4632` | `+443` |
+| Represented doc-option pairs | `253/4632` | `697/4632` | `+444` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -156,7 +156,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `version` | `0` | `4` | `+4` |
 | `bugreport` | `0` | `9` | `+9` |
 | `commit-graph` | `0` | `3` | `+3` |
-| `credential-store` | `0` | `3` | `+3` |
+| `credential-store` | `0` | `5` | `+5` |
 | `http-fetch` | `1` | `4` | `+3` |
 | `index-pack` | `0` | `3` | `+3` |
 | `mktree` | `0` | `3` | `+3` |
@@ -3392,6 +3392,44 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `credential-store --file`
+and positional action schema surfaces, with focused stock-oracle smoke
+evidence.
+
+Evidence command:
+
+- `tools/git-credential-store-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `credential-store --file`
+- implemented-but-unverified schema rows: expected `-2`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git credential-store --file <path> store/get/erase`
+- positional `store`, `get` and `erase` action surface with `--file <path>`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr, explicit
+credential file side effects and the absence of default HOME credential-file
+side effects.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+1` represented doc-option pair and `-2`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import
