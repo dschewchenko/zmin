@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2800` | `+1706` |
-| Matching stock Git rows | `823` | `2411` | `+1588` |
+| Written behavior rows | `1094` | `2802` | `+1708` |
+| Matching stock Git rows | `823` | `2413` | `+1590` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
@@ -146,7 +146,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `fmt-merge-msg` | `0` | `4` | `+4` |
 | `for-each-repo` | `0` | `4` | `+4` |
 | `init` | `0` | `4` | `+4` |
-| `ls-tree` | `0` | `4` | `+4` |
+| `ls-tree` | `0` | `6` | `+6` |
 | `mailinfo` | `0` | `4` | `+4` |
 | `mailsplit` | `0` | `4` | `+4` |
 | `read-tree` | `0` | `5` | `+5` |
@@ -3425,6 +3425,43 @@ Expected rows:
 The evidence compares stock Git and Zmin exit status, stdout, stderr,
 `.git/HEAD` content and worktree status in an attached repository with an
 existing target branch.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented
+oracle functions, `+0` missing-or-unclassified oracle functions, `+0`
+commands with rows, `+0` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `ls-tree` positional schema
+surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-ls-tree-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`; these rows close positional schema
+  surfaces rather than documented option spellings
+- implemented-but-unverified schema rows: expected `-2`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git ls-tree HEAD`
+- `git ls-tree HEAD src/main.rs`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and
+worktree status in a repository with root and nested files.
 
 Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented
