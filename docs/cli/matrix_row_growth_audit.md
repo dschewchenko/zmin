@@ -37,8 +37,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2630` | `+1536` |
-| Matching stock Git rows | `823` | `2253` | `+1430` |
+| Written behavior rows | `1094` | `2634` | `+1540` |
+| Matching stock Git rows | `823` | `2257` | `+1434` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `376` | `+106` |
 | Commands with rows | `50/151` | `102/151` | `+52` |
@@ -50,7 +50,7 @@ behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`683` represented by matrix, extension or deferral evidence, and `278` still
+`687` represented by matrix, extension or deferral evidence, and `274` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -157,7 +157,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `278` missing or unclassified.
+  functions, currently `961` total with `274` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -333,18 +333,18 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `683` are already represented by matrix rows,
-extension rows or explicit deferrals, and `278` are
+focused oracle functions. `687` are already represented by matrix rows,
+extension rows or explicit deferrals, and `274` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_transport_http_compat.rs` | `27` |
 | `git_worktree_state_compat.rs` | `26` |
-| `git_maintenance_compat.rs` | `24` |
 | `git_transport_local_compat.rs` | `24` |
+| `git_maintenance_compat.rs` | `24` |
+| `git_transport_http_compat.rs` | `23` |
 | `git_pack_integrity_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
@@ -371,22 +371,22 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `278` functions:
+Largest command-hint buckets inside those `274` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
-| `<none>` | `64` |
+| `<none>` | `62` |
 | `worktree` | `47` |
 | `merge` | `28` |
 | `remote` | `26` |
 | `maintenance` | `26` |
-| `refs` | `18` |
 | `submodule` | `17` |
 | `branch` | `16` |
-| `notes` | `14` |
+| `refs` | `15` |
 | `commit` | `14` |
+| `notes` | `14` |
 | `add` | `13` |
-| `config` | `6` |
+| `checkout` | `7` |
 
 ## Oracle Import Walk Order
 
@@ -407,10 +407,10 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_transport_http_compat.rs` (`27`) | network transport coverage over HTTP, SSH and git-daemon |
-| 2 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
+| 1 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
+| 2 | `git_transport_local_compat.rs` (`24`) | remaining local/file transport and remote-management rows |
 | 3 | `git_maintenance_compat.rs` (`24`) | remaining dense maintenance/repack/multi-pack-index rows |
-| 4 | `git_transport_local_compat.rs` (`24`) | remaining local/file transport and remote-management rows |
+| 4 | `git_transport_http_compat.rs` (`23`) | remaining network transport coverage over HTTP, SSH and git-daemon |
 | 5 | `git_pack_integrity_compat.rs` (`23`) | remaining pack/fsck/bundle rows; continue here only when the selected function group is coherent |
 
 If a new WebStorm or replacement-binary blocker appears, it overrides this
@@ -2609,6 +2609,48 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 `+4` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
 represented oracle functions, `-2` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+1` represented doc-option pair.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions:
+
+- `git_transport_http_compat::http_backend_info_refs_matches_stock_git_smart_discovery_refs`
+- `git_transport_http_compat::http_backend_resolves_scriptalias_path_translated_like_stock_git`
+- `git_transport_http_compat::http_backend_serves_scriptalias_non_bare_repo_like_stock_git`
+- `git_transport_http_compat::http_backend_upload_pack_post_returns_stock_readable_pack`
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+4`
+- missing-or-unclassified oracle functions: `-4`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; `http-backend` already has
+  represented doc-option rows
+- Rust behavior changes: no
+
+Expected rows:
+
+- `GIT_PROJECT_ROOT=<root> PATH_INFO=/remote.git/info/refs?service=git-upload-pack git http-backend`
+- `GIT_PROJECT_ROOT=<root> PATH_TRANSLATED=<root>/remote.git/info/refs git http-backend`
+- `GIT_PROJECT_ROOT=<root> PATH_TRANSLATED=<root>/server/info/refs git http-backend`
+- `GIT_PROJECT_ROOT=<root> PATH_INFO=/remote.git/git-upload-pack REQUEST_METHOD=POST git http-backend`
+
+The evidence compares stock Git and Zmin smart HTTP advertised ref lines for
+normal and ScriptAlias discovery paths, and verifies that the upload-pack POST
+response includes stock-readable sideband pack data, acknowledges the common
+`have`, includes delta objects and omits common base objects.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+4`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+4` represented oracle
+functions, `-4` missing-or-unclassified oracle functions, `+0` commands with
+rows and `+0` represented doc-option pairs.
 
 ## Latest Declared Import
 
