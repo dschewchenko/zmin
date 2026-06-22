@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 499/4632 represented doc-option pairs / 1969 written rows / 1658/1969 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 499/4632 represented doc-option pairs / 1975 written rows / 1664/1975 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,17 +269,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice imports `clone` shallow-rejection and selected
-single-branch rows from existing stock-oracle evidence:
+The latest completed slice imports `log` merge-diff mode rows from existing
+stock-oracle evidence:
 
-`git clone --reject-shallow <shallow-path> dst`
+`git log -p --diff-merges=separate -n 3 main`
 
-`clone_v2_47.tsv` now records `--reject-shallow` and `--no-reject-shallow`
-behavior against a shallow local source, including last-option-wins ordering,
-plus `--single-branch -b feature` and `--single-branch -b v1` selection
-variants. Existing `git_clone_compat::clone_local_repo_matches_stock_git_state`
-evidence compares stock Git and Zmin output or side effects for all six forms.
-This is an evidence import only; no Rust behavior changed.
+`log_v2_47.tsv` now records no-patch `--diff-merges=first-parent`, plain
+`-m -p`, patch forms for `--diff-merges=separate`, `on` and `1`, plus
+`log.diffMerges=1` without patch output. Existing
+`git_diff_compat::log_merge_diff_modes_match_stock_git` evidence compares
+stock Git and Zmin output for all six forms. This is an evidence import only;
+no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -628,7 +628,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1969` written-row
+This card is the exact handoff target after the current `1975` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -647,7 +647,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1969`; the `1/1969` open row and the still incomplete command/doc-option
+`0/1975`; the `1/1975` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
