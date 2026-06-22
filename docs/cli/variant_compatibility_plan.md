@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2319 written rows / 1993/2319 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2325 written rows / 1998/2325 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,18 +285,18 @@ an incidental side effect of finding more existing tests.
 
 ### Latest Completed Slice
 
-The latest completed slice imports seven non-interactive `git_stash_compat.rs`
-state-flow rows from `docs/cli/existing_oracle_test_inventory.tsv`.
+The latest completed slice imports the remaining strong `git_stash_compat.rs`
+intent-to-add and interactive patch rows from
+`docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested closed rows for `git stash` with
-a missing skip-worktree entry, fallback `git stash <git@stash>` identity,
-same-size rewrite capture through drop/apply, dirty-overlap pop rejection,
-selected `apply` plus numeric `drop`, legacy `save` for remove-then-recreate,
-and legacy `save` for file-to-directory replacement. The focused
-`git_stash_compat.rs` evidence covers stash commit contents, author identity,
-stdout/stderr/exit status, stash stack updates, worktree status and restored
-file contents against stock Git. The oracle inventory reduced total
-`missing_or_unclassified` to `490`. No Rust behavior changed.
+`stash_v2_47.tsv` now records an already-tested stock-compatible invalid-input
+row for `git add --intent-to-add file4; git stash`, plus closed rows for
+interactive `stash push --patch` `y/n` hunk selection, pathspec-limited `a`,
+`d` done, `q` quit and split-hunk `s/y/n` flows. The focused
+`git_stash_compat.rs` evidence covers exit status, stdout/stderr shape,
+stash list/show output and worktree file contents against stock Git. The
+oracle inventory reduced total `missing_or_unclassified` to `486`. No Rust
+behavior changed.
 
 ### No-Skip Rule
 
@@ -639,7 +639,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2319` written-row
+This card is the exact handoff target after the current `2325` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -658,7 +658,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2319`; the `1/2319` open row and the still incomplete command/doc-option
+`0/2325`; the `1/2325` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
