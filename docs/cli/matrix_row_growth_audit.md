@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2766` | `+1672` |
-| Matching stock Git rows | `823` | `2378` | `+1555` |
+| Written behavior rows | `1094` | `2770` | `+1676` |
+| Matching stock Git rows | `823` | `2382` | `+1559` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `675/4632` | `+422` |
+| Represented doc-option pairs | `253/4632` | `679/4632` | `+426` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -79,7 +79,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `blame` | `101` | `171` | `+70` |
 | `config` | `60` | `130` | `+70` |
 | `clone` | `6` | `72` | `+66` |
-| `commit` | `0` | `68` | `+68` |
+| `commit` | `0` | `72` | `+72` |
 | `status` | `76` | `135` | `+59` |
 | `branch` | `0` | `49` | `+49` |
 | `notes` | `0` | `42` | `+42` |
@@ -3392,6 +3392,49 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `commit` doc-option alias
+surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-commit-alias-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+4` for `commit --file`,
+  `commit --edit`, `commit --reuse-message` and `commit --reedit-message`
+- implemented-but-unverified schema rows: `+0`; these are doc-option evidence
+  gaps after the matching schema arg IDs were already covered by existing
+  short-option rows
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git -c commit.gpgsign=false commit --file msg.txt`
+- `GIT_EDITOR=.git/editor.sh git -c commit.gpgsign=false commit --edit --file msg.txt`
+- `git -c commit.gpgsign=false commit --reuse-message HEAD~1`
+- `GIT_EDITOR=.git/editor.sh git -c commit.gpgsign=false commit --reedit-message HEAD~1`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr, commit
+object, HEAD and porcelain status. The smoke disables ambient commit signing
+with `-c commit.gpgsign=false` so local global Git config cannot change the
+oracle commit object.
+
+Actual post-import movement matched the declaration: `+4` behavior rows,
+`+4` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+4` represented doc-option pairs and `+0`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import

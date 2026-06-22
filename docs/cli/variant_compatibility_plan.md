@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 675/4632 represented doc-option pairs / 2766 written rows / 2378/2766 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 679/4632 represented doc-option pairs / 2770 written rows / 2382/2770 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -301,15 +301,15 @@ source bucket and expected row/status delta in
 The latest completed slice extends `commit_v2_47.tsv`, backed by a new focused
 stock-oracle smoke script.
 
-`commit_v2_47.tsv` now records `--all` and `-a` for tracked modifications with
-an unrelated untracked file. The rows compare exit status, stdout, stderr,
-commit object, HEAD, tree and porcelain status, while disabling ambient commit
-signing with `-c commit.gpgsign=false` for deterministic evidence. The oracle
-inventory remains `707` represented/classified functions and `254`
-`missing_or_unclassified` because the evidence is a shell smoke, not a Rust
-test inventory function. Current written rows are `2766`, with `2378/2766`
-matching stock Git, `1/2766` open and `387/2766` invalid-input. No Rust
-behavior changed.
+`commit_v2_47.tsv` now records long alias rows for `--file`, `--edit`,
+`--reuse-message` and `--reedit-message`. The rows compare exit status,
+stdout, stderr, commit object, HEAD and porcelain status, while disabling
+ambient commit signing with `-c commit.gpgsign=false` for deterministic
+evidence. The oracle inventory remains `707` represented/classified functions
+and `254` `missing_or_unclassified` because the evidence is a shell smoke, not
+a Rust test inventory function. Current written rows are `2770`, with
+`2382/2770` matching stock Git, `1/2770` open and `387/2770` invalid-input.
+No Rust behavior changed.
 
 ### No-Skip Rule
 
