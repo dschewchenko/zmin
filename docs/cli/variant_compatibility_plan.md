@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 504/4632 represented doc-option pairs / 1995 written rows / 1684/1995 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 504/4632 represented doc-option pairs / 2004 written rows / 1693/2004 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice imports `diff` cached rename-detection rows from
+The latest completed slice imports `rev-list` traversal combination rows from
 existing stock-oracle evidence:
 
-`git diff --cached -M --name-status`
+`git rev-list --objects --all --max-count 2`
 
-`diff_v2_47.tsv` now records `-M` cached exact-rename output across
-name-status, name-only, summary, raw, NUL raw, stat, numstat, NUL name-status
-and default patch forms, plus `--find-renames=100% --name-status`. Existing
-`git_diff_compat::diff_find_renames_exact_matches_stock_git_for_cached_formats`
-evidence compares stock Git and Zmin output for all ten forms. This is an
+`rev_list_v2_47.tsv` now records parent-list plus max-count, object traversal
+count, all-ref object traversal, no-object-names over all refs, reverse object
+traversal, reverse traversal with and without max-count, count with max-count
+and all-ref object traversal with max-count. Existing
+`git_history_query_compat::add_commit_rev_list_and_log_match_stock_git_state`
+evidence compares stock Git and Zmin output for all nine forms. This is an
 evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -620,22 +621,22 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice imports `diff` cached copy-detection rows from
+The latest completed slice imports `rev-list` traversal combination rows from
 existing stock-oracle evidence:
 
-`git diff --cached -C --find-copies-harder --name-status`
+`git rev-list --objects --all --max-count 2`
 
-`diff_v2_47.tsv` now records `-C` cached exact-copy output across name-status,
-name-only, summary, raw, stat, numstat and default patch forms, plus
-`--find-copies=50%`, compact `-C90%`, and `--find-copies-harder` spelling
-coverage for name-status copy detection. Existing
-`git_diff_compat::diff_find_copies_exact_matches_stock_git_for_cached_formats`
-evidence compares stock Git and Zmin output for all ten forms. This is an
+`rev_list_v2_47.tsv` now records parent-list plus max-count, object traversal
+count, all-ref object traversal, no-object-names over all refs, reverse object
+traversal, reverse traversal with and without max-count, count with max-count
+and all-ref object traversal with max-count. Existing
+`git_history_query_compat::add_commit_rev_list_and_log_match_stock_git_state`
+evidence compares stock Git and Zmin output for all nine forms. This is an
 evidence import only; no Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1995` written-row
+This card is the exact handoff target after the current `2004` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -654,7 +655,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1995`; the `1/1995` open row and the still incomplete command/doc-option
+`0/2004`; the `1/2004` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
