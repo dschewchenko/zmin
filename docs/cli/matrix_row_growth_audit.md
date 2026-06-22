@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2742` | `+1648` |
-| Matching stock Git rows | `823` | `2354` | `+1531` |
+| Written behavior rows | `1094` | `2748` | `+1654` |
+| Matching stock Git rows | `823` | `2360` | `+1537` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
-| Commands with rows | `50/151` | `104/151` | `+54` |
-| Represented doc-option pairs | `253/4632` | `659/4632` | `+406` |
+| Commands with rows | `50/151` | `105/151` | `+55` |
+| Represented doc-option pairs | `253/4632` | `662/4632` | `+409` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -132,6 +132,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `format-patch` | `0` | `6` | `+6` |
 | `multi-pack-index` | `0` | `6` | `+6` |
 | `patch-id` | `0` | `6` | `+6` |
+| `replace` | `0` | `6` | `+6` |
 | `shortlog` | `0` | `6` | `+6` |
 | `verify-pack` | `0` | `6` | `+6` |
 | `checkout` | `0` | `5` | `+5` |
@@ -147,6 +148,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `init` | `0` | `4` | `+4` |
 | `ls-tree` | `0` | `4` | `+4` |
 | `mailinfo` | `0` | `4` | `+4` |
+| `mailsplit` | `0` | `4` | `+4` |
 | `read-tree` | `0` | `4` | `+4` |
 | `replay` | `0` | `4` | `+4` |
 | `send-pack` | `0` | `4` | `+4` |
@@ -159,9 +161,9 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `index-pack` | `0` | `3` | `+3` |
 | `mktree` | `0` | `3` | `+3` |
 | `range-diff` | `0` | `3` | `+3` |
+| `request-pull` | `0` | `3` | `+3` |
 | `cherry-pick` | `0` | `2` | `+2` |
 | `get-tar-commit-id` | `0` | `2` | `+2` |
-| `mailsplit` | `0` | `2` | `+2` |
 | `mktag` | `0` | `2` | `+2` |
 | `quiltimport` | `0` | `2` | `+2` |
 | `update-server-info` | `0` | `2` | `+2` |
@@ -172,7 +174,6 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `merge` | `0` | `1` | `+1` |
 | `p4` | `0` | `1` | `+1` |
 | `rebase` | `0` | `1` | `+1` |
-| `request-pull` | `0` | `1` | `+1` |
 | `rerere` | `0` | `1` | `+1` |
 | `show-index` | `1` | `2` | `+1` |
 | `worktree` | `0` | `1` | `+1` |
@@ -3272,3 +3273,43 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+1` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+
+- `git_ref_resolution_compat::replace_matches_stock_git_for_list_create_delete`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: `-1`
+- commands with rows: `+1`
+- represented doc-option pairs: expected `+3` for `replace -d`,
+  `replace -l` and `replace --format`; default and positional creation rows
+  are not represented in the Git docs option seed
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git replace <object> <replacement>`
+- `git replace`
+- `git replace -l '*'`
+- `git replace --format=medium`
+- `git replace --format=long`
+- `git replace -d <object-prefix>`
+
+The evidence compares stock Git and Zmin output plus replacement ref side
+effects for create, list, formatted list and delete flows.
+
+Actual post-import movement matched the declaration: `+6` behavior rows,
+`+6` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
+represented oracle function, `-1` missing-or-unclassified oracle function,
+`+1` command with rows and `+3` represented doc-option pairs.
