@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 103/151 commands with matrix rows / 657/4632 represented doc-option pairs / 2728 written rows / 2340/2728 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 103/151 commands with matrix rows / 657/4632 represented doc-option pairs / 2729 written rows / 2341/2729 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,18 +298,19 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice fixes and records `archive --verbose` directory
-stderr parity, backed by focused stock-oracle evidence in
+The latest completed slice extends `archive_v2_47.tsv` with an explicit
+`<positional:treeish>` row backed by existing focused stock-oracle evidence in
 `git_archive_compat.rs`.
 
-`archive_v2_47.tsv` now records `git archive --format=tar --verbose -o out.tar
-HEAD dir`, closing the Zmin schema `verbose` parser surface, including the
-`-v` alias through shared `arg_id` evidence. Zmin now prints archived directory
-paths with the trailing slash on stderr like stock Git while writing matching
-tar output.
+`archive_v2_47.tsv` now records `git archive --format=tar --prefix=pre/
+--add-file=extra.txt --add-virtual-file=virt/path.txt:virtual
+--mtime='2024-01-02 03:04:05 +0000' -o out.tar HEAD`, closing the Zmin schema
+`treeish` parser surface for `HEAD` tree-ish archive input with matching tar
+output and side effects.
 The oracle inventory now lists `703` represented/classified functions and
-`258` `missing_or_unclassified`. Current written rows are `2728`, with
-`2340/2728` matching stock Git, `1/2728` open and `387/2728` invalid-input.
+`258` `missing_or_unclassified`. Current written rows are `2729`, with
+`2341/2729` matching stock Git, `1/2729` open and `387/2729` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 
