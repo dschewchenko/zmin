@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the `git_stash_compat.rs` stash show rename-detection
+Generated after reviewing the `git_stash_compat.rs` stash show copy-detection
 backlog on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `437` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `524` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `438` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `523` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -49,8 +49,8 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_transport_http_compat.rs` | `75` |
 | `git_pack_integrity_compat.rs` | `61` |
 | `git_transport_local_compat.rs` | `58` |
-| `git_stash_compat.rs` | `39` |
 | `git_index_mutation_compat.rs` | `39` |
+| `git_stash_compat.rs` | `38` |
 | `git_maintenance_compat.rs` | `32` |
 | `git_commit_compat.rs` | `26` |
 | `git_worktree_state_compat.rs` | `26` |
