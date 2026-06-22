@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 60/151 commands with matrix rows / 389/4632 represented doc-option pairs / 1643 written rows / 1345 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 63/151 commands with matrix rows / 390/4632 represented doc-option pairs / 1654 written rows / 1355 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `check-ref-format` matrix from existing
+The latest completed slice seeds credential-family matrices from existing
 stock-oracle evidence:
 
-`git check-ref-format --normalize /refs//heads/main`
+`git credential-cache --socket=<path> get`
 
-`docs/cli/matrices/check_ref_format_v2_47.tsv` now records command lines from
-`git_check_ref_format_compat::check_ref_format_matches_stock_git_for_common_modes`:
-full refname validation, `--allow-onelevel`, `--normalize`, `--branch`, and
-stock-compatible invalid refname forms.
+`credential_v2_47.tsv`, `credential_store_v2_47.tsv`, and
+`credential_cache_v2_47.tsv` now record command lines from
+`git_credential_compat`: basic `credential` fill/approve/reject flows,
+missing-field fill invalid input, isolated-HOME `credential-store`
+store/get/erase side effects, and Unix socket-scoped `credential-cache`
+store/get/erase/get-after-erase flows.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +628,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `check_ref_format_v2_47.tsv` with
-accepted and invalid refname rows already covered by
-`git_check_ref_format_compat::check_ref_format_matches_stock_git_for_common_modes`.
+The latest matrix inventory slice seeds credential-family TSVs with
+basic protocol, store-file, and Unix socket-cache rows already covered by
+`git_credential_compat`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1643` written-row
+This card is the exact handoff target after the current `1654` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +654,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1643`; the `1/1643` open row and the still incomplete command/doc-option
+`0/1654`; the `1/1654` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -742,6 +744,9 @@ until a full matrix is expanded and verified.
 | `config` replacement missing optional get | `1` | `0` | `--get commit.template` through the `git` shim exits 1 with empty stdout/stderr on a cloned repository without that key |
 | `config` replacement remote regexp query | `1` | `0` | `--get-regexp ^remote\\.` through the `git` shim on cloned repository config |
 | `config` replacement branch regexp query | `1` | `0` | `--get-regexp ^branch\\.` through the `git` shim on cloned repository config |
+| `credential` basic protocol flows | `3` | `1` | `fill`, `approve`, `reject` with complete stdin plus missing username/password fill failure already covered by `git_credential_compat` |
+| `credential-store` store/get/erase flows | `3` | `0` | isolated-HOME `.git-credentials` store, get and erase file side effects already covered by `git_credential_compat` |
+| `credential-cache` socket store/get/erase flows | `4` | `0` | Unix `--socket=<path>` store, get, erase and get-after-erase flows already covered by `git_credential_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
