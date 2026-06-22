@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2539 written rows / 2165/2539 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2542 written rows / 2168/2542 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -286,17 +286,17 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `601`
-represented or classified and `360` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `604`
+represented or classified and `357` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `601` already represented
-or classified and `360` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `604` already represented
+or classified and `357` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. The default
-bucket order is HTTP transport (`62`), local transport (`58`), maintenance
+bucket order is HTTP transport (`59`), local transport (`58`), maintenance
 (`32`), pack integrity (`28`) and worktree state (`26`), unless a real
 replacement-binary blocker overrides it. A docs-only oracle import must reduce
 `missing_or_unclassified` by the declared number of evidence functions; any TSV
@@ -305,20 +305,22 @@ rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `ls_remote_v2_47.tsv` with six closed SSH
-rows from existing focused stock-oracle evidence in
+The latest completed slice extends `fetch_v2_47.tsv` with three closed
+git-daemon and SSH rows from existing focused stock-oracle evidence in
 `git_transport_http_compat.rs`.
 
-`ls_remote_v2_47.tsv` now records SSH variants for default
-`git ls-remote <url>`, `--heads`, `--tags`, `--refs`, pattern `v*` and
-scp-like URL forms.
+`fetch_v2_47.tsv` now records default configured `git fetch origin` over
+git-daemon and SSH plus SSH wildcard refspec with `--prune --no-tags`.
 Evidence comes from
-`git_transport_http_compat::ls_remote_reads_ssh_remote_like_stock_git`, which
-asserts successful execution and compares stock Git and Zmin stdout through a
-fake SSH transport. The oracle inventory now lists `601`
-represented/classified functions and `360` `missing_or_unclassified`. Current
-written rows are `2539`, with `2165/2539` matching stock Git, `1/2539` open and
-`373/2539` invalid-input. No Rust behavior changed.
+`git_transport_http_compat::fetch_reads_git_daemon_remote_like_stock_git`,
+`git_transport_http_compat::fetch_reads_ssh_remote_like_stock_git` and
+`git_transport_http_compat::fetch_ssh_wildcard_refspec_prune_no_tags_like_stock_git`,
+which assert successful execution and compare stock Git and Zmin
+remote-tracking refs plus fetched object contents. The oracle inventory now
+lists `604` represented/classified functions and `357`
+`missing_or_unclassified`. Current written rows are `2542`, with `2168/2542`
+matching stock Git, `1/2542` open and `373/2542` invalid-input. No Rust
+behavior changed.
 
 ### No-Skip Rule
 
