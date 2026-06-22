@@ -406,6 +406,27 @@ def zmin_extension_command_names(root: Path) -> set[str]:
     return commands
 
 
+def zmin_extension_option_keys(root: Path) -> set[tuple[str, str]]:
+    extension_doc = root / "docs/cli/zmin_extensions_inventory.md"
+    if not extension_doc.exists():
+        die(f"extension inventory is missing: {extension_doc}")
+
+    options = set()
+    for line in extension_doc.read_text(errors="replace").splitlines():
+        if not line.startswith("| `zmin "):
+            continue
+        cells = markdown_cells(line)
+        if len(cells) < 2:
+            continue
+        option = cells[1]
+        if not option.startswith("-"):
+            continue
+        parts = cells[0].split()
+        if len(parts) >= 2:
+            options.add((parts[1], option))
+    return options
+
+
 def zmin_extension_rows(root: Path) -> list[dict[str, str]]:
     rows = []
     extension_doc = root / "docs/cli/zmin_extensions_inventory.md"
@@ -519,6 +540,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     matrices = matrix_rows(root)
     hard_fails = hard_fail_scan(root)
     extension_commands = zmin_extension_command_names(root)
+    extension_options = zmin_extension_option_keys(root)
 
     matrix_options_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     matrix_rows_by_command: Counter[str] = Counter()
@@ -559,6 +581,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     implemented_unverified = []
     for (command, option), arg_refs in sorted(zmin_options.items()):
         if command not in command_set:
+            continue
+        if (command, option) in extension_options:
             continue
         statuses = matrix_options_by_status.get((command, option), Counter())
         for arg_ref in arg_refs:
