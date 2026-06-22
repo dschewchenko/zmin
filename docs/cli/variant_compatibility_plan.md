@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 504/4632 represented doc-option pairs / 2008 written rows / 1697/2008 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 91/151 commands with matrix rows / 507/4632 represented doc-option pairs / 2013 written rows / 1702/2013 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice imports `apply` empty-file delete patch rows from
-existing stock-oracle evidence:
+The latest completed slice imports `interpret-trailers` folded and divider
+mode rows from existing stock-oracle evidence:
 
-`git apply < empty-delete.patch`
+`git interpret-trailers --only-trailers --unfold < folded-message.txt`
 
-`apply_v2_47.tsv` now records default, reverse, cached and index application
-of an empty-file delete patch with no hunks. Existing
-`git_apply_compat::apply_empty_file_delete_patches_match_stock_git` evidence
-compares stock Git and Zmin output or side effects for all four forms. This is
-an evidence import only; no Rust behavior changed.
+`interpret_trailers_v2_47.tsv` now records folded trailer handling,
+`--unfold`, `--no-divider`, `--trim-empty`, and default divider handling for a
+patch-like stdin message. Existing
+`git_mail_tools_compat::interpret_trailers_matches_stock_git_for_common_modes`
+evidence compares stock Git and Zmin output for all five forms. This is an
+evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -619,20 +620,21 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice imports `apply` empty-file delete patch rows from
-existing stock-oracle evidence:
+The latest completed slice imports `interpret-trailers` folded and divider
+mode rows from existing stock-oracle evidence:
 
-`git apply < empty-delete.patch`
+`git interpret-trailers --only-trailers --unfold < folded-message.txt`
 
-`apply_v2_47.tsv` now records default, reverse, cached and index application
-of an empty-file delete patch with no hunks. Existing
-`git_apply_compat::apply_empty_file_delete_patches_match_stock_git` evidence
-compares stock Git and Zmin output or side effects for all four forms. This is
-an evidence import only; no Rust behavior changed.
+`interpret_trailers_v2_47.tsv` now records folded trailer handling,
+`--unfold`, `--no-divider`, `--trim-empty`, and default divider handling for a
+patch-like stdin message. Existing
+`git_mail_tools_compat::interpret_trailers_matches_stock_git_for_common_modes`
+evidence compares stock Git and Zmin output for all five forms. This is an
+evidence import only; no Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2008` written-row
+This card is the exact handoff target after the current `2013` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2008`; the `1/2008` open row and the still incomplete command/doc-option
+`0/2013`; the `1/2013` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
