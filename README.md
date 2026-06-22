@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `98/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `568/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2408` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2063/2408` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2408` | written rows with incomplete parity |
-| Open written rows | `1/2408` | written rows that still do not match stock Git |
-| Invalid input rows | `344/2408` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `573/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `2416` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2071/2416` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2416` | written rows with incomplete parity |
+| Open written rows | `1/2416` | written rows that still do not match stock Git |
+| Invalid input rows | `344/2416` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2063/2408` as Git compatibility. It only means `2063` of the `2408`
+Do not read `2071/2416` as Git compatibility. It only means `2071` of the `2416`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2408` rows are partially matching,
-`1/2408` rows are known open mismatches, and `344/2408` additional rows are
-stock-compatible invalid inputs. Do not read `568/4632` as option support
+unexpanded surface is not counted yet, `0/2416` rows are partially matching,
+`1/2416` rows are known open mismatches, and `344/2416` additional rows are
+stock-compatible invalid inputs. Do not read `573/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -208,7 +208,7 @@ Audit progress by git-scm reference group:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Setup and Config | `6` | `0` | `276` | `0` | `149` | `135` | `0` | `0` | `14` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `61` | `54` | `0` | `1` | `6` |
-| Basic Snapshotting | `9` | `0` | `371` | `0` | `202` | `180` | `0` | `0` | `22` |
+| Basic Snapshotting | `9` | `0` | `371` | `0` | `210` | `188` | `0` | `0` | `22` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `268` | `225` | `0` | `0` | `43` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `403` | `394` | `0` | `0` | `9` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2408`** | **`2063`** | **`0`** | **`1`** | **`344`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2416`** | **`2071`** | **`0`** | **`1`** | **`344`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and

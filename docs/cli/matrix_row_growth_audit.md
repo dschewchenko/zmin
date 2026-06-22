@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2408` | `+1314` |
-| Matching stock Git rows | `823` | `2063` | `+1240` |
+| Written behavior rows | `1094` | `2416` | `+1322` |
+| Matching stock Git rows | `823` | `2071` | `+1248` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `344` | `+74` |
 | Commands with rows | `50/151` | `98/151` | `+48` |
-| Represented doc-option pairs | `253/4632` | `568/4632` | `+315` |
+| Represented doc-option pairs | `253/4632` | `573/4632` | `+320` |
 
-The text-level row delta audit reports `201` commits with `1405` TSV row
-additions and `43` TSV row deletions, for `+1362` text net. The strict behavior
-row count is `+1314` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `202` commits with `1413` TSV row
+additions and `43` TSV row deletions, for `+1370` text net. The strict behavior
+row count is `+1322` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`520` represented by matrix, extension or deferral evidence, and `441` still
+`527` represented by matrix, extension or deferral evidence, and `434` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -143,7 +143,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `441` missing or unclassified.
+  functions, currently `961` total with `434` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -185,8 +185,8 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `520` are already represented by matrix rows,
-extension rows or explicit deferrals, and `441` are
+focused oracle functions. `527` are already represented by matrix rows,
+extension rows or explicit deferrals, and `434` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
@@ -198,7 +198,7 @@ Largest missing/unclassified buckets:
 | `git_pack_integrity_compat.rs` | `46` |
 | `git_index_mutation_compat.rs` | `39` |
 | `git_maintenance_compat.rs` | `32` |
-| `git_commit_compat.rs` | `9` |
+| `git_commit_compat.rs` | `2` |
 | `git_worktree_state_compat.rs` | `26` |
 | `git_notes_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
@@ -214,14 +214,14 @@ Largest missing/unclassified buckets:
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_global_cli_compat.rs` | `5` |
 
-Largest command-hint buckets inside those `441` functions:
+Largest command-hint buckets inside those `434` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `115` |
 | `remote` | `58` |
 | `worktree` | `48` |
-| `commit` | `27` |
+| `commit` | `20` |
 | `maintenance` | `34` |
 | `config` | `32` |
 | `refs` | `30` |
@@ -1069,7 +1069,7 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows and `+3` represented doc-option pairs.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle tests already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -1117,3 +1117,52 @@ Actual post-import movement matched the declaration: `+8` behavior rows,
 `+5` closed rows, `+0` open rows, `+3` invalid-input rows, `+6`
 represented oracle functions, `-6` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+1` represented doc-option pair.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_commit_compat.rs`:
+
+- `git_commit_compat::commit_long_message_option_matches_stock_git_object`
+- `git_commit_compat::commit_author_matches_stock_git_object`
+- `git_commit_compat::commit_date_matches_stock_git_object`
+- `git_commit_compat::commit_amend_author_date_options_match_stock_git_object`
+- `git_commit_compat::commit_reset_author_matches_stock_git_object`
+- `git_commit_compat::commit_signoff_matches_stock_git_object`
+- `git_commit_compat::commit_squash_matches_stock_git_object`
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+8`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+7`
+- missing-or-unclassified oracle functions: `-7`
+- commands with rows: `+0`
+- represented doc-option pairs: expected up to `+5` for `--message`,
+  `--author`, `--date`, `--reset-author` and `--squash`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git commit --allow-empty --message empty`
+- `git commit --author "Alice Example <alice@example.test>" -m author`
+- `git commit --date "1700001234 +0000" -m date`
+- `git commit --amend --author "Alice Example <alice@example.test>" --date "1700001234 +0000" -m amended`
+- `git commit --amend --reset-author -m reset`
+- `git commit --allow-empty-message --signoff -m ""`
+- `git commit --signoff -m subject -m details`
+- `git commit --squash HEAD~1 -m work`
+
+The evidence compares stock Git and Zmin commit objects and, for the author
+row, log-rendered author identity for long message spelling, explicit
+author/date metadata, amend metadata overrides, reset-author behavior, signoff
+messages and squash messages.
+
+Actual post-import movement matched the declaration: `+8` behavior rows,
+`+8` closed rows, `+0` open rows, `+0` invalid-input rows, `+7`
+represented oracle functions, `-7` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+5` represented doc-option pairs.
