@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2279 written rows / 1957/2279 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2286 written rows / 1964/2286 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -278,15 +278,17 @@ an incidental side effect of finding more existing tests.
 
 ### Latest Completed Slice
 
-The latest completed slice imports the `git_stash_compat.rs` stash store
-negative-argument backlog rows from
+The latest completed slice imports the `git_stash_compat.rs` stash pathspec
+backlog rows from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested invalid-input `stash store` rows
-for missing commit arguments, message-only store, unknown options, extra
-operands and bad revision names. The focused `git_stash_compat.rs` evidence
-covers stdout, stderr and exit status against stock Git. The oracle inventory
-reduced total `missing_or_unclassified` to `514`. No Rust behavior changed.
+`stash_v2_47.tsv` now records already-tested supported pathspec rows for
+`stash push -- <pathspec>`, implicit `stash -- <pathspec>`, subdirectory
+relative pathspecs, `-k -- <pathspec>`, `--pathspec-from-file <file>` and
+NUL-delimited `--pathspec-from-file - --pathspec-file-nul`. The focused
+`git_stash_compat.rs` evidence covers stdout, stderr, exit status and
+worktree/index side effects against stock Git. The oracle inventory reduced
+total `missing_or_unclassified` to `508`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -629,7 +631,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2279` written-row
+This card is the exact handoff target after the current `2286` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -648,7 +650,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2279`; the `1/2279` open row and the still incomplete command/doc-option
+`0/2286`; the `1/2286` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb

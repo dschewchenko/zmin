@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the `git_stash_compat.rs` stash store negative-argument
-backlog on `compat/status-pathspec-matrix`.
+Generated after reviewing the `git_stash_compat.rs` stash pathspec backlog on
+`compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `447` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `514` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `453` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `508` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
