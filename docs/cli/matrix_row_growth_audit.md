@@ -152,6 +152,31 @@ The known queues are:
 These are not a complete final Git behavior denominator. They are the frozen
 known inventory layers that must be expanded deliberately.
 
+## Full Backlog Verification
+
+`docs/cli/existing_oracle_test_inventory.tsv` is the full current list of
+already-existing focused stock-oracle test functions to walk before importing
+more rows from that source. Do not reconstruct this list from chat history or
+from a partial `rg` result.
+
+Verify it before each oracle-import batch:
+
+```bash
+python3 tools/git-existing-oracle-inventory.py > /tmp/zmin-oracle-inventory.tsv
+cmp -s /tmp/zmin-oracle-inventory.tsv docs/cli/existing_oracle_test_inventory.tsv
+awk -F '\t' 'NR>1 { total++; c[$7]++ } END { printf "total=%d represented=%d missing_or_unclassified=%d\n", total, c["represented"], c["missing_or_unclassified"] }' docs/cli/existing_oracle_test_inventory.tsv
+```
+
+Then select rows only from `missing_or_unclassified`, read the exact test
+function, declare the expected row delta below and rerun the same inventory
+check after the slice. The expected invariant for an import from this backlog
+is:
+
+- `represented` increases by the declared evidence-function count.
+- `missing_or_unclassified` decreases by the same count.
+- `behavior_rows_written` grows only by the declared row count.
+- Any different movement is a process error to investigate before committing.
+
 ## Frozen Oracle Backlog Snapshot
 
 This snapshot explains the remaining known denominator growth from focused

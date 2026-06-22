@@ -79,6 +79,26 @@ Run this at the start of every session:
 7. Confirm the exact stock Git command line and expected behavior before
    editing implementation code.
 
+## Baseline Verification Contract
+
+Before importing more rows from existing tests, verify the known oracle backlog
+instead of discovering it implicitly during the slice:
+
+```bash
+python3 tools/git-existing-oracle-inventory.py > /tmp/zmin-oracle-inventory.tsv
+cmp -s /tmp/zmin-oracle-inventory.tsv docs/cli/existing_oracle_test_inventory.tsv
+awk -F '\t' 'NR>1 { total++; c[$7]++ } END { print total, c["represented"], c["missing_or_unclassified"] }' docs/cli/existing_oracle_test_inventory.tsv
+tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD
+```
+
+The current frozen focused-oracle backlog is `961` functions: `513`
+represented or classified and `448` `missing_or_unclassified`. Treat
+`docs/cli/existing_oracle_test_inventory.tsv` as the complete current list to
+walk. A docs-only row import from that list must reduce
+`missing_or_unclassified` by the declared evidence-function count. If behavior
+rows grow without that reduction, stop and fix the inventory or name a separate
+source bucket before committing.
+
 ## Slice Loop
 
 Every compatibility slice follows this exact order:

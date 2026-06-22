@@ -283,6 +283,14 @@ row count, then run `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after
 the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
+Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
+compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
+complete current backlog list to walk: `961` focused oracle functions, `513`
+represented or classified and `448` `missing_or_unclassified`. If the generated
+inventory differs, fix the inventory first. If an import does not reduce
+`missing_or_unclassified` by its declared evidence-function count, stop and
+explain the mismatch before committing.
+
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
 backlog snapshot at `961` focused oracle functions: `513` already represented
 or classified and `448` still `missing_or_unclassified`. Treat that snapshot as
