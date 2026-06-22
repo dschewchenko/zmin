@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2802` | `+1708` |
-| Matching stock Git rows | `823` | `2413` | `+1590` |
+| Written behavior rows | `1094` | `2803` | `+1709` |
+| Matching stock Git rows | `823` | `2414` | `+1591` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
@@ -111,7 +111,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `describe` | `0` | `12` | `+12` |
 | `filter-branch` | `2` | `14` | `+12` |
 | `grep` | `0` | `12` | `+12` |
-| `merge-base` | `0` | `12` | `+12` |
+| `merge-base` | `0` | `13` | `+13` |
 | `var` | `0` | `12` | `+12` |
 | `check-ref-format` | `0` | `11` | `+11` |
 | `pull` | `0` | `10` | `+10` |
@@ -4147,3 +4147,40 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
 implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `merge-base` positional
+schema surface, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-merge-base-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`; this row closes a positional schema
+  surface rather than a documented option spelling
+- implemented-but-unverified schema rows: expected `-1`
+- Rust behavior changes: no
+
+Expected row:
+
+- `git merge-base main side`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and
+worktree status using copied workdirs from one seed repository so object ids
+match byte-for-byte.
+
+Actual post-import movement matched the declaration: `+1` behavior row,
+`+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented
+oracle functions, `+0` missing-or-unclassified oracle functions, `+0`
+commands with rows, `+0` represented doc-option pairs and `-1`
+implemented-but-unverified schema row.
