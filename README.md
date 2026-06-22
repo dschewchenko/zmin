@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `81/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `463/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1876` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1569/1876` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1876` | written rows with incomplete parity |
-| Open written rows | `1/1876` | written rows that still do not match stock Git |
-| Invalid input rows | `306/1876` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `82/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `465/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1882` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1575/1882` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1882` | written rows with incomplete parity |
+| Open written rows | `1/1882` | written rows that still do not match stock Git |
+| Invalid input rows | `306/1882` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1569/1876` as Git compatibility. It only means `1569` of the `1876`
+Do not read `1575/1882` as Git compatibility. It only means `1575` of the `1882`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1876` rows are partially matching,
-`1/1876` rows are known open mismatches, and `306/1876` additional rows are
-stock-compatible invalid inputs. Do not read `463/4632` as option support
+unexpanded surface is not counted yet, `0/1882` rows are partially matching,
+`1/1882` rows are known open mismatches, and `306/1882` additional rows are
+stock-compatible invalid inputs. Do not read `465/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -211,7 +211,7 @@ Audit progress by git-scm reference group:
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `314` | `306` | `0` | `0` | `8` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `320` | `312` | `0` | `0` | `8` |
 | Patching | `5` | `0` | `333` | `0` | `11` | `9` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `27` | `27` | `0` | `0` | `0` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `423` | `358` | `0` | `0` | `65` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `106` | `72` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1876`** | **`1569`** | **`0`** | **`1`** | **`306`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1882`** | **`1575`** | **`0`** | **`1`** | **`306`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -300,6 +300,7 @@ Current command-level matrices:
 | `rev-parse` | `72` | `0` | `24` | `69` | `63` | `0` | `0` | `6` | no |
 | `rm` | `20` | `0` | `1` | `1` | `1` | `0` | `0` | `0` | no |
 | `send-email` | `70` | `0` | `2` | `16` | `16` | `0` | `0` | `0` | no |
+| `show` | `143` | `0` | `2` | `6` | `6` | `0` | `0` | `0` | no |
 | `show-index` | `1` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `11` | `8` | `0` | `0` | `3` | no |
 | `shortlog` | `164` | `0` | `4` | `6` | `6` | `0` | `0` | `0` | no |

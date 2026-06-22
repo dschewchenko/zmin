@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 81/151 commands with matrix rows / 463/4632 represented doc-option pairs / 1876 written rows / 1569 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 82/151 commands with matrix rows / 465/4632 represented doc-option pairs / 1882 written rows / 1575/1882 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,14 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice adds concrete `config -c` inline config value
-rows from existing stock-oracle evidence:
+The latest completed slice seeds the `show` matrix from existing stock-oracle
+evidence:
 
-`git -c demo.flag config --bool --get demo.flag`
+`git show --format=%H%x00%s --name-status -z --max-count=1 HEAD`
 
-`config_v2_47.tsv` now records key-only bool get, empty-value bool get and
-empty-value raw get forms, comparing stock Git and Zmin output through focused
-`git_global_cli_compat` evidence. This is an evidence import only; no Rust
+`show_v2_47.tsv` now records root commit output, explicit `--root`, raw
+format, `log.showroot=false` and IDE-shaped NUL-delimited `--name-status`
+output, comparing stock Git and Zmin output through focused
+`git_history_query_compat` evidence. This is an evidence import only; no Rust
 behavior changed.
 
 ### No-Skip Rule
@@ -626,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1876` written-row
+This card is the exact handoff target after the current `1882` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -645,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1876`; the `1/1876` open row and the still incomplete command/doc-option
+`0/1882`; the `1/1882` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -736,6 +737,7 @@ until a full matrix is expanded and verified.
 | `config` replacement remote regexp query | `1` | `0` | `--get-regexp ^remote\\.` through the `git` shim on cloned repository config |
 | `config` replacement branch regexp query | `1` | `0` | `--get-regexp ^branch\\.` through the `git` shim on cloned repository config |
 | `config -c` inline bool and empty values | `3` | `0` | key-only bool get, empty-value bool get and empty-value raw get already covered by `git_global_cli_compat` |
+| `show` root and IDE output rows | `6` | `0` | default root commit output, explicit `--root`, raw format, `log.showroot=false` and NUL-delimited `--name-status` output already covered by `git_history_query_compat` |
 | `credential` basic protocol flows | `3` | `1` | `fill`, `approve`, `reject` with complete stdin plus missing username/password fill failure already covered by `git_credential_compat` |
 | `credential-store` store/get/erase flows | `3` | `0` | isolated-HOME `.git-credentials` store, get and erase file side effects already covered by `git_credential_compat` |
 | `credential-cache` socket store/get/erase flows | `4` | `0` | Unix `--socket=<path>` store, get, erase and get-after-erase flows already covered by `git_credential_compat` |
