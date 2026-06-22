@@ -363,6 +363,24 @@ def markdown_cells(line: str) -> list[str]:
     ]
 
 
+def zmin_extension_command_names(root: Path) -> set[str]:
+    extension_doc = root / "docs/cli/zmin_extensions_inventory.md"
+    if not extension_doc.exists():
+        die(f"extension inventory is missing: {extension_doc}")
+
+    commands = set()
+    for line in extension_doc.read_text(errors="replace").splitlines():
+        if not line.startswith("| `zmin "):
+            continue
+        cells = markdown_cells(line)
+        if not cells or cells[0] == "Command":
+            continue
+        parts = cells[0].split()
+        if len(parts) >= 2:
+            commands.add(parts[1])
+    return commands
+
+
 def zmin_extension_rows(root: Path) -> list[dict[str, str]]:
     rows = []
     extension_doc = root / "docs/cli/zmin_extensions_inventory.md"
@@ -475,6 +493,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     zmin_commands, additional_commands, zmin_options = normalize_schema(schema)
     matrices = matrix_rows(root)
     hard_fails = hard_fail_scan(root)
+    extension_commands = zmin_extension_command_names(root)
 
     matrix_options_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     matrix_rows_by_command: Counter[str] = Counter()
@@ -529,6 +548,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
             )
 
     for command in sorted(additional_commands):
+        if command in extension_commands:
+            continue
         implemented_unverified.append(
             {
                 "item_id": stable_id("schema-additional", [command]),

@@ -8,10 +8,10 @@ matrix_rows	2665	existing behavior rows used as evidence layer
 verified_rows	2287	closed exact behavior rows
 invalid_input_rows	377	stock-compatible rejection rows
 open_or_partial_matrix_rows	1	exact rows still open or partial
-implemented_but_unverified_rows	960	schema args without exact matrix evidence
+implemented_but_unverified_rows	949	schema args without exact matrix evidence
 remaining_to_fix_or_verify_rows	4682	doc-option expansion, exact opens and unclassified guards
 extension_or_deferred_rows	33	Zmin-only or deferred/non-Git scope items
 oracle_evidence_layer_rows	961	existing oracle inventory rows, not primary backlog
 hard_fail_scan_rows	88	source guard hits
 hard_fail_scan_unclassified_rows	0	source guard hits not matched to classification docs
-all_census_rows	9388	union of generated census output rows
+all_census_rows	9377	union of generated census output rows
