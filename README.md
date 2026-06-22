@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `81/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `463/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1873` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1566/1873` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1873` | written rows with incomplete parity |
-| Open written rows | `1/1873` | written rows that still do not match stock Git |
-| Invalid input rows | `306/1873` | rows where stock Git rejects the input |
+| Written behavior rows | `1876` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1569/1876` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1876` | written rows with incomplete parity |
+| Open written rows | `1/1876` | written rows that still do not match stock Git |
+| Invalid input rows | `306/1876` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1566/1873` as Git compatibility. It only means `1566` of the `1873`
+Do not read `1569/1876` as Git compatibility. It only means `1569` of the `1876`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1873` rows are partially matching,
-`1/1873` rows are known open mismatches, and `306/1873` additional rows are
+unexpanded surface is not counted yet, `0/1876` rows are partially matching,
+`1/1876` rows are known open mismatches, and `306/1876` additional rows are
 stock-compatible invalid inputs. Do not read `463/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -206,7 +206,7 @@ Audit progress by git-scm reference group:
 
 | Git reference group | Git commands | Complete command matrices | Git doc option seed | Complete documented option matrices | Behavior rows written | Written rows matching stock Git | Partial written rows | Open written rows | Invalid input rows |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Setup and Config | `6` | `0` | `276` | `0` | `146` | `132` | `0` | `0` | `14` |
+| Setup and Config | `6` | `0` | `276` | `0` | `149` | `135` | `0` | `0` | `14` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `55` | `50` | `0` | `1` | `4` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `423` | `358` | `0` | `0` | `65` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `106` | `72` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1873`** | **`1566`** | **`0`** | **`1`** | **`306`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1876`** | **`1569`** | **`0`** | **`1`** | **`306`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -253,7 +253,7 @@ Current command-level matrices:
 | `clone` | `56` | `0` | `22` | `53` | `48` | `0` | `1` | `4` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
-| `config` | `243` | `0` | `17` | `120` | `110` | `0` | `0` | `10` | no |
+| `config` | `243` | `0` | `17` | `123` | `113` | `0` | `0` | `10` | no |
 | `credential` | `0` | `0` | `0` | `4` | `3` | `0` | `0` | `1` | no |
 | `credential-cache` | `2` | `0` | `1` | `4` | `4` | `0` | `0` | `0` | no |
 | `credential-store` | `1` | `0` | `0` | `3` | `3` | `0` | `0` | `0` | no |
