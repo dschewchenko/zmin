@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 446/4632 represented doc-option pairs / 1806 written rows / 1501 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 447/4632 represented doc-option pairs / 1810 written rows / 1504 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands `clone` local safety and ref-format matrix
-rows from existing stock-oracle evidence:
+The latest completed slice expands `diff --check` and `diff --no-index`
+error/edge rows from existing stock-oracle evidence:
 
-`git clone --ref-format=files <path> dst`
+`git diff --check`
 
-`clone_v2_47.tsv` now records explicit files ref storage, symlinked source
-object-store root rejection, symlinked loose-object rejection and
-case-insensitive symlink/directory checkout collision as separate rows,
-comparing stock Git and Zmin behavior through focused `git_clone_compat`
-evidence. This is an evidence import only; no Rust behavior changed.
+`diff_v2_47.tsv` now records clean pathspec `--check`, dirty worktree
+whitespace diagnostics, no-index missing-path rejection and no-index
+`/dev/null` deletion comparison as separate rows, comparing stock Git and Zmin
+stdout, stderr and exit status through focused `git_diff_compat` evidence.
+This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -627,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1806` written-row
+This card is the exact handoff target after the current `1810` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1806`; the `1/1806` open row and the still incomplete command/doc-option
+`0/1810`; the `1/1810` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -848,6 +848,7 @@ until a full matrix is expanded and verified.
 | `ls-files` conflicted-index non-unmerged modes | `7` | `0` | default, `-c`, `-t`, `-v`, `--stage`, `-s -t` and `-s -v` conflicted-index forms already covered by `git_ls_files_compat` |
 | `ls-files` nested-cwd and EOL rows | `3` | `0` | default nested-cwd listing plus LF and CRLF single-path `--eol` rows already covered by `git_ls_files_compat` |
 | `diff` patch edge-case rows | `6` | `0` | context/no-newline, cached context, markdown-empty-binary-delete, YAML hunk-header, JSON/repeated-blank and binary-stat rows already covered by `git_diff_compat` |
+| `diff --check` and no-index edge rows | `3` | `1` | clean pathspec `--check`, dirty whitespace diagnostics, missing no-index path rejection and no-index `/dev/null` deletion comparison already covered by `git_diff_compat` |
 | `verify-pack` unsupported pack index version | `1` | `0` | `git verify-pack` rejects a checksum-valid `.idx` version `3` with stock unsupported-version diagnostics |
 | `index-pack --verify` bad reverse-index signature | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` with a bad signature using stock sha1 validation diagnostics |
 | `index-pack --verify` bad reverse-index version | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` version `2` using stock sha1 validation diagnostics |
@@ -945,7 +946,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `792` verified variants.
+Tracked closed blocks in this table: `795` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

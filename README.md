@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `80/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `446/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1806` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1501/1806` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1806` | written rows with incomplete parity |
-| Open written rows | `1/1806` | written rows that still do not match stock Git |
-| Invalid input rows | `304/1806` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `447/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1810` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1504/1810` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1810` | written rows with incomplete parity |
+| Open written rows | `1/1810` | written rows that still do not match stock Git |
+| Invalid input rows | `305/1810` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1501/1806` as Git compatibility. It only means `1501` of the `1806`
+Do not read `1504/1810` as Git compatibility. It only means `1504` of the `1810`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1806` rows are partially matching,
-`1/1806` rows are known open mismatches, and `304/1806` additional rows are
-stock-compatible invalid inputs. Do not read `446/4632` as option support
+unexpanded surface is not counted yet, `0/1810` rows are partially matching,
+`1/1810` rows are known open mismatches, and `305/1810` additional rows are
+stock-compatible invalid inputs. Do not read `447/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -211,7 +211,7 @@ Audit progress by git-scm reference group:
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `271` | `264` | `0` | `0` | `7` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `275` | `267` | `0` | `0` | `8` |
 | Patching | `5` | `0` | `333` | `0` | `11` | `9` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `27` | `27` | `0` | `0` | `0` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `411` | `346` | `0` | `0` | `65` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `106` | `72` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1806`** | **`1501`** | **`0`** | **`1`** | **`304`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1810`** | **`1504`** | **`0`** | **`1`** | **`305`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -258,7 +258,7 @@ Current command-level matrices:
 | `credential-cache` | `2` | `0` | `1` | `4` | `4` | `0` | `0` | `0` | no |
 | `credential-store` | `1` | `0` | `0` | `3` | `3` | `0` | `0` | `0` | no |
 | `describe` | `18` | `0` | `8` | `10` | `10` | `0` | `0` | `0` | no |
-| `diff` | `133` | `0` | `56` | `157` | `155` | `0` | `0` | `2` | no |
+| `diff` | `133` | `0` | `57` | `161` | `158` | `0` | `0` | `3` | no |
 | `diff-files` | `130` | `0` | `4` | `6` | `6` | `0` | `0` | `0` | no |
 | `diff-index` | `124` | `0` | `3` | `3` | `3` | `0` | `0` | `0` | no |
 | `diff-tree` | `151` | `0` | `47` | `74` | `74` | `0` | `0` | `0` | no |
