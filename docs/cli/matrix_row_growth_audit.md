@@ -37,12 +37,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2634` | `+1540` |
-| Matching stock Git rows | `823` | `2257` | `+1434` |
+| Written behavior rows | `1094` | `2638` | `+1544` |
+| Matching stock Git rows | `823` | `2261` | `+1438` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `376` | `+106` |
 | Commands with rows | `50/151` | `102/151` | `+52` |
-| Represented doc-option pairs | `253/4632` | `605/4632` | `+352` |
+| Represented doc-option pairs | `253/4632` | `606/4632` | `+353` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -50,7 +50,7 @@ behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`687` represented by matrix, extension or deferral evidence, and `274` still
+`691` represented by matrix, extension or deferral evidence, and `270` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -333,19 +333,19 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `687` are already represented by matrix rows,
-extension rows or explicit deferrals, and `274` are
+focused oracle functions. `691` are already represented by matrix rows,
+extension rows or explicit deferrals, and `270` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_worktree_state_compat.rs` | `26` |
 | `git_transport_local_compat.rs` | `24` |
 | `git_maintenance_compat.rs` | `24` |
 | `git_transport_http_compat.rs` | `23` |
 | `git_pack_integrity_compat.rs` | `23` |
+| `git_worktree_state_compat.rs` | `22` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
 | `git_notes_compat.rs` | `14` |
@@ -371,12 +371,12 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `274` functions:
+Largest command-hint buckets inside those `270` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `62` |
-| `worktree` | `47` |
+| `worktree` | `43` |
 | `merge` | `28` |
 | `remote` | `26` |
 | `maintenance` | `26` |
@@ -407,11 +407,11 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
-| 2 | `git_transport_local_compat.rs` (`24`) | remaining local/file transport and remote-management rows |
-| 3 | `git_maintenance_compat.rs` (`24`) | remaining dense maintenance/repack/multi-pack-index rows |
-| 4 | `git_transport_http_compat.rs` (`23`) | remaining network transport coverage over HTTP, SSH and git-daemon |
-| 5 | `git_pack_integrity_compat.rs` (`23`) | remaining pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 1 | `git_transport_local_compat.rs` (`24`) | remaining local/file transport and remote-management rows |
+| 2 | `git_maintenance_compat.rs` (`24`) | remaining dense maintenance/repack/multi-pack-index rows |
+| 3 | `git_transport_http_compat.rs` (`23`) | remaining network transport coverage over HTTP, SSH and git-daemon |
+| 4 | `git_pack_integrity_compat.rs` (`23`) | remaining pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 5 | `git_worktree_state_compat.rs` (`22`) | remaining worktree state rows that may expose implementation gaps |
 
 If a new WebStorm or replacement-binary blocker appears, it overrides this
 walk order. If a selected bucket produces Zmin-only extension behavior or an
@@ -2609,6 +2609,47 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 `+4` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
 represented oracle functions, `-2` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+1` represented doc-option pair.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions:
+
+- `git_worktree_state_compat::checkout_dot_pathspec_restores_root_like_stock_git`
+- `git_worktree_state_compat::checkout_dot_reports_updated_paths_like_stock_git`
+- `git_worktree_state_compat::checkout_separator_pathspec_omits_updated_paths_like_stock_git`
+- `git_worktree_state_compat::checkout_recurse_submodules_flag_keeps_dot_pathspec_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+4`
+- missing-or-unclassified oracle functions: `-4`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1`; checkout pathspec rows now
+  represent one more documented option pair
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git checkout --quiet --no-progress .`
+- `git checkout .`
+- `git checkout -- a.txt`
+- `git checkout --recurse-submodules .`
+
+The evidence compares stock Git and Zmin worktree restoration and updated-path
+reporting for dot pathspec checkout, separator pathspec checkout and
+`--recurse-submodules` dot pathspec handling.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+4`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+4` represented oracle
+functions, `-4` missing-or-unclassified oracle functions, `+0` commands with
+rows and `+1` represented doc-option pair.
 
 ## Latest Declared Import
 
