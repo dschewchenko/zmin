@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `95/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `534/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2095` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1784/2095` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2095` | written rows with incomplete parity |
-| Open written rows | `1/2095` | written rows that still do not match stock Git |
-| Invalid input rows | `310/2095` | rows where stock Git rejects the input |
+| Written behavior rows | `2105` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1794/2105` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2105` | written rows with incomplete parity |
+| Open written rows | `1/2105` | written rows that still do not match stock Git |
+| Invalid input rows | `310/2105` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1784/2095` as Git compatibility. It only means `1784` of the `2095`
+Do not read `1794/2105` as Git compatibility. It only means `1794` of the `2105`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2095` rows are partially matching,
-`1/2095` rows are known open mismatches, and `310/2095` additional rows are
+unexpanded surface is not counted yet, `0/2105` rows are partially matching,
+`1/2105` rows are known open mismatches, and `310/2105` additional rows are
 stock-compatible invalid inputs. Do not read `534/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -211,7 +211,7 @@ Audit progress by git-scm reference group:
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `373` | `365` | `0` | `0` | `8` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `383` | `375` | `0` | `0` | `8` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `174` | `93` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `34` | `34` | `0` | `0` | `0` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `490` | `423` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `114` | `80` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2095`** | **`1784`** | **`0`** | **`1`** | **`310`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2105`** | **`1794`** | **`0`** | **`1`** | **`310`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -261,7 +261,7 @@ Current command-level matrices:
 | `credential-cache` | `2` | `0` | `1` | `4` | `4` | `0` | `0` | `0` | no |
 | `credential-store` | `1` | `0` | `0` | `3` | `3` | `0` | `0` | `0` | no |
 | `describe` | `18` | `0` | `8` | `10` | `10` | `0` | `0` | `0` | no |
-| `diff` | `133` | `0` | `69` | `216` | `213` | `0` | `0` | `3` | no |
+| `diff` | `133` | `0` | `69` | `226` | `223` | `0` | `0` | `3` | no |
 | `diff-files` | `130` | `0` | `4` | `6` | `6` | `0` | `0` | `0` | no |
 | `diff-index` | `124` | `0` | `3` | `3` | `3` | `0` | `0` | `0` | no |
 | `diff-tree` | `151` | `0` | `47` | `74` | `74` | `0` | `0` | `0` | no |

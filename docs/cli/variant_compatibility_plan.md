@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 534/4632 represented doc-option pairs / 2095 written rows / 1784/2095 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 534/4632 represented doc-option pairs / 2105 written rows / 1794/2105 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -273,17 +273,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice adds an inventory-first backlog for existing
-stock-oracle tests:
+The latest completed slice imports a reviewed backlog batch from
+`docs/cli/existing_oracle_test_inventory.tsv`:
 
-`tools/git-existing-oracle-inventory.py --root .`
+`git_diff_compat::diff_treeish_forms_match_stock_git`
 
-`docs/cli/existing_oracle_test_inventory.tsv` now lists `961` stock-oracle test
-functions found by the generator: `400` already referenced by TSV evidence and
-`561` missing or not yet classified. Future evidence-import batches must start
-from this backlog, review one focused test function, extract exact rows, and
-only then update command matrices. This process slice does not change behavior
-row counts or Rust behavior.
+`diff_v2_47.tsv` now records ten already-tested supported rows for explicit
+treeish pairs, HEAD-to-worktree forms, pathspec separator forms and cached
+HEAD comparisons. Existing `git_diff_compat` evidence compares stock Git and
+Zmin output for those rows. The oracle inventory was regenerated, moving that
+test function to `represented` with `10` TSV rows and reducing
+`missing_or_unclassified` to `560`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -624,21 +624,21 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice adds an inventory-first backlog for existing
-stock-oracle tests:
+The latest completed slice imports a reviewed backlog batch from
+`docs/cli/existing_oracle_test_inventory.tsv`:
 
-`tools/git-existing-oracle-inventory.py --root .`
+`git_diff_compat::diff_treeish_forms_match_stock_git`
 
-`docs/cli/existing_oracle_test_inventory.tsv` now lists `961` stock-oracle test
-functions found by the generator: `400` already referenced by TSV evidence and
-`561` missing or not yet classified. Future evidence-import batches must start
-from this backlog, review one focused test function, extract exact rows, and
-only then update command matrices. This process slice does not change behavior
-row counts or Rust behavior.
+`diff_v2_47.tsv` now records ten already-tested supported rows for explicit
+treeish pairs, HEAD-to-worktree forms, pathspec separator forms and cached
+HEAD comparisons. Existing `git_diff_compat` evidence compares stock Git and
+Zmin output for those rows. The oracle inventory was regenerated, moving that
+test function to `represented` with `10` TSV rows and reducing
+`missing_or_unclassified` to `560`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2095` written-row
+This card is the exact handoff target after the current `2105` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -657,7 +657,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2095`; the `1/2095` open row and the still incomplete command/doc-option
+`0/2105`; the `1/2105` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
