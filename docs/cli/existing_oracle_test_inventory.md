@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after importing the `git_commit_compat.rs` message-source rows on
+Generated after importing the `git_commit_compat.rs` reuse-message rows on
 `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `507` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `454` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `508` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `453` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -52,7 +52,7 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_index_mutation_compat.rs` | `39` |
 | `git_maintenance_compat.rs` | `32` |
 | `git_worktree_state_compat.rs` | `26` |
-| `git_commit_compat.rs` | `22` |
+| `git_commit_compat.rs` | `21` |
 | `git_notes_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |

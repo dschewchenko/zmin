@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 556/4632 represented doc-option pairs / 2371 written rows / 2029/2371 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 558/4632 represented doc-option pairs / 2375 written rows / 2033/2375 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -284,8 +284,8 @@ the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `507` already represented
-or classified and `454` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `508` already represented
+or classified and `453` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -293,19 +293,19 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `commit_v2_47.tsv` with four message-source
+The latest completed slice extends `commit_v2_47.tsv` with four reuse-message
 rows from existing focused stock-oracle evidence in `git_commit_compat.rs`.
 
-`commit_v2_47.tsv` now records closed rows for `git commit -m subject -m body`,
-`git commit -F message.txt`, `git commit --allow-empty-message -m ""` and
-`git commit --amend -m amended -m details`. Evidence comes from
-`git_commit_compat::commit_messages_match_stock_git_object`, comparing stock
-Git and Zmin commit objects for multiple `-m` paragraphs, file-backed messages,
-empty messages and amend messages with multiple paragraphs. The oracle
-inventory now lists `507` represented/classified functions and `454`
-`missing_or_unclassified`. Current written rows are `2371`, with `2029/2371`
-matching stock Git, `1/2371` open and `341/2371` invalid-input. No Rust
-behavior changed.
+`commit_v2_47.tsv` now records closed rows for `git commit -C HEAD`,
+`git commit -C HEAD~1 --author ... --date ...`, `git commit -c HEAD~2` with a
+custom editor and `git commit -c HEAD~3` with an unchanged-message editor.
+Evidence comes from
+`git_commit_compat::commit_reuse_message_matches_stock_git_object`, comparing
+stock Git and Zmin commit objects, command output and editor input buffers for
+reuse and reedit message flows. The oracle inventory now lists `508`
+represented/classified functions and `453` `missing_or_unclassified`. Current
+written rows are `2375`, with `2033/2375` matching stock Git, `1/2375` open
+and `341/2375` invalid-input. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -648,7 +648,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2371` written-row
+This card is the exact handoff target after the current `2375` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -667,7 +667,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2371`; the `1/2371` open row and the still incomplete command/doc-option
+`0/2375`; the `1/2375` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
