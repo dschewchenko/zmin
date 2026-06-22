@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 59/151 commands with matrix rows / 386/4632 represented doc-option pairs / 1632 written rows / 1340 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 60/151 commands with matrix rows / 389/4632 represented doc-option pairs / 1643 written rows / 1345 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `grep` matrix from existing stock-oracle
-evidence:
+The latest completed slice seeds the `check-ref-format` matrix from existing
+stock-oracle evidence:
 
-`git grep --cached hello a.txt`
+`git check-ref-format --normalize /refs//heads/main`
 
-`docs/cli/matrices/grep_v2_47.tsv` now records command lines from
-`git_grep_compat::grep_matches_stock_git_for_tracked_text_files`: default
-pattern search, `-n`, `-l`, `-F`, pathspec-limited worktree searches,
-`--cached`, treeish searches with `HEAD`, and no-match exit behavior.
+`docs/cli/matrices/check_ref_format_v2_47.tsv` now records command lines from
+`git_check_ref_format_compat::check_ref_format_matches_stock_git_for_common_modes`:
+full refname validation, `--allow-onelevel`, `--normalize`, `--branch`, and
+stock-compatible invalid refname forms.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `grep_v2_47.tsv` with tracked,
-cached and treeish text-search rows already covered by
-`git_grep_compat::grep_matches_stock_git_for_tracked_text_files`.
+The latest matrix inventory slice seeds `check_ref_format_v2_47.tsv` with
+accepted and invalid refname rows already covered by
+`git_check_ref_format_compat::check_ref_format_matches_stock_git_for_common_modes`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1632` written-row
+This card is the exact handoff target after the current `1643` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1632`; the `1/1632` open row and the still incomplete command/doc-option
+`0/1643`; the `1/1643` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -753,6 +753,7 @@ until a full matrix is expanded and verified.
 | `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
 | `rebase -i` invalid todo command usage | `1` | `0` | `GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` with an unknown todo command exits `1` with stock invalid-command diagnostics, leaves `.git/rebase-merge` state for recovery, moves HEAD to the stock in-progress rebase point, and supports `git rebase --abort` cleanup instead of a custom unsupported-interactive-command fatal diagnostic |
 | `grep` tracked, cached and treeish text search forms | `12` | `0` | default pattern search, `-n`, `-l`, `-F`, pathspec, `--cached`, `HEAD -- <path>`, treeish line/filename modes, treeish directory pathspec and no-match exit behavior already covered by `git_grep_compat` |
+| `check-ref-format` common accepted and invalid forms | `11` | `0` | full refname validation, `--allow-onelevel`, `--normalize`, `--branch`, one-level rejection, invalid path components, trailing slash and invalid branch shorthand already covered by `git_check_ref_format_compat` |
 | `filter-branch` supported filters and options | `13` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, `-d` temp directory, `--commit-filter` passthrough, `--commit-filter` with `skip_commit`, initial `--state-branch`, and repeated state-branch forms already covered by `git_filter_branch_compat` |
 | `clone` local path options | `43` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, `--origin` long forms, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, `--single-branch`, local and file URL `--depth 1`, `-b`/`--branch feature`, `--checkout`/`--no-checkout` ordering, `--separate-git-dir`, `--no-single-branch` ordering, bare, mirror, shared bare/mirror and bare/mirror no-tags forms already covered by `git_clone_compat` |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
