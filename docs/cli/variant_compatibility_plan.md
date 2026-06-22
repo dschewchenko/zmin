@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 586/4632 represented doc-option pairs / 2498 written rows / 2144/2498 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 586/4632 represented doc-option pairs / 2504 written rows / 2144/2504 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,15 +285,15 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `579`
-represented or classified and `382` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `585`
+represented or classified and `376` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `579` already represented
-or classified and `382` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `585` already represented
+or classified and `376` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -301,18 +301,19 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice classifies nine `git_transport_http_compat.rs`
-remote instant-clone oracle tests as Zmin-only extension evidence in
-`docs/cli/zmin_extensions_inventory.md`, not Git `2.47.1` matrix rows.
+The latest completed slice extends `fsck_v2_47.tsv` with six invalid-input
+severity-config rows from existing focused stock-oracle evidence in
+`git_pack_integrity_compat.rs`.
 
-The classified functions cover `zmin clone --instant`,
-`--background-fetch` and `--demand-hydrate` over git-daemon, SSH and smart HTTP.
-Those options are additive Zmin clone modes, so they stay outside the Git
-compatibility denominator while still reducing the unclassified oracle backlog.
-The oracle inventory now lists `579` represented/classified functions and
-`382` `missing_or_unclassified`. Current written rows remain `2498`, with
-`2144/2498` matching stock Git, `1/2498` open and `353/2498` invalid-input. No
-Rust behavior changed.
+`fsck_v2_47.tsv` now records invalid `fsck.<message>=bogus` rows for
+`missingSpaceBeforeEmail`, `missingNameBeforeEmail`, `missingSpaceBeforeDate`,
+`zeroPaddedDate`, `zeroPaddedFilemode` and `badFilemode`. Evidence comes from
+the matching `git_pack_integrity_compat::fsck_*_severity_config_matches_stock_git`
+tests, comparing stock Git and Zmin output and exit status for malformed commit
+and tree objects. The oracle inventory now lists `585` represented/classified
+functions and `376` `missing_or_unclassified`. Current written rows are `2504`,
+with `2144/2504` matching stock Git, `1/2504` open and `359/2504`
+invalid-input. No Rust behavior changed.
 
 ### No-Skip Rule
 
