@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 673/4632 represented doc-option pairs / 2764 written rows / 2376/2764 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 675/4632 represented doc-option pairs / 2766 written rows / 2378/2766 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,16 +298,18 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `cat_file_v2_47.tsv`, backed by the
-existing focused stock-oracle smoke script.
+The latest completed slice extends `commit_v2_47.tsv`, backed by a new focused
+stock-oracle smoke script.
 
-`cat_file_v2_47.tsv` now records `--no-filter` in `--batch-check` mode. The
-row compares exit status, stdout, stderr and clean worktree status without
-changing behavior. The oracle inventory remains `707` represented/classified
-functions and `254` `missing_or_unclassified` because the evidence is a shell
-smoke, not a Rust test inventory function. Current written rows are `2764`,
-with `2376/2764` matching stock Git, `1/2764` open and `387/2764`
-invalid-input. No Rust behavior changed.
+`commit_v2_47.tsv` now records `--all` and `-a` for tracked modifications with
+an unrelated untracked file. The rows compare exit status, stdout, stderr,
+commit object, HEAD, tree and porcelain status, while disabling ambient commit
+signing with `-c commit.gpgsign=false` for deterministic evidence. The oracle
+inventory remains `707` represented/classified functions and `254`
+`missing_or_unclassified` because the evidence is a shell smoke, not a Rust
+test inventory function. Current written rows are `2766`, with `2378/2766`
+matching stock Git, `1/2766` open and `387/2766` invalid-input. No Rust
+behavior changed.
 
 ### No-Skip Rule
 
