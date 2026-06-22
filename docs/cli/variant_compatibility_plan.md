@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 446/4632 represented doc-option pairs / 1785 written rows / 1482 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 446/4632 represented doc-option pairs / 1786 written rows / 1483 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands `ls-files --unmerged` matrix rows from
+The latest completed slice expands `ls-files --killed` matrix rows from
 existing stock-oracle evidence:
 
-`git ls-files --unmerged -z`
+`git ls-files --killed -z`
 
-`ls_files_v2_47.tsv` now records default `--unmerged`, short `-u`, `-t`, `-v`,
-`-z`, `--deduplicate`, `--full-name f.txt`, and two `--error-unmatch` forms as
-separate rows instead of two aggregate rows, comparing stdout, stderr and exit
-status with stock Git through
-`git_ls_files_compat::ls_files_unmerged_index_matches_stock_git`.
+`ls_files_v2_47.tsv` now records plain `--killed`, `-t`, `-z` and
+`--directory` forms as separate rows instead of the remaining aggregate row,
+comparing stdout, stderr and exit status with stock Git through
+`git_ls_files_compat::ls_files_modes_match_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -620,15 +619,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `ls_files_v2_47.tsv` unmerged
-coverage into separate default, short `-u`, tag, lowercase tag, NUL,
-deduplicate, full-name and error-unmatch rows already covered by
-`git_ls_files_compat::ls_files_unmerged_index_matches_stock_git`.
+The latest matrix inventory slice expands `ls_files_v2_47.tsv` killed-entry
+coverage into separate plain, tag, NUL and directory rows already covered by
+`git_ls_files_compat::ls_files_modes_match_stock_git`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1785` written-row
+This card is the exact handoff target after the current `1786` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -647,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1785`; the `1/1785` open row and the still incomplete command/doc-option
+`0/1786`; the `1/1786` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -845,6 +843,7 @@ until a full matrix is expanded and verified.
 | `ls-files --with-tree` row-by-row modes | `6` | `0` | default, pathspec, `--error-unmatch`, `--deduplicate`, `-t` and `--format` with-tree forms already covered by `git_ls_files_compat` |
 | `ls-files --recurse-submodules` supported row-by-row modes | `8` | `0` | default, `-t`, `-s`, `--format`, ignored cached, ignored cached `-s`, ignored cached `-t` and ignored cached `-z` forms already covered by `git_ls_files_compat` |
 | `ls-files --unmerged` row-by-row modes | `7` | `0` | default `--unmerged`, short `-u`, `-t`, `-v`, `-z`, `--deduplicate` and `--full-name f.txt` forms already covered by `git_ls_files_compat` |
+| `ls-files --killed` row-by-row modes | `4` | `0` | plain, `-t`, `-z` and `--directory` killed-entry forms already covered by `git_ls_files_compat` |
 | `verify-pack` unsupported pack index version | `1` | `0` | `git verify-pack` rejects a checksum-valid `.idx` version `3` with stock unsupported-version diagnostics |
 | `index-pack --verify` bad reverse-index signature | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` with a bad signature using stock sha1 validation diagnostics |
 | `index-pack --verify` bad reverse-index version | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` version `2` using stock sha1 validation diagnostics |
@@ -942,7 +941,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `770` verified variants.
+Tracked closed blocks in this table: `774` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
