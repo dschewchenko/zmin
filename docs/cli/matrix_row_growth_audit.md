@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2792` | `+1698` |
-| Matching stock Git rows | `823` | `2404` | `+1581` |
+| Written behavior rows | `1094` | `2793` | `+1699` |
+| Matching stock Git rows | `823` | `2405` | `+1582` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `698/4632` | `+445` |
+| Represented doc-option pairs | `253/4632` | `699/4632` | `+446` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -159,7 +159,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `credential-store` | `0` | `5` | `+5` |
 | `http-fetch` | `1` | `4` | `+3` |
 | `index-pack` | `0` | `3` | `+3` |
-| `mktree` | `0` | `3` | `+3` |
+| `mktree` | `0` | `4` | `+4` |
 | `range-diff` | `0` | `3` | `+3` |
 | `request-pull` | `0` | `3` | `+3` |
 | `cherry-pick` | `0` | `2` | `+2` |
@@ -3393,6 +3393,41 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
 implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `mktree --missing` schema
+surface, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-mktree-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `mktree --missing`
+- implemented-but-unverified schema rows: expected `-1`
+- Rust behavior changes: no
+
+Expected row:
+
+- `printf '100644 blob <missing-oid>\tmissing.txt\n' | git mktree --missing`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and the
+written tree object type using stock Git.
+
+Actual post-import movement matched the declaration: `+1` behavior row,
+`+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+1` represented doc-option pair and `-1`
+implemented-but-unverified schema row.
 
 ## Latest Declared Import
 

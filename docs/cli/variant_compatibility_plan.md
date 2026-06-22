@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 698/4632 represented doc-option pairs / 2792 written rows / 2404/2792 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 699/4632 represented doc-option pairs / 2793 written rows / 2405/2793 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,18 +298,16 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice fixes and extends `credential_cache_v2_47.tsv`,
-backed by `tools/git-credential-cache-schema-oracle-smoke.sh`.
+The latest completed slice extends `mktree_v2_47.tsv`, backed by
+`tools/git-mktree-schema-oracle-smoke.sh`.
 
-`credential_cache_v2_47.tsv` now records exact rows for `--timeout=60` and the
-positional `store`, `get` and `erase` action surface with an explicit Unix
-socket. The rows compare exit status, stdout and stderr for store, get, erase
-and post-erase get. The slice also removes Zmin's extra blank line from
-`credential-cache get` output so it matches stock Git exactly. The oracle
-inventory remains `707` represented/classified functions and `254`
-`missing_or_unclassified` because the evidence is a shell smoke, not a Rust
-test inventory function. Current written rows are `2792`, with `2404/2792`
-matching stock Git, `1/2792` open and `387/2792` invalid-input.
+`mktree_v2_47.tsv` now records an exact `--missing` row for a tree entry that
+references a missing blob id. The row compares exit status, stdout, stderr and
+the written tree object type using stock Git. The oracle inventory remains
+`707` represented/classified functions and `254` `missing_or_unclassified`
+because the evidence is a shell smoke, not a Rust test inventory function.
+Current written rows are `2793`, with `2405/2793` matching stock Git, `1/2793`
+open and `387/2793` invalid-input.
 
 ### No-Skip Rule
 
