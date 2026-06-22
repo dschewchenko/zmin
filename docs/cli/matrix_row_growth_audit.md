@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2665` | `+1571` |
-| Matching stock Git rows | `823` | `2287` | `+1464` |
+| Written behavior rows | `1094` | `2733` | `+1639` |
+| Matching stock Git rows | `823` | `2345` | `+1522` |
 | Open rows | `1` | `1` | `0` |
-| Invalid-input rows | `270` | `377` | `+107` |
-| Commands with rows | `50/151` | `102/151` | `+52` |
-| Represented doc-option pairs | `253/4632` | `611/4632` | `+358` |
+| Invalid-input rows | `270` | `387` | `+117` |
+| Commands with rows | `50/151` | `104/151` | `+54` |
+| Represented doc-option pairs | `253/4632` | `658/4632` | `+405` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -62,7 +62,7 @@ behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`703` represented by matrix, extension or deferral evidence, and `258` still
+`705` represented by matrix, extension or deferral evidence, and `256` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -72,79 +72,110 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 
 | Command | Rows at `9275ac4d` | Rows at `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| `diff` | `68` | `239` | `+171` |
 | `stash` | `25` | `207` | `+182` |
+| `diff` | `68` | `239` | `+171` |
 | `ls-files` | `72` | `155` | `+83` |
 | `diff-tree` | `0` | `74` | `+74` |
 | `blame` | `101` | `171` | `+70` |
-| `config` | `60` | `123` | `+63` |
+| `config` | `60` | `130` | `+70` |
+| `clone` | `6` | `72` | `+66` |
+| `commit` | `0` | `66` | `+66` |
 | `status` | `76` | `135` | `+59` |
-| `clone` | `6` | `70` | `+64` |
+| `branch` | `0` | `49` | `+49` |
+| `notes` | `0` | `42` | `+42` |
+| `add` | `3` | `41` | `+38` |
+| `fsck` | `0` | `35` | `+35` |
+| `for-each-ref` | `0` | `34` | `+34` |
 | `show` | `0` | `34` | `+34` |
 | `remote` | `0` | `32` | `+32` |
+| `cat-file` | `8` | `39` | `+31` |
+| `ls-remote` | `2` | `31` | `+29` |
 | `rev-list` | `0` | `28` | `+28` |
-| `cat-file` | `8` | `33` | `+25` |
+| `tag` | `0` | `27` | `+27` |
+| `fetch` | `300` | `326` | `+26` |
+| `bundle` | `0` | `21` | `+21` |
 | `rev-parse` | `52` | `73` | `+21` |
-| `diff-files` | `0` | `20` | `+20` |
 | `apply` | `0` | `20` | `+20` |
-| `check-ignore` | `0` | `19` | `+19` |
+| `check-ignore` | `0` | `20` | `+20` |
+| `diff-files` | `0` | `20` | `+20` |
+| `maintenance` | `0` | `20` | `+20` |
 | `clean` | `12` | `30` | `+18` |
 | `log` | `87` | `105` | `+18` |
+| `pack-objects` | `0` | `18` | `+18` |
 | `send-email` | `0` | `16` | `+16` |
-| `notes` | `0` | `42` | `+42` |
 | `interpret-trailers` | `0` | `15` | `+15` |
+| `archive` | `1` | `15` | `+14` |
 | `diff-index` | `0` | `14` | `+14` |
+| `http-backend` | `0` | `14` | `+14` |
 | `reflog` | `2` | `15` | `+13` |
-| `filter-branch` | `2` | `14` | `+12` |
-| `bundle` | `0` | `21` | `+21` |
-| `maintenance` | `0` | `20` | `+20` |
-| `var` | `0` | `12` | `+12` |
-| `grep` | `0` | `12` | `+12` |
 | `describe` | `0` | `12` | `+12` |
-| `archive` | `1` | `12` | `+11` |
+| `filter-branch` | `2` | `14` | `+12` |
+| `grep` | `0` | `12` | `+12` |
+| `merge-base` | `0` | `12` | `+12` |
+| `var` | `0` | `12` | `+12` |
 | `check-ref-format` | `0` | `11` | `+11` |
+| `pull` | `0` | `10` | `+10` |
+| `rm` | `0` | `10` | `+10` |
+| `check-attr` | `0` | `9` | `+9` |
+| `check-mailmap` | `0` | `8` | `+8` |
+| `cherry` | `0` | `8` | `+8` |
 | `count-objects` | `0` | `8` | `+8` |
-| `shortlog` | `0` | `6` | `+6` |
+| `show-ref` | `10` | `18` | `+8` |
+| `sparse-checkout` | `0` | `8` | `+8` |
+| `symbolic-ref` | `0` | `8` | `+8` |
+| `fast-import` | `0` | `7` | `+7` |
+| `prune` | `0` | `7` | `+7` |
+| `push` | `0` | `7` | `+7` |
+| `submodule` | `0` | `7` | `+7` |
+| `update-ref` | `0` | `7` | `+7` |
+| `fetch-pack` | `0` | `6` | `+6` |
+| `format-patch` | `0` | `6` | `+6` |
 | `multi-pack-index` | `0` | `6` | `+6` |
 | `patch-id` | `0` | `6` | `+6` |
-| `format-patch` | `0` | `6` | `+6` |
-| `fsck` | `0` | `35` | `+35` |
-| `commit` | `0` | `42` | `+42` |
-| `cherry` | `0` | `6` | `+6` |
-| `check-mailmap` | `0` | `6` | `+6` |
+| `shortlog` | `0` | `6` | `+6` |
+| `checkout` | `0` | `5` | `+5` |
 | `stripspace` | `0` | `5` | `+5` |
 | `verify-pack` | `0` | `5` | `+5` |
-| `check-attr` | `0` | `5` | `+5` |
-| `fetch` | `300` | `326` | `+26` |
-| `ls-remote` | `2` | `23` | `+21` |
-| `replay` | `0` | `4` | `+4` |
-| `read-tree` | `0` | `4` | `+4` |
-| `mailinfo` | `0` | `4` | `+4` |
-| `hash-object` | `0` | `4` | `+4` |
-| `for-each-repo` | `0` | `4` | `+4` |
-| `fmt-merge-msg` | `0` | `4` | `+4` |
-| `difftool` | `0` | `4` | `+4` |
-| `credential-cache` | `0` | `4` | `+4` |
-| `credential` | `0` | `4` | `+4` |
+| `column` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `4` | `+4` |
-| `add` | `3` | `39` | `+36` |
-| `unpack-file` | `0` | `3` | `+3` |
-| `range-diff` | `0` | `3` | `+3` |
-| `mktree` | `0` | `3` | `+3` |
-| `credential-store` | `0` | `3` | `+3` |
+| `credential` | `0` | `4` | `+4` |
+| `credential-cache` | `0` | `4` | `+4` |
+| `difftool` | `0` | `4` | `+4` |
+| `fmt-merge-msg` | `0` | `4` | `+4` |
+| `for-each-repo` | `0` | `4` | `+4` |
+| `hash-object` | `0` | `4` | `+4` |
+| `init` | `0` | `4` | `+4` |
+| `ls-tree` | `0` | `4` | `+4` |
+| `mailinfo` | `0` | `4` | `+4` |
+| `read-tree` | `0` | `4` | `+4` |
+| `replay` | `0` | `4` | `+4` |
+| `send-pack` | `0` | `4` | `+4` |
+| `version` | `0` | `4` | `+4` |
 | `bugreport` | `0` | `3` | `+3` |
+| `commit-graph` | `0` | `3` | `+3` |
+| `credential-store` | `0` | `3` | `+3` |
 | `http-fetch` | `1` | `4` | `+3` |
-| `write-tree` | `0` | `2` | `+2` |
-| `update-server-info` | `0` | `2` | `+2` |
-| `quiltimport` | `0` | `2` | `+2` |
-| `mktag` | `0` | `2` | `+2` |
-| `mailsplit` | `0` | `2` | `+2` |
+| `index-pack` | `0` | `3` | `+3` |
+| `mktree` | `0` | `3` | `+3` |
+| `range-diff` | `0` | `3` | `+3` |
+| `unpack-file` | `0` | `3` | `+3` |
+| `cherry-pick` | `0` | `2` | `+2` |
 | `get-tar-commit-id` | `0` | `2` | `+2` |
-| `show-ref` | `10` | `11` | `+1` |
-| `show-index` | `1` | `2` | `+1` |
-| `rm` | `0` | `10` | `+10` |
-| `request-pull` | `0` | `1` | `+1` |
+| `mailsplit` | `0` | `2` | `+2` |
+| `mktag` | `0` | `2` | `+2` |
+| `quiltimport` | `0` | `2` | `+2` |
+| `update-server-info` | `0` | `2` | `+2` |
+| `write-tree` | `0` | `2` | `+2` |
 | `am` | `0` | `1` | `+1` |
+| `bisect` | `0` | `1` | `+1` |
+| `checkout-index` | `0` | `1` | `+1` |
+| `merge` | `0` | `1` | `+1` |
+| `p4` | `0` | `1` | `+1` |
+| `rebase` | `0` | `1` | `+1` |
+| `request-pull` | `0` | `1` | `+1` |
+| `rerere` | `0` | `1` | `+1` |
+| `show-index` | `1` | `2` | `+1` |
+| `worktree` | `0` | `1` | `+1` |
 
 ## Growth Control Rule
 
@@ -174,7 +205,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `258` missing or unclassified.
+  functions, currently `961` total with `256` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -372,8 +403,8 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `703` are already represented by matrix rows,
-extension rows or explicit deferrals, and `258` are
+focused oracle functions. `705` are already represented by matrix rows,
+extension rows or explicit deferrals, and `256` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
@@ -389,7 +420,7 @@ Largest missing/unclassified buckets:
 | `git_worktree_compat.rs` | `15` |
 | `git_notes_compat.rs` | `14` |
 | `git_merge_compat.rs` | `13` |
-| `git_sequencer_compat.rs` | `12` |
+| `git_sequencer_compat.rs` | `10` |
 | `git_admin_tools_compat.rs` | `10` |
 | `git_merge_plumbing_compat.rs` | `9` |
 | `git_foreign_scm_compat.rs` | `8` |
@@ -410,7 +441,7 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `258` functions:
+Largest command-hint buckets inside those `256` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
@@ -1030,6 +1061,44 @@ Actual post-import movement matched the declaration: `+3` behavior rows,
 `+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows and `+0` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: census-selected implemented-but-unverified `cherry-pick`
+schema rows, using focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv` as the evidence layer.
+
+Evidence functions:
+
+- `git_sequencer_compat::cherry_pick_and_revert_match_stock_git_for_clean_single_commit`
+- `git_sequencer_compat::cherry_pick_and_revert_mainline_merge_match_stock_git`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+2`
+- missing-or-unclassified oracle functions: `-2`
+- commands with rows: `+1`
+- represented doc-option pairs: expected `+1` for the shared `mainline`
+  parser surface
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git cherry-pick <feature-commit>`
+- `git cherry-pick -m 1 <merge-commit>`
+
+The evidence compares stock Git and Zmin exit status, stdout/stderr, resulting
+tree, commit subject and clean worktree state for clean single-commit input
+and selected-mainline merge input.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
+represented oracle functions, `-2` missing-or-unclassified oracle functions,
+`+1` command with rows and `+1` represented doc-option pair.
 
 ## Latest Declared Import
 
