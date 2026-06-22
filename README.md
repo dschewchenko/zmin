@@ -169,19 +169,19 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `76/151` | commands that have started behavior matrices; this is not support |
+| Commands with any matrix rows | `77/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `439/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1749` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1449/1749` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1749` | written rows with incomplete parity |
-| Open written rows | `1/1749` | written rows that still do not match stock Git |
-| Invalid input rows | `299/1749` | rows where stock Git rejects the input |
+| Written behavior rows | `1750` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1450/1750` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1750` | written rows with incomplete parity |
+| Open written rows | `1/1750` | written rows that still do not match stock Git |
+| Invalid input rows | `299/1750` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1449/1749` as Git compatibility. It only means `1449` of the `1749`
+Do not read `1450/1750` as Git compatibility. It only means `1450` of the `1750`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1749` rows are partially matching,
-`1/1749` rows are known open mismatches, and `299/1749` additional rows are
+unexpanded surface is not counted yet, `0/1750` rows are partially matching,
+`1/1750` rows are known open mismatches, and `299/1750` additional rows are
 stock-compatible invalid inputs. Do not read `439/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -214,13 +214,13 @@ Audit progress by git-scm reference group:
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `265` | `258` | `0` | `0` | `7` |
 | Patching | `5` | `0` | `333` | `0` | `11` | `9` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
-| Email | `6` | `0` | `361` | `0` | `26` | `26` | `0` | `0` | `0` |
+| Email | `6` | `0` | `361` | `0` | `27` | `27` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `376` | `313` | `0` | `0` | `63` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `98` | `65` | `0` | `0` | `33` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1749`** | **`1449`** | **`0`** | **`1`** | **`299`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1750`** | **`1450`** | **`0`** | **`1`** | **`299`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -290,6 +290,7 @@ Current command-level matrices:
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `reflog` | `13` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
 | `remote` | `23` | `0` | `1` | `32` | `26` | `0` | `0` | `6` | no |
+| `request-pull` | `1` | `0` | `0` | `1` | `1` | `0` | `0` | `0` | no |
 | `rerere` | `7` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-list` | `165` | `0` | `8` | `10` | `10` | `0` | `0` | `0` | no |
 | `rev-parse` | `72` | `0` | `24` | `64` | `58` | `0` | `0` | `6` | no |

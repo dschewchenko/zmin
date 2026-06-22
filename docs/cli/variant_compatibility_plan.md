@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 76/151 commands with matrix rows / 439/4632 represented doc-option pairs / 1749 written rows / 1449 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 77/151 commands with matrix rows / 439/4632 represented doc-option pairs / 1750 written rows / 1450 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,14 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `send-email` matrix from existing
+The latest completed slice seeds the `request-pull` matrix from existing
 stock-oracle evidence:
 
-`git send-email --translate-aliases < aliases.txt`
+`git request-pull <start> file://<remote> main`
 
-`send_email_v2_47.tsv` now records `--dump-aliases` and `--translate-aliases`
-for configured mutt aliases plus mutt, mailrc, pine, elm, sendmail, gnus and
-unknown alias file type states, comparing output with stock Git through
-`git_mail_tools_compat::send_email_alias_modes_match_stock_git` and
-`git_mail_tools_compat::send_email_alias_file_types_match_stock_git`.
+`request_pull_v2_47.tsv` now records the local pushed-branch summary flow with
+a file URL remote, comparing request-pull output with stock Git through
+`git_mail_tools_compat::request_pull_matches_stock_git_for_local_pushed_branch`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -627,16 +625,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `send_email_v2_47.tsv` with
-`--dump-aliases` and `--translate-aliases` rows for configured mutt aliases and
-seven alias file type states already covered by
-`git_mail_tools_compat::send_email_alias_modes_match_stock_git` and
-`git_mail_tools_compat::send_email_alias_file_types_match_stock_git`.
+The latest matrix inventory slice seeds `request_pull_v2_47.tsv` with the
+local pushed-branch and file URL remote row already covered by
+`git_mail_tools_compat::request_pull_matches_stock_git_for_local_pushed_branch`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1749` written-row
+This card is the exact handoff target after the current `1750` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -655,7 +651,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1749`; the `1/1749` open row and the still incomplete command/doc-option
+`0/1750`; the `1/1750` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -761,6 +757,7 @@ until a full matrix is expanded and verified.
 | `mailsplit` mbox and maildir modes | `2` | `0` | mbox `-d4 -f3 -o...` and maildir `-o...` split forms already covered by `git_mail_tools_compat` |
 | `fmt-merge-msg` fetch-head title modes | `4` | `0` | default stdin `FETCH_HEAD`, `--into-name`, `-m` and `-F` file-input forms already covered by `git_mail_tools_compat` |
 | `send-email` alias modes | `16` | `0` | `--dump-aliases` and `--translate-aliases` for configured mutt aliases plus mutt, mailrc, pine, elm, sendmail, gnus and unknown alias file type states already covered by `git_mail_tools_compat` |
+| `request-pull` local pushed branch | `1` | `0` | local pushed-branch summary with file URL remote already covered by `git_mail_tools_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
@@ -942,7 +939,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `729` verified variants.
+Tracked closed blocks in this table: `730` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
