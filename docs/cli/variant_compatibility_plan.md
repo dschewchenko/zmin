@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 92/151 commands with matrix rows / 509/4632 represented doc-option pairs / 2021 written rows / 1710/2021 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 516/4632 represented doc-option pairs / 2031 written rows / 1720/2031 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,18 +269,19 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice starts the `quiltimport` matrix from existing
-stock-oracle evidence:
+The latest completed slice starts the `format-patch`, `am` and `range-diff`
+matrices from existing mail-series stock-oracle evidence:
 
-`git quiltimport --author 'Patch Author <patch@example.test>' --patches patches`
+`git format-patch --inline --stdout --subject-prefix=TESTCASE HEAD~2..HEAD`
 
-`quiltimport_v2_47.tsv` now records applying a two-patch series with explicit
-`--author` and `--patches`, plus dry-run `-n` output that leaves `HEAD`
-unchanged. Existing
-`git_mail_tools_compat::quiltimport_applies_series_like_stock_git` evidence
-compares stock Git and Zmin output, resulting commit metadata, final tree and
-dry-run side effects. This is an evidence import only; no Rust behavior
-changed.
+`format_patch_v2_47.tsv` now records stdout inline patch output, custom
+subject prefix, cover-letter numbering and merge-commit `-1` behavior.
+`am_v2_47.tsv` records applying stock `format-patch` mails with matching final
+tree, author/subject log and clean status. `range_diff_v2_47.tsv` records
+two-range, three-argument and `--no-dual-color` outputs. Existing
+`git_mail_series_compat` evidence compares stdout, exit status and repository
+side effects against stock Git where applicable. This is an evidence import
+only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -621,22 +622,23 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice starts the `quiltimport` matrix from existing
-stock-oracle evidence:
+The latest completed slice starts the `format-patch`, `am` and `range-diff`
+matrices from existing mail-series stock-oracle evidence:
 
-`git quiltimport --author 'Patch Author <patch@example.test>' --patches patches`
+`git format-patch --inline --stdout --subject-prefix=TESTCASE HEAD~2..HEAD`
 
-`quiltimport_v2_47.tsv` now records applying a two-patch series with explicit
-`--author` and `--patches`, plus dry-run `-n` output that leaves `HEAD`
-unchanged. Existing
-`git_mail_tools_compat::quiltimport_applies_series_like_stock_git` evidence
-compares stock Git and Zmin output, resulting commit metadata, final tree and
-dry-run side effects. This is an evidence import only; no Rust behavior
-changed.
+`format_patch_v2_47.tsv` now records stdout inline patch output, custom
+subject prefix, cover-letter numbering and merge-commit `-1` behavior.
+`am_v2_47.tsv` records applying stock `format-patch` mails with matching final
+tree, author/subject log and clean status. `range_diff_v2_47.tsv` records
+two-range, three-argument and `--no-dual-color` outputs. Existing
+`git_mail_series_compat` evidence compares stdout, exit status and repository
+side effects against stock Git where applicable. This is an evidence import
+only; no Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2021` written-row
+This card is the exact handoff target after the current `2031` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -655,7 +657,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2021`; the `1/2021` open row and the still incomplete command/doc-option
+`0/2031`; the `1/2031` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
