@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 699/4632 represented doc-option pairs / 2793 written rows / 2405/2793 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 700/4632 represented doc-option pairs / 2794 written rows / 2406/2794 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,16 +298,16 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `mktree_v2_47.tsv`, backed by
-`tools/git-mktree-schema-oracle-smoke.sh`.
+The latest completed slice extends `write_tree_v2_47.tsv`, backed by
+`tools/git-write-tree-schema-oracle-smoke.sh`.
 
-`mktree_v2_47.tsv` now records an exact `--missing` row for a tree entry that
-references a missing blob id. The row compares exit status, stdout, stderr and
-the written tree object type using stock Git. The oracle inventory remains
+`write_tree_v2_47.tsv` now records an exact `--missing-ok` row for an index
+entry whose blob object is absent. The row compares exit status, stdout, stderr
+and the written tree object type using stock Git. The oracle inventory remains
 `707` represented/classified functions and `254` `missing_or_unclassified`
 because the evidence is a shell smoke, not a Rust test inventory function.
-Current written rows are `2793`, with `2405/2793` matching stock Git, `1/2793`
-open and `387/2793` invalid-input.
+Current written rows are `2794`, with `2406/2794` matching stock Git, `1/2794`
+open and `387/2794` invalid-input.
 
 ### No-Skip Rule
 
