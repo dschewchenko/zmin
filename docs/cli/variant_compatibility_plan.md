@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 104/151 commands with matrix rows / 658/4632 represented doc-option pairs / 2736 written rows / 2348/2736 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 104/151 commands with matrix rows / 658/4632 represented doc-option pairs / 2738 written rows / 2350/2738 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,18 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `hash_object_v2_47.tsv` and
-`unpack_file_v2_47.tsv` with explicit positional schema rows backed by existing
-focused stock-oracle evidence in `git_object_plumbing_compat.rs`.
+The latest completed slice extends `mailinfo_v2_47.tsv` with explicit
+`<positional:msg>` and `<positional:patch>` schema rows backed by existing
+focused stock-oracle evidence in `git_mail_tools_compat.rs`.
 
-`hash_object_v2_47.tsv` now records `git hash-object a.txt` as an explicit
-`<positional:paths>` surface, and `unpack_file_v2_47.tsv` records
-`git unpack-file <blob>` as an explicit `<positional:object>` surface. These
-rows close those exact Zmin schema positional parser surfaces without changing
-behavior.
+`mailinfo_v2_47.tsv` now records the `git mailinfo git-msg git-patch <
+patch-mail.txt` message and patch output path surfaces as explicit positional
+rows. These rows close those exact Zmin schema positional parser surfaces
+without changing behavior.
 The oracle inventory remains at `705` represented/classified functions and
-`256` `missing_or_unclassified`. Current written rows are `2736`, with
-`2348/2736` matching stock Git, `1/2736` open and `387/2736` invalid-input. No
+`256` `missing_or_unclassified`. Current written rows are `2738`, with
+`2350/2738` matching stock Git, `1/2738` open and `387/2738` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
