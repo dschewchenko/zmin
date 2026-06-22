@@ -65,7 +65,7 @@ Generated on 2026-06-22 from committed branch state `4c53dd7`.
 | Verified exact rows | `2287` | closed behavior variants safe to skip exactly |
 | Invalid-input parity rows | `377` | stock-compatible rejection variants |
 | Exact open or partial matrix rows | `1` | row exists but is not closed |
-| Implemented but unverified rows | `851` | schema args and additional schema paths without exact matrix evidence |
+| Implemented but unverified rows | `831` | schema args and additional schema paths without exact matrix evidence |
 | Remaining checklist rows | `4682` | doc-option expansion, exact opens and unclassified guards |
 | Zmin-only or deferred rows | `33` | extension and deferral classifications outside the denominator |
 | Oracle evidence layer rows | `961` | existing tests, not the primary backlog |

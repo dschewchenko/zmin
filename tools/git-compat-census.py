@@ -299,6 +299,31 @@ def matrix_option_spellings(row: dict[str, str]) -> set[str]:
     return spellings
 
 
+def normalized_placeholder_names(option: str) -> set[str]:
+    if not (option.startswith("<") and option.endswith(">")):
+        return set()
+    raw = option[1:-1].lower()
+    normalized = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    if not normalized or normalized == "none":
+        return set()
+
+    names = {normalized}
+    if normalized.endswith("s"):
+        names.add(normalized[:-1])
+    aliases = {
+        "pathspec": {"paths", "path"},
+        "tree_ish": {"treeish"},
+        "tree": {"treeish"},
+        "pattern": {"patterns"},
+        "revision_range": {"revs", "revision_ranges"},
+        "repository": {"remote"},
+        "refspec": {"refspecs"},
+        "basename": {"base_name"},
+    }
+    names.update(aliases.get(normalized, set()))
+    return names
+
+
 def hard_fail_is_documented(path: Path, stripped: str, docs_text: str) -> bool:
     quoted = re.findall(r'"([^"]*(?:unsupported|not supported yet|not implemented yet)[^"]*)"', stripped)
     if stripped in docs_text or any(fragment in docs_text for fragment in quoted):
@@ -500,6 +525,14 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     for row in matrices:
         for option in matrix_option_spellings(row):
             matrix_options_by_status[(row["command"], option)][row["zmin_status"]] += 1
+        placeholder_names = normalized_placeholder_names(row["option"])
+        if placeholder_names:
+            for (command, option), arg_refs in zmin_options.items():
+                if command != row["command"] or not option.startswith("<positional:"):
+                    continue
+                for arg_ref in arg_refs:
+                    if arg_ref["arg_id"] in placeholder_names:
+                        matrix_options_by_status[(command, option)][row["zmin_status"]] += 1
         matrix_rows_by_command[row["command"]] += 1
 
     schema_arg_statuses: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
