@@ -326,13 +326,13 @@ Do not collapse these layers into one percentage.
 | --- | ---: | --- | --- |
 | Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `101/151` | no | audit rows exist for `add`, `am`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit`, `commit-graph`, `commit-tree`, `config`, `count-objects`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `difftool`, `fast-import`, `fetch`, `fetch-pack`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `format-patch`, `fsck`, `get-tar-commit-id`, `grep`, `hash-object`, `http-backend`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `mktag`, `mktree`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `push`, `quiltimport`, `range-diff`, `read-tree`, `rebase`, `reflog`, `remote`, `request-pull`, `replay`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `send-pack`, `show`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `unpack-file`, `update-server-info`, `var`, `verify-pack`, `version`, `worktree` and `write-tree` |
-| Git doc option pairs represented by rows | `595/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `2592` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `2216/2592` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/2592` | no | written rows with incomplete parity |
-| Open written rows | `1/2592` | no | written rows that still do not match stock Git |
-| Invalid input rows | `375/2592` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Commands with any matrix rows | `102/151` | no | audit rows exist for `add`, `am`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit`, `commit-graph`, `commit-tree`, `config`, `count-objects`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `difftool`, `fast-import`, `fetch`, `fetch-pack`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `format-patch`, `fsck`, `get-tar-commit-id`, `grep`, `hash-object`, `http-backend`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `mktag`, `mktree`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `pull`, `push`, `quiltimport`, `range-diff`, `read-tree`, `rebase`, `reflog`, `remote`, `request-pull`, `replay`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `send-pack`, `show`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `unpack-file`, `update-server-info`, `var`, `verify-pack`, `version`, `worktree` and `write-tree` |
+| Git doc option pairs represented by rows | `597/4632` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `2602` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `2226/2602` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/2602` | no | written rows with incomplete parity |
+| Open written rows | `1/2602` | no | written rows that still do not match stock Git |
+| Invalid input rows | `375/2602` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -365,7 +365,7 @@ Current generated summary:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `72` | `64` | `0` | `1` | `7` | `47` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `292` | `261` | `0` | `0` | `31` | `145` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `268` | `225` | `0` | `0` | `43` | `50` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `384` | `359` | `0` | `0` | `25` | `160` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `399` | `374` | `0` | `0` | `25` | `160` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `403` | `394` | `0` | `0` | `9` | `52` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` | `11` |
 | Debugging | `3` | `0` | `132` | `0` | `184` | `103` | `0` | `0` | `81` | `166` |
@@ -375,7 +375,7 @@ Current generated summary:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `509` | `442` | `0` | `0` | `67` | `186` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `144` | `108` | `0` | `0` | `36` | `102` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2592`** | **`2216`** | **`0`** | **`1`** | **`375`** | **`1018`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2602`** | **`2226`** | **`0`** | **`1`** | **`375`** | **`1018`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -385,10 +385,10 @@ tests and real traces. Closed block variants are focused parity blocks from
 Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
-Never use `151/151` command presence, `4632` option spellings, `595/4632`
-represented option pairs or `2216/2592` passing written rows as a Git support
-percentage. The `2216/2592` number is audit progress for supported rows already
-written down; `0/2592` rows are partial, `1/2592` rows are open and `375/2592`
+Never use `151/151` command presence, `4632` option spellings, `597/4632`
+represented option pairs or `2226/2602` passing written rows as a Git support
+percentage. The `2226/2602` number is audit progress for supported rows already
+written down; `0/2602` rows are partial, `1/2602` rows are open and `375/2602`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -403,8 +403,7 @@ variants.
 
 | Command | Git doc option seed | Complete doc option pairs | Doc spellings represented by rows | Matrix | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |
 | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `command` | `doc_option_pairs` | `complete_doc_option_pairs` | `represented_doc_option_pairs` | `docs/cli/matrices/command_v2_47.tsv` | `behavior_rows_written` | `written_rows_matching_stock_git` | `partial` | `open` | `invalid_input` | complete_matrix |
-| `add` | `34` | `0` | `2` | `docs/cli/matrices/add_v2_47.tsv` | `6` | `3` | `0` | `0` | `3` | no |
+| `add` | `34` | `0` | `8` | `docs/cli/matrices/add_v2_47.tsv` | `39` | `29` | `0` | `0` | `10` | no |
 | `am` | `55` | `0` | `0` | `docs/cli/matrices/am_v2_47.tsv` | `1` | `1` | `0` | `0` | `0` | no |
 | `apply` | `39` | `0` | `4` | `docs/cli/matrices/apply_v2_47.tsv` | `20` | `19` | `0` | `0` | `1` | no |
 | `archive` | `17` | `0` | `3` | `docs/cli/matrices/archive_v2_47.tsv` | `12` | `11` | `0` | `0` | `1` | no |
@@ -424,7 +423,7 @@ variants.
 | `clean` | `13` | `0` | `9` | `docs/cli/matrices/clean_v2_47.tsv` | `30` | `24` | `0` | `0` | `6` | no |
 | `clone` | `56` | `0` | `24` | `docs/cli/matrices/clone_v2_47.tsv` | `70` | `62` | `0` | `1` | `7` | no |
 | `column` | `10` | `0` | `1` | `docs/cli/matrices/column_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
-| `commit` | `63` | `0` | `14` | `docs/cli/matrices/commit_v2_47.tsv` | `42` | `42` | `0` | `0` | `0` | no |
+| `commit` | `63` | `0` | `24` | `docs/cli/matrices/commit_v2_47.tsv` | `66` | `63` | `0` | `0` | `3` | no |
 | `commit-graph` | `18` | `0` | `0` | `docs/cli/matrices/commit_graph_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
 | `commit-tree` | `7` | `0` | `2` | `docs/cli/matrices/commit_tree_v2_47.tsv` | `4` | `4` | `0` | `0` | `0` | no |
 | `config` | `243` | `0` | `17` | `docs/cli/matrices/config_v2_47.tsv` | `123` | `113` | `0` | `0` | `10` | no |
@@ -457,7 +456,7 @@ variants.
 | `interpret-trailers` | `24` | `0` | `9` | `docs/cli/matrices/interpret_trailers_v2_47.tsv` | `15` | `15` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `37` | `docs/cli/matrices/log_v2_47.tsv` | `105` | `100` | `0` | `0` | `5` | no |
 | `ls-files` | `42` | `0` | `29` | `docs/cli/matrices/ls_files_v2_47.tsv` | `155` | `135` | `0` | `0` | `20` | no |
-| `ls-remote` | `16` | `0` | `0` | `docs/cli/matrices/ls_remote_v2_47.tsv` | `2` | `1` | `0` | `0` | `1` | no |
+| `ls-remote` | `16` | `0` | `3` | `docs/cli/matrices/ls_remote_v2_47.tsv` | `23` | `22` | `0` | `0` | `1` | no |
 | `ls-tree` | `15` | `0` | `2` | `docs/cli/matrices/ls_tree_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `mailinfo` | `10` | `0` | `3` | `docs/cli/matrices/mailinfo_v2_47.tsv` | `4` | `4` | `0` | `0` | `0` | no |
 | `mailsplit` | `6` | `0` | `2` | `docs/cli/matrices/mailsplit_v2_47.tsv` | `2` | `2` | `0` | `0` | `0` | no |
@@ -472,6 +471,7 @@ variants.
 | `pack-objects` | `44` | `0` | `1` | `docs/cli/matrices/pack_objects_v2_47.tsv` | `10` | `4` | `0` | `0` | `6` | no |
 | `patch-id` | `4` | `0` | `3` | `docs/cli/matrices/patch_id_v2_47.tsv` | `6` | `6` | `0` | `0` | `0` | no |
 | `prune` | `7` | `0` | `1` | `docs/cli/matrices/prune_v2_47.tsv` | `7` | `6` | `0` | `0` | `1` | no |
+| `pull` | `121` | `0` | `2` | `docs/cli/matrices/pull_v2_47.tsv` | `10` | `10` | `0` | `0` | `0` | no |
 | `push` | `57` | `0` | `0` | `docs/cli/matrices/push_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `quiltimport` | `7` | `0` | `2` | `docs/cli/matrices/quiltimport_v2_47.tsv` | `2` | `2` | `0` | `0` | `0` | no |
 | `range-diff` | `15` | `0` | `1` | `docs/cli/matrices/range_diff_v2_47.tsv` | `3` | `3` | `0` | `0` | `0` | no |
@@ -484,7 +484,7 @@ variants.
 | `rerere` | `7` | `0` | `0` | `docs/cli/matrices/rerere_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `rev-list` | `165` | `0` | `10` | `docs/cli/matrices/rev_list_v2_47.tsv` | `28` | `28` | `0` | `0` | `0` | no |
 | `rev-parse` | `72` | `0` | `24` | `docs/cli/matrices/rev_parse_v2_47.tsv` | `73` | `67` | `0` | `0` | `6` | no |
-| `rm` | `20` | `0` | `1` | `docs/cli/matrices/rm_v2_47.tsv` | `1` | `1` | `0` | `0` | `0` | no |
+| `rm` | `20` | `0` | `7` | `docs/cli/matrices/rm_v2_47.tsv` | `10` | `9` | `0` | `0` | `1` | no |
 | `send-email` | `70` | `0` | `2` | `docs/cli/matrices/send_email_v2_47.tsv` | `16` | `16` | `0` | `0` | `0` | no |
 | `send-pack` | `15` | `0` | `3` | `docs/cli/matrices/send_pack_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `shortlog` | `164` | `0` | `4` | `docs/cli/matrices/shortlog_v2_47.tsv` | `6` | `6` | `0` | `0` | `0` | no |
@@ -492,7 +492,7 @@ variants.
 | `show-index` | `1` | `0` | `0` | `docs/cli/matrices/show_index_v2_47.tsv` | `2` | `1` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `docs/cli/matrices/show_ref_v2_47.tsv` | `11` | `8` | `0` | `0` | `3` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `docs/cli/matrices/sparse_checkout_v2_47.tsv` | `8` | `3` | `0` | `0` | `5` | no |
-| `stash` | `30` | `0` | `0` | `docs/cli/matrices/stash_v2_47.tsv` | `194` | `178` | `0` | `0` | `16` | no |
+| `stash` | `30` | `0` | `0` | `docs/cli/matrices/stash_v2_47.tsv` | `207` | `190` | `0` | `0` | `17` | no |
 | `status` | `26` | `0` | `23` | `docs/cli/matrices/status_v2_47.tsv` | `135` | `125` | `0` | `0` | `10` | no |
 | `stripspace` | `5` | `0` | `4` | `docs/cli/matrices/stripspace_v2_47.tsv` | `5` | `5` | `0` | `0` | `0` | no |
 | `submodule` | `35` | `0` | `0` | `docs/cli/matrices/submodule_v2_47.tsv` | `7` | `0` | `0` | `0` | `7` | no |
@@ -505,58 +505,6 @@ variants.
 | `version` | `2` | `0` | `2` | `docs/cli/matrices/version_v2_47.tsv` | `4` | `2` | `0` | `0` | `2` | no |
 | `worktree` | `28` | `0` | `0` | `docs/cli/matrices/worktree_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `write-tree` | `2` | `0` | `1` | `docs/cli/matrices/write_tree_v2_47.tsv` | `2` | `2` | `0` | `0` | `0` | no |
-
-Selected closed behavior blocks without a full command matrix yet. The full
-closed block list is in `docs/cli/variant_compatibility_plan.md` and is counted
-by `tools/git-compat-audit-summary.sh`.
-
-| Command | Closed variants | Evidence |
-| --- | ---: | --- |
-| `for-each-ref` date atoms | `16` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
-| `for-each-ref` author atoms | `10` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
-| `for-each-ref` tagger identity atoms | `2` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
-| `for-each-ref` committer identity atoms | `2` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
-| `for-each-ref` object size atom | `4` | `git_for_each_ref_compat::for_each_ref_matches_stock_git_for_common_formats` |
-| `for-each-ref` object size sort key | `1` | `git_for_each_ref_compat::for_each_ref_matches_stock_git_for_common_formats` |
-| `for-each-ref` refname strip modifiers | `10` | `git_for_each_ref_compat::for_each_ref_matches_stock_git_for_common_formats` |
-| `for-each-ref` creator atoms | `18` | `git_for_each_ref_compat::for_each_ref_date_atoms_match_stock_git` |
-| `for-each-ref` object id abbreviation lengths | `3` | `git_for_each_ref_compat::for_each_ref_matches_stock_git_for_common_formats` |
-| `for-each-ref` invalid object id abbreviation lengths | `4` | `git_for_each_ref_compat::for_each_ref_objectname_short_invalid_lengths_match_stock_git` |
-| `for-each-ref` invalid refname strip values | `6` | `git_for_each_ref_compat::for_each_ref_refname_strip_invalid_values_match_stock_git` |
-
-The `status` matrix includes one newly closed row from this audit slice:
-`git status -z` now matches stock Git's implicit porcelain v1 output. It also
-promotes five parser-supported rows to closed evidence: `--null`, `--short`,
-`-unormal`, bare `--untracked-files`, and `--ignored=traditional`. Existing
-closed rows in that matrix are evidence import from current parity tests, not a
-new support claim. The next slices closed `--ahead-behind` and
-`--no-ahead-behind` for porcelain v1/v2 branch output with equal and different
-upstream refs, then `--show-stash` and `--no-show-stash` for human output,
-porcelain v2 output and order-sensitive toggle forms. The latest slice closed
-`--long` and `--no-long`, including their order-sensitive interaction with
-`--short`.
-The following slice closed `--verbose` and `--no-verbose`, including `-v`,
-`-vv`, order-sensitive reset forms and machine-readable combinations.
-The latest slice closed `--column` and `--no-column` for human untracked
-layout, order-sensitive reset forms, `--column=always/never`, `column.status`
-and machine-readable combinations.
-The latest audit reclassified `--untracked-cache`, `--no-untracked-cache`,
-`--split-index`, and `--no-split-index` from open status gaps to
-`invalid-input`: stock Git `2.47.1` rejects them for `git status` with exit
-code `129`. They belong to `update-index`, not the `status` support surface.
-The latest audit closed global `--no-optional-locks` for `status --short`
-using existing global CLI parity evidence.
-The latest implementation slice closed exact staged rename output for
-`--renames`, `--no-renames`, `--find-renames`, and `--find-renames=<n>` across
-human, porcelain v1/v2, and short forms.
-The latest implementation slice closed `--ignore-submodules`, `=all`, `=dirty`
-and `=untracked` for dirty, untracked and new-commit submodule states across
-human, porcelain v1/v2 and short output.
-The latest evidence slice closed standalone human `-b` and `--branch` status
-for dirty, untracked and upstream-ahead states. The latest implementation slice
-split the previous partial pathspec row into exact status-specific rows for
-file, directory, default glob, explicit magic, exclude magic, human output and
-global pathspec flags.
 
 The latest `fetch --recurse-submodules` slices closed local/file no-submodule
 value forms for implicit yes, explicit yes, boolean true, numeric true,
