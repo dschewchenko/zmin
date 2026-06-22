@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2562 written rows / 2187/2562 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2567 written rows / 2192/2567 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -286,17 +286,17 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `624`
-represented or classified and `337` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `629`
+represented or classified and `332` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `624` already represented
-or classified and `337` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `629` already represented
+or classified and `332` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. The default
-bucket order is local transport (`49`), HTTP transport (`48`), maintenance
+bucket order is HTTP transport (`48`), local transport (`44`), maintenance
 (`32`), pack integrity (`28`) and worktree state (`26`), unless a real
 replacement-binary blocker overrides it. A docs-only oracle import must reduce
 `missing_or_unclassified` by the declared number of evidence functions; any TSV
@@ -305,18 +305,21 @@ rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `fetch_v2_47.tsv` with six local prune rows
-from existing focused stock-oracle evidence in `git_transport_local_compat.rs`.
+The latest completed slice extends `fetch_v2_47.tsv` with five local fetch
+refspec-resolution rows from existing focused stock-oracle evidence in
+`git_transport_local_compat.rs`.
 
-`fetch_v2_47.tsv` now records branch-limited prune preserving unrelated stale
-remote-tracking refs, `fetch.prune=true`, prune stderr `From <url>` header,
-prune resolving a remote-tracking D/F conflict, pruneTags config with prune
-enabled, and direct file URL pruneTags pruning tags while keeping
-remote-tracking refs. Evidence comes from the matching `fetch_prune_*` and
-`fetch_direct_file_url_prune_tags_*` tests in `git_transport_local_compat.rs`.
-The oracle inventory now lists `624` represented/classified functions and
-`337` `missing_or_unclassified`. Current written rows are `2562`, with
-`2187/2562` matching stock Git, `1/2562` open and `374/2562` invalid-input. No
+`fetch_v2_47.tsv` now records direct local short remote-tracking source
+resolution, fully qualified left-hand refspec disambiguation, explicit
+`HEAD:branch` tag backfill from a file URL remote, direct file URL multiple
+explicit refspecs with `--prune`, and empty `--refmap=` named-branch fetch
+behavior. Evidence comes from the matching
+`fetch_direct_location_*`, `fetch_explicit_head_to_branch_*`,
+`fetch_direct_file_url_accepts_multiple_explicit_refspecs_*` and
+`fetch_empty_refmap_with_branch_*` tests in `git_transport_local_compat.rs`.
+The oracle inventory now lists `629` represented/classified functions and
+`332` `missing_or_unclassified`. Current written rows are `2567`, with
+`2192/2567` matching stock Git, `1/2567` open and `374/2567` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
