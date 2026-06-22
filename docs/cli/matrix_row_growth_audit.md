@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2770` | `+1676` |
-| Matching stock Git rows | `823` | `2382` | `+1559` |
+| Written behavior rows | `1094` | `2776` | `+1682` |
+| Matching stock Git rows | `823` | `2388` | `+1565` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `679/4632` | `+426` |
+| Represented doc-option pairs | `253/4632` | `685/4632` | `+432` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -3392,6 +3392,52 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `commit` short/options
+surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-commit-short-options-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+6` for `commit -q`, `commit -s`,
+  `commit -o`, `commit -n`, `commit -t` and `commit --verbose`
+- implemented-but-unverified schema rows: `+0`; these are doc-option evidence
+  gaps after related schema arg IDs were already covered or remain schema
+  aliases rather than new command entries
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git -c commit.gpgsign=false commit -q -m quiet`
+- `git -c commit.gpgsign=false commit -s -m subject`
+- `git -c commit.gpgsign=false commit -o -m only -- a.txt`
+- `git -c commit.gpgsign=false commit -n -m skip`
+- `GIT_EDITOR=.git/editor.sh git -c commit.gpgsign=false commit -t template.txt`
+- `GIT_EDITOR=.git/editor.sh git -c commit.gpgsign=false commit --verbose --no-status`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr, commit
+object, HEAD and porcelain status. The `-n` row also verifies that a failing
+pre-commit hook is skipped by comparing hook-log presence. The smoke disables
+ambient commit signing with `-c commit.gpgsign=false` so local global Git config
+cannot change the oracle commit object.
+
+Actual post-import movement matched the declaration: `+6` behavior rows,
+`+6` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+6` represented doc-option pairs and `+0`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import
