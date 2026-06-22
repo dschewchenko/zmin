@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `91/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `507/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2013` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1702/2013` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2013` | written rows with incomplete parity |
-| Open written rows | `1/2013` | written rows that still do not match stock Git |
-| Invalid input rows | `310/2013` | rows where stock Git rejects the input |
+| Written behavior rows | `2019` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1708/2019` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2019` | written rows with incomplete parity |
+| Open written rows | `1/2019` | written rows that still do not match stock Git |
+| Invalid input rows | `310/2019` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1702/2013` as Git compatibility. It only means `1702` of the `2013`
+Do not read `1708/2019` as Git compatibility. It only means `1708` of the `2019`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2013` rows are partially matching,
-`1/2013` rows are known open mismatches, and `310/2013` additional rows are
+unexpanded surface is not counted yet, `0/2019` rows are partially matching,
+`1/2019` rows are known open mismatches, and `310/2019` additional rows are
 stock-compatible invalid inputs. Do not read `507/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -212,7 +212,7 @@ Audit progress by git-scm reference group:
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `366` | `358` | `0` | `0` | `8` |
-| Patching | `5` | `0` | `333` | `0` | `15` | `13` | `0` | `0` | `2` |
+| Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `27` | `27` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `490` | `423` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `112` | `78` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2013`** | **`1702`** | **`0`** | **`1`** | **`310`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2019`** | **`1708`** | **`0`** | **`1`** | **`310`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -234,7 +234,7 @@ Current command-level matrices:
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | `add` | `34` | `0` | `2` | `6` | `3` | `0` | `0` | `3` | no |
-| `apply` | `39` | `0` | `4` | `14` | `13` | `0` | `0` | `1` | no |
+| `apply` | `39` | `0` | `4` | `20` | `19` | `0` | `0` | `1` | no |
 | `archive` | `17` | `0` | `3` | `11` | `10` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `blame` | `39` | `0` | `6` | `101` | `21` | `0` | `0` | `80` | no |
