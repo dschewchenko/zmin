@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 71/151 commands with matrix rows / 423/4632 represented doc-option pairs / 1713 written rows / 1413 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 72/151 commands with matrix rows / 429/4632 represented doc-option pairs / 1723 written rows / 1423 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,14 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `check-mailmap` matrix from existing stock-oracle
-evidence:
+The latest completed slice seeds the `interpret-trailers` matrix from existing
+stock-oracle evidence:
 
-`git check-mailmap --stdin < identities.txt`
+`git interpret-trailers --if-exists replace --trailer 'Acked-by: C' < message.txt`
 
-`check_mailmap_v2_47.tsv` now records positional identity mapping forms plus
-`--stdin` batch mapping from
-`git_text_tools_compat::check_mailmap_matches_stock_git_for_common_entries`.
+`interpret_trailers_v2_47.tsv` now records default, `--only-trailers`,
+`--parse`, `--trailer`, `--where before/after`, `--if-exists
+addIfDifferent/add/replace` and `--if-missing doNothing` stdin forms from
+`git_mail_tools_compat::interpret_trailers_matches_stock_git_for_common_modes`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -625,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `check_mailmap_v2_47.tsv` with
-positional identity and `--stdin` rows already covered by
-`git_text_tools_compat::check_mailmap_matches_stock_git_for_common_entries`.
+The latest matrix inventory slice seeds `interpret_trailers_v2_47.tsv` with
+common stdin parse/output/insertion/duplicate-handling rows already covered by
+`git_mail_tools_compat::interpret_trailers_matches_stock_git_for_common_modes`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1713` written-row
+This card is the exact handoff target after the current `1723` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -651,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1713`; the `1/1713` open row and the still incomplete command/doc-option
+`0/1723`; the `1/1723` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -752,6 +753,7 @@ until a full matrix is expanded and verified.
 | `patch-id` stdin patch modes | `6` | `0` | default, `--stable`, `--unstable`, `--verbatim` diff patch forms plus stable and unstable log patch streams already covered by `git_apply_compat` |
 | `stripspace` stdin text modes | `5` | `0` | default, `-s`, `-c`, `--strip-comments` and `--comment-lines` stdin text forms already covered by `git_text_tools_compat` |
 | `check-mailmap` common entry forms | `6` | `0` | positional name-and-email, email-only, display-name, canonical-email, unmapped identity and `--stdin` batch forms already covered by `git_text_tools_compat` |
+| `interpret-trailers` common stdin modes | `10` | `0` | default, `--only-trailers`, `--parse`, `--trailer`, `--where before/after`, `--if-exists addIfDifferent/add/replace` and `--if-missing doNothing` stdin forms already covered by `git_mail_tools_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
@@ -933,7 +935,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `693` verified variants.
+Tracked closed blocks in this table: `703` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
