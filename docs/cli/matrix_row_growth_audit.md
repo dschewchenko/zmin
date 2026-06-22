@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2790` | `+1696` |
-| Matching stock Git rows | `823` | `2402` | `+1579` |
+| Written behavior rows | `1094` | `2792` | `+1698` |
+| Matching stock Git rows | `823` | `2404` | `+1581` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `697/4632` | `+444` |
+| Represented doc-option pairs | `253/4632` | `698/4632` | `+445` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -141,7 +141,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `column` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `4` | `+4` |
 | `credential` | `0` | `4` | `+4` |
-| `credential-cache` | `0` | `4` | `+4` |
+| `credential-cache` | `0` | `6` | `+6` |
 | `difftool` | `0` | `4` | `+4` |
 | `fmt-merge-msg` | `0` | `4` | `+4` |
 | `for-each-repo` | `0` | `4` | `+4` |
@@ -3392,6 +3392,44 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `credential-cache --timeout`
+and positional action schema surfaces, with focused stock-oracle smoke
+evidence.
+
+Evidence command:
+
+- `tools/git-credential-cache-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `credential-cache --timeout`
+- implemented-but-unverified schema rows: expected `-2`
+- Rust behavior changes: yes, remove the extra blank line from
+  `credential-cache get` output
+
+Expected rows:
+
+- `git credential-cache --socket=<path> --timeout=60 store/get/erase`
+- positional `store`, `get` and `erase` action surface with `--timeout=60`
+
+The evidence compares stock Git and Zmin exit status, stdout and stderr for
+store, get, erase and post-erase get over explicit Unix socket paths.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+1` represented doc-option pair and `-2`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import

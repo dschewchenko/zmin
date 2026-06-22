@@ -412,7 +412,6 @@ fn credential_cache_get(rows: &[CredentialCacheRow], query: &[(String, String)])
                 out.push_str(password);
                 out.push('\n');
             }
-            out.push('\n');
             return out;
         }
     }
