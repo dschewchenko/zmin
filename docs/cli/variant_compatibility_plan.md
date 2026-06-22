@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 701/4632 represented doc-option pairs / 2804 written rows / 2415/2804 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 701/4632 represented doc-option pairs / 2805 written rows / 2416/2805 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,17 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `show_ref_v2_47.tsv`, backed by
-`tools/git-show-ref-schema-oracle-smoke.sh`.
+The latest completed slice extends `rev_parse_v2_47.tsv`, backed by
+`tools/git-rev-parse-schema-oracle-smoke.sh`.
 
-`show_ref_v2_47.tsv` now records an exact positional row for `git show-ref
-refs/heads/main`. The smoke compares stock Git and Zmin exit status, stdout,
-stderr, full `show-ref` output and worktree status using copied workdirs from
-one seed repository so ref object ids match byte-for-byte. The oracle
-inventory remains `707` represented/classified functions and `254`
-`missing_or_unclassified` because the evidence is a shell smoke, not a Rust
-test inventory function. Current written rows are `2804`, with `2415/2804`
-matching stock Git, `1/2804` open and `388/2804` invalid-input.
+`rev_parse_v2_47.tsv` now records an exact positional row for `git rev-parse
+HEAD`. The smoke compares stock Git and Zmin exit status, stdout, stderr and
+worktree status using copied workdirs from one seed repository so object ids
+match byte-for-byte. The oracle inventory remains `707`
+represented/classified functions and `254` `missing_or_unclassified` because
+the evidence is a shell smoke, not a Rust test inventory function. Current
+written rows are `2805`, with `2416/2805` matching stock Git, `1/2805` open
+and `388/2805` invalid-input.
 
 ### No-Skip Rule
 
