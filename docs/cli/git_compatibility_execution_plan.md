@@ -114,7 +114,7 @@ The current census snapshot reports:
 - `4632` Git doc option seed rows
 - `2287` verified exact behavior rows
 - `377` invalid-input parity rows
-- `1010` implemented-but-unverified schema rows
+- `960` implemented-but-unverified schema rows
 - `4745` remaining rows to fix, expand or verify
 
 These are checklist counts, not a compatibility percentage. Complete command

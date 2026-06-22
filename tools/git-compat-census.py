@@ -73,6 +73,8 @@ OUTPUT_COLUMNS = [
 
 HARD_FAIL_PATTERN = re.compile(r"unsupported|not supported yet|not implemented yet")
 EVIDENCE_REF_PATTERN = re.compile(r"[A-Za-z0-9_]+::[A-Za-z0-9_]+")
+LONG_OPTION_PATTERN = re.compile(r"(?<!\S)(--[A-Za-z0-9][A-Za-z0-9-]*)(?:[=\s]|$)")
+SHORT_OPTION_PATTERN = re.compile(r"(?<!\S)(-[A-Za-z])(?:[=\s]|$)")
 
 
 def die(message: str) -> None:
@@ -276,6 +278,26 @@ def row_from_matrix(row: dict[str, str], bucket: str, item_kind: str, next_actio
     }
 
 
+def matrix_option_spellings(row: dict[str, str]) -> set[str]:
+    """Return option spellings evidenced by a matrix row.
+
+    The matrix `option` column is authoritative for the primary row shape, but
+    many rows verify option combinations in `stock_git_case`. Extract only
+    unambiguous spellings so the census can avoid false backlog without
+    treating compact short-option clusters as proof for every possible alias.
+    """
+
+    spellings = set()
+    option = row["option"]
+    if option.startswith("-"):
+        spellings.add(option.split("=", 1)[0])
+
+    text = " ".join([row["stock_git_case"], row["combination"]])
+    spellings.update(match.group(1) for match in LONG_OPTION_PATTERN.finditer(text))
+    spellings.update(match.group(1) for match in SHORT_OPTION_PATTERN.finditer(text))
+    return spellings
+
+
 def hard_fail_scan(root: Path) -> list[dict[str, str]]:
     docs_text = "\n".join(
         path.read_text(errors="replace")
@@ -436,8 +458,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     matrix_options_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     matrix_rows_by_command: Counter[str] = Counter()
     for row in matrices:
-        key = (row["command"], row["option"])
-        matrix_options_by_status[key][row["zmin_status"]] += 1
+        for option in matrix_option_spellings(row):
+            matrix_options_by_status[(row["command"], option)][row["zmin_status"]] += 1
         matrix_rows_by_command[row["command"]] += 1
 
     verified = [
