@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 65/151 commands with matrix rows / 402/4632 represented doc-option pairs / 1670 written rows / 1371 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 66/151 commands with matrix rows / 403/4632 represented doc-option pairs / 1676 written rows / 1377 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `shortlog` matrix from existing
+The latest completed slice seeds the `cherry` matrix from existing
 stock-oracle evidence:
 
-`git shortlog -sn HEAD`
+`git cherry -v upstream topic`
 
-`shortlog_v2_47.tsv` now records command lines from
-`git_history_query_compat::shortlog_matches_stock_git_for_author_summaries`:
-default author summaries, `-s`, `-sn`, `-se`, `--no-merges` and revision-range
-forms.
+`cherry_v2_47.tsv` now records command lines from
+`git_history_query_compat::cherry_matches_stock_git_for_patch_equivalence_and_upstream_default`:
+default upstream, explicit upstream/head, verbose output, abbreviation and
+limit forms.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +626,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `shortlog_v2_47.tsv` with author
-summary, summary-sort, email, no-merges and revision-range rows already
-covered by `git_history_query_compat::shortlog_matches_stock_git_for_author_summaries`.
+The latest matrix inventory slice seeds `cherry_v2_47.tsv` with upstream/head,
+verbose, abbreviation and limit rows already covered by
+`git_history_query_compat::cherry_matches_stock_git_for_patch_equivalence_and_upstream_default`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1670` written-row
+This card is the exact handoff target after the current `1676` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +652,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1670`; the `1/1670` open row and the still incomplete command/doc-option
+`0/1676`; the `1/1676` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -747,6 +747,7 @@ until a full matrix is expanded and verified.
 | `credential-cache` socket store/get/erase flows | `4` | `0` | Unix `--socket=<path>` store, get, erase and get-after-erase flows already covered by `git_credential_compat` |
 | `describe` tag, ref-filter and dirty forms | `10` | `0` | default describe, `--long`, `--abbrev=0`, `--abbrev=12`, `--tags`, `--all`, `--match`, `--exclude`, `--always` and `--dirty` already covered by `git_history_query_compat` |
 | `shortlog` author summary forms | `6` | `0` | default `HEAD`, `-s`, `-sn`, `-se`, `--no-merges` and `HEAD~2..HEAD` range forms already covered by `git_history_query_compat` |
+| `cherry` upstream/head comparison forms | `6` | `0` | default upstream, explicit upstream/head, `-v`, `--abbrev`, `--abbrev=12` and limit forms already covered by `git_history_query_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |

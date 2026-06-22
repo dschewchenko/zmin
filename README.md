@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `65/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `402/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1670` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1371/1670` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1670` | written rows with incomplete parity |
-| Open written rows | `1/1670` | written rows that still do not match stock Git |
-| Invalid input rows | `298/1670` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `66/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `403/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1676` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1377/1676` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1676` | written rows with incomplete parity |
+| Open written rows | `1/1676` | written rows that still do not match stock Git |
+| Invalid input rows | `298/1676` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1371/1670` as Git compatibility. It only means `1371` of the `1670`
+Do not read `1377/1676` as Git compatibility. It only means `1377` of the `1676`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1670` rows are partially matching,
-`1/1670` rows are known open mismatches, and `298/1670` additional rows are
-stock-compatible invalid inputs. Do not read `402/4632` as option support
+unexpanded surface is not counted yet, `0/1676` rows are partially matching,
+`1/1676` rows are known open mismatches, and `298/1676` additional rows are
+stock-compatible invalid inputs. Do not read `403/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -219,8 +219,8 @@ Audit progress by git-scm reference group:
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `366` | `303` | `0` | `0` | `63` |
-| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `65` | `32` | `0` | `0` | `33` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1670`** | **`1371`** | **`0`** | **`1`** | **`298`** |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `71` | `38` | `0` | `0` | `33` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1676`** | **`1377`** | **`0`** | **`1`** | **`298`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -243,6 +243,7 @@ Current command-level matrices:
 | `check-attr` | `6` | `0` | `1` | `5` | `5` | `0` | `0` | `0` | no |
 | `check-ignore` | `10` | `0` | `7` | `19` | `9` | `0` | `0` | `10` | no |
 | `check-ref-format` | `6` | `0` | `3` | `11` | `5` | `0` | `0` | `6` | no |
+| `cherry` | `6` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
 | `checkout` | `43` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `checkout-index` | `19` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `clean` | `13` | `0` | `3` | `12` | `8` | `0` | `0` | `4` | no |
