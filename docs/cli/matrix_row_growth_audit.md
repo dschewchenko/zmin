@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2400` | `+1306` |
-| Matching stock Git rows | `823` | `2058` | `+1235` |
+| Written behavior rows | `1094` | `2408` | `+1314` |
+| Matching stock Git rows | `823` | `2063` | `+1240` |
 | Open rows | `1` | `1` | `0` |
-| Invalid-input rows | `270` | `341` | `+71` |
+| Invalid-input rows | `270` | `344` | `+74` |
 | Commands with rows | `50/151` | `98/151` | `+48` |
-| Represented doc-option pairs | `253/4632` | `567/4632` | `+314` |
+| Represented doc-option pairs | `253/4632` | `568/4632` | `+315` |
 
-The text-level row delta audit reports `200` commits with `1397` TSV row
-additions and `43` TSV row deletions, for `+1354` text net. The strict behavior
-row count is `+1306` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `201` commits with `1405` TSV row
+additions and `43` TSV row deletions, for `+1362` text net. The strict behavior
+row count is `+1314` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`514` represented by matrix, extension or deferral evidence, and `447` still
+`520` represented by matrix, extension or deferral evidence, and `441` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -143,7 +143,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `447` missing or unclassified.
+  functions, currently `961` total with `441` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -185,8 +185,8 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `514` are already represented by matrix rows,
-extension rows or explicit deferrals, and `447` are
+focused oracle functions. `520` are already represented by matrix rows,
+extension rows or explicit deferrals, and `441` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
@@ -198,7 +198,7 @@ Largest missing/unclassified buckets:
 | `git_pack_integrity_compat.rs` | `46` |
 | `git_index_mutation_compat.rs` | `39` |
 | `git_maintenance_compat.rs` | `32` |
-| `git_commit_compat.rs` | `15` |
+| `git_commit_compat.rs` | `9` |
 | `git_worktree_state_compat.rs` | `26` |
 | `git_notes_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
@@ -214,14 +214,14 @@ Largest missing/unclassified buckets:
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_global_cli_compat.rs` | `5` |
 
-Largest command-hint buckets inside those `447` functions:
+Largest command-hint buckets inside those `441` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `115` |
 | `remote` | `58` |
 | `worktree` | `48` |
-| `commit` | `33` |
+| `commit` | `27` |
 | `maintenance` | `34` |
 | `config` | `32` |
 | `refs` | `30` |
@@ -248,7 +248,7 @@ declared evidence-function count. If a slice increases written TSV rows without
 reducing this count or without naming a different source bucket, that is a
 process error.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle test already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -1068,3 +1068,52 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 `+4` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows and `+3` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_commit_compat.rs`:
+
+- `git_commit_compat::commit_template_editor_matches_stock_git_object`
+- `git_commit_compat::commit_editor_without_message_matches_stock_git_buffer`
+- `git_commit_compat::commit_editor_empty_and_unchanged_abort_like_stock_git`
+- `git_commit_compat::commit_verbose_template_editor_matches_stock_git_buffer`
+- `git_commit_compat::commit_verbose_verbose_template_editor_matches_stock_git_buffer`
+- `git_commit_compat::commit_template_requires_editor_change_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+5`
+- open rows: `+0`
+- invalid-input rows: `+3`
+- represented oracle functions: `+6`
+- missing-or-unclassified oracle functions: `-6`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `--template`; `-vv` is a
+  value/spelling form of the existing verbose option seed rather than a
+  separate documented option pair
+- Rust behavior changes: no
+
+Expected rows:
+
+- `GIT_EDITOR=./editor.sh git commit --template template.txt`
+- `GIT_EDITOR=./editor.sh git commit` with `commit.template` configured
+- `GIT_EDITOR=.git/editor.sh git commit`
+- `GIT_EDITOR=.git/editor.sh git commit` with unchanged editor buffer
+- `GIT_EDITOR=.git/editor.sh git commit` with empty editor buffer
+- `GIT_EDITOR=.git/editor.sh git commit --template .git/template.txt -v`
+- `GIT_EDITOR=.git/editor.sh git commit --template .git/template.txt -vv`
+- `GIT_EDITOR=true git commit --template template.txt`
+
+The evidence compares stock Git and Zmin command output, captured editor
+buffers, resulting commit objects and failure output for editor-backed commits,
+template messages, verbose template buffers and unchanged or empty editor
+abort behavior.
+
+Actual post-import movement matched the declaration: `+8` behavior rows,
+`+5` closed rows, `+0` open rows, `+3` invalid-input rows, `+6`
+represented oracle functions, `-6` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+1` represented doc-option pair.
