@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2733` | `+1639` |
-| Matching stock Git rows | `823` | `2345` | `+1522` |
+| Written behavior rows | `1094` | `2734` | `+1640` |
+| Matching stock Git rows | `823` | `2346` | `+1523` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `104/151` | `+54` |
@@ -133,9 +133,9 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `multi-pack-index` | `0` | `6` | `+6` |
 | `patch-id` | `0` | `6` | `+6` |
 | `shortlog` | `0` | `6` | `+6` |
+| `verify-pack` | `0` | `6` | `+6` |
 | `checkout` | `0` | `5` | `+5` |
 | `stripspace` | `0` | `5` | `+5` |
-| `verify-pack` | `0` | `5` | `+5` |
 | `column` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `4` | `+4` |
 | `credential` | `0` | `4` | `+4` |
@@ -1099,6 +1099,42 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
 represented oracle functions, `-2` missing-or-unclassified oracle functions,
 `+1` command with rows and `+1` represented doc-option pair.
+
+## Latest Declared Import
+
+Source bucket: census-selected implemented-but-unverified `verify-pack`
+`<positional:packs>` schema row, using already represented focused
+stock-oracle evidence from `docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+
+- `git_pack_integrity_compat::verify_pack_matches_stock_git_for_default_and_stats`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; this closes the Zmin schema
+  positional `packs` parser surface for the already represented default
+  verify-pack case
+- Rust behavior changes: no
+
+Expected row:
+
+- `git verify-pack .git/objects/pack/pack-*.idx`
+
+The evidence compares stock Git and Zmin default verify-pack stdout for the
+same local pack index.
+
+Actual post-import movement matched the declaration: `+1` behavior row,
+`+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+0` represented doc-option pairs.
 
 ## Latest Declared Import
 
