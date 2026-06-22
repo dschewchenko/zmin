@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2556` | `+1462` |
-| Matching stock Git rows | `823` | `2181` | `+1358` |
+| Written behavior rows | `1094` | `2562` | `+1468` |
+| Matching stock Git rows | `823` | `2187` | `+1364` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `374` | `+104` |
 | Commands with rows | `50/151` | `98/151` | `+48` |
 | Represented doc-option pairs | `253/4632` | `589/4632` | `+336` |
 
-The text-level row delta audit reports `225` commits with `1553` TSV row
-additions and `43` TSV row deletions, for `+1510` text net. The strict behavior
-row count is `+1462` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `225` commits with `1559` TSV row
+additions and `43` TSV row deletions, for `+1516` text net. The strict behavior
+row count is `+1468` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`618` represented by matrix, extension or deferral evidence, and `343` still
+`624` represented by matrix, extension or deferral evidence, and `337` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -87,7 +87,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `check-mailmap` | `0` | `6` | `+6` |
 | `stripspace` | `0` | `5` | `+5` |
 | `check-attr` | `0` | `5` | `+5` |
-| `fetch` | `300` | `310` | `+10` |
+| `fetch` | `300` | `316` | `+16` |
 | `ls-remote` | `2` | `23` | `+21` |
 | `replay` | `0` | `4` | `+4` |
 | `read-tree` | `0` | `4` | `+4` |
@@ -145,7 +145,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `343` missing or unclassified.
+  functions, currently `961` total with `337` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -187,15 +187,15 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `618` are already represented by matrix rows,
-extension rows or explicit deferrals, and `343` are
+focused oracle functions. `624` are already represented by matrix rows,
+extension rows or explicit deferrals, and `337` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_transport_local_compat.rs` | `55` |
+| `git_transport_local_compat.rs` | `49` |
 | `git_transport_http_compat.rs` | `48` |
 | `git_maintenance_compat.rs` | `32` |
 | `git_pack_integrity_compat.rs` | `28` |
@@ -225,24 +225,24 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `343` functions:
+Largest command-hint buckets inside those `337` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `81` |
 | `worktree` | `47` |
-| `remote` | `44` |
+| `remote` | `39` |
 | `maintenance` | `34` |
 | `merge` | `29` |
-| `refs` | `22` |
-| `branch` | `20` |
+| `refs` | `19` |
+| `branch` | `19` |
 | `commit` | `18` |
 | `submodule` | `17` |
 | `notes` | `14` |
 | `upload-pack` | `14` |
 | `add` | `13` |
 | `prune` | `11` |
-| `config` | `11` |
+| `config` | `9` |
 | `rebase` | `11` |
 
 ## Oracle Import Walk Order
@@ -264,7 +264,7 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_transport_local_compat.rs` (`55`) | largest remaining source with local/file transport and remote-management rows |
+| 1 | `git_transport_local_compat.rs` (`49`) | largest remaining source with local/file transport and remote-management rows |
 | 2 | `git_transport_http_compat.rs` (`48`) | second-largest source and likely dense `upload-pack` transport rows |
 | 3 | `git_maintenance_compat.rs` (`32`) | dense maintenance/repack/multi-pack-index rows with shared command shape |
 | 4 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
@@ -274,6 +274,55 @@ If a new WebStorm or replacement-binary blocker appears, it overrides this
 walk order. If a selected bucket produces Zmin-only extension behavior or an
 intentional deferral instead of Git matrix rows, record that classification and
 do not increase written behavior rows.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`, first frozen backlog bucket
+`git_transport_local_compat.rs`, local fetch prune behavior group.
+
+Evidence functions:
+
+- `git_transport_local_compat::fetch_prune_with_branch_name_keeps_other_remote_tracking_refs_like_stock_git`
+- `git_transport_local_compat::fetch_prune_config_prunes_stale_remote_tracking_refs_like_stock_git`
+- `git_transport_local_compat::fetch_prune_only_prints_remote_url_header_like_stock_git`
+- `git_transport_local_compat::fetch_prune_resolves_remote_tracking_directory_file_conflict_like_stock_git`
+- `git_transport_local_compat::fetch_prune_tags_config_with_prune_config_removes_stale_tags_like_stock_git`
+- `git_transport_local_compat::fetch_direct_file_url_prune_tags_prunes_tags_but_keeps_remote_tracking_refs_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+6`
+- missing-or-unclassified oracle functions: `-6`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; `fetch --prune`,
+  `--prune-tags` and `<none>` already had rows
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git fetch --prune origin main`
+- `git -c fetch.prune=true fetch origin`
+- `git fetch --prune origin` with a stale remote-tracking branch
+- `git fetch --prune` resolving a remote-tracking directory/file conflict
+- `git -c fetch.prune=true -c fetch.pruneTags=true fetch origin`
+- `git fetch file://repo --prune --prune-tags`
+
+The evidence checks stock-compatible local/file transport prune behavior:
+branch-limited prune keeps unrelated stale remote-tracking refs, prune config
+removes stale remote-tracking refs, prune stderr begins with the `From <url>`
+header, prune resolves a remote-tracking D/F conflict, pruneTags config removes
+stale tags with prune enabled, and direct file URL pruneTags prunes tags while
+keeping remote-tracking refs.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+6`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+6` represented oracle
+functions, `-6` missing-or-unclassified oracle functions, `+0` commands with
+rows and `+0` represented doc-option pairs.
 
 ## Latest Declared Import
 

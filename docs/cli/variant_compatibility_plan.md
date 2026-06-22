@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2556 written rows / 2181/2556 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 589/4632 represented doc-option pairs / 2562 written rows / 2187/2562 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -286,17 +286,17 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `618`
-represented or classified and `343` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `624`
+represented or classified and `337` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `618` already represented
-or classified and `343` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `624` already represented
+or classified and `337` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. The default
-bucket order is local transport (`55`), HTTP transport (`48`), maintenance
+bucket order is local transport (`49`), HTTP transport (`48`), maintenance
 (`32`), pack integrity (`28`) and worktree state (`26`), unless a real
 replacement-binary blocker overrides it. A docs-only oracle import must reduce
 `missing_or_unclassified` by the declared number of evidence functions; any TSV
@@ -305,19 +305,19 @@ rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `clone_v2_47.tsv` with nine network
-shallow/shared rows from existing focused stock-oracle evidence in
-`git_transport_http_compat.rs`.
+The latest completed slice extends `fetch_v2_47.tsv` with six local prune rows
+from existing focused stock-oracle evidence in `git_transport_local_compat.rs`.
 
-`clone_v2_47.tsv` now records `--depth=1` over SSH, smart HTTP and
-git-daemon, the stock-compatible dumb HTTP shallow rejection, smart HTTP
-shallow tag behavior, and `--shared` being ignored for SSH, smart HTTP, dumb
-HTTP and git-daemon clones. Evidence comes from the matching
-`clone_reads_shallow_*` and `clone_shared_is_ignored_*` tests in
-`git_transport_http_compat.rs`. The oracle inventory now lists `618`
-represented/classified functions and `343` `missing_or_unclassified`. Current
-written rows are `2556`, with `2181/2556` matching stock Git, `1/2556` open
-and `374/2556` invalid-input. No Rust behavior changed.
+`fetch_v2_47.tsv` now records branch-limited prune preserving unrelated stale
+remote-tracking refs, `fetch.prune=true`, prune stderr `From <url>` header,
+prune resolving a remote-tracking D/F conflict, pruneTags config with prune
+enabled, and direct file URL pruneTags pruning tags while keeping
+remote-tracking refs. Evidence comes from the matching `fetch_prune_*` and
+`fetch_direct_file_url_prune_tags_*` tests in `git_transport_local_compat.rs`.
+The oracle inventory now lists `624` represented/classified functions and
+`337` `missing_or_unclassified`. Current written rows are `2562`, with
+`2187/2562` matching stock Git, `1/2562` open and `374/2562` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 

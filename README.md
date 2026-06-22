@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `98/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `589/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2556` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2181/2556` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2556` | written rows with incomplete parity |
-| Open written rows | `1/2556` | written rows that still do not match stock Git |
-| Invalid input rows | `374/2556` | rows where stock Git rejects the input |
+| Written behavior rows | `2562` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2187/2562` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2562` | written rows with incomplete parity |
+| Open written rows | `1/2562` | written rows that still do not match stock Git |
+| Invalid input rows | `374/2562` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2181/2556` as Git compatibility. It only means `2181` of the `2556`
+Do not read `2187/2562` as Git compatibility. It only means `2187` of the `2562`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2556` rows are partially matching,
-`1/2556` rows are known open mismatches, and `374/2556` additional rows are
+unexpanded surface is not counted yet, `0/2562` rows are partially matching,
+`1/2562` rows are known open mismatches, and `374/2562` additional rows are
 stock-compatible invalid inputs. Do not read `589/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -210,7 +210,7 @@ Audit progress by git-scm reference group:
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `72` | `64` | `0` | `1` | `7` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `292` | `261` | `0` | `0` | `31` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `268` | `225` | `0` | `0` | `43` |
-| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `373` | `348` | `0` | `0` | `25` |
+| Sharing and Updating Projects | `5` | `0` | `309` | `0` | `379` | `354` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `403` | `394` | `0` | `0` | `9` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `184` | `103` | `0` | `0` | `81` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2556`** | **`2181`** | **`0`** | **`1`** | **`374`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2562`** | **`2187`** | **`0`** | **`1`** | **`374`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -268,7 +268,7 @@ Current command-level matrices:
 | `diff-tree` | `151` | `0` | `47` | `74` | `74` | `0` | `0` | `0` | no |
 | `difftool` | `19` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `fast-import` | `25` | `0` | `1` | `7` | `4` | `0` | `0` | `3` | no |
-| `fetch` | `73` | `0` | `30` | `310` | `300` | `0` | `0` | `10` | no |
+| `fetch` | `73` | `0` | `30` | `316` | `306` | `0` | `0` | `10` | no |
 | `filter-branch` | `37` | `0` | `11` | `14` | `14` | `0` | `0` | `0` | no |
 | `fmt-merge-msg` | `9` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
