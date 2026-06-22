@@ -5,8 +5,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use common::{
-    command_stdout_bytes, configure_identity, git, git_failure_output, git_status, git_with_env,
-    git_with_stdin_bytes, run_zmin, run_zmin_failure_output, run_zmin_status,
+    command_output, command_stdout_bytes, configure_identity, git, git_failure_output, git_status,
+    git_with_env, git_with_stdin_bytes, run_zmin, run_zmin_failure_output, run_zmin_status,
     run_zmin_with_stdin_bytes, zmin_bin,
 };
 
@@ -143,6 +143,41 @@ fn archive_matches_stock_git_for_tar_prefix_and_paths() {
     assert_eq!(
         tar_listing(repo.path(), "zmin-dir.tar"),
         tar_listing(repo.path(), "git-dir.tar")
+    );
+
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            repo.path(),
+            &[
+                "archive",
+                "--format=tar",
+                "--verbose",
+                "-o",
+                "zmin-verbose.tar",
+                "HEAD",
+                "dir",
+            ],
+            "zmin archive verbose",
+        ),
+        command_output(
+            "git",
+            repo.path(),
+            &[
+                "archive",
+                "--format=tar",
+                "--verbose",
+                "-o",
+                "git-verbose.tar",
+                "HEAD",
+                "dir",
+            ],
+            "git archive verbose",
+        )
+    );
+    assert_eq!(
+        tar_listing(repo.path(), "zmin-verbose.tar"),
+        tar_listing(repo.path(), "git-verbose.tar")
     );
 }
 

@@ -451,12 +451,12 @@ fn archive_entry(
     out: &mut Vec<u8>,
 ) -> Result<()> {
     let archive_path = format!("{}{}", context.prefix, path);
-    if context.verbose {
-        eprintln!("{archive_path}");
-    }
     match entry.mode {
         TreeMode::Tree => {
             let dir_path = format!("{archive_path}/");
+            if context.verbose {
+                eprintln!("{dir_path}");
+            }
             write_tar_header(
                 out,
                 &dir_path,
@@ -468,6 +468,9 @@ fn archive_entry(
             archive_tree_entries(context, &entry.id, path, out)
         }
         TreeMode::File | TreeMode::Executable => {
+            if context.verbose {
+                eprintln!("{archive_path}");
+            }
             let object = context.store.read_object(&entry.id)?;
             let content = smudge_worktree_filter_content(
                 context.repo,
@@ -486,6 +489,9 @@ fn archive_entry(
             )
         }
         TreeMode::Symlink => {
+            if context.verbose {
+                eprintln!("{archive_path}");
+            }
             let object = context.store.read_object(&entry.id)?;
             write_tar_header(
                 out,
@@ -525,16 +531,19 @@ fn archive_entry_zip(
     zip: &mut ZipArchiveWriter,
 ) -> Result<()> {
     let archive_path = format!("{}{}", context.prefix, path);
-    if context.verbose {
-        eprintln!("{archive_path}");
-    }
     match entry.mode {
         TreeMode::Tree => {
             let dir_path = format!("{archive_path}/");
+            if context.verbose {
+                eprintln!("{dir_path}");
+            }
             zip.add_directory(&dir_path, context.mtime)?;
             archive_tree_entries_zip(context, &entry.id, path, zip)
         }
         TreeMode::File | TreeMode::Executable => {
+            if context.verbose {
+                eprintln!("{archive_path}");
+            }
             let object = context.store.read_object(&entry.id)?;
             let content = smudge_worktree_filter_content(
                 context.repo,
@@ -555,6 +564,9 @@ fn archive_entry_zip(
             )
         }
         TreeMode::Symlink => {
+            if context.verbose {
+                eprintln!("{archive_path}");
+            }
             let object = context.store.read_object(&entry.id)?;
             zip.add_file(&archive_path, &object.content, 0o120000, context.mtime)
         }
