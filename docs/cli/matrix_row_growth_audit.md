@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2822` | `+1728` |
-| Matching stock Git rows | `823` | `2433` | `+1610` |
+| Written behavior rows | `1094` | `2824` | `+1730` |
+| Matching stock Git rows | `823` | `2435` | `+1612` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `106/151` | `+56` |
@@ -4397,4 +4397,44 @@ Actual post-import movement matched the declaration: `+5` behavior rows, `+5`
 closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+3` represented doc-option pairs, `-3` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `branch` positional schema
+surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-schema-parser-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`; these rows close positional schema
+  surfaces rather than documented option spellings
+- implemented-but-unverified schema rows: expected `-2`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git branch plain_branch`
+- `git branch from_head HEAD`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr, refs and
+config using copied workdirs from one seed repository. `branch --track`,
+`branch -t`, `branch --help` and `branch -h` remain fix-needed surfaces because
+probe output showed stdout/stderr differences.
+
+Actual post-import movement matched the declaration: `+2` behavior rows, `+2`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `-2` implemented-but-unverified
 schema rows and `+0` remaining checklist rows.

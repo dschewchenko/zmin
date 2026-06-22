@@ -152,6 +152,8 @@ run_in_seed_repos branch_no_sort_listing branch --no-sort
 run_in_seed_repos branch_column_never_listing branch --column=never
 run_in_seed_repos branch_no_create_reflog branch --no-create-reflog no_reflog_branch
 run_in_seed_repos branch_create_reflog branch --create-reflog reflog_branch
+run_in_seed_repos branch_positional_name branch plain_branch
+run_in_seed_repos branch_positional_start_point branch from_head HEAD
 run_in_seed_repos branch_verbose_short branch -v
 run_in_seed_repos branch_verbose_long branch --verbose
 run_in_seed_repos branch_remotes_short branch -r

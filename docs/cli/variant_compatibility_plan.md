@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 106/151 commands with matrix rows / 715/4632 represented doc-option pairs / 2822 written rows / 2433/2822 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 106/151 commands with matrix rows / 715/4632 represented doc-option pairs / 2824 written rows / 2435/2824 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -310,8 +310,8 @@ compares stock Git and Zmin exit status, stdout, stderr, `ls-files --stage`,
 `ls-files -v` index flags and worktree status. The oracle inventory remains
 `707` represented/classified functions and `254` `missing_or_unclassified`
 because the evidence is a shell smoke, not a Rust test inventory function.
-Current written rows are `2822`, with `2433/2822` matching stock Git, `1/2822`
-open and `388/2822` invalid-input.
+Current written rows are `2824`, with `2435/2824` matching stock Git, `1/2824`
+open and `388/2824` invalid-input.
 
 ### No-Skip Rule
 
