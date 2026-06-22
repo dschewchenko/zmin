@@ -370,10 +370,10 @@ Current extension inventory:
 
 | Layer | Count |
 | --- | ---: |
-| Zmin-only commands | `9` |
+| Zmin-only commands | `11` |
 | Zmin-only options on Git commands | `4` |
 | Zmin-only environment controls | `1` |
-| Stable extensions | `3` |
+| Stable extensions | `5` |
 | Experimental extensions | `2` |
 | Planned extensions | `1` |
 

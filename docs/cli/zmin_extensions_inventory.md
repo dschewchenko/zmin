@@ -38,9 +38,9 @@ coverage numbers in the Git compatibility matrix.
 | Command | Option | Status | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | `zmin clone` | `--worktree-first` | stable | `git_clone_compat`, `git_transport_http_compat clone_instant_` | materializes selected `HEAD` first and records `zmin.worktreeFirst=true` |
-| `zmin clone` | `--instant` | stable | `git_clone_compat`, `git_transport_http_compat clone_instant_` | alias for worktree-first clone mode |
-| `zmin clone` | `--background-fetch` | experimental | `git_transport_http_compat clone_instant_` | starts a detached `fetch origin` after an instant remote clone |
-| `zmin clone` | `--demand-hydrate` | experimental | `git_transport_http_compat clone_instant_` | marks instant remote clones as promisor-backed for missing-object hydration |
+| `zmin clone` | `--instant` | stable | `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs` | alias for worktree-first clone mode over git-daemon, SSH and smart HTTP transport |
+| `zmin clone` | `--background-fetch` | experimental | `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs` | starts a detached `fetch origin` after an instant remote clone |
+| `zmin clone` | `--demand-hydrate` | experimental | `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects` | marks instant remote clones as promisor-backed for missing-object hydration |
 
 ## Zmin-Only Environment Controls
 

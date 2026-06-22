@@ -285,15 +285,15 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `570`
-represented or classified and `391` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `579`
+represented or classified and `382` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `570` already represented
-or classified and `391` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `579` already represented
+or classified and `382` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -301,24 +301,18 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `add_v2_47.tsv` with four `git add`
-unmerged/update/submodule rows from existing focused stock-oracle evidence in
-`git_index_mutation_compat.rs`.
+The latest completed slice classifies nine `git_transport_http_compat.rs`
+remote instant-clone oracle tests as Zmin-only extension evidence in
+`docs/cli/zmin_extensions_inventory.md`, not Git `2.47.1` matrix rows.
 
-`add_v2_47.tsv` now records closed rows for resolving unmerged file/symlink
-entries with `core.filemode=false` and `core.symlinks=false`, plus
-pathspec-limited `git add -u dir`. It also records invalid-input rows for
-adding sha1/sha256 object-format-mismatched submodules.
-Evidence comes from
-`git_index_mutation_compat::add_resolves_unmerged_entries_preserving_disabled_mode_bits_like_stock_git`,
-`git_index_mutation_compat::add_update_matches_stock_git_state`
-and `git_index_mutation_compat::add_rejects_submodule_object_format_mismatch_like_upstream_git`,
-comparing stock Git and Zmin index/status output for the supported rows and
-upstream Git diagnostic shape for the invalid submodule additions. The oracle
-inventory now lists `570` represented/classified functions and `391`
-`missing_or_unclassified`. Current written rows are `2498`, with `2144/2498`
-matching stock Git, `1/2498` open and `353/2498` invalid-input. No Rust
-behavior changed.
+The classified functions cover `zmin clone --instant`,
+`--background-fetch` and `--demand-hydrate` over git-daemon, SSH and smart HTTP.
+Those options are additive Zmin clone modes, so they stay outside the Git
+compatibility denominator while still reducing the unclassified oracle backlog.
+The oracle inventory now lists `579` represented/classified functions and
+`382` `missing_or_unclassified`. Current written rows remain `2498`, with
+`2144/2498` matching stock Git, `1/2498` open and `353/2498` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 

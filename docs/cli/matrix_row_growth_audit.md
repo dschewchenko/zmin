@@ -38,7 +38,7 @@ row count is `+1404` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`570` represented by matrix, extension or deferral evidence, and `391` still
+`579` represented by matrix, extension or deferral evidence, and `382` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -144,7 +144,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `391` missing or unclassified.
+  functions, currently `961` total with `382` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -186,15 +186,15 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `570` are already represented by matrix rows,
-extension rows or explicit deferrals, and `391` are
+focused oracle functions. `579` are already represented by matrix rows,
+extension rows or explicit deferrals, and `382` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_transport_http_compat.rs` | `75` |
+| `git_transport_http_compat.rs` | `66` |
 | `git_transport_local_compat.rs` | `58` |
 | `git_pack_integrity_compat.rs` | `46` |
 | `git_maintenance_compat.rs` | `32` |
@@ -214,34 +214,64 @@ Largest missing/unclassified buckets:
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_global_cli_compat.rs` | `5` |
 
-Largest command-hint buckets inside those `391` functions:
+Largest command-hint buckets inside those `382` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
-| `<none>` | `88` |
-| `remote` | `31` |
-| `worktree` | `28` |
-| `config` | `20` |
-| `maintenance` | `20` |
-| `upload-pack` | `14` |
-| `submodule` | `10` |
-| `merge` | `11` |
-| `refs` | `10` |
-| `branch` | `7` |
-| `notes` | `6` |
-| `daemon,remote` | `5` |
-| `refs,remote` | `4` |
-| `rebase` | `4` |
-| `fetch,refs` | `4` |
-| `commit` | `4` |
-| `add,branch,worktree` | `4` |
-| `version` | `3` |
-| `tag` | `3` |
-| `prune,remote` | `3` |
-| `merge,worktree` | `3` |
-| `fetch` | `3` |
-| `checkout,sparse-checkout` | `3` |
-| `branch,worktree` | `3` |
+| `<none>` | `86` |
+| `remote` | `58` |
+| `worktree` | `47` |
+| `maintenance` | `34` |
+| `merge` | `29` |
+| `config` | `29` |
+| `refs` | `24` |
+| `branch` | `20` |
+| `commit` | `18` |
+| `submodule` | `17` |
+
+## Latest Declared Classification
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`, classified as Zmin-only
+extension evidence rather than Git `2.47.1` matrix coverage.
+
+Evidence functions:
+
+- `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`
+- `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`
+- `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`
+- `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`
+- `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`
+- `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`
+- `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs`
+- `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects`
+- `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs`
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+9`
+- missing-or-unclassified oracle functions: `-9`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- Rust behavior changes: no
+
+Classification:
+
+- `zmin clone --instant` over git-daemon, SSH and smart HTTP is an additive
+  Zmin clone mode and not a Git `2.47.1` option row.
+- `zmin clone --instant --background-fetch` over git-daemon, SSH and smart HTTP
+  is a Zmin-only extension mode.
+- `zmin clone --instant --demand-hydrate` over git-daemon, SSH and smart HTTP
+  is a Zmin-only extension mode.
+
+Actual post-classification movement matched the declaration: `+0` behavior
+rows, `+0` closed rows, `+0` open rows, `+0` invalid-input rows, `+9`
+represented oracle functions, `-9` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+0` represented doc-option pairs.
 
 Use this snapshot as the upper bound for already-known oracle-import growth.
 Future slices should reduce the `missing_or_unclassified` count by their
