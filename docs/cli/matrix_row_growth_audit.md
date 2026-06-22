@@ -37,8 +37,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2610` | `+1516` |
-| Matching stock Git rows | `823` | `2233` | `+1410` |
+| Written behavior rows | `1094` | `2616` | `+1522` |
+| Matching stock Git rows | `823` | `2239` | `+1416` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `376` | `+106` |
 | Commands with rows | `50/151` | `102/151` | `+52` |
@@ -50,7 +50,7 @@ behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`671` represented by matrix, extension or deferral evidence, and `290` still
+`676` represented by matrix, extension or deferral evidence, and `285` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -157,7 +157,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `290` missing or unclassified.
+  functions, currently `961` total with `285` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -333,18 +333,18 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `671` are already represented by matrix rows,
-extension rows or explicit deferrals, and `290` are
+focused oracle functions. `676` are already represented by matrix rows,
+extension rows or explicit deferrals, and `285` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_maintenance_compat.rs` | `29` |
 | `git_transport_http_compat.rs` | `29` |
 | `git_pack_integrity_compat.rs` | `28` |
 | `git_worktree_state_compat.rs` | `26` |
+| `git_maintenance_compat.rs` | `24` |
 | `git_transport_local_compat.rs` | `24` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
@@ -371,15 +371,15 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `290` functions:
+Largest command-hint buckets inside those `285` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `69` |
 | `worktree` | `47` |
-| `remote` | `30` |
-| `maintenance` | `31` |
 | `merge` | `28` |
+| `remote` | `28` |
+| `maintenance` | `26` |
 | `refs` | `18` |
 | `submodule` | `17` |
 | `branch` | `16` |
@@ -407,10 +407,10 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_maintenance_compat.rs` (`29`) | largest remaining source with dense maintenance/repack/multi-pack-index rows |
-| 2 | `git_transport_http_compat.rs` (`29`) | network transport coverage over HTTP, SSH and git-daemon |
-| 3 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
-| 4 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
+| 1 | `git_transport_http_compat.rs` (`29`) | network transport coverage over HTTP, SSH and git-daemon |
+| 2 | `git_pack_integrity_compat.rs` (`28`) | pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 3 | `git_worktree_state_compat.rs` (`26`) | worktree state rows that may expose implementation gaps |
+| 4 | `git_maintenance_compat.rs` (`24`) | remaining dense maintenance/repack/multi-pack-index rows |
 | 5 | `git_transport_local_compat.rs` (`24`) | remaining local/file transport and remote-management rows |
 
 If a new WebStorm or replacement-binary blocker appears, it overrides this
@@ -1035,6 +1035,55 @@ Actual post-import movement matched the declaration: `+4` behavior rows,
 `+3` closed rows, `+0` open rows, `+1` invalid-input row, `+3`
 represented oracle functions, `-3` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+1` represented doc-option pair.
+
+### Declared: Maintenance Run Local Tasks Batch
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`, current largest missing bucket
+`git_maintenance_compat.rs`, maintenance run local task and schedule behavior
+group.
+
+Evidence functions:
+
+- `git_maintenance_compat::maintenance_run_gc_reuses_repository_gc`
+- `git_maintenance_compat::maintenance_run_local_tasks_create_stock_readable_metadata`
+- `git_maintenance_compat::maintenance_run_schedule_matches_stock_git_strategy_selection`
+- `git_maintenance_compat::maintenance_run_daily_prunes_packed_loose_duplicates_like_stock_git`
+- `git_maintenance_compat::maintenance_run_weekly_packs_refs_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+5`
+- missing-or-unclassified oracle functions: `-5`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; `maintenance --task`,
+  `--schedule` and `--quiet` already have matrix rows
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git maintenance run --task=gc --quiet`
+- `git maintenance run --task=commit-graph --task=pack-refs --task=loose-objects`
+- `git maintenance run --schedule=hourly`
+- `git maintenance run --schedule=daily --quiet` with incremental strategy
+  metadata creation
+- `git maintenance run --schedule=daily --quiet` pruning duplicate loose
+  objects
+- `git maintenance run --schedule=weekly --quiet`
+
+The evidence checks stock-readable repository state after local maintenance
+tasks: pack creation and reachable `HEAD`, commit-graph verification, packed
+refs readability, multi-pack-index verification, duplicate loose-object pruning
+and weekly packed-ref side effects.
+
+Actual post-import movement matched the declaration: `+6` behavior rows,
+`+6` closed rows, `+0` open rows, `+0` invalid-input rows, `+5`
+represented oracle functions, `-5` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+0` represented doc-option pairs.
 
 ### Completed: Pull Local Rebase Batch
 
