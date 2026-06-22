@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `102/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `607/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2649` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2272/2649` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2649` | written rows with incomplete parity |
-| Open written rows | `1/2649` | written rows that still do not match stock Git |
-| Invalid input rows | `376/2649` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `609/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `2652` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2275/2652` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2652` | written rows with incomplete parity |
+| Open written rows | `1/2652` | written rows that still do not match stock Git |
+| Invalid input rows | `376/2652` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2272/2649` as Git compatibility. It only means `2272` of the `2649`
+Do not read `2275/2652` as Git compatibility. It only means `2275` of the `2652`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2649` rows are partially matching,
-`1/2649` rows are known open mismatches, and `376/2649` additional rows are
-stock-compatible invalid inputs. Do not read `607/4632` as option support
+unexpanded surface is not counted yet, `0/2652` rows are partially matching,
+`1/2652` rows are known open mismatches, and `376/2652` additional rows are
+stock-compatible invalid inputs. Do not read `609/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -218,9 +218,9 @@ Audit progress by git-scm reference group:
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `140` | `79` | `0` | `0` | `61` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
-| Plumbing Commands | `21` | `0` | `650` | `0` | `509` | `442` | `0` | `0` | `67` |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `512` | `445` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `158` | `122` | `0` | `0` | `36` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2649`** | **`2272`** | **`0`** | **`1`** | **`376`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2652`** | **`2275`** | **`0`** | **`1`** | **`376`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -331,7 +331,7 @@ Current command-level matrices:
 | `unpack-file` | `0` | `0` | `0` | `3` | `1` | `0` | `0` | `2` | no |
 | `update-server-info` | `2` | `0` | `1` | `2` | `2` | `0` | `0` | `0` | no |
 | `var` | `3` | `0` | `1` | `12` | `9` | `0` | `0` | `3` | no |
-| `verify-pack` | `4` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
+| `verify-pack` | `4` | `0` | `2` | `5` | `3` | `0` | `0` | `2` | no |
 | `version` | `2` | `0` | `2` | `4` | `2` | `0` | `0` | `2` | no |
 | `worktree` | `28` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `write-tree` | `2` | `0` | `1` | `2` | `2` | `0` | `0` | `0` | no |
