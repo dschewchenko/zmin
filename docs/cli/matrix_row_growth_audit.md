@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2817` | `+1723` |
-| Matching stock Git rows | `823` | `2428` | `+1605` |
+| Written behavior rows | `1094` | `2822` | `+1728` |
+| Matching stock Git rows | `823` | `2433` | `+1610` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `106/151` | `+56` |
-| Represented doc-option pairs | `253/4632` | `712/4632` | `+459` |
+| Represented doc-option pairs | `253/4632` | `715/4632` | `+462` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4351,3 +4351,50 @@ Actual post-import movement matched the declaration: `+10` behavior rows,
 oracle functions, `+0` missing-or-unclassified oracle functions, `+0` commands
 with rows, `+10` represented doc-option pairs, `-10`
 implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `update-index` schema
+surfaces, with focused stock-oracle smoke evidence for cacheinfo, replace and
+index-info formats.
+
+Evidence command:
+
+- `tools/git-update-index-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+5`
+- closed rows: `+5`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+3` for `--cacheinfo`,
+  `--replace` and `--index-info`
+- implemented-but-unverified schema rows: expected `-3`
+- remaining checklist rows: expected `+0`; documented option seeds move from
+  implemented-without-matrix to expansion-required, but remain in the
+  remaining expansion checklist
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git update-index --add --cacheinfo 100644,<blob>,b.txt`
+- `git update-index --add --cacheinfo 100644 <blob> b.txt`
+- `git update-index --replace --cacheinfo 100644,<blob>,a.txt`
+- `printf '100644 blob <blob>\tb.txt\n' | git update-index --index-info`
+- `printf '100644 <blob> 0\tb.txt\n' | git update-index --index-info`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr,
+`ls-files --stage`, `ls-files -v` index flags and worktree status. Standalone
+`--cacheinfo` without `--add`, `--index-info` two-field input and `--chmod`
+are intentionally left for later fix slices because probe output showed
+current parity gaps.
+
+Actual post-import movement matched the declaration: `+5` behavior rows, `+5`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `-3` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.

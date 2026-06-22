@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 106/151 commands with matrix rows / 712/4632 represented doc-option pairs / 2817 written rows / 2428/2817 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 106/151 commands with matrix rows / 715/4632 represented doc-option pairs / 2822 written rows / 2433/2822 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -304,13 +304,14 @@ The latest completed slice creates `update_index_v2_47.tsv`, backed by
 `update_index_v2_47.tsv` now records exact rows for `git update-index --add
 a.txt`, `git update-index a.txt`, clean `--refresh`/`--really-refresh`,
 assume-unchanged and skip-worktree set/clear toggles, `--remove`,
-`--force-remove`, `--stdin` and `-z --stdin`. The smoke compares stock Git and
-Zmin exit status, stdout, stderr, `ls-files --stage`, `ls-files -v` index
-flags and worktree status. The oracle inventory remains `707`
-represented/classified functions and `254` `missing_or_unclassified` because
-the evidence is a shell smoke, not a Rust test inventory function. Current
-written rows are `2817`, with `2428/2817` matching stock Git, `1/2817` open
-and `388/2817` invalid-input.
+`--force-remove`, `--stdin`, `-z --stdin`, two `--cacheinfo` value forms,
+`--replace --cacheinfo` and two `--index-info` stdin formats. The smoke
+compares stock Git and Zmin exit status, stdout, stderr, `ls-files --stage`,
+`ls-files -v` index flags and worktree status. The oracle inventory remains
+`707` represented/classified functions and `254` `missing_or_unclassified`
+because the evidence is a shell smoke, not a Rust test inventory function.
+Current written rows are `2822`, with `2433/2822` matching stock Git, `1/2822`
+open and `388/2822` invalid-input.
 
 ### No-Skip Rule
 

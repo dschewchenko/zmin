@@ -167,6 +167,106 @@ run_stdin_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_cacheinfo_case() {
+  local name="$1"
+  shift
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_index="$tmpdir/${name}.git.index"
+  local zmin_index="$tmpdir/${name}.zmin.index"
+  local git_flags="$tmpdir/${name}.git.flags"
+  local zmin_flags="$tmpdir/${name}.zmin.flags"
+  local git_status="$tmpdir/${name}.git.status"
+  local zmin_status="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_tracked_repo "$seed"
+  local blob
+  blob="$("$GIT_BIN" -C "$seed" hash-object -w a.txt)"
+  local args=()
+  for arg in "$@"; do
+    args+=("${arg//__BLOB__/$blob}")
+  done
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" update-index "${args[@]}" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" update-index "${args[@]}" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" ls-files --stage >"$git_index"
+  "$GIT_BIN" -C "$zmin_work" ls-files --stage >"$zmin_index"
+  compare_files index "$git_index" "$zmin_index"
+  "$GIT_BIN" -C "$git_work" ls-files -v >"$git_flags"
+  "$GIT_BIN" -C "$zmin_work" ls-files -v >"$zmin_flags"
+  compare_files index_flags "$git_flags" "$zmin_flags"
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
+  compare_files worktree_status "$git_status" "$zmin_status"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
+run_index_info_case() {
+  local name="$1"
+  local input_template="$2"
+  shift 2
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_index="$tmpdir/${name}.git.index"
+  local zmin_index="$tmpdir/${name}.zmin.index"
+  local git_flags="$tmpdir/${name}.git.flags"
+  local zmin_flags="$tmpdir/${name}.zmin.flags"
+  local git_status="$tmpdir/${name}.git.status"
+  local zmin_status="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_tracked_repo "$seed"
+  local blob
+  blob="$("$GIT_BIN" -C "$seed" hash-object -w a.txt)"
+  local input="${input_template//__BLOB__/$blob}"
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+
+  set +e
+  printf '%b' "$input" | "$GIT_BIN" -C "$git_work" update-index "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  printf '%b' "$input" | "$ZMIN_BIN" -C "$zmin_work" update-index "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" ls-files --stage >"$git_index"
+  "$GIT_BIN" -C "$zmin_work" ls-files --stage >"$zmin_index"
+  compare_files index "$git_index" "$zmin_index"
+  "$GIT_BIN" -C "$git_work" ls-files -v >"$git_flags"
+  "$GIT_BIN" -C "$zmin_work" ls-files -v >"$zmin_flags"
+  compare_files index_flags "$git_flags" "$zmin_flags"
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
+  compare_files worktree_status "$git_status" "$zmin_status"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case update_index_add_path empty update-index --add a.txt
 run_case update_index_positional_path tracked update-index a.txt
 run_case update_index_refresh tracked_clean update-index --refresh
@@ -179,3 +279,8 @@ run_case update_index_remove tracked update-index --remove a.txt
 run_case update_index_force_remove tracked update-index --force-remove a.txt
 run_stdin_case update_index_stdin 'a.txt\n' update-index --stdin
 run_stdin_case update_index_z_stdin 'a.txt\0' update-index -z --stdin
+run_cacheinfo_case update_index_cacheinfo_add --add --cacheinfo '100644,__BLOB__,b.txt'
+run_cacheinfo_case update_index_cacheinfo_split --add --cacheinfo 100644 __BLOB__ b.txt
+run_cacheinfo_case update_index_replace_cacheinfo --replace --cacheinfo '100644,__BLOB__,a.txt'
+run_index_info_case update_index_index_info_blob '100644 blob __BLOB__\tb.txt\n' --index-info
+run_index_info_case update_index_index_info_stage '100644 __BLOB__ 0\tb.txt\n' --index-info
