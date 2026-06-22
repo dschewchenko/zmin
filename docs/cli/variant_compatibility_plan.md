@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 445/4632 represented doc-option pairs / 1761 written rows / 1460 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 445/4632 represented doc-option pairs / 1767 written rows / 1466 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `replay` matrix from existing
-stock-oracle evidence:
+The latest completed slice expands `ls-files --resolve-undo` matrix rows from
+existing stock-oracle evidence:
 
-`git replay --contained --advance topic <base>..<tip>`
+`git ls-files --resolve-undo --abbrev=12`
 
-`replay_v2_47.tsv` now records plain range usage failure, contained advance,
-advance with fixed committer date, and `--onto` replay forms, comparing output,
-stderr, exit status and topic ref side effects with stock Git through
-`git_admin_tools_compat::replay_matches_stock_git_for_linear_range`.
+`ls_files_v2_47.tsv` now records default, `-t`, `-v`, `--abbrev=12`, `-z`,
+`--error-unmatch f.txt`, `-s` and `-u` resolve-undo forms as separate rows
+instead of two aggregate rows, comparing stdout, stderr and exit status with
+stock Git through `git_ls_files_compat::ls_files_resolve_undo_matches_stock_git`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -619,14 +619,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `replay_v2_47.tsv` with plain range
-usage failure, contained advance, fixed-date advance and `--onto` rows already
-covered by `git_admin_tools_compat::replay_matches_stock_git_for_linear_range`.
+The latest matrix inventory slice expands `ls_files_v2_47.tsv` resolve-undo
+coverage into separate default, tag, lowercase tag, abbreviation, NUL,
+error-unmatch, stage and unmerged rows already covered by
+`git_ls_files_compat::ls_files_resolve_undo_matches_stock_git`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1761` written-row
+This card is the exact handoff target after the current `1767` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -645,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1761`; the `1/1761` open row and the still incomplete command/doc-option
+`0/1767`; the `1/1767` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -839,6 +840,7 @@ until a full matrix is expanded and verified.
 | `ls-files --sparse --stage` sparse index tree entries | `1` | `0` | `git ls-files --sparse --stage` prints stock sparse-directory `040000` tree entries from an index with the `sdir` marker |
 | `ls-files --stage` stock Git index v4 | `1` | `0` | `git ls-files --stage` reads stock Git version 4 indexes with prefix-compressed paths |
 | `ls-files --stage` unknown required index extension | `1` | `0` | `git ls-files --stage` rejects a checksum-valid lowercase `abcd` index extension with stock corrupt-index diagnostics |
+| `ls-files --resolve-undo` row-by-row modes | `8` | `0` | default, `-t`, `-v`, `--abbrev=12`, `-z`, `--error-unmatch f.txt`, `-s` and `-u` resolve-undo forms already covered by `git_ls_files_compat` |
 | `verify-pack` unsupported pack index version | `1` | `0` | `git verify-pack` rejects a checksum-valid `.idx` version `3` with stock unsupported-version diagnostics |
 | `index-pack --verify` bad reverse-index signature | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` with a bad signature using stock sha1 validation diagnostics |
 | `index-pack --verify` bad reverse-index version | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` version `2` using stock sha1 validation diagnostics |
@@ -936,7 +938,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `741` verified variants.
+Tracked closed blocks in this table: `749` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
