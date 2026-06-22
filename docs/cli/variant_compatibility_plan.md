@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 74/151 commands with matrix rows / 434/4632 represented doc-option pairs / 1729 written rows / 1429 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 75/151 commands with matrix rows / 437/4632 represented doc-option pairs / 1733 written rows / 1433 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `mailsplit` matrix from existing
+The latest completed slice seeds the `fmt-merge-msg` matrix from existing
 stock-oracle evidence:
 
-`git mailsplit -d4 -f3 -oout mbox`
+`git fmt-merge-msg -F fetch-head-copy`
 
-`mailsplit_v2_47.tsv` now records mbox splitting with `-d4 -f3 -o...` and
-maildir splitting with `-o...`, comparing stdout plus generated output files
+`fmt_merge_msg_v2_47.tsv` now records default stdin `FETCH_HEAD`,
+`--into-name`, `-m` and `-F` file-input forms, comparing merge-message stdout
 with stock Git through
-`git_mail_tools_compat::mailsplit_matches_stock_git_for_mbox_and_maildir`.
+`git_mail_tools_compat::fmt_merge_msg_matches_stock_git_for_fetch_head_titles`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +626,15 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice seeds `mailsplit_v2_47.tsv` with mbox and
-maildir split rows already covered by
-`git_mail_tools_compat::mailsplit_matches_stock_git_for_mbox_and_maildir`.
+The latest matrix inventory slice seeds `fmt_merge_msg_v2_47.tsv` with default
+stdin `FETCH_HEAD`, `--into-name`, `-m` and `-F` file-input rows already
+covered by
+`git_mail_tools_compat::fmt_merge_msg_matches_stock_git_for_fetch_head_titles`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1729` written-row
+This card is the exact handoff target after the current `1733` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1729`; the `1/1729` open row and the still incomplete command/doc-option
+`0/1733`; the `1/1733` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -756,6 +757,7 @@ until a full matrix is expanded and verified.
 | `interpret-trailers` common stdin modes | `10` | `0` | default, `--only-trailers`, `--parse`, `--trailer`, `--where before/after`, `--if-exists addIfDifferent/add/replace` and `--if-missing doNothing` stdin forms already covered by `git_mail_tools_compat` |
 | `mailinfo` common patch mail modes | `4` | `0` | default, `-k`, `-b` and `-m` stdin patch-mail forms already covered by `git_mail_tools_compat` |
 | `mailsplit` mbox and maildir modes | `2` | `0` | mbox `-d4 -f3 -o...` and maildir `-o...` split forms already covered by `git_mail_tools_compat` |
+| `fmt-merge-msg` fetch-head title modes | `4` | `0` | default stdin `FETCH_HEAD`, `--into-name`, `-m` and `-F` file-input forms already covered by `git_mail_tools_compat` |
 | `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
@@ -937,7 +939,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `709` verified variants.
+Tracked closed blocks in this table: `713` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus

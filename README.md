@@ -169,20 +169,20 @@ Current state:
 | --- | ---: | --- |
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `74/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `434/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1729` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1429/1729` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1729` | written rows with incomplete parity |
-| Open written rows | `1/1729` | written rows that still do not match stock Git |
-| Invalid input rows | `299/1729` | rows where stock Git rejects the input |
+| Commands with any matrix rows | `75/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `437/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1733` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1433/1733` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1733` | written rows with incomplete parity |
+| Open written rows | `1/1733` | written rows that still do not match stock Git |
+| Invalid input rows | `299/1733` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1429/1729` as Git compatibility. It only means `1429` of the `1729`
+Do not read `1433/1733` as Git compatibility. It only means `1433` of the `1733`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1729` rows are partially matching,
-`1/1729` rows are known open mismatches, and `299/1729` additional rows are
-stock-compatible invalid inputs. Do not read `434/4632` as option support
+unexpanded surface is not counted yet, `0/1733` rows are partially matching,
+`1/1733` rows are known open mismatches, and `299/1733` additional rows are
+stock-compatible invalid inputs. Do not read `437/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -214,13 +214,13 @@ Audit progress by git-scm reference group:
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `265` | `258` | `0` | `0` | `7` |
 | Patching | `5` | `0` | `333` | `0` | `11` | `9` | `0` | `0` | `2` |
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
-| Email | `6` | `0` | `361` | `0` | `6` | `6` | `0` | `0` | `0` |
+| Email | `6` | `0` | `361` | `0` | `10` | `10` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `376` | `313` | `0` | `0` | `63` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `98` | `65` | `0` | `0` | `33` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1729`** | **`1429`** | **`0`** | **`1`** | **`299`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1733`** | **`1433`** | **`0`** | **`1`** | **`299`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -264,6 +264,7 @@ Current command-level matrices:
 | `fast-import` | `25` | `0` | `1` | `7` | `4` | `0` | `0` | `3` | no |
 | `fetch` | `73` | `0` | `30` | `304` | `294` | `0` | `0` | `10` | no |
 | `filter-branch` | `37` | `0` | `11` | `14` | `14` | `0` | `0` | `0` | no |
+| `fmt-merge-msg` | `9` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
 | `grep` | `75` | `0` | `4` | `12` | `12` | `0` | `0` | `0` | no |
 | `http-fetch` | `10` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
