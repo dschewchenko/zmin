@@ -1,3 +1,4 @@
 group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
 Plumbing Commands	diff-index	--diff-algorithm	histogram	-p HEAD	repeated anchor text changes	local	all	git diff-index -p --diff-algorithm=histogram HEAD	closed	git_diff_compat::diff_algorithm_flags_match_stock_git_for_supported_modes	histogram diff-index patch output against HEAD matches stock Git
 Plumbing Commands	diff-index	-B	<empty>	-p HEAD	complete file rewrite	local	all	git diff-index -p HEAD -B	closed	git_diff_compat::diff_break_rewrites_matches_stock_git_for_complete_rewrites	break-rewrites diff-index patch output against HEAD matches stock Git
+Plumbing Commands	diff-index	-D	<empty>	-p HEAD	deleted tracked file	local	all	git diff-index -p HEAD -D	closed	git_diff_compat::diff_irreversible_delete_matches_stock_git	irreversible-delete diff-index patch output against HEAD matches stock Git

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 366/4632 represented doc-option pairs / 1557 written rows / 1265 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 370/4632 represented doc-option pairs / 1562 written rows / 1270 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,17 +269,17 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands break-rewrites matrix coverage from existing
+The latest completed slice expands irreversible-delete matrix coverage from existing
 stock-oracle evidence:
 
-`git diff -B`
+`git diff -D`
 
 `docs/cli/matrices/diff_v2_47.tsv`, `diff_files_v2_47.tsv` and
 `diff_index_v2_47.tsv` now record
 command lines from
-`git_diff_compat::diff_break_rewrites_matches_stock_git_for_complete_rewrites`:
-`git diff -B`, `git diff --break-rewrites`, `git diff-files -p -B` and
-`git diff-index -p HEAD -B`.
+`git_diff_compat::diff_irreversible_delete_matches_stock_git`:
+`git diff -D`, `git diff --irreversible-delete`, `git diff --stat -D`,
+`git diff-files -p -D` and `git diff-index -p HEAD -D`.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -629,14 +629,14 @@ commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
 The latest matrix inventory slice expands `diff_v2_47.tsv`,
-`diff_files_v2_47.tsv` and `diff_index_v2_47.tsv` with break-rewrites rows
+`diff_files_v2_47.tsv` and `diff_index_v2_47.tsv` with irreversible-delete rows
 already covered by
-`git_diff_compat::diff_break_rewrites_matches_stock_git_for_complete_rewrites`.
+`git_diff_compat::diff_irreversible_delete_matches_stock_git`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1557` written-row
+This card is the exact handoff target after the current `1562` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -655,7 +655,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1557`; the `1/1557` open row and the still incomplete command/doc-option
+`0/1562`; the `1/1562` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb

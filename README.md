@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `58/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `366/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1557` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1265/1557` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1557` | written rows with incomplete parity |
-| Open written rows | `1/1557` | written rows that still do not match stock Git |
-| Invalid input rows | `291/1557` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `370/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1562` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1270/1562` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1562` | written rows with incomplete parity |
+| Open written rows | `1/1562` | written rows that still do not match stock Git |
+| Invalid input rows | `291/1562` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1265/1557` as Git compatibility. It only means `1265` of the `1557`
+Do not read `1270/1562` as Git compatibility. It only means `1270` of the `1562`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1557` rows are partially matching,
-`1/1557` rows are known open mismatches, and `291/1557` additional rows are
-stock-compatible invalid inputs. Do not read `366/4632` as option support
+unexpanded surface is not counted yet, `0/1562` rows are partially matching,
+`1/1562` rows are known open mismatches, and `291/1562` additional rows are
+stock-compatible invalid inputs. Do not read `370/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -211,16 +211,16 @@ Audit progress by git-scm reference group:
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
 | Branching and Merging | `9` | `0` | `581` | `0` | `113` | `83` | `0` | `0` | `30` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
-| Inspection and Comparison | `7` | `0` | `774` | `0` | `220` | `213` | `0` | `0` | `7` |
+| Inspection and Comparison | `7` | `0` | `774` | `0` | `223` | `216` | `0` | `0` | `7` |
 | Patching | `5` | `0` | `333` | `0` | `1` | `0` | `0` | `0` | `1` |
 | Debugging | `3` | `0` | `132` | `0` | `102` | `21` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `0` | `0` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Plumbing Commands | `21` | `0` | `650` | `0` | `360` | `297` | `0` | `0` | `63` |
-| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `53` | `26` | `0` | `0` | `27` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1557`** | **`1265`** | **`0`** | **`1`** | **`291`** |
+| Plumbing Commands | `21` | `0` | `650` | `0` | `361` | `298` | `0` | `0` | `63` |
+| Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `54` | `27` | `0` | `0` | `27` |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1562`** | **`1270`** | **`0`** | **`1`** | **`291`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
