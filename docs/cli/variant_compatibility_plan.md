@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 574/4632 represented doc-option pairs / 2456 written rows / 2110/2456 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 576/4632 represented doc-option pairs / 2461 written rows / 2115/2461 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,15 +285,15 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `538`
-represented or classified and `423` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `543`
+represented or classified and `418` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `538` already represented
-or classified and `423` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `543` already represented
+or classified and `418` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -301,20 +301,23 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `notes_v2_47.tsv` with five `notes copy`
-stdin, no-stdin and for-rewrite rows from existing focused stock-oracle
-evidence in `git_notes_compat.rs`.
+The latest completed slice extends `add_v2_47.tsv` with five `git add` index
+mutation rows from existing focused stock-oracle evidence in
+`git_index_mutation_compat.rs`.
 
-`notes_v2_47.tsv` now records closed rows for `notes copy --stdin`, final
-`--stdin`/`--no-stdin` toggle order, and config-gated `--for-rewrite` copy
-flows. Evidence comes from
-`git_notes_compat::notes_copy_stdin_matches_stock_git_for_pair_stream`,
-`git_notes_compat::notes_copy_stdin_no_stdin_toggles_match_stock_git_order`,
-and `git_notes_compat::notes_copy_for_rewrite_matches_stock_git_config_gate`,
-comparing stock Git and Zmin command output plus destination note contents or
-absence. The oracle inventory now lists `538` represented/classified functions
-and `423` `missing_or_unclassified`. Current written rows are `2456`, with
-`2110/2456` matching stock Git, `1/2456` open and `345/2456` invalid-input. No
+`add_v2_47.tsv` now records closed rows for `git add -A dir` with
+pathspec-limited tracked deletes, `git add -f ignored.txt`, explicit ignored
+path rejection without `-f`, nested `.gitignore` negation and
+`core.filemode=false` executable-file staging. Evidence comes from
+`git_index_mutation_compat::add_all_pathspec_limits_tracked_deletes_like_stock_git`,
+`git_index_mutation_compat::add_force_stages_explicit_ignored_paths_like_stock_git`,
+`git_index_mutation_compat::add_rejects_explicit_ignored_paths_without_force_like_stock_git`,
+`git_index_mutation_compat::add_honors_nested_gitignore_negation_like_stock_git`
+and `git_index_mutation_compat::add_respects_core_filemode_false_like_stock_git`,
+comparing stock Git and Zmin status, index entries, cached diffs or exit
+status. The oracle inventory now lists `543` represented/classified functions
+and `418` `missing_or_unclassified`. Current written rows are `2461`, with
+`2115/2461` matching stock Git, `1/2461` open and `345/2461` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
