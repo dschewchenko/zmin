@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 104/151 commands with matrix rows / 658/4632 represented doc-option pairs / 2734 written rows / 2346/2734 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 104/151 commands with matrix rows / 658/4632 represented doc-option pairs / 2736 written rows / 2348/2736 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,16 +298,18 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `verify_pack_v2_47.tsv` with an
-explicit `<positional:packs>` row backed by existing focused stock-oracle
-evidence in `git_pack_integrity_compat.rs`.
+The latest completed slice extends `hash_object_v2_47.tsv` and
+`unpack_file_v2_47.tsv` with explicit positional schema rows backed by existing
+focused stock-oracle evidence in `git_object_plumbing_compat.rs`.
 
-`verify_pack_v2_47.tsv` now records `git verify-pack <pack-index>` as an
-explicit positional pack-index surface, closing the Zmin schema `packs`
-argument for that exact stock-Git parity case without changing behavior.
+`hash_object_v2_47.tsv` now records `git hash-object a.txt` as an explicit
+`<positional:paths>` surface, and `unpack_file_v2_47.tsv` records
+`git unpack-file <blob>` as an explicit `<positional:object>` surface. These
+rows close those exact Zmin schema positional parser surfaces without changing
+behavior.
 The oracle inventory remains at `705` represented/classified functions and
-`256` `missing_or_unclassified`. Current written rows are `2734`, with
-`2346/2734` matching stock Git, `1/2734` open and `387/2734` invalid-input. No
+`256` `missing_or_unclassified`. Current written rows are `2736`, with
+`2348/2736` matching stock Git, `1/2736` open and `387/2736` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule

@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2734` | `+1640` |
-| Matching stock Git rows | `823` | `2346` | `+1523` |
+| Written behavior rows | `1094` | `2736` | `+1642` |
+| Matching stock Git rows | `823` | `2348` | `+1525` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `104/151` | `+54` |
@@ -135,6 +135,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `shortlog` | `0` | `6` | `+6` |
 | `verify-pack` | `0` | `6` | `+6` |
 | `checkout` | `0` | `5` | `+5` |
+| `hash-object` | `0` | `5` | `+5` |
 | `stripspace` | `0` | `5` | `+5` |
 | `column` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `4` | `+4` |
@@ -143,13 +144,13 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `difftool` | `0` | `4` | `+4` |
 | `fmt-merge-msg` | `0` | `4` | `+4` |
 | `for-each-repo` | `0` | `4` | `+4` |
-| `hash-object` | `0` | `4` | `+4` |
 | `init` | `0` | `4` | `+4` |
 | `ls-tree` | `0` | `4` | `+4` |
 | `mailinfo` | `0` | `4` | `+4` |
 | `read-tree` | `0` | `4` | `+4` |
 | `replay` | `0` | `4` | `+4` |
 | `send-pack` | `0` | `4` | `+4` |
+| `unpack-file` | `0` | `4` | `+4` |
 | `version` | `0` | `4` | `+4` |
 | `bugreport` | `0` | `3` | `+3` |
 | `commit-graph` | `0` | `3` | `+3` |
@@ -158,7 +159,6 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `index-pack` | `0` | `3` | `+3` |
 | `mktree` | `0` | `3` | `+3` |
 | `range-diff` | `0` | `3` | `+3` |
-| `unpack-file` | `0` | `3` | `+3` |
 | `cherry-pick` | `0` | `2` | `+2` |
 | `get-tar-commit-id` | `0` | `2` | `+2` |
 | `mailsplit` | `0` | `2` | `+2` |
@@ -1133,6 +1133,44 @@ same local pack index.
 
 Actual post-import movement matched the declaration: `+1` behavior row,
 `+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+0` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: census-selected implemented-but-unverified positional schema
+rows for object plumbing commands, using already represented focused
+stock-oracle evidence from `docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions:
+
+- `git_object_plumbing_compat::hash_object_and_cat_file_match_stock_git`
+- `git_object_plumbing_compat::unpack_file_matches_stock_git_blob_behavior`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; these close the Zmin schema
+  positional `paths` and `object` parser surfaces for already represented
+  stock-Git parity cases
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git hash-object a.txt`
+- `git unpack-file <blob>`
+
+The evidence compares stock Git and Zmin object ids for path hashing, and the
+temporary worktree file content for unpacking a blob object.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+0` represented doc-option pairs.
 
