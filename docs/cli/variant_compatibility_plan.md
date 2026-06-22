@@ -283,6 +283,14 @@ row count, then run `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after
 the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
+`docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
+backlog snapshot at `961` focused oracle functions: `500` already represented
+or classified and `461` still `missing_or_unclassified`. Treat that snapshot as
+the upper bound for already-known oracle-test denominator growth. A docs-only
+oracle import must reduce `missing_or_unclassified` by the declared number of
+evidence functions; any TSV row growth that does not do that must name a
+different source bucket before the rows are added.
+
 ### Latest Completed Slice
 
 The latest completed slice imports the next `git_pack_integrity_compat.rs`

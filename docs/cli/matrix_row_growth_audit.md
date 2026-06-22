@@ -151,6 +151,77 @@ The known queues are:
 These are not a complete final Git behavior denominator. They are the frozen
 known inventory layers that must be expanded deliberately.
 
+## Frozen Oracle Backlog Snapshot
+
+This snapshot explains the remaining known denominator growth from focused
+stock-oracle tests. It is intentionally file-level, not row-level: each listed
+test function still must be read before adding TSV rows, because one function
+can prove one row, several command variants, or a non-Git extension/deferral.
+
+As of `5e182a2`, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
+focused oracle functions. `500` are already represented by matrix rows,
+extension rows or explicit deferrals, and `461` are
+`missing_or_unclassified`.
+
+Largest missing/unclassified buckets:
+
+| Test file | Missing/unclassified functions |
+| --- | ---: |
+| `git_transport_http_compat.rs` | `75` |
+| `git_transport_local_compat.rs` | `58` |
+| `git_pack_integrity_compat.rs` | `46` |
+| `git_index_mutation_compat.rs` | `39` |
+| `git_maintenance_compat.rs` | `32` |
+| `git_commit_compat.rs` | `26` |
+| `git_worktree_state_compat.rs` | `26` |
+| `git_notes_compat.rs` | `23` |
+| `git_submodule_compat.rs` | `16` |
+| `git_worktree_compat.rs` | `15` |
+| `git_merge_compat.rs` | `13` |
+| `git_sequencer_compat.rs` | `12` |
+| `git_admin_tools_compat.rs` | `10` |
+| `git_merge_plumbing_compat.rs` | `9` |
+| `git_foreign_scm_compat.rs` | `8` |
+| `git_global_cli_compat.rs` | `7` |
+| `git_refs_compat.rs` | `7` |
+| `git_ref_resolution_compat.rs` | `6` |
+| `git_scalar_compat.rs` | `6` |
+| `git_fast_import_export_compat.rs` | `5` |
+
+Largest command-hint buckets inside those `461` functions:
+
+| Command hint | Missing/unclassified functions |
+| --- | ---: |
+| `<none>` | `115` |
+| `remote` | `58` |
+| `worktree` | `48` |
+| `commit` | `44` |
+| `maintenance` | `34` |
+| `config` | `33` |
+| `refs` | `30` |
+| `merge` | `29` |
+| `notes` | `23` |
+| `branch` | `20` |
+| `submodule` | `18` |
+| `add` | `17` |
+| `upload-pack` | `14` |
+| `fetch` | `12` |
+| `prune` | `12` |
+| `rebase` | `11` |
+| `daemon` | `9` |
+| `checkout` | `7` |
+| `clean` | `5` |
+| `clone` | `5` |
+| `fast-import` | `5` |
+| `status` | `5` |
+| `tag` | `5` |
+
+Use this snapshot as the upper bound for already-known oracle-import growth.
+Future slices should reduce the `missing_or_unclassified` count by their
+declared evidence-function count. If a slice increases written TSV rows without
+reducing this count or without naming a different source bucket, that is a
+process error.
+
 ## Previous Declared Import
 
 Source bucket: focused stock-oracle test already listed in
