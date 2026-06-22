@@ -60,6 +60,12 @@ def collect_evidence_refs(root: Path) -> Counter[str]:
                 evidence = row.get("evidence", "")
                 if "::" in evidence:
                     refs[evidence] += 1
+
+    extension_inventory = root / "docs/cli/zmin_extensions_inventory.md"
+    if extension_inventory.exists():
+        text = extension_inventory.read_text(errors="replace")
+        for evidence in re.findall(r"`([A-Za-z0-9_]+::[A-Za-z0-9_]+)`", text):
+            refs[evidence] += 1
     return refs
 
 
@@ -95,7 +101,7 @@ def main() -> int:
             "test",
             "body_lines",
             "command_hints",
-            "tsv_rows",
+            "evidence_refs",
             "inventory_status",
         ]
     )
@@ -107,8 +113,8 @@ def main() -> int:
             if not (has_oracle and has_zmin):
                 continue
             evidence = f"{path.stem}::{test_name}"
-            tsv_rows = evidence_refs[evidence]
-            status = "represented" if tsv_rows else "missing_or_unclassified"
+            evidence_ref_count = evidence_refs[evidence]
+            status = "represented" if evidence_ref_count else "missing_or_unclassified"
             writer.writerow(
                 [
                     evidence,
@@ -116,7 +122,7 @@ def main() -> int:
                     test_name,
                     len(body.splitlines()),
                     command_hints(path.name, test_name, commands),
-                    tsv_rows,
+                    evidence_ref_count,
                     status,
                 ]
             )

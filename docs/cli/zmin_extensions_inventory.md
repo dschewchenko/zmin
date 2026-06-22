@@ -10,10 +10,10 @@ coverage numbers in the Git compatibility matrix.
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Zmin-only commands | `9` | additive top-level commands that are not Git command names |
+| Zmin-only commands | `10` | additive top-level commands that are not Git command names |
 | Zmin-only options on Git commands | `4` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
-| Stable extensions | `3` | implemented and covered by focused tests |
+| Stable extensions | `4` | implemented and covered by focused tests |
 | Experimental extensions | `2` | implemented but still preview-only |
 | Planned extensions | `1` | designed backlog, not implemented |
 
@@ -23,6 +23,7 @@ coverage numbers in the Git compatibility matrix.
 | --- | --- | --- | --- |
 | `zmin hooks` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation` | supports `init`, `add [--force]`, `list`, and `remove` managed-hook subcommands for supported hook names; rejects unsupported managed-hook names as Zmin-only validation |
 | `zmin repo` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | exposes Zmin-only repository metadata and structure summaries; stock Git has no `git repo` command |
+| `zmin diff-pairs` | stable | `git_diff_compat::diff_pairs_matches_stock_git_for_raw_diff_input` | consumes raw `git diff-tree -z -r --raw` input on stdin and renders selected diff formats; stock Git has no `git diff-pairs` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin save <message>` | experimental | `git_cms_porcelain_compat` | CMS-style `add -A` plus `commit -m` wrapper |
 | `zmin changes` | experimental | `git_cms_porcelain_compat` | human-readable status wrapper |
 | `zmin publish` | experimental | `git_cms_porcelain_compat` | safe push wrapper |

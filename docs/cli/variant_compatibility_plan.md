@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 546/4632 represented doc-option pairs / 2142 written rows / 1831/2142 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 95/151 commands with matrix rows / 549/4632 represented doc-option pairs / 2149 written rows / 1837/2149 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -273,17 +273,21 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice imports a reviewed backlog batch from
-`docs/cli/existing_oracle_test_inventory.tsv`:
+The latest completed slice finishes the remaining `git_diff_compat.rs`
+missing-or-unclassified backlog from
+`docs/cli/existing_oracle_test_inventory.tsv`.
 
-`git_diff_compat::diff_index_merge_option_treats_missing_worktree_files_like_stock_git`
-
-`diff_index_v2_47.tsv` now records two already-tested supported rows for a
-missing worktree tracked file: default `git diff-index HEAD` and
-`git diff-index -m HEAD`. Existing `git_diff_compat` evidence compares stock
-Git and Zmin output for those rows. The oracle inventory was regenerated,
-moving that focused test function to `represented` with `2` TSV rows and
-reducing `missing_or_unclassified` to `554`. No Rust behavior changed.
+`rev_list_v2_47.tsv` now records `git rev-list --children HEAD` and
+`git rev-list --children --reverse HEAD` over a merge graph. `show_v2_47.tsv`
+records `git show --patch-with-stat HEAD`,
+`git show --patch-with-stat --summary HEAD`, `git show --patch-with-raw HEAD`,
+and multi-commit `git show --name-only --format=<%s> side main -- dir`.
+`diff_v2_47.tsv` records stock-compatible invalid input for
+`git diff --no-rename`. `zmin_extensions_inventory.md` classifies
+`zmin diff-pairs` as a Zmin-only stable extension, outside the Git `2.47.1`
+denominator. The oracle inventory now counts extension evidence as classified,
+moving `git_diff_compat.rs` to zero missing-or-unclassified functions and
+reducing total `missing_or_unclassified` to `546`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -624,21 +628,25 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice imports a reviewed backlog batch from
-`docs/cli/existing_oracle_test_inventory.tsv`:
+The latest completed slice finishes the remaining `git_diff_compat.rs`
+missing-or-unclassified backlog from
+`docs/cli/existing_oracle_test_inventory.tsv`.
 
-`git_diff_compat::diff_index_merge_option_treats_missing_worktree_files_like_stock_git`
-
-`diff_index_v2_47.tsv` now records two already-tested supported rows for a
-missing worktree tracked file: default `git diff-index HEAD` and
-`git diff-index -m HEAD`. Existing `git_diff_compat` evidence compares stock
-Git and Zmin output for those rows. The oracle inventory was regenerated,
-moving that focused test function to `represented` with `2` TSV rows and
-reducing `missing_or_unclassified` to `554`. No Rust behavior changed.
+`rev_list_v2_47.tsv` now records `git rev-list --children HEAD` and
+`git rev-list --children --reverse HEAD` over a merge graph. `show_v2_47.tsv`
+records `git show --patch-with-stat HEAD`,
+`git show --patch-with-stat --summary HEAD`, `git show --patch-with-raw HEAD`,
+and multi-commit `git show --name-only --format=<%s> side main -- dir`.
+`diff_v2_47.tsv` records stock-compatible invalid input for
+`git diff --no-rename`. `zmin_extensions_inventory.md` classifies
+`zmin diff-pairs` as a Zmin-only stable extension, outside the Git `2.47.1`
+denominator. The oracle inventory now counts extension evidence as classified,
+moving `git_diff_compat.rs` to zero missing-or-unclassified functions and
+reducing total `missing_or_unclassified` to `546`. No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2142` written-row
+This card is the exact handoff target after the current `2149` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -657,7 +665,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2142`; the `1/2142` open row and the still incomplete command/doc-option
+`0/2149`; the `1/2149` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
