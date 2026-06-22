@@ -163,6 +163,7 @@ Use these files as the handoff map:
 | --- | --- |
 | `docs/cli/git_compatibility_inventory.md` | compatibility counting model and current denominator layers |
 | `docs/cli/variant_compatibility_plan.md` | operating plan, active queue, current slice pointer and guard mappings |
+| `docs/cli/existing_oracle_test_inventory.tsv` | generated inventory of stock-oracle test functions and missing TSV evidence |
 | `docs/cli/matrices/*_v2_47.tsv` | row-level command/option/value/state/transport evidence |
 | `docs/cli/zmin_extensions_inventory.md` | Zmin-only commands/options kept outside Git compatibility counts |
 | `README.md` | user-facing status with honest non-100% compatibility numbers |
@@ -259,27 +260,30 @@ updates, project-note update, commit and push.
 
 The replacement smoke currently has matrix evidence for every command label in
 `tools/git-replacement-dogfood-smoke.sh`. The next default slice is to keep
-importing dense batches from existing focused stock-oracle tests for high-use
-commands, such as `diff`, `log`, `ls-files`, `rev-parse`, `config`, `fetch`,
-`clone` or `filter-branch`. If no dense tested rows are available, classify one
-remaining `unsupported` or `not supported` Rust guard as a Git-supported gap,
+importing dense batches from `docs/cli/existing_oracle_test_inventory.tsv`.
+Filter to `missing_or_unclassified`, read the selected test function, extract
+exact command/option/value/state rows, and only then update matrices. Start
+with high-use commands such as `diff`, `log`, `ls-files`, `rev-parse`,
+`config`, `fetch`, `clone` or `filter-branch` when their focused tests expose a
+dense batch. If no dense tested rows are available, classify one remaining
+`unsupported` or `not supported` Rust guard as a Git-supported gap,
 stock-compatible invalid input, intentional deferral or Zmin-only extension. If
 new WebStorm or replacement-shim traces appear, add those rows before
 continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice extends the `blame` matrix from existing
-stock-oracle evidence:
+The latest completed slice adds an inventory-first backlog for existing
+stock-oracle tests:
 
-`git blame --date=human a.txt`
+`tools/git-existing-oracle-inventory.py --root .`
 
-`blame_v2_47.tsv` now records ten more already-tested supported rows for
-final-disabled score-debug, color-lines, color-by-age and minimal toggles plus
-`--date=relative` and `--date=human`. Existing `git_history_query_compat`
-evidence compares stock Git and Zmin output for those simple linear-history
-cases, with deterministic `GIT_TEST_DATE_NOW` for relative and human dates.
-This is an evidence import only; no Rust behavior changed.
+`docs/cli/existing_oracle_test_inventory.tsv` now lists `961` stock-oracle test
+functions found by the generator: `400` already referenced by TSV evidence and
+`561` missing or not yet classified. Future evidence-import batches must start
+from this backlog, review one focused test function, extract exact rows, and
+only then update command matrices. This process slice does not change behavior
+row counts or Rust behavior.
 
 ### No-Skip Rule
 
@@ -620,17 +624,17 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice extends the `blame` matrix from existing
-stock-oracle evidence:
+The latest completed slice adds an inventory-first backlog for existing
+stock-oracle tests:
 
-`git blame --date=human a.txt`
+`tools/git-existing-oracle-inventory.py --root .`
 
-`blame_v2_47.tsv` now records ten more already-tested supported rows for
-final-disabled score-debug, color-lines, color-by-age and minimal toggles plus
-`--date=relative` and `--date=human`. Existing `git_history_query_compat`
-evidence compares stock Git and Zmin output for those simple linear-history
-cases, with deterministic `GIT_TEST_DATE_NOW` for relative and human dates.
-This is an evidence import only; no Rust behavior changed.
+`docs/cli/existing_oracle_test_inventory.tsv` now lists `961` stock-oracle test
+functions found by the generator: `400` already referenced by TSV evidence and
+`561` missing or not yet classified. Future evidence-import batches must start
+from this backlog, review one focused test function, extract exact rows, and
+only then update command matrices. This process slice does not change behavior
+row counts or Rust behavior.
 
 ### Current Slice Card
 

@@ -1,0 +1,85 @@
+# Existing Oracle Test Inventory
+
+This inventory prevents compatibility rows from being imported opportunistically.
+It lists focused tests that already compare Zmin behavior with stock Git, then
+shows whether the test function is already referenced by a behavior matrix row.
+
+Generated TSV:
+
+`docs/cli/existing_oracle_test_inventory.tsv`
+
+Generator:
+
+```bash
+tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv
+```
+
+## Current Snapshot
+
+Generated after commit `9bb32ef5` on `compat/status-pathspec-matrix`.
+
+| Layer | Count |
+| --- | ---: |
+| Stock-oracle test functions found | `961` |
+| Test functions referenced by at least one TSV row | `400` |
+| Test functions missing or not yet classified in TSV evidence | `561` |
+
+`missing_or_unclassified` does not automatically mean "add a Git matrix row".
+Each function still needs review:
+
+- Git-compatible behavior: split into exact command/option/value/state rows.
+- Git invalid input: add invalid-input rows only when stock Git rejects the
+  same surface and side effects match.
+- Zmin-only behavior: record under `docs/cli/zmin_extensions_inventory.md`.
+- Legacy or unavailable external tool behavior: defer until a real stock oracle
+  environment exists.
+- Broad smoke or acceptance tests: keep as gates, not behavior rows, unless an
+  exact command shape is extracted.
+
+## Priority Buckets
+
+Use these buckets before adding more row batches. They are sorted by number of
+currently unclassified stock-oracle test functions, not by product priority.
+
+| Test file | Missing or unclassified |
+| --- | ---: |
+| `git_transport_http_compat.rs` | `75` |
+| `git_pack_integrity_compat.rs` | `61` |
+| `git_transport_local_compat.rs` | `58` |
+| `git_stash_compat.rs` | `50` |
+| `git_index_mutation_compat.rs` | `39` |
+| `git_maintenance_compat.rs` | `32` |
+| `git_commit_compat.rs` | `26` |
+| `git_worktree_state_compat.rs` | `26` |
+| `git_notes_compat.rs` | `23` |
+| `git_submodule_compat.rs` | `16` |
+| `git_worktree_compat.rs` | `15` |
+| `git_admin_tools_compat.rs` | `13` |
+| `git_merge_compat.rs` | `13` |
+| `git_diff_compat.rs` | `12` |
+| `git_sequencer_compat.rs` | `12` |
+| `git_reflog_compat.rs` | `10` |
+| `git_merge_plumbing_compat.rs` | `9` |
+| `git_foreign_scm_compat.rs` | `8` |
+| `git_global_cli_compat.rs` | `7` |
+| `git_refs_compat.rs` | `7` |
+| `git_ref_resolution_compat.rs` | `6` |
+| `git_scalar_compat.rs` | `6` |
+| `git_fast_import_export_compat.rs` | `5` |
+| `git_history_query_compat.rs` | `5` |
+
+The full TSV is the backlog. Do not treat the table above as complete by
+itself; it only summarizes the largest buckets.
+
+## Next-Row Rule
+
+Before importing any more already-tested rows:
+
+1. Filter `existing_oracle_test_inventory.tsv` to one test file and
+   `missing_or_unclassified`.
+2. Read the selected test function body and identify the exact command lines.
+3. Check the command matrix for existing rows by command, option, value,
+   combination and repo state.
+4. Add a batch only when the rows share the same focused oracle function and
+   do not need Rust behavior changes.
+5. Regenerate this inventory after the batch so the backlog stays current.
