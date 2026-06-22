@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2803` | `+1709` |
-| Matching stock Git rows | `823` | `2414` | `+1591` |
+| Written behavior rows | `1094` | `2804` | `+1710` |
+| Matching stock Git rows | `823` | `2415` | `+1592` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
@@ -4178,6 +4178,43 @@ Expected row:
 The evidence compares stock Git and Zmin exit status, stdout, stderr and
 worktree status using copied workdirs from one seed repository so object ids
 match byte-for-byte.
+
+Actual post-import movement matched the declaration: `+1` behavior row,
+`+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented
+oracle functions, `+0` missing-or-unclassified oracle functions, `+0`
+commands with rows, `+0` represented doc-option pairs and `-1`
+implemented-but-unverified schema row.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `show-ref` positional schema
+surface, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-show-ref-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`; this row closes a positional schema
+  surface rather than a documented option spelling
+- implemented-but-unverified schema rows: expected `-1`
+- Rust behavior changes: no
+
+Expected row:
+
+- `git show-ref refs/heads/main`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr, full
+`show-ref` output and worktree status using copied workdirs from one seed
+repository so ref object ids match byte-for-byte.
 
 Actual post-import movement matched the declaration: `+1` behavior row,
 `+1` closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented
