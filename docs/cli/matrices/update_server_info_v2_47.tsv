@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Server Admin	update-server-info	<none>	<empty>	<empty>	bare repository with loose objects and refs	local	all	git update-server-info	closed	git_object_plumbing_compat::update_server_info_matches_stock_git_for_bare_repo	info/refs and objects/info/packs side effects match stock Git for a bare repository
+Server Admin	update-server-info	-f	<empty>	after repack	bare repository with packed objects and refs	local	all	git update-server-info -f	closed	git_object_plumbing_compat::update_server_info_matches_stock_git_for_bare_repo	forced update after repack writes info/refs and objects/info/packs like stock Git
