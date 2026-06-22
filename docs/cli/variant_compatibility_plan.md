@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2254 written rows / 1938/2254 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2258 written rows / 1942/2258 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -279,15 +279,14 @@ an incidental side effect of finding more existing tests.
 ### Latest Completed Slice
 
 The latest completed slice imports the `git_stash_compat.rs` stash show
-copy-detection backlog rows from
+break-rewrite and irreversible-delete backlog rows from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested `stash show` copy rows for
-default `--name-status`, `-C`, `--find-copies`, `--find-copies-harder`, stat
-and patch copy detection, and copy `--diff-filter=C` combinations. The focused
+`stash_v2_47.tsv` now records already-tested `stash show --patch` rows for
+`-B`, `--break-rewrites`, `-D` and `--irreversible-delete`. The focused
 `git_stash_compat.rs` evidence covers stdout, stderr and exit status against
 stock Git. The oracle inventory reduced total `missing_or_unclassified` to
-`523`. No Rust behavior changed.
+`521`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -628,20 +627,9 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest completed slice imports the `git_stash_compat.rs` stash show
-copy-detection backlog rows from
-`docs/cli/existing_oracle_test_inventory.tsv`.
-
-`stash_v2_47.tsv` now records already-tested `stash show` copy rows for
-default `--name-status`, `-C`, `--find-copies`, `--find-copies-harder`, stat
-and patch copy detection, and copy `--diff-filter=C` combinations. The focused
-`git_stash_compat.rs` evidence covers stdout, stderr and exit status against
-stock Git. The oracle inventory reduced total `missing_or_unclassified` to
-`523`. No Rust behavior changed.
-
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2254` written-row
+This card is the exact handoff target after the current `2258` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -660,7 +648,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2254`; the `1/2254` open row and the still incomplete command/doc-option
+`0/2258`; the `1/2258` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
