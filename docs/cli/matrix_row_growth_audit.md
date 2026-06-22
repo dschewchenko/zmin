@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2393` | `+1299` |
-| Matching stock Git rows | `823` | `2051` | `+1228` |
+| Written behavior rows | `1094` | `2396` | `+1302` |
+| Matching stock Git rows | `823` | `2054` | `+1231` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `341` | `+71` |
 | Commands with rows | `50/151` | `98/151` | `+48` |
 | Represented doc-option pairs | `253/4632` | `564/4632` | `+311` |
 
-The text-level row delta audit reports `198` commits with `1390` TSV row
-additions and `43` TSV row deletions, for `+1347` text net. The strict behavior
-row count is `+1299` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `199` commits with `1393` TSV row
+additions and `43` TSV row deletions, for `+1350` text net. The strict behavior
+row count is `+1302` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`512` represented by matrix, extension or deferral evidence, and `449` still
+`513` represented by matrix, extension or deferral evidence, and `448` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -81,7 +81,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `patch-id` | `0` | `6` | `+6` |
 | `format-patch` | `0` | `6` | `+6` |
 | `fsck` | `0` | `15` | `+15` |
-| `commit` | `0` | `39` | `+39` |
+| `commit` | `0` | `42` | `+42` |
 | `cherry` | `0` | `6` | `+6` |
 | `check-mailmap` | `0` | `6` | `+6` |
 | `stripspace` | `0` | `5` | `+5` |
@@ -143,7 +143,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `449` missing or unclassified.
+  functions, currently `961` total with `448` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -160,8 +160,8 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `512` are already represented by matrix rows,
-extension rows or explicit deferrals, and `449` are
+focused oracle functions. `513` are already represented by matrix rows,
+extension rows or explicit deferrals, and `448` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
@@ -173,7 +173,7 @@ Largest missing/unclassified buckets:
 | `git_pack_integrity_compat.rs` | `46` |
 | `git_index_mutation_compat.rs` | `39` |
 | `git_maintenance_compat.rs` | `32` |
-| `git_commit_compat.rs` | `17` |
+| `git_commit_compat.rs` | `16` |
 | `git_worktree_state_compat.rs` | `26` |
 | `git_notes_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
@@ -189,14 +189,14 @@ Largest missing/unclassified buckets:
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_global_cli_compat.rs` | `5` |
 
-Largest command-hint buckets inside those `449` functions:
+Largest command-hint buckets inside those `448` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
 | `<none>` | `115` |
 | `remote` | `58` |
 | `worktree` | `48` |
-| `commit` | `35` |
+| `commit` | `34` |
 | `maintenance` | `34` |
 | `config` | `32` |
 | `refs` | `30` |
@@ -224,6 +224,41 @@ reducing this count or without naming a different source bucket, that is a
 process error.
 
 ## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+
+- `git_commit_compat::commit_hook_failures_match_stock_git_flow`
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: `-1`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git commit -m fail` with failing `pre-commit`
+- `git commit -m fail` with failing `commit-msg`
+- `git commit -m post` with failing `post-commit`
+
+The evidence compares stock Git and Zmin output, exit status and repository
+state for blocked and post-commit hook flows.
+
+Actual post-import movement matched the declaration: `+3` behavior rows,
+`+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
+represented oracle function, `-1` missing-or-unclassified oracle function,
+`+0` commands with rows and `+0` represented doc-option pairs.
+
+## Previous Declared Import
 
 Source bucket: focused stock-oracle test already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
