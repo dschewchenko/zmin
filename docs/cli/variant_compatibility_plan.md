@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 82/151 commands with matrix rows / 465/4632 represented doc-option pairs / 1882 written rows / 1575/1882 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 83/151 commands with matrix rows / 467/4632 represented doc-option pairs / 1886 written rows / 1579/1886 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `show` matrix from existing stock-oracle
-evidence:
+The latest completed slice seeds the `hash-object` matrix from existing
+stock-oracle evidence:
 
-`git show --format=%H%x00%s --name-status -z --max-count=1 HEAD`
+`git hash-object -w a.txt`
 
-`show_v2_47.tsv` now records root commit output, explicit `--root`, raw
-format, `log.showroot=false` and IDE-shaped NUL-delimited `--name-status`
-output, comparing stock Git and Zmin output through focused
-`git_history_query_compat` evidence. This is an evidence import only; no Rust
-behavior changed.
+`hash_object_v2_47.tsv` now records path hashing, non-writing `/dev/null`
+hashing, stdin plus path hashing and large stdin write-object hashing,
+comparing stock Git and Zmin output through focused
+`git_object_plumbing_compat` evidence. This is an evidence import only; no
+Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -627,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1882` written-row
+This card is the exact handoff target after the current `1886` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1882`; the `1/1882` open row and the still incomplete command/doc-option
+`0/1886`; the `1/1886` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
