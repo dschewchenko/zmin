@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `102/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `597/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2606` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2230/2606` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2606` | written rows with incomplete parity |
-| Open written rows | `1/2606` | written rows that still do not match stock Git |
-| Invalid input rows | `375/2606` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `598/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `2610` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `2233/2610` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2610` | written rows with incomplete parity |
+| Open written rows | `1/2610` | written rows that still do not match stock Git |
+| Invalid input rows | `376/2610` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2230/2606` as Git compatibility. It only means `2230` of the `2606`
+Do not read `2233/2610` as Git compatibility. It only means `2233` of the `2610`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2606` rows are partially matching,
-`1/2606` rows are known open mismatches, and `375/2606` additional rows are
-stock-compatible invalid inputs. Do not read `597/4632` as option support
+unexpanded surface is not counted yet, `0/2610` rows are partially matching,
+`1/2610` rows are known open mismatches, and `376/2610` additional rows are
+stock-compatible invalid inputs. Do not read `598/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -216,11 +216,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `184` | `103` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `34` | `34` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `129` | `69` | `0` | `0` | `60` |
+| Administration | `8` | `0` | `147` | `0` | `133` | `72` | `0` | `0` | `61` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `509` | `442` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `144` | `108` | `0` | `0` | `36` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2606`** | **`2230`** | **`0`** | **`1`** | **`375`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2610`** | **`2233`** | **`0`** | **`1`** | **`376`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -290,7 +290,7 @@ Current command-level matrices:
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
 | `mailinfo` | `10` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `mailsplit` | `6` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
-| `maintenance` | `14` | `0` | `3` | `9` | `4` | `0` | `0` | `5` | no |
+| `maintenance` | `14` | `0` | `4` | `13` | `7` | `0` | `0` | `6` | no |
 | `merge` | `69` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
 | `mktag` | `6` | `0` | `1` | `2` | `2` | `0` | `0` | `0` | no |

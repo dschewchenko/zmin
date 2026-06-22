@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 102/151 commands with matrix rows / 597/4632 represented doc-option pairs / 2606 written rows / 2230/2606 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 102/151 commands with matrix rows / 598/4632 represented doc-option pairs / 2610 written rows / 2233/2610 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -286,17 +286,17 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `668`
-represented or classified and `293` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `671`
+represented or classified and `290` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `668` already represented
-or classified and `293` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `671` already represented
+or classified and `290` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. The default
-bucket order is maintenance (`32`), HTTP transport (`29`), pack integrity
+bucket order is maintenance (`29`), HTTP transport (`29`), pack integrity
 (`28`), worktree state (`26`) and local transport (`24`), unless a real
 replacement-binary blocker overrides it. A docs-only oracle import must reduce
 `missing_or_unclassified` by the declared number of evidence functions; any TSV
@@ -314,9 +314,9 @@ HTTP, git-daemon and SSH remotes. Evidence comes from the matching
 `maintenance_prefetch_reads_*_remote_like_stock_git` tests in
 `git_transport_http_compat.rs`, comparing stock Git and Zmin `refs/prefetch`
 refs and fetched object contents.
-The oracle inventory now lists `668` represented/classified functions and
-`293` `missing_or_unclassified`. Current written rows are `2606`, with
-`2230/2606` matching stock Git, `1/2606` open and `375/2606` invalid-input. No
+The oracle inventory now lists `671` represented/classified functions and
+`290` `missing_or_unclassified`. Current written rows are `2610`, with
+`2233/2610` matching stock Git, `1/2610` open and `376/2610` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule
