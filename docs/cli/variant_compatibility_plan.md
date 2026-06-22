@@ -161,9 +161,11 @@ Use these files as the handoff map:
 
 | File | Purpose |
 | --- | --- |
+| `docs/cli/git_compatibility_census.md` | census-first entry point and generated bucket-list index |
+| `docs/cli/census/*.tsv` | machine-readable verified, invalid-input, implemented-unverified, remaining, extension/deferred and evidence-layer lists |
 | `docs/cli/git_compatibility_inventory.md` | compatibility counting model and current denominator layers |
 | `docs/cli/variant_compatibility_plan.md` | operating plan, active queue, current slice pointer and guard mappings |
-| `docs/cli/existing_oracle_test_inventory.tsv` | generated inventory of stock-oracle test functions and missing TSV evidence |
+| `docs/cli/existing_oracle_test_inventory.tsv` | generated inventory of stock-oracle test functions; evidence layer only |
 | `docs/cli/matrix_row_growth_audit.md` | row-count growth audit and required predeclared row-growth budget |
 | `docs/cli/matrices/*_v2_47.tsv` | row-level command/option/value/state/transport evidence |
 | `docs/cli/zmin_extensions_inventory.md` | Zmin-only commands/options kept outside Git compatibility counts |
@@ -265,43 +267,34 @@ updates, project-note update, commit and push.
 
 ### Current Next Slice Pointer
 
-The replacement smoke currently has matrix evidence for every command label in
-`tools/git-replacement-dogfood-smoke.sh`. The next default slice is to walk the
-frozen `missing_or_unclassified` oracle backlog in
-`docs/cli/existing_oracle_test_inventory.tsv`, using
-`docs/cli/matrix_row_growth_audit.md` as the bucket list and row-growth budget.
-Filter to `missing_or_unclassified`, choose one coherent file/function group,
-read the selected test functions, extract exact command/option/value/state
-rows, and only then update matrices. If no coherent docs-only batch is
-available from the current bucket, move to the next bucket or classify one
-remaining `unsupported` or `not supported` Rust guard as a Git-supported gap,
-stock-compatible invalid input, intentional deferral or Zmin-only extension. If
-new WebStorm or replacement-shim traces appear, add those rows before
-continuing matrix expansion or guard classification.
+The next default slice is census-first, not row-import-first.
 
-Before the next row-import batch, record the selected oracle bucket and expected
-row count, then run `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after
-the batch. This makes denominator growth an explicit audit artifact instead of
-an incidental side effect of finding more existing tests.
+Start from `docs/cli/git_compatibility_census.md` and the generated
+`docs/cli/census/*.tsv` files. Refresh the census with
+`tools/git-compat-census.py` if command docs, Zmin schema, matrices, extension
+docs, deferrals or source guards changed. Use:
 
-Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
-compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `703`
-represented or classified and `258` `missing_or_unclassified`. If the generated
-inventory differs, fix the inventory first. If an import does not reduce
-`missing_or_unclassified` by its declared evidence-function count, stop and
-explain the mismatch before committing.
+- `docs/cli/census/verified_behavior.tsv` as the exact safe-to-skip list.
+- `docs/cli/census/invalid_input_parity.tsv` as the exact verified rejection
+  list.
+- `docs/cli/census/implemented_but_unverified.tsv` for parser/handler surfaces
+  that need stock-Git evidence before they count.
+- `docs/cli/census/remaining_to_fix_or_verify.tsv` as the primary checklist
+  for new fix/verify slices.
+- `docs/cli/census/zmin_extension_or_deferred.tsv` for items outside the Git
+  `2.47.1` denominator.
 
-`docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `703` already represented
-or classified and `258` still `missing_or_unclassified`. Treat that snapshot as
-the upper bound for already-known oracle-test denominator growth. The default
-bucket order is HTTP transport (`21`), local transport (`22`), worktree state
-(`22`), maintenance (`21`) and pack integrity (`18`), unless a real
-replacement-binary blocker overrides it. A docs-only oracle import must reduce
-`missing_or_unclassified` by the declared number of evidence functions; any TSV
-row growth that does not do that must name a different source bucket before the
-rows are added.
+Only after selecting an exact row or coherent expansion group from the census
+should work consult `docs/cli/existing_oracle_test_inventory.tsv` to find
+whether an existing focused oracle test can serve as evidence. Do not add more
+matrix rows merely because an oracle test is `missing_or_unclassified`; that
+was the source of the previous unbounded-loader workflow.
+
+If a new WebStorm, replacement-shim or real-tool blocker appears, add it as a
+census/matrix row shape first, then use stock Git to close it. Otherwise, pick
+one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
+source bucket and expected row/status delta in
+`docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
 ### Latest Completed Slice
 

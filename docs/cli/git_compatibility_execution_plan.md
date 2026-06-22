@@ -8,6 +8,12 @@ model lives in `docs/cli/git_compatibility_inventory.md`; the live slice queue,
 guard mappings and latest completed slice live in
 `docs/cli/variant_compatibility_plan.md`.
 
+Current correction: start future work from
+`docs/cli/git_compatibility_census.md` and the generated
+`docs/cli/census/*.tsv` files. The previous row-import-first workflow is
+paused; `docs/cli/existing_oracle_test_inventory.tsv` is only an evidence
+layer after independent command/docs/schema census selection.
+
 ## Durable Plan Files
 
 Use these files instead of chat history:
@@ -15,9 +21,11 @@ Use these files instead of chat history:
 | File | Role |
 | --- | --- |
 | `docs/cli/git_compatibility_execution_plan.md` | step-by-step operating plan and definition of done |
+| `docs/cli/git_compatibility_census.md` | census-first entry point and bucket rules |
+| `docs/cli/census/*.tsv` | machine-readable verified, invalid-input, implemented-unverified, remaining, extension/deferred and evidence-layer lists |
 | `docs/cli/git_compatibility_inventory.md` | counting model, current generated counts and command-level matrix status |
 | `docs/cli/variant_compatibility_plan.md` | live next-slice pointer, immediate queue, guard classifications and closed evidence blocks |
-| `docs/cli/existing_oracle_test_inventory.tsv` | generated backlog of stock-oracle test functions and whether each has TSV evidence |
+| `docs/cli/existing_oracle_test_inventory.tsv` | evidence layer of stock-oracle test functions; not the primary backlog |
 | `docs/cli/matrix_row_growth_audit.md` | audited explanation of row-count growth and the required predeclared row-growth budget for future imports |
 | `docs/cli/matrices/*_v2_47.tsv` | per-command behavior rows with command, option, value, combinations, state, transport, expected behavior and evidence |
 | `docs/cli/zmin_extensions_inventory.md` | Zmin-only extensions kept outside the Git `2.47.1` denominator |
@@ -63,26 +71,60 @@ closed with stock-Git evidence.
 Run this at the start of every session:
 
 1. Check the active Codex goal and this file.
-2. Read the `Current Next Slice Pointer` in
+2. Read `docs/cli/git_compatibility_census.md` and inspect
+   `docs/cli/census/summary.tsv`.
+3. Read the `Current Next Slice Pointer` in
    `docs/cli/variant_compatibility_plan.md`.
-3. Run `/usr/bin/git status --short --branch` and identify unrelated staged or
+4. Run `/usr/bin/git status --short --branch` and identify unrelated staged or
    unstaged work.
-4. If a WebStorm, replacement-binary or real-tool trace is blocking dogfood,
+5. Refresh `docs/cli/census/*.tsv` with `tools/git-compat-census.py` if
+   command/docs/schema/matrix/evidence sources changed.
+6. If a WebStorm, replacement-binary or real-tool trace is blocking dogfood,
    promote it to the next slice and add a matrix row first.
-5. Otherwise use `docs/cli/existing_oracle_test_inventory.tsv` to pick an
-   already-covered missing-or-unclassified oracle function, or take the first
-   unfinished item from the Immediate Slice Queue when no dense oracle batch is
-   available.
-6. Before adding behavior rows, record the source bucket and expected row delta
+7. Otherwise choose one exact row or coherent expansion group from
+   `docs/cli/census/remaining_to_fix_or_verify.tsv`. Use
+   `docs/cli/census/verified_behavior.tsv` and
+   `docs/cli/census/invalid_input_parity.tsv` as exact skip lists.
+8. Only after selecting that row shape, consult
+   `docs/cli/existing_oracle_test_inventory.tsv` to see whether existing
+   stock-oracle evidence can close it.
+9. Before adding behavior rows, record the source bucket and expected row delta
    from `docs/cli/matrix_row_growth_audit.md`; stop if the actual post-slice
    delta differs.
-7. Confirm the exact stock Git command line and expected behavior before
+10. Confirm the exact stock Git command line and expected behavior before
    editing implementation code.
+
+## Census Verification Contract
+
+Before any more fix/import slice, refresh or verify the census:
+
+```bash
+python3 tools/git-compat-census.py --root .
+awk -F '\t' 'NR > 1 { print }' docs/cli/census/summary.tsv
+```
+
+If the worktree has unrelated Rust WIP, produce
+`zmin compat --profile v2-47 --format json` from a clean worktree and pass it
+with `--zmin-schema-json`. Do not let unrelated WIP change the committed
+census outputs.
+
+The current census snapshot reports:
+
+- `151` Git `2.47.1` commands from upstream command-list
+- `4632` Git doc option seed rows
+- `2287` verified exact behavior rows
+- `377` invalid-input parity rows
+- `1010` implemented-but-unverified schema rows
+- `4745` remaining rows to fix, expand or verify
+
+These are checklist counts, not a compatibility percentage. Complete command
+matrices and complete doc-option matrices remain `0/151` and `0/4632`.
 
 ## Baseline Verification Contract
 
-Before importing more rows from existing tests, verify the known oracle backlog
-instead of discovering it implicitly during the slice:
+After selecting a row shape from the census, existing stock-oracle tests may be
+used as an evidence layer. Before importing rows from those tests, verify the
+known oracle inventory instead of discovering it implicitly during the slice:
 
 ```bash
 python3 tools/git-existing-oracle-inventory.py > /tmp/zmin-oracle-inventory.tsv

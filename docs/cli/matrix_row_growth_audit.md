@@ -4,6 +4,18 @@ This file explains behavior-row count growth on
 `compat/status-pathspec-matrix` and defines the guardrail for future matrix
 imports.
 
+## Census-First Correction
+
+As of 2026-06-22, do not continue importing rows directly from
+`docs/cli/existing_oracle_test_inventory.tsv`. The next compatibility work
+starts from `docs/cli/git_compatibility_census.md` and
+`docs/cli/census/remaining_to_fix_or_verify.tsv`.
+
+`docs/cli/existing_oracle_test_inventory.tsv` is now an evidence layer only.
+After a row or coherent expansion group is selected from the census, this audit
+still records the source bucket, expected row/status delta and oracle evidence
+movement before any TSV matrix edit.
+
 ## Why The Count Grew
 
 The count grew because the branch imported already-existing stock-oracle test

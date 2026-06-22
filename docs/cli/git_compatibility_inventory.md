@@ -100,6 +100,14 @@ focused parity evidence checks the same surface.
 
 ## Files
 
+- `tools/git-compat-census.py` generates the census-first machine-readable
+  checklist from upstream Git command/docs seeds, Zmin schema, matrices,
+  oracle evidence, extensions, deferrals and source hard-fail scans.
+- `docs/cli/git_compatibility_census.md` is the current census entry point.
+- `docs/cli/census/*.tsv` are the generated bucket lists for verified rows,
+  invalid-input parity, implemented-but-unverified schema surfaces, remaining
+  fix/verify work, Zmin-only/deferred scope, oracle evidence and hard-fail
+  scans.
 - `tools/git-command-gap.sh` checks command entry points only.
 - `tools/git-compat-option-inventory.sh` extracts a seed option list from Git
   `v2.47.1` documentation.
