@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 102/151 commands with matrix rows / 606/4632 represented doc-option pairs / 2646 written rows / 2269/2646 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 102/151 commands with matrix rows / 607/4632 represented doc-option pairs / 2649 written rows / 2272/2649 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -286,18 +286,18 @@ an incidental side effect of finding more existing tests.
 
 Before selecting that bucket, regenerate the oracle inventory into `/tmp` and
 compare it with `docs/cli/existing_oracle_test_inventory.tsv`. The TSV is the
-complete current backlog list to walk: `961` focused oracle functions, `693`
-represented or classified and `268` `missing_or_unclassified`. If the generated
+complete current backlog list to walk: `961` focused oracle functions, `696`
+represented or classified and `265` `missing_or_unclassified`. If the generated
 inventory differs, fix the inventory first. If an import does not reduce
 `missing_or_unclassified` by its declared evidence-function count, stop and
 explain the mismatch before committing.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `693` already represented
-or classified and `268` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `696` already represented
+or classified and `265` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. The default
-bucket order is maintenance (`24`), HTTP transport (`23`), pack integrity
-(`23`), local transport (`22`) and worktree state (`22`), unless a real
+bucket order is HTTP transport (`23`), pack integrity (`23`), local transport
+(`22`), worktree state (`22`) and maintenance (`21`), unless a real
 replacement-binary blocker overrides it. A docs-only oracle import must reduce
 `missing_or_unclassified` by the declared number of evidence functions; any TSV
 row growth that does not do that must name a different source bucket before the
@@ -305,17 +305,18 @@ rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `ls_remote_v2_47.tsv` with eight local and
-file transport rows from existing focused stock-oracle evidence in
-`git_transport_local_compat.rs`.
+The latest completed slice extends `multi_pack_index_v2_47.tsv` and
+`maintenance_v2_47.tsv` with three storage-maintenance rows from existing
+focused stock-oracle evidence in `git_maintenance_compat.rs`.
 
-`ls_remote_v2_47.tsv` now records named local remote listing, `--heads`,
-`--tags`, `--refs`, multi-pattern filtering, direct local bare paths, `file://`
-local paths and local gitfile worktree repositories. Evidence compares stock
-Git and Zmin stdout for each form.
-The oracle inventory now lists `693` represented/classified functions and
-`268` `missing_or_unclassified`. Current written rows are `2646`, with
-`2269/2646` matching stock Git, `1/2646` open and `376/2646` invalid-input. No
+`multi_pack_index_v2_47.tsv` now records `repack --batch-size=1` no-op behavior
+and `repack --batch-size=0` followed by `expire` consolidation behavior.
+`maintenance_v2_47.tsv` now records `maintenance run --task=incremental-repack`
+writing stock-verifiable multi-pack-index metadata. Evidence compares stock Git
+and Zmin pack effects, MIDX verification and `fsck --strict` side effects.
+The oracle inventory now lists `696` represented/classified functions and
+`265` `missing_or_unclassified`. Current written rows are `2649`, with
+`2272/2649` matching stock Git, `1/2649` open and `376/2649` invalid-input. No
 Rust behavior changed.
 
 ### No-Skip Rule

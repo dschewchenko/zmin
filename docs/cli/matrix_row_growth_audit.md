@@ -37,12 +37,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2646` | `+1552` |
-| Matching stock Git rows | `823` | `2269` | `+1446` |
+| Written behavior rows | `1094` | `2649` | `+1555` |
+| Matching stock Git rows | `823` | `2272` | `+1449` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `376` | `+106` |
 | Commands with rows | `50/151` | `102/151` | `+52` |
-| Represented doc-option pairs | `253/4632` | `606/4632` | `+353` |
+| Represented doc-option pairs | `253/4632` | `607/4632` | `+354` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -50,7 +50,7 @@ behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`693` represented by matrix, extension or deferral evidence, and `268` still
+`696` represented by matrix, extension or deferral evidence, and `265` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -84,6 +84,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `diff-index` | `0` | `14` | `+14` |
 | `reflog` | `2` | `15` | `+13` |
 | `filter-branch` | `2` | `14` | `+12` |
+| `maintenance` | `0` | `20` | `+20` |
 | `var` | `0` | `12` | `+12` |
 | `grep` | `0` | `12` | `+12` |
 | `describe` | `0` | `12` | `+12` |
@@ -91,6 +92,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `check-ref-format` | `0` | `11` | `+11` |
 | `count-objects` | `0` | `8` | `+8` |
 | `shortlog` | `0` | `6` | `+6` |
+| `multi-pack-index` | `0` | `6` | `+6` |
 | `patch-id` | `0` | `6` | `+6` |
 | `format-patch` | `0` | `6` | `+6` |
 | `fsck` | `0` | `35` | `+35` |
@@ -157,7 +159,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `274` missing or unclassified.
+  functions, currently `961` total with `265` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -333,19 +335,19 @@ test function still must be read before adding TSV rows, because one function
 can prove one row, several command variants, or a non-Git extension/deferral.
 
 As of this commit, `docs/cli/existing_oracle_test_inventory.tsv` contains `961`
-focused oracle functions. `693` are already represented by matrix rows,
-extension rows or explicit deferrals, and `268` are
+focused oracle functions. `696` are already represented by matrix rows,
+extension rows or explicit deferrals, and `265` are
 `missing_or_unclassified`.
 
 Largest missing/unclassified buckets:
 
 | Test file | Missing/unclassified functions |
 | --- | ---: |
-| `git_maintenance_compat.rs` | `24` |
-| `git_transport_http_compat.rs` | `23` |
 | `git_pack_integrity_compat.rs` | `23` |
-| `git_worktree_state_compat.rs` | `22` |
+| `git_transport_http_compat.rs` | `23` |
 | `git_transport_local_compat.rs` | `22` |
+| `git_worktree_state_compat.rs` | `22` |
+| `git_maintenance_compat.rs` | `21` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
 | `git_notes_compat.rs` | `14` |
@@ -371,7 +373,7 @@ Largest missing/unclassified buckets:
 | `git_mail_series_compat.rs` | `1` |
 | `git_cli_failure_compat.rs` | `1` |
 
-Largest command-hint buckets inside those `268` functions:
+Largest command-hint buckets inside those `265` functions:
 
 | Command hint | Missing/unclassified functions |
 | --- | ---: |
@@ -379,7 +381,7 @@ Largest command-hint buckets inside those `268` functions:
 | `worktree` | `43` |
 | `merge` | `28` |
 | `remote` | `24` |
-| `maintenance` | `26` |
+| `maintenance` | `23` |
 | `submodule` | `17` |
 | `branch` | `16` |
 | `refs` | `15` |
@@ -407,11 +409,11 @@ For the current snapshot, the default candidate order is:
 
 | Order | Bucket | Why first |
 | ---: | --- | --- |
-| 1 | `git_maintenance_compat.rs` (`24`) | remaining dense maintenance/repack/multi-pack-index rows |
-| 2 | `git_transport_http_compat.rs` (`23`) | remaining network transport coverage over HTTP, SSH and git-daemon |
-| 3 | `git_pack_integrity_compat.rs` (`23`) | remaining pack/fsck/bundle rows; continue here only when the selected function group is coherent |
-| 4 | `git_transport_local_compat.rs` (`22`) | remaining local/file transport and remote-management rows |
-| 5 | `git_worktree_state_compat.rs` (`22`) | remaining worktree state rows that may expose implementation gaps |
+| 1 | `git_transport_http_compat.rs` (`23`) | remaining network transport coverage over HTTP, SSH and git-daemon |
+| 2 | `git_pack_integrity_compat.rs` (`23`) | remaining pack/fsck/bundle rows; continue here only when the selected function group is coherent |
+| 3 | `git_transport_local_compat.rs` (`22`) | remaining local/file transport and remote-management rows |
+| 4 | `git_worktree_state_compat.rs` (`22`) | remaining worktree state rows that may expose implementation gaps |
+| 5 | `git_maintenance_compat.rs` (`21`) | remaining dense maintenance/repack/multi-pack-index rows |
 
 If a new WebStorm or replacement-binary blocker appears, it overrides this
 walk order. If a selected bucket produces Zmin-only extension behavior or an
@@ -991,6 +993,49 @@ Actual post-import movement matched the declaration: `+3` behavior rows,
 `+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
 represented oracle function, `-1` missing-or-unclassified oracle function,
 `+0` commands with rows and `+0` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions:
+
+- `git_maintenance_compat::multi_pack_index_repack_batch_size_one_noops_like_stock_git`
+- `git_maintenance_compat::multi_pack_index_repack_and_expire_consolidate_like_stock_git`
+- `git_maintenance_compat::maintenance_incremental_repack_writes_stock_verifiable_multi_pack_index`
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+3`
+- missing-or-unclassified oracle functions: `-3`
+- commands with rows: `+0`; `multi-pack-index` and `maintenance` already
+  have matrix rows
+- represented doc-option pairs: expected `+1`; `maintenance --task` already
+  has represented rows, and `multi-pack-index --batch-size` becomes newly
+  represented if it was not already counted
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git multi-pack-index repack --batch-size=1`
+- `git multi-pack-index repack --batch-size=0` followed by
+  `git multi-pack-index expire`
+- `git maintenance run --task=incremental-repack`
+
+The evidence compares stock Git and Zmin pack-file effects, no-op behavior for
+small repack batches, consolidation plus expire behavior, stock-verifiable
+multi-pack-index metadata and `fsck --strict`/`multi-pack-index verify`
+side effects.
+
+Actual post-import movement matched the declaration: `+3` behavior rows, `+3`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+3` represented oracle
+functions, `-3` missing-or-unclassified oracle functions, `+0` commands with
+rows and `+1` represented doc-option pair.
 
 ### Declared: Push Network Transport Batch
 
