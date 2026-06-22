@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2336` | `+1242` |
-| Matching stock Git rows | `823` | `2009` | `+1186` |
+| Written behavior rows | `1094` | `2339` | `+1245` |
+| Matching stock Git rows | `823` | `2012` | `+1189` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `326` | `+56` |
 | Commands with rows | `50/151` | `96/151` | `+46` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `186` commits with `1331` TSV row
-additions and `43` TSV row deletions, for `+1288` text net. The strict behavior
-row count is `+1242` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `187` commits with `1334` TSV row
+additions and `43` TSV row deletions, for `+1291` text net. The strict behavior
+row count is `+1245` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`482` represented by matrix, extension or deferral evidence, and `479` still
+`485` represented by matrix, extension or deferral evidence, and `476` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -65,10 +65,11 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `apply` | `0` | `20` | `+20` |
 | `check-ignore` | `0` | `19` | `+19` |
 | `clean` | `12` | `30` | `+18` |
-| `log` | `87` | `104` | `+17` |
+| `log` | `87` | `105` | `+18` |
 | `send-email` | `0` | `16` | `+16` |
 | `interpret-trailers` | `0` | `15` | `+15` |
 | `diff-index` | `0` | `14` | `+14` |
+| `reflog` | `2` | `15` | `+13` |
 | `filter-branch` | `2` | `14` | `+12` |
 | `var` | `0` | `12` | `+12` |
 | `grep` | `0` | `12` | `+12` |
@@ -140,7 +141,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `479` missing or unclassified.
+  functions, currently `961` total with `476` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -370,7 +371,7 @@ Actual post-import movement matched the declaration: `+7` behavior rows,
 `+7` closed rows, `+0` open rows, `+0` invalid-input rows and `+3`
 represented oracle functions.
 
-## Latest Declared Import
+## Previous Declared Import
 
 Source bucket: focused stock-oracle tests already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -407,4 +408,43 @@ this import batch.
 
 Actual post-import movement matched the corrected declaration: `+4` behavior
 rows, `+4` closed rows, `+0` open rows, `+0` invalid-input rows and `+4`
+represented oracle functions.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle tests already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence functions in `crates/zmin-cli/tests/git_reflog_compat.rs`:
+
+- `git_reflog_compat::reflog_expire_dry_run_does_not_touch_reflog`
+- `git_reflog_compat::reflog_expire_default_current_entries_match_stock_git`
+- `git_reflog_compat::reflog_expire_pattern_config_matches_stock_git`
+
+Expected delta:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+3`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git reflog expire --dry-run main`
+- `git reflog expire`, `git reflog expire main`, `git reflog expire HEAD`,
+  `git reflog expire --updateref main`, `git reflog expire --rewrite main`
+  and `git reflog expire --verbose main`
+- `git reflog expire root1/branch1 root1/branch2 root2/branch1 root2/branch2`
+  with per-pattern `gc.<pattern>.reflogExpire` config
+
+The evidence compares stock Git and Zmin for `reflog expire` stdout/stderr,
+exit status, resulting HEAD/main reflogs, dry-run non-mutation and per-pattern
+expiry config side effects. The dry-run focused test was tightened in this
+slice to compare stock and Zmin command output directly before counting the
+row as represented.
+
+Actual post-import movement matched the declaration: `+3` behavior rows,
+`+3` closed rows, `+0` open rows, `+0` invalid-input rows and `+3`
 represented oracle functions.

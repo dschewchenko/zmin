@@ -320,11 +320,11 @@ Do not collapse these layers into one percentage.
 | Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
 | Commands with any matrix rows | `96/151` | no | audit rows exist for `add`, `am`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit-graph`, `commit-tree`, `config`, `count-objects`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `difftool`, `fast-import`, `fetch`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `format-patch`, `get-tar-commit-id`, `grep`, `hash-object`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `mktag`, `mktree`, `multi-pack-index`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `push`, `quiltimport`, `range-diff`, `read-tree`, `rebase`, `reflog`, `remote`, `request-pull`, `replay`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `show`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `unpack-file`, `update-server-info`, `var`, `verify-pack`, `version`, `worktree` and `write-tree` |
 | Git doc option pairs represented by rows | `550/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `2336` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `2009/2336` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/2336` | no | written rows with incomplete parity |
-| Open written rows | `1/2336` | no | written rows that still do not match stock Git |
-| Invalid input rows | `326/2336` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Written behavior rows | `2339` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `2012/2339` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/2339` | no | written rows with incomplete parity |
+| Open written rows | `1/2339` | no | written rows that still do not match stock Git |
+| Invalid input rows | `326/2339` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -363,11 +363,11 @@ Current generated summary:
 | Debugging | `3` | `0` | `132` | `0` | `184` | `103` | `0` | `0` | `81` | `166` |
 | Email | `6` | `0` | `361` | `0` | `34` | `34` | `0` | `0` | `0` | `17` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `87` | `62` | `0` | `0` | `25` | `58` |
+| Administration | `8` | `0` | `147` | `0` | `90` | `65` | `0` | `0` | `25` | `58` |
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` | `186` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` | `102` |
-| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2336`** | **`2009`** | **`0`** | **`1`** | **`326`** | **`1018`** |
+| **Git 2.47 unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2339`** | **`2012`** | **`0`** | **`1`** | **`326`** | **`1018`** |
 
 The matrix columns are the written subset of explicit
 option/value/combination/state/transport/platform rows. They are not the final
@@ -378,9 +378,9 @@ Reference group rows follow git-scm sections and can duplicate command names.
 The total row is unique.
 
 Never use `151/151` command presence, `4632` option spellings, `550/4632`
-represented option pairs or `2009/2336` passing written rows as a Git support
-percentage. The `2009/2336` number is audit progress for supported rows already
-written down; `0/2336` rows are partial, `1/2336` rows are open and `326/2336`
+represented option pairs or `2012/2339` passing written rows as a Git support
+percentage. The `2012/2339` number is audit progress for supported rows already
+written down; `0/2339` rows are partial, `1/2339` rows are open and `326/2339`
 additional rows are stock-compatible invalid inputs. It says nothing about the
 still unexpanded rows. A command or option pair is
 complete only after its documented values, negations, repeated forms,
@@ -465,7 +465,7 @@ variants.
 | `range-diff` | `15` | `0` | `1` | `docs/cli/matrices/range_diff_v2_47.tsv` | `3` | `3` | `0` | `0` | `0` | no |
 | `read-tree` | `22` | `0` | `3` | `docs/cli/matrices/read_tree_v2_47.tsv` | `4` | `4` | `0` | `0` | `0` | no |
 | `rebase` | `103` | `0` | `1` | `docs/cli/matrices/rebase_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
-| `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `2` | `0` | `0` | `0` | `2` | no |
+| `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `15` | `13` | `0` | `0` | `2` | no |
 | `remote` | `23` | `0` | `1` | `docs/cli/matrices/remote_v2_47.tsv` | `32` | `26` | `0` | `0` | `6` | no |
 | `replay` | `160` | `0` | `3` | `docs/cli/matrices/replay_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `request-pull` | `1` | `0` | `0` | `docs/cli/matrices/request_pull_v2_47.tsv` | `1` | `1` | `0` | `0` | `0` | no |

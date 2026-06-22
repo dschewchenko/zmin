@@ -381,20 +381,31 @@ fn reflog_delete_fixture(repo: &std::path::Path) {
 
 #[test]
 fn reflog_expire_dry_run_does_not_touch_reflog() {
-    let repo = git_init();
-    configure_identity(repo.path());
-    git(repo.path(), ["checkout", "-b", "main"]);
-    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "one"]);
-    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "two"]);
-    let before = run_zmin_args(repo.path(), &["reflog", "show", "main"]);
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    reflog_expire_default_fixture(git_repo.path());
+    reflog_expire_default_fixture(zmin_repo.path());
+    let git_before = git_args(git_repo.path(), &["reflog", "show", "main"]);
+    let zmin_before = run_zmin_args(zmin_repo.path(), &["reflog", "show", "main"]);
+    assert_eq!(zmin_before, git_before);
 
     assert_eq!(
-        run_zmin_status(repo.path(), ["reflog", "expire", "--dry-run", "main"]),
-        0
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["reflog", "expire", "--dry-run", "main"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["reflog", "expire", "--dry-run", "main"],
+            "git",
+        )
     );
     assert_eq!(
-        run_zmin_args(repo.path(), &["reflog", "show", "main"]),
-        before
+        run_zmin_args(zmin_repo.path(), &["reflog", "show", "main"]),
+        git_args(git_repo.path(), &["reflog", "show", "main"])
     );
 }
 

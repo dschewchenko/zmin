@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2336 written rows / 2009/2336 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2339 written rows / 2012/2339 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,18 +285,18 @@ an incidental side effect of finding more existing tests.
 
 ### Latest Completed Slice
 
-The latest completed slice imports the `git_reflog_compat.rs` reflog mutation
-and `log -g` ordinal rows from `docs/cli/existing_oracle_test_inventory.tsv`.
+The latest completed slice imports the `git_reflog_compat.rs` `reflog expire`
+rows from `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`reflog_v2_47.tsv` now records already-tested closed rows for branch and HEAD
-reflog entries produced by `reset --hard`, empty commits and nested branch
-creation. `log_v2_47.tsv` records the orphan-checkout `log -g --format=%gd %gs
-HEAD` ordinal row. The hidden zero-oid `log -g -2 HEAD` row was already
-represented, so it is not counted in this import batch. The focused
-`git_reflog_compat.rs` evidence covers stdout/stderr, exit status, reflog
-message ordering and visible ordinal numbering against stock Git. The oracle
-inventory reduced total `missing_or_unclassified` to `479`. No Rust behavior
-changed.
+`reflog_v2_47.tsv` now records already-tested closed rows for
+`reflog expire --dry-run main`, default/current-ref expiry forms, `--updateref`,
+`--rewrite`, `--verbose` and multi-ref expiry with per-pattern
+`gc.<pattern>.reflogExpire` config. The focused `git_reflog_compat.rs` evidence
+covers stdout/stderr, exit status, resulting HEAD/main reflogs, dry-run
+non-mutation and pattern-config side effects against stock Git. The dry-run
+test was tightened in this slice to compare stock and Zmin command output
+directly before counting the row as represented. The oracle inventory reduced
+total `missing_or_unclassified` to `476`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -639,7 +639,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2336` written-row
+This card is the exact handoff target after the current `2339` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -658,7 +658,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2336`; the `1/2336` open row and the still incomplete command/doc-option
+`0/2339`; the `1/2339` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
