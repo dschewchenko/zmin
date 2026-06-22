@@ -342,6 +342,8 @@ def hard_fail_scan(root: Path) -> list[dict[str, str]]:
                 if not HARD_FAIL_PATTERN.search(line):
                     continue
                 stripped = line.strip()
+                if ".expect_err(" in stripped:
+                    continue
                 documented = hard_fail_is_documented(path, stripped, docs_text)
                 rows.append(
                     {
