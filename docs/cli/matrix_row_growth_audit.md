@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2807` | `+1713` |
-| Matching stock Git rows | `823` | `2418` | `+1595` |
+| Written behavior rows | `1094` | `2817` | `+1723` |
+| Matching stock Git rows | `823` | `2428` | `+1605` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `106/151` | `+56` |
-| Represented doc-option pairs | `253/4632` | `702/4632` | `+449` |
+| Represented doc-option pairs | `253/4632` | `712/4632` | `+459` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4300,3 +4300,54 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 oracle functions, `+0` missing-or-unclassified oracle functions, `+1` command
 with rows, `+1` represented doc-option pair, `-2` implemented-but-unverified
 schema rows and `-1` remaining checklist row.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `update-index` schema
+surfaces, with focused stock-oracle smoke evidence for simple index flag,
+removal and stdin modes.
+
+Evidence command:
+
+- `tools/git-update-index-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+10`
+- closed rows: `+10`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+10`
+- implemented-but-unverified schema rows: expected `-10`
+- remaining checklist rows: expected `+0`; documented option seeds move from
+  implemented-without-matrix to expansion-required, but remain in the
+  remaining expansion checklist
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git update-index --refresh`
+- `git update-index --really-refresh`
+- `git update-index --assume-unchanged a.txt`
+- `git update-index --no-assume-unchanged a.txt`
+- `git update-index --skip-worktree a.txt`
+- `git update-index --no-skip-worktree a.txt`
+- `git update-index --remove a.txt`
+- `git update-index --force-remove a.txt`
+- `printf 'a.txt\n' | git update-index --stdin`
+- `printf 'a.txt\0' | git update-index -z --stdin`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr,
+`ls-files --stage`, `ls-files -v` index flags and worktree status. Refresh
+rows intentionally use a clean tracked file because stock Git exits non-zero
+for a modified file while the current Zmin behavior still needs a separate fix
+slice.
+
+Actual post-import movement matched the declaration: `+10` behavior rows,
+`+10` closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented
+oracle functions, `+0` missing-or-unclassified oracle functions, `+0` commands
+with rows, `+10` represented doc-option pairs, `-10`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
