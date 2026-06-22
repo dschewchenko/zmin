@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 373/4632 represented doc-option pairs / 1588 written rows / 1296 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 58/151 commands with matrix rows / 377/4632 represented doc-option pairs / 1598 written rows / 1306 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands the remaining `diff --no-index` format
-matrix coverage from existing stock-oracle evidence:
+The latest completed slice expands `clone` local option and shallow matrix
+coverage from existing stock-oracle evidence:
 
-`git diff --no-index --patch-with-raw a.txt b.txt`
+`git clone --depth 1 file://<path> dst`
 
-`docs/cli/matrices/diff_v2_47.tsv` now records command lines from
-`git_diff_compat::diff_no_index_format_options_match_stock_git`: raw,
-reverse raw, summary, patch-with-stat, patch-with-raw, no-patch, quiet and
-irreversible-delete variants for outside-index files.
+`docs/cli/matrices/clone_v2_47.tsv` now records additional command lines from
+`git_clone_compat::clone_local_repo_matches_stock_git_state`: `--hardlinks`,
+`--no-template` ordering, `--tags`/`--no-tags` ordering, `--single-branch`,
+local and file URL `--depth 1`, `-b feature`, and `--no-checkout -b feature`
+variants for local source repositories.
 This is an evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
@@ -626,14 +627,14 @@ is already represented by invalid-input rows for both top-level unknown
 commands and unknown commands inside a commit record; both use stock-Git crash
 report evidence and remain classified as invalid input, not open feature gaps.
 
-The latest matrix inventory slice expands `diff_v2_47.tsv` with the remaining
-no-index format rows already covered by
-`git_diff_compat::diff_no_index_format_options_match_stock_git`.
+The latest matrix inventory slice expands `clone_v2_47.tsv` with local option,
+shallow, branch and checkout rows already covered by
+`git_clone_compat::clone_local_repo_matches_stock_git_state`.
 No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1588` written-row
+This card is the exact handoff target after the current `1598` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -652,7 +653,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1588`; the `1/1588` open row and the still incomplete command/doc-option
+`0/1598`; the `1/1598` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -753,7 +754,7 @@ until a full matrix is expanded and verified.
 | `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
 | `rebase -i` invalid todo command usage | `1` | `0` | `GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` with an unknown todo command exits `1` with stock invalid-command diagnostics, leaves `.git/rebase-merge` state for recovery, moves HEAD to the stock in-progress rebase point, and supports `git rebase --abort` cleanup instead of a custom unsupported-interactive-command fatal diagnostic |
 | `filter-branch` supported filters and options | `13` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, `-d` temp directory, `--commit-filter` passthrough, `--commit-filter` with `skip_commit`, initial `--state-branch`, and repeated state-branch forms already covered by `git_filter_branch_compat` |
-| `clone` local path options | `16` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--shared`, repeated `-c` config, `--template`, custom origin name, `--no-tags`, `--tags`, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference and `--shared --dissociate` forms already covered by `git_clone_compat::clone_local_repo_matches_stock_git_state` |
+| `clone` local path options | `26` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, `--single-branch`, local and file URL `--depth 1`, `-b feature`, and `--no-checkout -b feature` forms already covered by `git_clone_compat::clone_local_repo_matches_stock_git_state` |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
