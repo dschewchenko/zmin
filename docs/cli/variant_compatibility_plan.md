@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 694/4632 represented doc-option pairs / 2785 written rows / 2397/2785 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 696/4632 represented doc-option pairs / 2788 written rows / 2400/2788 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,18 +298,16 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `archive_v2_47.tsv`, backed by
-`tools/git-archive-schema-oracle-smoke.sh`.
+The latest completed slice extends `count_objects_v2_47.tsv`, backed by
+`tools/git-count-objects-schema-oracle-smoke.sh`.
 
-`archive_v2_47.tsv` now records exact rows for `-l` and `-v`. The `-l` row
-compares exit status, stdout, stderr and worktree status; the `-v` row also
-compares the written tar entry listing. The same probe found `archive --output`
-is not countable yet because the binary `out.tar` differs from stock Git, so
-that surface remains unverified. The oracle inventory remains `707`
+`count_objects_v2_47.tsv` now records exact rows for `--verbose`,
+`--human-readable` and `--verbose --human-readable`. The rows compare exit
+status, stdout, stderr and worktree status. The oracle inventory remains `707`
 represented/classified functions and `254` `missing_or_unclassified` because
 the evidence is a shell smoke, not a Rust test inventory function. Current
-written rows are `2785`, with `2397/2785` matching stock Git, `1/2785` open and
-`387/2785` invalid-input.
+written rows are `2788`, with `2400/2788` matching stock Git, `1/2788` open and
+`387/2788` invalid-input.
 
 ### No-Skip Rule
 

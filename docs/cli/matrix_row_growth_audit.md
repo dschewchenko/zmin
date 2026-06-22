@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2785` | `+1691` |
-| Matching stock Git rows | `823` | `2397` | `+1574` |
+| Written behavior rows | `1094` | `2788` | `+1694` |
+| Matching stock Git rows | `823` | `2400` | `+1577` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `694/4632` | `+441` |
+| Represented doc-option pairs | `253/4632` | `696/4632` | `+443` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -3392,6 +3392,46 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `count-objects` long option
+surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-count-objects-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+2` for
+  `count-objects --verbose` and `count-objects --human-readable`; the combined
+  row extends both already represented long option spellings
+- implemented-but-unverified schema rows: `+0`; the current census keeps these
+  schema args unchanged while the rows add exact long-option evidence
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git count-objects --verbose`
+- `git count-objects --human-readable`
+- `git count-objects --verbose --human-readable`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and
+worktree status in a repository with loose objects.
+
+Actual post-import movement matched the declaration: `+3` behavior rows,
+`+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+2` represented doc-option pairs and `+0`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import
