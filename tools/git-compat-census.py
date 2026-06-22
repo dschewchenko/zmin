@@ -75,9 +75,7 @@ HARD_FAIL_PATTERN = re.compile(r"unsupported|not supported yet|not implemented y
 EVIDENCE_REF_PATTERN = re.compile(r"[A-Za-z0-9_]+::[A-Za-z0-9_]+")
 LONG_OPTION_PATTERN = re.compile(r"(?<!\S)(--[A-Za-z0-9][A-Za-z0-9-]*)(?:[=\s]|$)")
 SHORT_OPTION_PATTERN = re.compile(r"(?<!\S)(-[A-Za-z])(?:[=\s]|$)")
-UNSUPPORTED_IDENTIFIER_PATTERN = re.compile(
-    r"\b[A-Za-z_][A-Za-z0-9_]*(?:unsupported|not_supported|not_implemented)[A-Za-z0-9_]*\b"
-)
+IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 
 
 def die(message: str) -> None:
@@ -309,9 +307,14 @@ def hard_fail_is_documented(path: Path, stripped: str, docs_text: str) -> bool:
     basename = path.name
     if basename not in docs_text:
         return False
+    identifiers = [
+        identifier
+        for identifier in IDENTIFIER_PATTERN.findall(stripped)
+        if any(fragment in identifier for fragment in ["unsupported", "not_supported", "not_implemented"])
+    ]
     return any(
         identifier in docs_text
-        for identifier in UNSUPPORTED_IDENTIFIER_PATTERN.findall(stripped)
+        for identifier in identifiers
     )
 
 
