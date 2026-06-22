@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the `git_stash_compat.rs` stash too-many-reference
-invalid-input backlog on `compat/status-pathspec-matrix`.
+Generated after reviewing the `git_stash_compat.rs` default push/list/clear/apply/pop
+flow backlog on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `462` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `499` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `463` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `498` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -56,8 +56,8 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_notes_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
-| `git_stash_compat.rs` | `14` |
 | `git_merge_compat.rs` | `13` |
+| `git_stash_compat.rs` | `13` |
 | `git_sequencer_compat.rs` | `12` |
 | `git_admin_tools_compat.rs` | `10` |
 | `git_reflog_compat.rs` | `10` |
