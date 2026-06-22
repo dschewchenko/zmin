@@ -108,6 +108,7 @@ pub(crate) fn parse_cli_invocation(
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
+    validate_hash_object_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -324,6 +325,34 @@ fn validate_fetch_invocation_before_clap(command_args: &[String]) -> Result<()> 
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: option `server-option' requires a value\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_hash_object_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("hash-object") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if let Some(option) = arg
+            .strip_prefix("--type")
+            .filter(|value| value.is_empty() || value.starts_with('='))
+        {
+            let name = if option.is_empty() {
+                "type".to_owned()
+            } else {
+                format!("type{option}")
+            };
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!(
+                    "error: unknown option `{name}'\nusage: git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n                       [--stdin [--literally]] [--] <file>...\n   or: git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]\n\n    -t <type>             object type\n    -w                    write the object into the object database\n    --[no-]stdin          read the object from stdin\n    --[no-]stdin-paths    read file names from stdin\n    --no-filters          store file as is without filters\n    --filters             opposite of --no-filters\n    --[no-]literally      just hash any random garbage to create corrupt objects for debugging Git\n    --[no-]path <file>    process file as it were from this path\n\n"
+                ),
             });
         }
     }

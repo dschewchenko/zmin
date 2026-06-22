@@ -53,7 +53,7 @@ python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-compat-
 
 ## Current Snapshot
 
-Generated on 2026-06-22 from the current branch census inputs.
+Generated on 2026-06-23 from the current branch census inputs.
 
 | Metric | Count | Meaning |
 | --- | ---: | --- |
@@ -61,11 +61,11 @@ Generated on 2026-06-22 from the current branch census inputs.
 | Git doc option seed rows | `4632` | documented option spelling seed, not final denominator |
 | Zmin schema baseline commands | `151` | command entry points present in schema |
 | Zmin schema additional commands | `52` | outside Git `2.47.1` baseline |
-| Existing matrix rows | `2796` | evidence layer, not full denominator |
-| Verified exact rows | `2408` | closed behavior variants safe to skip exactly |
-| Invalid-input parity rows | `387` | stock-compatible rejection variants |
+| Existing matrix rows | `2798` | evidence layer, not full denominator |
+| Verified exact rows | `2409` | closed behavior variants safe to skip exactly |
+| Invalid-input parity rows | `388` | stock-compatible rejection variants |
 | Exact open or partial matrix rows | `1` | row exists but is not closed |
-| Implemented but unverified rows | `723` | schema args and additional schema paths without exact matrix evidence |
+| Implemented but unverified rows | `721` | schema args and additional schema paths without exact matrix evidence |
 | Remaining checklist rows | `4679` | doc-option expansion, exact opens and unclassified guards |
 | Zmin-only or deferred rows | `33` | extension and deferral classifications outside the denominator |
 | Oracle evidence layer rows | `961` | existing tests, not the primary backlog |

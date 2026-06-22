@@ -193,7 +193,7 @@ pub enum Command {
         directory: Option<PathBuf>,
     },
     HashObject {
-        #[arg(short = 't', long = "type", default_value = "blob")]
+        #[arg(short = 't', default_value = "blob")]
         object_type: String,
         #[arg(short = 'w', long = "write", action = ArgAction::SetTrue)]
         write: bool,

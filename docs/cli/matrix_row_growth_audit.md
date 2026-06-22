@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2796` | `+1702` |
-| Matching stock Git rows | `823` | `2408` | `+1585` |
+| Written behavior rows | `1094` | `2798` | `+1704` |
+| Matching stock Git rows | `823` | `2409` | `+1586` |
 | Open rows | `1` | `1` | `0` |
-| Invalid-input rows | `270` | `387` | `+117` |
+| Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
-| Represented doc-option pairs | `253/4632` | `700/4632` | `+447` |
+| Represented doc-option pairs | `253/4632` | `701/4632` | `+448` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -136,7 +136,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `shortlog` | `0` | `6` | `+6` |
 | `verify-pack` | `0` | `6` | `+6` |
 | `checkout` | `0` | `5` | `+5` |
-| `hash-object` | `0` | `5` | `+5` |
+| `hash-object` | `0` | `7` | `+7` |
 | `stripspace` | `0` | `5` | `+5` |
 | `column` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `5` | `+5` |
@@ -3392,6 +3392,46 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `hash-object` schema
+surfaces, with focused stock-oracle smoke evidence and one parser schema fix.
+
+Evidence command:
+
+- `tools/git-hash-object-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+1`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `hash-object -t`; `--type`
+  is an invalid undocumented spelling and does not add a Git doc-option pair
+- implemented-but-unverified schema rows: expected `-2`; `-t` gets exact
+  stock-Git evidence and `--type` is removed from the schema after proving
+  stock Git rejects it
+- Rust behavior changes: yes, parser schema removes `hash-object --type` and
+  the pre-clap guard returns stock-style exit `129`/stderr for that spelling
+
+Expected rows:
+
+- `git hash-object -t blob a.txt`
+- `git hash-object --type blob a.txt`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and
+worktree status in a local repository with a regular file.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+1` closed row, `+0` open rows, `+1` invalid-input row, `+0` represented
+oracle functions, `+0` missing-or-unclassified oracle functions, `+0`
+commands with rows, `+1` represented doc-option pair and `-2`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import
