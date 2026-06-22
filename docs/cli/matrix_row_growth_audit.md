@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2738` | `+1644` |
-| Matching stock Git rows | `823` | `2350` | `+1527` |
+| Written behavior rows | `1094` | `2740` | `+1646` |
+| Matching stock Git rows | `823` | `2352` | `+1529` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `387` | `+117` |
 | Commands with rows | `50/151` | `104/151` | `+54` |
@@ -1171,8 +1171,6 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows and `+0` represented doc-option pairs.
-
-## Latest Declared Import
 
 Source bucket: focused stock-oracle test already listed in
 `docs/cli/existing_oracle_test_inventory.tsv`.
@@ -3199,6 +3197,41 @@ Expected rows:
 
 The evidence compares stock Git and Zmin stdout plus the resulting message and
 patch output files for the default patch-mail split flow.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows and `+0` represented doc-option pairs.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already represented in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+
+- `git_mail_tools_compat::request_pull_matches_stock_git_for_local_pushed_branch`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`; `request-pull` was already
+  represented and these rows split exact positional input surfaces
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git request-pull <start> file://<remote> main` as `<positional:url>`
+- `git request-pull <start> file://<remote> main` as `<positional:end>`
+
+The evidence compares stock Git and Zmin output for a local bare remote with a
+pushed branch ahead of the start commit.
 
 Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
