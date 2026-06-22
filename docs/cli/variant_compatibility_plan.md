@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 84/151 commands with matrix rows / 483/4632 represented doc-option pairs / 1928 written rows / 1621/1928 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 85/151 commands with matrix rows / 486/4632 represented doc-option pairs / 1932 written rows / 1625/1932 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,16 +269,15 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds the `count-objects` matrix from existing
+The latest completed slice seeds the `read-tree` matrix from existing
 stock-oracle evidence:
 
-`git count-objects -v`
+`git read-tree --prefix=import/ <tree>`
 
-`count_objects_v2_47.tsv` now records loose-object, packed-object and
-duplicate-pack count summaries for default, human-readable and verbose forms,
-comparing stock Git and Zmin output through focused
-`git_object_plumbing_compat` evidence. This is an evidence import only; no
-Rust behavior changed.
+`read_tree_v2_47.tsv` now records plain tree loads, `--empty`, `-m` and
+`--prefix` index update forms, comparing stock Git and Zmin index side effects
+through focused `git_object_plumbing_compat` evidence. This is an evidence
+import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -627,7 +626,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1928` written-row
+This card is the exact handoff target after the current `1932` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +645,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1928`; the `1/1928` open row and the still incomplete command/doc-option
+`0/1932`; the `1/1932` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
