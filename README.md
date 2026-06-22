@@ -170,19 +170,19 @@ Current state:
 | Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `80/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `453/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `1820` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1514/1820` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/1820` | written rows with incomplete parity |
-| Open written rows | `1/1820` | written rows that still do not match stock Git |
-| Invalid input rows | `305/1820` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `458/4632` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `1828` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1521/1828` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/1828` | written rows with incomplete parity |
+| Open written rows | `1/1828` | written rows that still do not match stock Git |
+| Invalid input rows | `306/1828` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1514/1820` as Git compatibility. It only means `1514` of the `1820`
+Do not read `1521/1828` as Git compatibility. It only means `1521` of the `1828`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/1820` rows are partially matching,
-`1/1820` rows are known open mismatches, and `305/1820` additional rows are
-stock-compatible invalid inputs. Do not read `453/4632` as option support
+unexpanded surface is not counted yet, `0/1828` rows are partially matching,
+`1/1828` rows are known open mismatches, and `306/1828` additional rows are
+stock-compatible invalid inputs. Do not read `458/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -216,11 +216,11 @@ Audit progress by git-scm reference group:
 | Debugging | `3` | `0` | `132` | `0` | `114` | `33` | `0` | `0` | `81` |
 | Email | `6` | `0` | `361` | `0` | `27` | `27` | `0` | `0` | `0` |
 | External Systems | `2` | `0` | `120` | `0` | `0` | `0` | `0` | `0` | `0` |
-| Administration | `8` | `0` | `147` | `0` | `58` | `35` | `0` | `0` | `23` |
+| Administration | `8` | `0` | `147` | `0` | `66` | `42` | `0` | `0` | `24` |
 | Server Admin | `2` | `0` | `30` | `0` | `0` | `0` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `411` | `346` | `0` | `0` | `65` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `106` | `72` | `0` | `0` | `34` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1820`** | **`1514`** | **`0`** | **`1`** | **`305`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`1828`** | **`1521`** | **`0`** | **`1`** | **`306`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -249,7 +249,7 @@ Current command-level matrices:
 | `cherry` | `6` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
 | `checkout` | `43` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `checkout-index` | `19` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `clean` | `13` | `0` | `3` | `12` | `8` | `0` | `0` | `4` | no |
+| `clean` | `13` | `0` | `8` | `20` | `15` | `0` | `0` | `5` | no |
 | `clone` | `56` | `0` | `22` | `53` | `48` | `0` | `1` | `4` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |

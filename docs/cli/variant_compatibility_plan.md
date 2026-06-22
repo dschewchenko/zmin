@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 453/4632 represented doc-option pairs / 1820 written rows / 1514 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 458/4632 represented doc-option pairs / 1828 written rows / 1521 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,17 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice expands `diff` whitespace-ignore matrix rows from
-existing stock-oracle evidence:
+The latest completed slice expands `clean` dry-run, path and force matrix rows
+from existing stock-oracle evidence:
 
-`git diff --cached --patch --ignore-space-at-eol`
+`git clean -n -d`
 
-`diff_v2_47.tsv` now records 10 cached whitespace-ignore rows across patch,
-stat, numstat and shortstat output modes for `--ignore-space-at-eol`,
-`--ignore-cr-at-eol`, `--ignore-space-change`, `-b`,
-`--ignore-all-space` and `-w`, comparing stock Git and Zmin output through
-focused `git_diff_compat` evidence. This is an evidence import only; no Rust
-behavior changed.
+`clean_v2_47.tsv` now records dry-run, directory traversal, path-limited
+dry-run, ignored-only, all-untracked, default require-force rejection and
+actual `-f -d` cleanup rows, comparing stock Git and Zmin output, exit status
+and worktree state through focused `git_clean_compat` evidence. This is an
+evidence import only; no Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -628,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1820` written-row
+This card is the exact handoff target after the current `1828` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -647,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1820`; the `1/1820` open row and the still incomplete command/doc-option
+`0/1828`; the `1/1828` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -828,6 +827,7 @@ until a full matrix is expanded and verified.
 | `clean` unknown option usage | `1` | `0` | `git clean --bad` exits `129` with stock unknown-option usage text instead of a fatal unsupported-option diagnostic |
 | `clean` unknown short-switch usage | `1` | `0` | `git clean -Z` exits `129` with stock unknown-switch usage text instead of an unknown-option diagnostic |
 | `clean` exclude missing-value usage | `2` | `0` | `git clean -e` and `git clean --exclude` exit `129` with stock missing-value diagnostics instead of a fatal custom pattern diagnostic |
+| `clean` dry-run, path and force rows | `7` | `1` | dry-run default, `-n -d`, path-limited `-n -d dir`, ignored-only `-X`, all-untracked `-x`, default require-force rejection and actual `-f -d` cleanup already covered by `git_clean_compat` |
 | `checkout` delayed smudge process-filter failure | `1` | `0` | `git checkout -- a.bad` with a required smudge process filter returning `status=delayed` exits `128`, leaves stdout empty, emits stock external-filter diagnostics and leaves the worktree file absent |
 | `ls-files` replacement stage NUL output | `1` | `0` | `--stage -z` through the `git` shim on a clean cloned index |
 | `ls-files` replacement cached plus others NUL output | `1` | `0` | `-z --cached --others --exclude-standard` through the `git` shim on a cloned repository |
@@ -948,7 +948,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `805` verified variants.
+Tracked closed blocks in this table: `812` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
