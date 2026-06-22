@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 81/151 commands with matrix rows / 462/4632 represented doc-option pairs / 1861 written rows / 1554 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 81/151 commands with matrix rows / 463/4632 represented doc-option pairs / 1868 written rows / 1561 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -269,15 +269,16 @@ continuing matrix expansion or guard classification.
 
 ### Latest Completed Slice
 
-The latest completed slice seeds `difftool` matrix rows from existing
-stock-oracle evidence:
+The latest completed slice adds `rev-list` symmetric-difference and separator
+rows from existing stock-oracle evidence:
 
-`git difftool --no-prompt --extcmd <cmd> a.txt`
+`git rev-list left...main`
 
-`difftool_v2_47.tsv` now records extcmd worktree, extcmd cached, configured
-default tool and explicit configured tool forms on Unix, comparing stock Git
-and Zmin output through focused `git_diff_compat` evidence. This is an
-evidence import only; no Rust behavior changed.
+`rev_list_v2_47.tsv` now records symmetric difference traversal, count, reverse,
+object traversal, no-object-names, `--not` combination and `--objects HEAD --`
+separator forms, comparing stock Git and Zmin output through focused
+`git_history_query_compat` evidence. This is an evidence import only; no Rust
+behavior changed.
 
 ### No-Skip Rule
 
@@ -626,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1861` written-row
+This card is the exact handoff target after the current `1868` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -645,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1861`; the `1/1861` open row and the still incomplete command/doc-option
+`0/1868`; the `1/1868` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -742,6 +743,7 @@ until a full matrix is expanded and verified.
 | `shortlog` author summary forms | `6` | `0` | default `HEAD`, `-s`, `-sn`, `-se`, `--no-merges` and `HEAD~2..HEAD` range forms already covered by `git_history_query_compat` |
 | `cherry` upstream/head comparison forms | `6` | `0` | default upstream, explicit upstream/head, `-v`, `--abbrev`, `--abbrev=12` and limit forms already covered by `git_history_query_compat` |
 | `rev-list` base traversal and object forms | `10` | `0` | `--max-count`, `--all`, revision range, negative revision, `--not`, `--count`, `--parents`, `-1`, `--objects` and `--objects --no-object-names` already covered by `git_history_query_compat` |
+| `rev-list` symmetric difference and separator forms | `7` | `0` | symmetric difference traversal, count, reverse, object traversal, no-object-names, `--not left...main main` and `--objects HEAD --` separator forms already covered by `git_history_query_compat` |
 | `apply` stdin patch modes | `10` | `0` | `git apply --check`, default stdin apply, `--cached`, `--index`, binary reverse `-R`, rename, Unix mode-only and header-only invalid patch forms already covered by `git_apply_compat` |
 | `patch-id` stdin patch modes | `6` | `0` | default, `--stable`, `--unstable`, `--verbatim` diff patch forms plus stable and unstable log patch streams already covered by `git_apply_compat` |
 | `stripspace` stdin text modes | `5` | `0` | default, `-s`, `-c`, `--strip-comments` and `--comment-lines` stdin text forms already covered by `git_text_tools_compat` |
@@ -950,7 +952,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `845` verified variants.
+Tracked closed blocks in this table: `852` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
