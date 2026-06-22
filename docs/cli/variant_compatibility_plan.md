@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 560/4632 represented doc-option pairs / 2380 written rows / 2038/2380 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 561/4632 represented doc-option pairs / 2384 written rows / 2042/2384 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -284,8 +284,8 @@ the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `509` already represented
-or classified and `452` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `510` already represented
+or classified and `451` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -293,20 +293,19 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `commit_v2_47.tsv` with five edit/no-edit
-message-source rows from existing focused stock-oracle evidence in
+The latest completed slice extends `commit_v2_47.tsv` with four commit summary
+and quiet-output rows from existing focused stock-oracle evidence in
 `git_commit_compat.rs`.
 
-`commit_v2_47.tsv` now records closed rows for `git commit -e -m ...`,
-`git commit -e -F msg.txt`, `git commit -e -C HEAD`,
-`git commit --no-edit -c HEAD` and `git commit --no-edit -m ...`. Evidence
-comes from
-`git_commit_compat::commit_edit_and_no_edit_message_sources_match_stock_git`,
-comparing stock Git and Zmin commit objects, command output, editor invocation
-and editor input buffers. The oracle inventory now lists `509`
-represented/classified functions and `452` `missing_or_unclassified`. Current
-written rows are `2380`, with `2038/2380` matching stock Git, `1/2380` open
-and `341/2380` invalid-input. No Rust behavior changed.
+`commit_v2_47.tsv` now records closed rows for root commit summary output,
+normal update summary output, delete summary output and
+`git commit --quiet -m quiet` output suppression. Evidence comes from
+`git_commit_compat::commit_summary_and_quiet_output_match_stock_git`,
+comparing stock Git and Zmin stdout/stderr/exit behavior for each commit flow.
+The oracle inventory now lists `510` represented/classified functions and
+`451` `missing_or_unclassified`. Current written rows are `2384`, with
+`2042/2384` matching stock Git, `1/2384` open and `341/2384` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -649,7 +648,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2380` written-row
+This card is the exact handoff target after the current `2384` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -668,7 +667,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2380`; the `1/2380` open row and the still incomplete command/doc-option
+`0/2384`; the `1/2384` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
