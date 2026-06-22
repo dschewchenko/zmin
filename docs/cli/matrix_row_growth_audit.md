@@ -25,20 +25,20 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2298` | `+1204` |
+| Written behavior rows | `1094` | `2302` | `+1208` |
 | Matching stock Git rows | `823` | `1976` | `+1153` |
 | Open rows | `1` | `1` | `0` |
-| Invalid-input rows | `270` | `321` | `+51` |
+| Invalid-input rows | `270` | `325` | `+55` |
 | Commands with rows | `50/151` | `96/151` | `+46` |
 | Represented doc-option pairs | `253/4632` | `550/4632` | `+297` |
 
-The text-level row delta audit reports `179` commits with `1293` TSV row
-additions and `43` TSV row deletions, for `+1250` text net. The strict behavior
-row count is `+1204` because some commits rewrote or split existing rows rather
+The text-level row delta audit reports `180` commits with `1297` TSV row
+additions and `43` TSV row deletions, for `+1254` text net. The strict behavior
+row count is `+1208` because some commits rewrote or split existing rows rather
 than adding net-new row coverage.
 
 The stock-oracle test inventory currently has `961` focused oracle functions:
-`461` represented by matrix, extension or deferral evidence, and `500` still
+`462` represented by matrix, extension or deferral evidence, and `499` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -49,7 +49,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | Command | Rows at `9275ac4d` | Rows at `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
 | `diff` | `68` | `239` | `+171` |
-| `stash` | `25` | `180` | `+155` |
+| `stash` | `25` | `184` | `+159` |
 | `ls-files` | `72` | `155` | `+83` |
 | `diff-tree` | `0` | `74` | `+74` |
 | `blame` | `101` | `171` | `+70` |
@@ -140,7 +140,7 @@ difference before committing.
 The known queues are:
 
 - `docs/cli/existing_oracle_test_inventory.tsv`: focused stock-oracle test
-  functions, currently `961` total with `500` missing or unclassified.
+  functions, currently `961` total with `499` missing or unclassified.
 - `docs/cli/git_compatibility_inventory.md`: command and documented option
   seed accounting, currently `151` commands and `4632` documented
   command-option pairs.
@@ -148,3 +148,35 @@ The known queues are:
 
 These are not a complete final Git behavior denominator. They are the frozen
 known inventory layers that must be expanded deliberately.
+
+## Latest Declared Import
+
+Source bucket: focused stock-oracle test already listed in
+`docs/cli/existing_oracle_test_inventory.tsv`.
+
+Evidence function:
+`git_stash_compat::stash_apply_pop_branch_reject_too_many_refs_like_stock_git`
+in `crates/zmin-cli/tests/git_stash_compat.rs`.
+
+Expected delta:
+
+- behavior rows: `+4`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+4`
+- represented oracle functions: `+1`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git stash apply stash@{0} stash@{1}`
+- `git stash pop stash@{0} stash@{1}`
+- `git stash show stash@{0} stash@{1}`
+- `git stash branch stash-branch stash@{0} stash@{1}`
+
+The evidence compares stock Git and Zmin failure output and verifies the dirty
+worktree file is unchanged after each rejected invocation.
+
+Actual post-import movement matched the declaration: `+4` behavior rows,
+`+0` closed rows, `+0` open rows, `+4` invalid-input rows and `+1`
+represented oracle function.

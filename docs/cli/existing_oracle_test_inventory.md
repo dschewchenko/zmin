@@ -17,14 +17,14 @@ tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_
 
 ## Current Snapshot
 
-Generated after reviewing the `git_stash_compat.rs` stash quiet and message option
-backlog on `compat/status-pathspec-matrix`.
+Generated after reviewing the `git_stash_compat.rs` stash too-many-reference
+invalid-input backlog on `compat/status-pathspec-matrix`.
 
 | Layer | Count |
 | --- | ---: |
 | Stock-oracle test functions found | `961` |
-| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `461` |
-| Test functions missing or not yet classified by matrix/extension/deferral evidence | `500` |
+| Test functions referenced by at least one matrix row, extension inventory entry or deferral entry | `462` |
+| Test functions missing or not yet classified by matrix/extension/deferral evidence | `499` |
 
 `missing_or_unclassified` does not automatically mean "add a Git matrix row".
 Each function still needs review:
@@ -50,13 +50,13 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_pack_integrity_compat.rs` | `61` |
 | `git_transport_local_compat.rs` | `58` |
 | `git_index_mutation_compat.rs` | `39` |
-| `git_stash_compat.rs` | `29` |
 | `git_maintenance_compat.rs` | `32` |
 | `git_commit_compat.rs` | `26` |
 | `git_worktree_state_compat.rs` | `26` |
 | `git_notes_compat.rs` | `23` |
 | `git_submodule_compat.rs` | `16` |
 | `git_worktree_compat.rs` | `15` |
+| `git_stash_compat.rs` | `14` |
 | `git_merge_compat.rs` | `13` |
 | `git_sequencer_compat.rs` | `12` |
 | `git_admin_tools_compat.rs` | `10` |
@@ -70,6 +70,14 @@ currently unclassified stock-oracle test functions, not by product priority.
 | `git_fast_import_export_compat.rs` | `5` |
 | `git_cms_porcelain_compat.rs` | `4` |
 | `git_object_plumbing_compat.rs` | `4` |
+| `git_mail_tools_compat.rs` | `3` |
+| `git_sparse_checkout_compat.rs` | `3` |
+| `git_clone_compat.rs` | `2` |
+| `compatibility_command.rs` | `1` |
+| `git_cli_failure_compat.rs` | `1` |
+| `git_mail_series_compat.rs` | `1` |
+| `git_repository_state_compat.rs` | `1` |
+| `git_status_compat.rs` | `1` |
 
 The full TSV is the backlog. Do not treat the table above as complete by
 itself; it only summarizes the largest buckets.

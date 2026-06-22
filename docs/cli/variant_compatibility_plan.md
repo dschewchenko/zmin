@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2298 written rows / 1976/2298 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 96/151 commands with matrix rows / 550/4632 represented doc-option pairs / 2302 written rows / 1976/2302 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -285,16 +285,15 @@ an incidental side effect of finding more existing tests.
 
 ### Latest Completed Slice
 
-The latest completed slice imports the `git_stash_compat.rs` stash quiet and
-message option backlog rows from
+The latest completed slice imports the `git_stash_compat.rs` stash
+too-many-reference invalid-input backlog rows from
 `docs/cli/existing_oracle_test_inventory.tsv`.
 
-`stash_v2_47.tsv` now records already-tested supported rows for quiet push,
-apply, pop and drop forms, equals-form `--message`, attached `-m` values and
-legacy `stash save --quiet`. The focused `git_stash_compat.rs` evidence covers
-stdout, stderr, exit status and worktree/index side effects against stock Git.
-The oracle inventory reduced total `missing_or_unclassified` to `500`. No Rust
-behavior changed.
+`stash_v2_47.tsv` now records invalid-input rows for extra stash references on
+`stash apply`, `stash pop`, `stash show`, and `stash branch`. The focused
+`git_stash_compat.rs` evidence covers stdout, stderr, exit status and the
+unchanged dirty worktree state against stock Git. The oracle inventory reduced
+total `missing_or_unclassified` to `499`. No Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -637,7 +636,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2298` written-row
+This card is the exact handoff target after the current `2302` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -647,7 +646,7 @@ state. Finish it before choosing another guard or command.
 | Implementation area | start with high-use matrices from `status`, `log`, `diff`, `ls-files`, `rev-parse`, `config`, `fetch`, `clone` or `filter-branch`; for guard work, stay on one narrow guard class |
 | Evidence test | focused compat test already proving stdout, stderr, exit code and repository state against stock Git, or the smallest new compat test for a guard classification |
 | Matrix update | add 3-10 rows from one existing focused test file when safe; for implementation work add the exact row before changing code |
-| Expected count movement | docs-only evidence imports should increase written rows and closed rows; complete command and doc-option matrices stay `0/151` and `0/4632` |
+| Expected count movement | predeclared docs-only evidence imports should increase only their declared row/status bucket; complete command and doc-option matrices stay `0/151` and `0/4632` |
 | Required gates | focused oracle test, TSV 12-column check, `git diff --check`, readiness/status summaries, docs/count stale scan; add `cargo check -p zmin-cli --bin zmin --profile compat` only for Rust behavior changes |
 | Commit rule | stage only this slice's files and commit with a Conventional Commit message before starting the next slice |
 
@@ -656,7 +655,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2298`; the `1/2298` open row and the still incomplete command/doc-option
+`0/2302`; the `1/2302` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb

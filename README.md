@@ -171,17 +171,17 @@ Current state:
 | Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
 | Commands with any matrix rows | `96/151` | commands that have started behavior matrices; this is not support |
 | Documented option spellings represented by rows | `550/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2298` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `1976/2298` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2298` | written rows with incomplete parity |
-| Open written rows | `1/2298` | written rows that still do not match stock Git |
-| Invalid input rows | `321/2298` | rows where stock Git rejects the input |
+| Written behavior rows | `2302` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `1976/2302` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/2302` | written rows with incomplete parity |
+| Open written rows | `1/2302` | written rows that still do not match stock Git |
+| Invalid input rows | `325/2302` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `1976/2298` as Git compatibility. It only means `1976` of the `2298`
+Do not read `1976/2302` as Git compatibility. It only means `1976` of the `2302`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2298` rows are partially matching,
-`1/2298` rows are known open mismatches, and `321/2298` additional rows are
+unexpanded surface is not counted yet, `0/2302` rows are partially matching,
+`1/2302` rows are known open mismatches, and `325/2302` additional rows are
 stock-compatible invalid inputs. Do not read `550/4632` as option support
 either; it only means those option spellings have at least one row in the audit.
 
@@ -209,7 +209,7 @@ Audit progress by git-scm reference group:
 | Setup and Config | `6` | `0` | `276` | `0` | `149` | `135` | `0` | `0` | `14` |
 | Getting and Creating Projects | `2` | `0` | `66` | `0` | `61` | `54` | `0` | `1` | `6` |
 | Basic Snapshotting | `9` | `0` | `371` | `0` | `148` | `129` | `0` | `0` | `19` |
-| Branching and Merging | `9` | `0` | `581` | `0` | `241` | `203` | `0` | `0` | `38` |
+| Branching and Merging | `9` | `0` | `581` | `0` | `245` | `203` | `0` | `0` | `42` |
 | Sharing and Updating Projects | `5` | `0` | `309` | `0` | `346` | `321` | `0` | `0` | `25` |
 | Inspection and Comparison | `7` | `0` | `774` | `0` | `402` | `393` | `0` | `0` | `9` |
 | Patching | `5` | `0` | `333` | `0` | `21` | `19` | `0` | `0` | `2` |
@@ -220,7 +220,7 @@ Audit progress by git-scm reference group:
 | Server Admin | `2` | `0` | `30` | `0` | `2` | `2` | `0` | `0` | `0` |
 | Plumbing Commands | `21` | `0` | `650` | `0` | `503` | `436` | `0` | `0` | `67` |
 | Other Git 2.47 commands | `70` | `0` | `1069` | `0` | `130` | `95` | `0` | `0` | `35` |
-| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2298`** | **`1976`** | **`0`** | **`1`** | **`321`** |
+| **Git `2.47.1` unique total** | **`151`** | **`0`** | **`4632`** | **`0`** | **`2302`** | **`1976`** | **`0`** | **`1`** | **`325`** |
 
 The `git` reference entry maps to the binary entry point, not a subcommand in
 the Git `2.47` command list. Zmin supports the replacement entry point and
@@ -233,12 +233,13 @@ Current command-level matrices:
 
 | Command | Git doc option seed | Complete documented option matrices | Doc spellings represented by rows | Behavior rows written | Written rows matching stock Git | Partial rows | Open rows | Invalid input rows | Complete matrix |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `command` | `doc_option_pairs` | `complete_doc_option_pairs` | `represented_doc_option_pairs` | `behavior_rows_written` | `written_rows_matching_stock_git` | `partial` | `open` | `invalid_input` | complete_matrix |
 | `add` | `34` | `0` | `2` | `6` | `3` | `0` | `0` | `3` | no |
 | `am` | `55` | `0` | `0` | `1` | `1` | `0` | `0` | `0` | no |
 | `apply` | `39` | `0` | `4` | `20` | `19` | `0` | `0` | `1` | no |
-| `archive` | `17` | `0` | `3` | `11` | `10` | `0` | `0` | `1` | no |
+| `archive` | `17` | `0` | `3` | `12` | `11` | `0` | `0` | `1` | no |
 | `bisect` | `18` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `blame` | `39` | `0` | `24` | `161` | `81` | `0` | `0` | `80` | no |
+| `blame` | `39` | `0` | `24` | `171` | `91` | `0` | `0` | `80` | no |
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `bugreport` | `8` | `0` | `1` | `3` | `3` | `0` | `0` | `0` | no |
 | `bundle` | `15` | `0` | `1` | `11` | `3` | `0` | `0` | `8` | no |
@@ -247,10 +248,10 @@ Current command-level matrices:
 | `check-ignore` | `10` | `0` | `7` | `19` | `9` | `0` | `0` | `10` | no |
 | `check-mailmap` | `3` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
 | `check-ref-format` | `6` | `0` | `3` | `11` | `5` | `0` | `0` | `6` | no |
-| `cherry` | `6` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
 | `checkout` | `43` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `checkout-index` | `19` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `clean` | `13` | `0` | `8` | `24` | `19` | `0` | `0` | `5` | no |
+| `cherry` | `6` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
+| `clean` | `13` | `0` | `9` | `30` | `24` | `0` | `0` | `6` | no |
 | `clone` | `56` | `0` | `24` | `59` | `52` | `0` | `1` | `6` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
@@ -260,8 +261,8 @@ Current command-level matrices:
 | `credential` | `0` | `0` | `0` | `4` | `3` | `0` | `0` | `1` | no |
 | `credential-cache` | `2` | `0` | `1` | `4` | `4` | `0` | `0` | `0` | no |
 | `credential-store` | `1` | `0` | `0` | `3` | `3` | `0` | `0` | `0` | no |
-| `describe` | `18` | `0` | `8` | `10` | `10` | `0` | `0` | `0` | no |
-| `diff` | `133` | `0` | `69` | `238` | `235` | `0` | `0` | `3` | no |
+| `describe` | `18` | `0` | `8` | `12` | `12` | `0` | `0` | `0` | no |
+| `diff` | `133` | `0` | `69` | `239` | `235` | `0` | `0` | `4` | no |
 | `diff-files` | `130` | `0` | `10` | `20` | `20` | `0` | `0` | `0` | no |
 | `diff-index` | `124` | `0` | `9` | `14` | `14` | `0` | `0` | `0` | no |
 | `diff-tree` | `151` | `0` | `47` | `74` | `74` | `0` | `0` | `0` | no |
@@ -270,21 +271,22 @@ Current command-level matrices:
 | `fetch` | `73` | `0` | `30` | `304` | `294` | `0` | `0` | `10` | no |
 | `filter-branch` | `37` | `0` | `11` | `14` | `14` | `0` | `0` | `0` | no |
 | `fmt-merge-msg` | `9` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
-| `for-each-repo` | `3` | `0` | `2` | `4` | `4` | `0` | `0` | `0` | no |
 | `for-each-ref` | `22` | `0` | `2` | `34` | `23` | `0` | `0` | `11` | no |
+| `for-each-repo` | `3` | `0` | `2` | `4` | `4` | `0` | `0` | `0` | no |
 | `format-patch` | `184` | `0` | `6` | `6` | `6` | `0` | `0` | `0` | no |
+| `get-tar-commit-id` | `0` | `0` | `0` | `2` | `1` | `0` | `0` | `1` | no |
 | `grep` | `75` | `0` | `4` | `12` | `12` | `0` | `0` | `0` | no |
 | `hash-object` | `7` | `0` | `2` | `4` | `4` | `0` | `0` | `0` | no |
 | `http-fetch` | `10` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
 | `index-pack` | `18` | `0` | `1` | `3` | `0` | `0` | `0` | `3` | no |
 | `init` | `10` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
 | `interpret-trailers` | `24` | `0` | `9` | `15` | `15` | `0` | `0` | `0` | no |
-| `mailinfo` | `10` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
-| `mailsplit` | `6` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
 | `log` | `282` | `0` | `37` | `104` | `99` | `0` | `0` | `5` | no |
 | `ls-files` | `42` | `0` | `29` | `155` | `135` | `0` | `0` | `20` | no |
 | `ls-remote` | `16` | `0` | `0` | `2` | `1` | `0` | `0` | `1` | no |
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
+| `mailinfo` | `10` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
+| `mailsplit` | `6` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
 | `maintenance` | `14` | `0` | `3` | `5` | `0` | `0` | `0` | `5` | no |
 | `merge` | `69` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
@@ -303,19 +305,19 @@ Current command-level matrices:
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `reflog` | `13` | `0` | `0` | `2` | `0` | `0` | `0` | `2` | no |
 | `remote` | `23` | `0` | `1` | `32` | `26` | `0` | `0` | `6` | no |
-| `request-pull` | `1` | `0` | `0` | `1` | `1` | `0` | `0` | `0` | no |
 | `replay` | `160` | `0` | `3` | `4` | `3` | `0` | `0` | `1` | no |
+| `request-pull` | `1` | `0` | `0` | `1` | `1` | `0` | `0` | `0` | no |
 | `rerere` | `7` | `0` | `0` | `1` | `0` | `0` | `0` | `1` | no |
-| `rev-list` | `165` | `0` | `9` | `26` | `26` | `0` | `0` | `0` | no |
+| `rev-list` | `165` | `0` | `10` | `28` | `28` | `0` | `0` | `0` | no |
 | `rev-parse` | `72` | `0` | `24` | `73` | `67` | `0` | `0` | `6` | no |
 | `rm` | `20` | `0` | `1` | `1` | `1` | `0` | `0` | `0` | no |
 | `send-email` | `70` | `0` | `2` | `16` | `16` | `0` | `0` | `0` | no |
-| `show` | `143` | `0` | `11` | `30` | `30` | `0` | `0` | `0` | no |
+| `shortlog` | `164` | `0` | `4` | `6` | `6` | `0` | `0` | `0` | no |
+| `show` | `143` | `0` | `13` | `34` | `34` | `0` | `0` | `0` | no |
 | `show-index` | `1` | `0` | `0` | `2` | `1` | `0` | `0` | `1` | no |
 | `show-ref` | `14` | `0` | `5` | `11` | `8` | `0` | `0` | `3` | no |
-| `shortlog` | `164` | `0` | `4` | `6` | `6` | `0` | `0` | `0` | no |
 | `sparse-checkout` | `11` | `0` | `0` | `8` | `3` | `0` | `0` | `5` | no |
-| `stash` | `30` | `0` | `0` | `180` | `168` | `0` | `0` | `12` | no |
+| `stash` | `30` | `0` | `0` | `184` | `168` | `0` | `0` | `16` | no |
 | `status` | `26` | `0` | `23` | `135` | `125` | `0` | `0` | `10` | no |
 | `stripspace` | `5` | `0` | `4` | `5` | `5` | `0` | `0` | `0` | no |
 | `submodule` | `35` | `0` | `0` | `7` | `0` | `0` | `0` | `7` | no |
