@@ -18,6 +18,7 @@ Use these files instead of chat history:
 | `docs/cli/git_compatibility_inventory.md` | counting model, current generated counts and command-level matrix status |
 | `docs/cli/variant_compatibility_plan.md` | live next-slice pointer, immediate queue, guard classifications and closed evidence blocks |
 | `docs/cli/existing_oracle_test_inventory.tsv` | generated backlog of stock-oracle test functions and whether each has TSV evidence |
+| `docs/cli/matrix_row_growth_audit.md` | audited explanation of row-count growth and the required predeclared row-growth budget for future imports |
 | `docs/cli/matrices/*_v2_47.tsv` | per-command behavior rows with command, option, value, combinations, state, transport, expected behavior and evidence |
 | `docs/cli/zmin_extensions_inventory.md` | Zmin-only extensions kept outside the Git `2.47.1` denominator |
 | `/Users/dschewchenko/work/private/.knowledge/projects/skron-core.md` | cross-session project memory that points back to the active execution plan |
@@ -72,7 +73,10 @@ Run this at the start of every session:
    already-covered missing-or-unclassified oracle function, or take the first
    unfinished item from the Immediate Slice Queue when no dense oracle batch is
    available.
-6. Confirm the exact stock Git command line and expected behavior before
+6. Before adding behavior rows, record the source bucket and expected row delta
+   from `docs/cli/matrix_row_growth_audit.md`; stop if the actual post-slice
+   delta differs.
+7. Confirm the exact stock Git command line and expected behavior before
    editing implementation code.
 
 ## Slice Loop

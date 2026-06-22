@@ -109,6 +109,9 @@ focused parity evidence checks the same surface.
 - `tools/git-compat-command-summary.sh` reports complete command matrices,
   commands with matrix rows, represented doc-option pairs and written behavior
   rows.
+- `docs/cli/matrix_row_growth_audit.md` records why written-row counts grew on
+  this branch and requires a predeclared row-growth budget before future
+  behavior-row imports.
 - `docs/cli/git_reference_groups.tsv` maps commands into git-scm reference
   groups. Commands can appear in more than one group.
 - `docs/cli/git_audit_primary_groups.tsv` resolves duplicate group membership

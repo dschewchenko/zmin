@@ -164,6 +164,7 @@ Use these files as the handoff map:
 | `docs/cli/git_compatibility_inventory.md` | compatibility counting model and current denominator layers |
 | `docs/cli/variant_compatibility_plan.md` | operating plan, active queue, current slice pointer and guard mappings |
 | `docs/cli/existing_oracle_test_inventory.tsv` | generated inventory of stock-oracle test functions and missing TSV evidence |
+| `docs/cli/matrix_row_growth_audit.md` | row-count growth audit and required predeclared row-growth budget |
 | `docs/cli/matrices/*_v2_47.tsv` | row-level command/option/value/state/transport evidence |
 | `docs/cli/zmin_extensions_inventory.md` | Zmin-only commands/options kept outside Git compatibility counts |
 | `README.md` | user-facing status with honest non-100% compatibility numbers |
@@ -207,9 +208,15 @@ Repeat this loop until the full Git `2.47.1` matrix is closed:
 3. Probe stock Git for stdout, stderr, exit code and repository side effects.
 4. Add focused oracle evidence for that exact row.
 5. Implement only the missing behavior for that row.
-6. Run the focused evidence, build and count gates listed below.
-7. Update README, inventory, this plan and project notes with generated counts.
-8. Commit and push before switching to another command, option class or lane.
+6. Before adding rows from any inventory source, declare the source bucket and
+   expected row-count delta from `docs/cli/matrix_row_growth_audit.md`.
+7. Run the focused evidence, build and count gates listed below.
+8. Update README, inventory, this plan and project notes with generated counts.
+9. Commit and push before switching to another command, option class or lane.
+
+If actual row growth differs from the declared bucket, stop and explain the
+difference before committing. Do not let `written behavior rows` grow as an
+incidental side effect of reading another test file.
 
 If a new IDE/tool trace appears, insert it at the top of the queue as a
 behavior row first. Do not replace this loop with broad ad-hoc test runs.
