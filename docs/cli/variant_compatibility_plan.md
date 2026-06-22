@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 458/4632 represented doc-option pairs / 1852 written rows / 1545 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 80/151 commands with matrix rows / 459/4632 represented doc-option pairs / 1857 written rows / 1550 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -275,8 +275,8 @@ from existing stock-oracle evidence:
 `git diff --no-index a b`
 
 `diff_v2_47.tsv` now records default, reversed, stat, numstat, shortstat,
-name-only, name-status, raw, summary, patch-with-stat, patch-with-raw and
-abbreviated raw forms for outside-index directories, comparing stock Git and
+name-only, name-status, raw, summary, patch-with-stat, patch-with-raw, full raw,
+file-directory and binary forms for no-index paths, comparing stock Git and
 Zmin output/exit behavior through focused `git_diff_compat` evidence. This is
 an evidence import only; no Rust behavior changed.
 
@@ -627,7 +627,7 @@ No Rust behavior changed.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `1852` written-row
+This card is the exact handoff target after the current `1857` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -646,7 +646,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/1852`; the `1/1852` open row and the still incomplete command/doc-option
+`0/1857`; the `1/1857` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
@@ -852,7 +852,7 @@ until a full matrix is expanded and verified.
 | `diff` patch edge-case rows | `6` | `0` | context/no-newline, cached context, markdown-empty-binary-delete, YAML hunk-header, JSON/repeated-blank and binary-stat rows already covered by `git_diff_compat` |
 | `diff --check` and no-index edge rows | `3` | `1` | clean pathspec `--check`, dirty whitespace diagnostics, missing no-index path rejection and no-index `/dev/null` deletion comparison already covered by `git_diff_compat` |
 | `diff` whitespace-ignore rows | `10` | `0` | cached patch/stat/numstat/shortstat forms for `--ignore-space-at-eol`, `--ignore-cr-at-eol`, `--ignore-space-change`, `-b`, `--ignore-all-space` and `-w` already covered by `git_diff_compat` |
-| `diff --no-index` directory rows | `20` | `0` | default, reversed, stat, numstat, shortstat, name-only, name-status, raw, summary, patch-with-stat, patch-with-raw and abbreviated raw forms for outside-index directories already covered by `git_diff_compat` |
+| `diff --no-index` directory rows | `25` | `0` | default, reversed, stat, numstat, shortstat, name-only, name-status, raw, summary, patch-with-stat, patch-with-raw, full raw, file-directory and binary forms for no-index paths already covered by `git_diff_compat` |
 | `verify-pack` unsupported pack index version | `1` | `0` | `git verify-pack` rejects a checksum-valid `.idx` version `3` with stock unsupported-version diagnostics |
 | `index-pack --verify` bad reverse-index signature | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` with a bad signature using stock sha1 validation diagnostics |
 | `index-pack --verify` bad reverse-index version | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` version `2` using stock sha1 validation diagnostics |
@@ -950,7 +950,7 @@ until a full matrix is expanded and verified.
 | `reflog --date` display modes | `8` | `0` | `default`, `local`, `iso-strict`, `rfc`, `rfc2822`, `short`, `relative`, `human` |
 | `reflog --date` invalid format usage | `1` | `0` | `git reflog --date=bogus` exits `128` with stock fatal diagnostic instead of a custom unsupported-date fatal diagnostic |
 
-Tracked closed blocks in this table: `836` verified variants.
+Tracked closed blocks in this table: `841` verified variants.
 
 This is closed evidence only, not the full Git denominator. A denominator is
 valid only after the matching command group is expanded into command plus
