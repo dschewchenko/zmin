@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 701/4632 represented doc-option pairs / 2798 written rows / 2409/2798 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 105/151 commands with matrix rows / 701/4632 represented doc-option pairs / 2800 written rows / 2411/2800 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -298,18 +298,17 @@ source bucket and expected row/status delta in
 
 ### Latest Completed Slice
 
-The latest completed slice extends `hash_object_v2_47.tsv`, backed by
-`tools/git-hash-object-schema-oracle-smoke.sh`.
+The latest completed slice extends `symbolic_ref_v2_47.tsv`, backed by
+`tools/git-symbolic-ref-schema-oracle-smoke.sh`.
 
-`hash_object_v2_47.tsv` now records exact rows for `git hash-object -t blob
-a.txt` and stock-compatible rejection of undocumented `git hash-object --type
-blob a.txt`. The parser schema now exposes only Git's short `-t` object-type
-option, while a pre-clap guard matches stock Git exit `129`, stdout, stderr
-and worktree status for `--type`. The oracle inventory remains `707`
+`symbolic_ref_v2_47.tsv` now records exact positional rows for `git
+symbolic-ref HEAD` and `git symbolic-ref HEAD refs/heads/plumbing`. The smoke
+compares stock Git and Zmin exit status, stdout, stderr, `.git/HEAD` and
+worktree status in an attached repository. The oracle inventory remains `707`
 represented/classified functions and `254` `missing_or_unclassified` because
 the evidence is a shell smoke, not a Rust test inventory function. Current
-written rows are `2798`, with `2409/2798` matching stock Git, `1/2798` open
-and `388/2798` invalid-input.
+written rows are `2800`, with `2411/2800` matching stock Git, `1/2800` open
+and `388/2800` invalid-input.
 
 ### No-Skip Rule
 

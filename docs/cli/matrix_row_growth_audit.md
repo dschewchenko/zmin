@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2798` | `+1704` |
-| Matching stock Git rows | `823` | `2409` | `+1586` |
+| Written behavior rows | `1094` | `2800` | `+1706` |
+| Matching stock Git rows | `823` | `2411` | `+1588` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `105/151` | `+55` |
@@ -122,7 +122,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `count-objects` | `0` | `8` | `+8` |
 | `show-ref` | `10` | `18` | `+8` |
 | `sparse-checkout` | `0` | `8` | `+8` |
-| `symbolic-ref` | `0` | `8` | `+8` |
+| `symbolic-ref` | `0` | `10` | `+10` |
 | `fast-import` | `0` | `7` | `+7` |
 | `prune` | `0` | `7` | `+7` |
 | `push` | `0` | `7` | `+7` |
@@ -3392,6 +3392,44 @@ Actual post-import movement matched the declaration: `+2` behavior rows,
 `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+2` represented doc-option pairs and `-2`
+implemented-but-unverified schema rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `symbolic-ref` positional
+schema surfaces, with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-symbolic-ref-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`; these rows close positional schema
+  surfaces rather than documented option spellings
+- implemented-but-unverified schema rows: expected `-2`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git symbolic-ref HEAD`
+- `git symbolic-ref HEAD refs/heads/plumbing`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr,
+`.git/HEAD` content and worktree status in an attached repository with an
+existing target branch.
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented
+oracle functions, `+0` missing-or-unclassified oracle functions, `+0`
+commands with rows, `+0` represented doc-option pairs and `-2`
 implemented-but-unverified schema rows.
 
 ## Latest Declared Import

@@ -112,9 +112,9 @@ The current census snapshot reports:
 
 - `151` Git `2.47.1` commands from upstream command-list
 - `4632` Git doc option seed rows
-- `2409` verified exact behavior rows
+- `2411` verified exact behavior rows
 - `388` invalid-input parity rows
-- `721` implemented-but-unverified schema rows
+- `719` implemented-but-unverified schema rows
 - `4679` remaining rows to fix, expand or verify
 
 These are checklist counts, not a compatibility percentage. Complete command
