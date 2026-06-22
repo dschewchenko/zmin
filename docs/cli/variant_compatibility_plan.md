@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 562/4632 represented doc-option pairs / 2388 written rows / 2046/2388 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`0/151 complete command matrices / 0/4632 complete doc-option matrices / 98/151 commands with matrix rows / 564/4632 represented doc-option pairs / 2393 written rows / 2051/2393 written rows matching stock Git / 0 partial written rows / 1 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -284,8 +284,8 @@ the batch. This makes denominator growth an explicit audit artifact instead of
 an incidental side effect of finding more existing tests.
 
 `docs/cli/matrix_row_growth_audit.md` now freezes the known oracle-import
-backlog snapshot at `961` focused oracle functions: `511` already represented
-or classified and `450` still `missing_or_unclassified`. Treat that snapshot as
+backlog snapshot at `961` focused oracle functions: `512` already represented
+or classified and `449` still `missing_or_unclassified`. Treat that snapshot as
 the upper bound for already-known oracle-test denominator growth. A docs-only
 oracle import must reduce `missing_or_unclassified` by the declared number of
 evidence functions; any TSV row growth that does not do that must name a
@@ -293,20 +293,18 @@ different source bucket before the rows are added.
 
 ### Latest Completed Slice
 
-The latest completed slice extends `commit_v2_47.tsv` with four commit
-cleanup-mode rows from existing focused stock-oracle evidence in
-`git_commit_compat.rs`.
+The latest completed slice extends `commit_v2_47.tsv` with five commit trailer
+rows from existing focused stock-oracle evidence in `git_commit_compat.rs`.
 
-`commit_v2_47.tsv` now records closed rows for `git commit --cleanup strip -F
-message.txt`, `git commit --cleanup whitespace -F message.txt`,
-`git commit --cleanup default -F message.txt` and
-`git commit --no-cleanup -F message.txt`. Evidence comes from
-`git_commit_compat::commit_cleanup_modes_match_stock_git_object`, comparing
-stock Git and Zmin commit objects for each cleanup mode. The oracle inventory
-now lists `511` represented/classified functions and `450`
-`missing_or_unclassified`. Current written rows are `2388`, with `2046/2388`
-matching stock Git, `1/2388` open and `341/2388` invalid-input. No Rust
-behavior changed.
+`commit_v2_47.tsv` now records closed rows for trailer insertion with `-m`,
+trailer insertion with `-F`, repeated `--trailer`, `--signoff` combined with a
+trailer and editor-backed trailer insertion. Evidence comes from
+`git_commit_compat::commit_trailers_match_stock_git_object_and_editor_buffer`,
+comparing stock Git and Zmin commit objects, command output and editor input
+buffers. The oracle inventory now lists `512` represented/classified functions
+and `449` `missing_or_unclassified`. Current written rows are `2393`, with
+`2051/2393` matching stock Git, `1/2393` open and `341/2393` invalid-input. No
+Rust behavior changed.
 
 ### No-Skip Rule
 
@@ -649,7 +647,7 @@ report evidence and remain classified as invalid input, not open feature gaps.
 
 ### Current Slice Card
 
-This card is the exact handoff target after the current `2388` written-row
+This card is the exact handoff target after the current `2393` written-row
 state. Finish it before choosing another guard or command.
 
 | Field | Value |
@@ -668,7 +666,7 @@ small `unsupported` / `not supported` guard classification or a newly observed
 WebStorm replacement trace, whichever is more urgent.
 
 Do not publish a support percentage just because partial written rows are now
-`0/2388`; the `1/2388` open row and the still incomplete command/doc-option
+`0/2393`; the `1/2393` open row and the still incomplete command/doc-option
 matrices remain `0/151` and `0/4632`.
 
 The most recent closed transport lane is `clone --reference-if-able` for dumb
