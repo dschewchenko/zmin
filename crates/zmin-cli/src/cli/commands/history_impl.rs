@@ -1708,7 +1708,7 @@ pub(crate) fn shortlog(
     } else {
         groups.sort_by(|left, right| left.0.cmp(&right.0));
     }
-    for (idx, (name, subjects)) in groups.iter().enumerate() {
+    for (name, subjects) in &groups {
         if summary {
             println!("{:6}\t{}", subjects.len(), name);
             continue;
@@ -1717,9 +1717,7 @@ pub(crate) fn shortlog(
         for subject in subjects {
             println!("      {subject}");
         }
-        if idx + 1 < groups.len() {
-            println!();
-        }
+        println!();
     }
     Ok(())
 }
