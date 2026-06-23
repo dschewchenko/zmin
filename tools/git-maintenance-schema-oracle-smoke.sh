@@ -32,6 +32,15 @@ compare_files() {
   fi
 }
 
+normalize_config() {
+  local input="$1"
+  local output="$2"
+  local repo_path="$3"
+  local resolved_repo_path
+  resolved_repo_path="$(cd "$repo_path" && pwd -P)"
+  sed -e "s|$repo_path|<repo>|g" -e "s|$resolved_repo_path|<repo>|g" "$input" >"$output"
+}
+
 seed_repo() {
   local repo="$1"
   mkdir "$repo"
@@ -73,5 +82,54 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_config_file_case() {
+  local name="$1"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_home="$tmpdir/${name}.git.home"
+  local zmin_home="$tmpdir/${name}.zmin.home"
+  local git_config="$git_home/custom.gitconfig"
+  local zmin_config="$zmin_home/custom.gitconfig"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+  mkdir "$git_home" "$zmin_home"
+
+  set +e
+  HOME="$git_home" "$GIT_BIN" -C "$git_work" maintenance register --config-file "$git_config" >"$tmpdir/${name}.git.register.out" 2>"$tmpdir/${name}.git.register.err"
+  git_exit=$?
+  HOME="$zmin_home" "$ZMIN_BIN" -C "$zmin_work" maintenance register --config-file "$zmin_config" >"$tmpdir/${name}.zmin.register.out" 2>"$tmpdir/${name}.zmin.register.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files register-stdout "$tmpdir/${name}.git.register.out" "$tmpdir/${name}.zmin.register.out"
+  compare_files register-stderr "$tmpdir/${name}.git.register.err" "$tmpdir/${name}.zmin.register.err"
+  normalize_config "$git_config" "$tmpdir/${name}.git.register.config" "$git_work"
+  normalize_config "$zmin_config" "$tmpdir/${name}.zmin.register.config" "$zmin_work"
+  compare_files register-config "$tmpdir/${name}.git.register.config" "$tmpdir/${name}.zmin.register.config"
+
+  set +e
+  HOME="$git_home" "$GIT_BIN" -C "$git_work" maintenance unregister --config-file "$git_config" >"$tmpdir/${name}.git.unregister.out" 2>"$tmpdir/${name}.git.unregister.err"
+  git_exit=$?
+  HOME="$zmin_home" "$ZMIN_BIN" -C "$zmin_work" maintenance unregister --config-file "$zmin_config" >"$tmpdir/${name}.zmin.unregister.out" 2>"$tmpdir/${name}.zmin.unregister.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files unregister-stdout "$tmpdir/${name}.git.unregister.out" "$tmpdir/${name}.zmin.unregister.out"
+  compare_files unregister-stderr "$tmpdir/${name}.git.unregister.err" "$tmpdir/${name}.zmin.unregister.err"
+  normalize_config "$git_config" "$tmpdir/${name}.git.unregister.config" "$git_work"
+  normalize_config "$zmin_config" "$tmpdir/${name}.zmin.unregister.config" "$zmin_work"
+  compare_files unregister-config "$tmpdir/${name}.git.unregister.config" "$tmpdir/${name}.zmin.unregister.config"
+  "$GIT_BIN" -C "$git_work" status --short >"$tmpdir/${name}.git.status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$tmpdir/${name}.zmin.status"
+  compare_files status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
+  printf '%s\tok\tregister_exit=0\tunregister_exit=0\n' "$name"
+}
+
+run_config_file_case maintenance_register_unregister_config_file_long
 run_case maintenance_unregister_force_long --force
 run_case maintenance_unregister_force_short -f
