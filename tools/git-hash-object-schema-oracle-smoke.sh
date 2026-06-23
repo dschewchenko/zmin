@@ -97,5 +97,5 @@ run_gap() {
 }
 
 run_case hash_object_short_type_blob hash-object -t blob a.txt
-run_gap hash_object_long_type_rejected hash-object --type blob a.txt
-run_gap hash_object_long_write_gap hash-object --write a.txt
+run_case hash_object_long_type_rejected hash-object --type blob a.txt
+run_case hash_object_long_write_rejected hash-object --write a.txt

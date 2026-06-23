@@ -355,6 +355,12 @@ fn validate_hash_object_invocation_before_clap(command_args: &[String]) -> Resul
                 ),
             });
         }
+        if arg == "--write" {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: unknown option `write'\nusage: git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n                       [--stdin [--literally]] [--] <file>...\n   or: git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]\n\n    -t <type>             object type\n    -w                    write the object into the object database\n    --[no-]stdin          read the object from stdin\n    --[no-]stdin-paths    read file names from stdin\n    --no-filters          store file as is without filters\n    --filters             opposite of --no-filters\n    --[no-]literally      just hash any random garbage to create corrupt objects for debugging Git\n    --[no-]path <file>    process file as it were from this path\n\n".into(),
+            });
+        }
     }
     Ok(())
 }
