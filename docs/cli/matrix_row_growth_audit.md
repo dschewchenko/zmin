@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2840` | `+1746` |
-| Matching stock Git rows | `823` | `2451` | `+1628` |
+| Written behavior rows | `1094` | `2842` | `+1748` |
+| Matching stock Git rows | `823` | `2453` | `+1630` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `108/151` | `+58` |
-| Represented doc-option pairs | `253/4632` | `725/4632` | `+472` |
+| Represented doc-option pairs | `253/4632` | `726/4632` | `+473` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4570,3 +4570,45 @@ Actual post-import movement matched the declaration for matrix and census
 counts: `+7` behavior rows, `+7` closed rows, `+0` open rows, `+0`
 invalid-input rows, `+1` command with rows, `+4` represented doc-option pairs,
 `-7` implemented-but-unverified schema rows and `-1` remaining checklist row.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `name-rev` and `show-branch`
+schema surfaces, with focused stock-oracle shell evidence.
+
+Evidence source:
+
+- `tools/git-name-rev-show-branch-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `show-branch --no-name`;
+  `name-rev --undefined` closes a schema surface but is not a documented
+  option seed pair
+- implemented-but-unverified schema rows: expected `-2`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git name-rev --undefined <dangling-commit>`
+- `git show-branch --no-name main feature`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and clean
+worktree status using copied workdirs from one seed repository. Probe attempts
+for `git name-rev --all` and `git name-rev --always <dangling-commit>` exposed
+current output-order/fallback mismatches, so those schema surfaces remain
+implemented-but-unverified/fix-needed and are not counted as closed rows.
+
+Actual post-import movement matched the narrowed declaration: `+2` behavior
+rows, `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+1` represented doc-option pair, `-2`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
