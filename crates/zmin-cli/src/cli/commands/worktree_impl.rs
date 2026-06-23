@@ -9784,13 +9784,23 @@ fn checkout_new_branch(
     } else {
         format!("branch: Created from {start}")
     };
+    let reset_current_branch_old_id = if reset_existing
+        && current_branch_ref(&refs)?.as_deref() == Some(ref_name.as_str())
+    {
+        Some(refs.resolve(&ref_name)?)
+    } else {
+        None
+    };
     if create_reflog || checkout_branch_reflog_enabled(&repo)? {
         write_ref_with_reflog(&repo, &refs, &ref_name, &id, &branch_reflog_message)?;
     } else {
         refs.write_ref(&ref_name, &id)?;
     }
+    if let Some(old_id) = reset_current_branch_old_id {
+        append_reflog(&repo, "HEAD", &old_id, &id, &branch_reflog_message)?;
+    }
     if reset_existing {
-        checkout_existing(force, branch)
+        checkout_existing_with_message(force, branch, CheckoutBranchMessage::ResetBranch)
     } else {
         checkout_existing_with_message(force, branch, CheckoutBranchMessage::NewBranch)
     }
@@ -9881,6 +9891,7 @@ fn reject_orphan_checkout_dirty_worktree(repo: &GitRepo, _store: &LooseObjectSto
 enum CheckoutBranchMessage {
     ExistingBranch,
     NewBranch,
+    ResetBranch,
 }
 
 pub(crate) fn checkout_existing(force: bool, target: &str) -> Result<()> {
@@ -9905,7 +9916,8 @@ fn checkout_existing_with_message(
         resolve_commitish(&repo, &store, target)?
     };
     let current_id = head_refs.resolve("HEAD").ok();
-    if current_id.as_ref() != Some(&target_id) {
+    let force_transition = matches!(branch_message, CheckoutBranchMessage::ResetBranch);
+    if force_transition || current_id.as_ref() != Some(&target_id) {
         let checkout_metadata = WorktreeCheckoutMetadata {
             ref_name: target_branch_ref.clone(),
             treeish: Some(target_id.clone()),
@@ -9936,6 +9948,7 @@ fn checkout_existing_with_message(
                 eprintln!("Already on '{target}'")
             }
             CheckoutBranchMessage::ExistingBranch => eprintln!("Switched to branch '{target}'"),
+            CheckoutBranchMessage::ResetBranch => eprintln!("Reset branch '{target}'"),
             CheckoutBranchMessage::NewBranch => {
                 eprintln!("Switched to a new branch '{target}'")
             }
