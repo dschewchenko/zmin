@@ -5758,7 +5758,16 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
             message: "depth value is not a positive number".into(),
         });
     }
-    if options.keep || options.upload_pack.is_some() || options.diag_url || options.verbose {
+    if options.diag_url {
+        return fetch_pack_diag_url(&options.directory);
+    }
+    let _ = options.quiet;
+    if options.keep
+        || options
+            .upload_pack
+            .as_deref()
+            .is_some_and(|command| command != "git-upload-pack")
+    {
         return Err(CliError::Fatal {
             code: 129,
             message: "fetch-pack currently supports local refs without optional negotiation modes"
@@ -5782,6 +5791,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
         collect_trimmed_lines_from_reader(&mut stdin, &mut requested)?;
     }
     if options.all {
+        requested.push("HEAD".to_owned());
         source_refs.for_each_ref_name("refs/", |ref_name| {
             requested.push(ref_name.to_owned());
             Ok::<(), CliError>(())
@@ -5807,6 +5817,9 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     });
     for ref_name in requested {
         let id = source_refs.resolve(&ref_name)?;
+        if options.verbose {
+            eprintln!("want {} ({})", id.to_hex(), ref_name);
+        }
         if let Some(depth) = options.depth {
             if object_kind_hint_or_read(&source_store, &id)? == GitObjectKind::Commit {
                 let depth_limited_commits = upload_pack_depth_limited_commits(
@@ -5839,9 +5852,10 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
                 &mut fetched_objects,
             )?;
         }
-        if !options.quiet {
-            println!("{} {}", id.to_hex(), ref_name);
-        }
+        println!("{} {}", id.to_hex(), ref_name);
+    }
+    if !options.no_progress {
+        write_fetch_pack_local_progress(fetched_objects.len());
     }
     if let Some(depth) = options.depth {
         let shallow_root_capacity = transport_ref_collection_capacity(shallow_roots.len());
@@ -5869,6 +5883,32 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     }
     let _ = (options.thin, options.no_progress);
     Ok(())
+}
+
+fn fetch_pack_diag_url(directory: &str) -> Result<()> {
+    let path = absolute_path_from_arg(std::path::Path::new(directory))?;
+    println!("Diag: url={}", path.display());
+    println!("Diag: protocol=file");
+    println!("Diag: hostandport=");
+    println!("Diag: path={}", path.display());
+    Ok(())
+}
+
+fn write_fetch_pack_local_progress(objects: usize) {
+    eprintln!("remote: Enumerating objects: {objects}, done.        ");
+    if objects > 0 {
+        for index in 1..=objects {
+            let percent = index * 100 / objects;
+            eprint!(
+                "remote: Counting objects: {:3}% ({}/{})        \r",
+                percent, index, objects
+            );
+        }
+        eprintln!(
+            "remote: Counting objects: 100% ({objects}/{objects}), done.        "
+        );
+    }
+    eprintln!("remote: Total {objects} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)        ");
 }
 
 pub(crate) fn copy_reachable_objects(

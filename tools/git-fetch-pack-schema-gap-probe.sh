@@ -18,14 +18,18 @@ make_remote() {
   local root="$1"
   mkdir "$root"
   "$GIT_BIN" -C "$root" init -q --bare remote.git
-  "$GIT_BIN" -C "$root" init -q -b main work
-  "$GIT_BIN" -C "$root/work" config user.name "Oracle"
-  "$GIT_BIN" -C "$root/work" config user.email "oracle@example.com"
-  printf 'base\n' >"$root/work/file.txt"
-  "$GIT_BIN" -C "$root/work" add file.txt
-  "$GIT_BIN" -C "$root/work" commit -qm "base"
-  "$GIT_BIN" -C "$root/work" remote add origin "$root/remote.git"
-  "$GIT_BIN" -C "$root/work" push -q origin main
+  local blob
+  local tree
+  local commit
+  blob="$(printf 'base\n' | "$GIT_BIN" --git-dir="$root/remote.git" hash-object -w --stdin)"
+  tree="$(printf '100644 blob %s\tfile.txt\n' "$blob" | "$GIT_BIN" --git-dir="$root/remote.git" mktree)"
+  commit="$(printf 'base\n' | \
+    GIT_AUTHOR_NAME="Oracle" \
+    GIT_AUTHOR_EMAIL="oracle@example.com" \
+    GIT_COMMITTER_NAME="Oracle" \
+    GIT_COMMITTER_EMAIL="oracle@example.com" \
+    "$GIT_BIN" --git-dir="$root/remote.git" commit-tree "$tree")"
+  "$GIT_BIN" --git-dir="$root/remote.git" update-ref refs/heads/main "$commit"
   "$GIT_BIN" -C "$root/remote.git" symbolic-ref HEAD refs/heads/main
 }
 
@@ -75,17 +79,61 @@ run_gap() {
   fi
 }
 
+normalize_trace() {
+  local path="$1"
+  local root="$2"
+  python3 - "$path" "$root" <<'PY'
+import re
+import sys
+path, root = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8", errors="replace").read()
+text = text.replace(root, "__ROOT__")
+text = re.sub(r"\b[0-9a-f]{40}\b", "__OID__", text)
+text = re.sub(r"Counting objects:\s+\d+% \(\d+/\d+\)\s*\r?", "Counting objects: __PROGRESS__", text)
+print(text, end="")
+PY
+}
+
+run_oracle() {
+  local name="$1"
+  local stdin_data="$2"
+  shift 2
+  local git_client="$tmpdir/$name.git-client"
+  local zmin_client="$tmpdir/$name.zmin-client"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_client "$git_client"
+  make_client "$zmin_client"
+
+  set +e
+  printf '%s' "$stdin_data" | "$GIT_BIN" -C "$git_client" fetch-pack "$@" >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
+  git_exit=$?
+  printf '%s' "$stdin_data" | "$ZMIN_BIN" -C "$zmin_client" fetch-pack "$@" >"$tmpdir/$name.zmin.out" 2>"$tmpdir/$name.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  normalize_trace "$tmpdir/$name.git.out" "$tmpdir" >"$tmpdir/$name.git.out.norm"
+  normalize_trace "$tmpdir/$name.zmin.out" "$tmpdir" >"$tmpdir/$name.zmin.out.norm"
+  normalize_trace "$tmpdir/$name.git.err" "$tmpdir" >"$tmpdir/$name.git.err.norm"
+  normalize_trace "$tmpdir/$name.zmin.err" "$tmpdir" >"$tmpdir/$name.zmin.err.norm"
+  cmp -s "$tmpdir/$name.git.out.norm" "$tmpdir/$name.zmin.out.norm"
+  cmp -s "$tmpdir/$name.git.err.norm" "$tmpdir/$name.zmin.err.norm"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 root="$tmpdir/root"
 make_remote "$root"
 remote="$root/remote.git"
 
-run_gap fetch_pack_all 0 0 "" --all "$remote"
-run_gap fetch_pack_stdin 0 0 "refs/heads/main"$'\n' --stdin "$remote"
-run_gap fetch_pack_quiet 0 0 "" --quiet "$remote" refs/heads/main
+run_oracle fetch_pack_all "" --all "$remote"
+run_oracle fetch_pack_stdin "refs/heads/main"$'\n' --stdin "$remote"
+run_oracle fetch_pack_quiet "" --quiet "$remote" refs/heads/main
 run_gap fetch_pack_keep 0 129 "" --keep "$remote" refs/heads/main
-run_gap fetch_pack_upload_pack 0 129 "" --upload-pack=git-upload-pack "$remote" refs/heads/main
-run_gap fetch_pack_diag_url 0 129 "" --diag-url "$remote"
-run_gap fetch_pack_verbose_long 129 129 "" --verbose "$remote" refs/heads/main
+run_oracle fetch_pack_upload_pack "" --upload-pack=git-upload-pack "$remote" refs/heads/main
+run_oracle fetch_pack_diag_url "" --diag-url "$remote"
+run_gap fetch_pack_verbose_long 129 0 "" --verbose "$remote" refs/heads/main
 run_gap fetch_pack_keep_short 0 129 "" -k "$remote" refs/heads/main
-run_gap fetch_pack_quiet_short 0 0 "" -q "$remote" refs/heads/main
-run_gap fetch_pack_verbose_short 0 129 "" -v "$remote" refs/heads/main
+run_oracle fetch_pack_quiet_short "" -q "$remote" refs/heads/main
+run_oracle fetch_pack_verbose_short "" -v "$remote" refs/heads/main
