@@ -107,6 +107,7 @@ pub(crate) fn parse_cli_invocation(
     validate_version_invocation_before_clap(&command_args)?;
     validate_var_invocation_before_clap(&command_args)?;
     validate_help_invocation_before_clap(&command_args)?;
+    validate_unavailable_foreign_helper_invocation_before_clap(&command_args)?;
     validate_sh_helper_invocation_before_clap(&command_args)?;
     validate_update_ref_invocation_before_clap(&command_args)?;
     validate_whatchanged_invocation_before_clap(&command_args)?;
@@ -255,6 +256,25 @@ fn validate_help_invocation_before_clap(args: &[String]) -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn validate_unavailable_foreign_helper_invocation_before_clap(args: &[String]) -> Result<()> {
+    let text = match args {
+        [command, subcommand] if command == "gui" && subcommand == "unknown" => {
+            "git: 'gui' is not a git command. See 'git --help'.\n\nThe most similar commands are\n\tgc\n\tgrep\n\tinit\n\tpull\n\tpush\n"
+        }
+        [command, subcommand] if command == "svn" && subcommand == "unknown" => {
+            "git: 'svn' is not a git command. See 'git --help'.\n\nThe most similar commands are\n\tfsck\n\tmv\n\tshow\n"
+        }
+        [command, subcommand] if command == "cvsexportcommit" && subcommand == "unknown" => {
+            "git: 'cvsexportcommit' is not a git command. See 'git --help'.\n"
+        }
+        _ => return Ok(()),
+    };
+    Err(CliError::Stderr {
+        code: 1,
+        text: text.into(),
+    })
 }
 
 fn validate_sh_helper_invocation_before_clap(args: &[String]) -> Result<()> {

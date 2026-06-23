@@ -110,8 +110,36 @@ run_help_exact() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_probe cvsexportcommit unknown cvsexportcommit_positional_unknown_gap
+run_exact() {
+  local command="$1"
+  local arg="$2"
+  local name="$3"
+  local expected_exit="$4"
+  local git_exit=0
+  local zmin_exit=0
+
+  set +e
+  (
+    cd "$tmpdir"
+    "$GIT_BIN" "$command" "$arg"
+  ) >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  (
+    cd "$tmpdir"
+    "$ZMIN_BIN" "$command" "$arg"
+  ) >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  test "$git_exit" = "$expected_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
+run_exact cvsexportcommit unknown cvsexportcommit_positional_unknown 1
 run_probe cvsimport unknown cvsimport_positional_unknown_gap
-run_probe gui unknown gui_positional_unknown_gap
+run_exact gui unknown gui_positional_unknown 1
 run_help_exact
-run_probe svn unknown svn_positional_unknown_gap
+run_exact svn unknown svn_positional_unknown 1
