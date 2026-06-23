@@ -200,10 +200,7 @@ pub(crate) fn http_fetch(options: HttpFetchOptions) -> Result<()> {
         roots.push(ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?);
     }
     if roots.is_empty() {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "usage: git http-fetch [-c] [-t] [-a] [-v] [--recover] [-w ref] [--stdin | commit-id] url".into(),
-        });
+        return Err(http_fetch_usage_error());
     }
     let url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
     let mut helper = RemoteHttpHelperSession::spawn(&url)?;
@@ -230,6 +227,13 @@ pub(crate) fn http_fetch(options: HttpFetchOptions) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn http_fetch_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: "usage: git http-fetch [-c] [-t] [-a] [-v] [--recover] [-w ref] [--stdin | --packfile=hash | commit-id] url\n".into(),
+    }
 }
 
 fn collect_first_token_object_ids_from_reader<R: BufRead>(
@@ -734,10 +738,7 @@ fn parse_http_fetch_args(options: &HttpFetchOptions) -> Result<(Option<String>, 
     match (options.stdin, options.args.as_slice()) {
         (true, [url]) => Ok((None, url.clone())),
         (false, [commit_id, url]) => Ok((Some(commit_id.clone()), url.clone())),
-        _ => Err(CliError::Fatal {
-            code: 129,
-            message: "usage: git http-fetch [-c] [-t] [-a] [-v] [--recover] [-w ref] [--stdin | commit-id] url".into(),
-        }),
+        _ => Err(http_fetch_usage_error()),
     }
 }
 

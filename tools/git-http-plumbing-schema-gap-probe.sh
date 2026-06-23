@@ -46,9 +46,9 @@ run_case() {
     http_fetch_*_usage_gap)
       test "$git_exit" = 129
       test "$zmin_exit" = 129
-      grep -F "usage: git http-fetch" "$tmpdir/${name}.git.err" >/dev/null
-      grep -F "fatal: usage: git http-fetch" "$tmpdir/${name}.zmin.err" >/dev/null
-      printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+      cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+      cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+      printf '%s\tok\texit=%s\n' "$name" "$git_exit"
       ;;
     http_push_*_outside_repo_gap)
       test "$git_exit" = 128
