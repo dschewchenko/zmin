@@ -112,6 +112,23 @@ prep_mv_force() {
   done
 }
 
+prep_tag_force() {
+  for repo in "$1" "$2"; do
+    "$GIT_BIN" -C "$repo" tag v1
+    printf 'two\n' >"$repo/a.txt"
+    "$GIT_BIN" -C "$repo" commit -q -am second
+  done
+}
+
+verify_refs() {
+  local name="$1"
+  local git_work="$2"
+  local zmin_work="$3"
+  "$GIT_BIN" -C "$git_work" show-ref --tags >"$tmpdir/${name}.git.tags"
+  "$GIT_BIN" -C "$zmin_work" show-ref --tags >"$tmpdir/${name}.zmin.tags"
+  compare_files tags "$tmpdir/${name}.git.tags" "$tmpdir/${name}.zmin.tags"
+}
+
 prep_switch_force() {
   for repo in "$1" "$2"; do
     "$GIT_BIN" -C "$repo" switch -q -c feature
@@ -136,5 +153,7 @@ run_pair rm_force_long prep_rm_force verify_index_and_worktree rm --force a.txt
 run_pair rm_force_short prep_rm_force verify_index_and_worktree rm -f a.txt
 run_pair mv_force_long prep_mv_force verify_index_and_worktree mv --force a.txt dst.txt
 run_pair mv_force_short prep_mv_force verify_index_and_worktree mv -f a.txt dst.txt
+run_pair tag_force_long prep_tag_force verify_refs tag --force v1 HEAD
+run_pair tag_force_short prep_tag_force verify_refs tag -f v1 HEAD
 run_pair switch_force_long prep_switch_force verify_head_and_file switch --force feature
 run_pair switch_force_short prep_switch_force verify_head_and_file switch -f feature

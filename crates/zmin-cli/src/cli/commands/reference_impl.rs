@@ -6265,7 +6265,8 @@ fn tag(options: TagOptions) -> Result<()> {
     }
     let name = &options.args[0];
     let ref_name = tag_ref_name(name)?;
-    if !options.force && ref_exists(&refs, &ref_name)? {
+    let previous_id = refs.resolve(&ref_name).ok();
+    if !options.force && previous_id.is_some() {
         return Err(CliError::Fatal {
             code: 128,
             message: format!("tag '{name}' already exists"),
@@ -6292,6 +6293,12 @@ fn tag(options: TagOptions) -> Result<()> {
         id
     };
     refs.write_ref(&ref_name, &id)?;
+    if options.force
+        && let Some(previous_id) = previous_id
+        && previous_id != id
+    {
+        println!("Updated tag '{name}' (was {})", short_object_id(&previous_id));
+    }
     Ok(())
 }
 
