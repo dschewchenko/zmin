@@ -65,7 +65,8 @@ record_state() {
 
 run_exact() {
   local name="$1"
-  shift
+  local stdin_text="$2"
+  shift 2
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
   local git_exit=0
@@ -75,9 +76,9 @@ run_exact() {
   cp -R "$git_work" "$zmin_work"
 
   set +e
-  "$GIT_BIN" -C "$git_work" mergetool "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  printf '%b' "$stdin_text" | "$GIT_BIN" -C "$git_work" mergetool "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
   git_exit=$?
-  "$ZMIN_BIN" -C "$zmin_work" mergetool "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  printf '%b' "$stdin_text" | "$ZMIN_BIN" -C "$zmin_work" mergetool "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
   zmin_exit=$?
   set -e
 
@@ -92,5 +93,6 @@ run_exact() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_exact mergetool_tool_short -t zmintest --no-prompt f.txt
-run_exact mergetool_no_prompt_short --tool=zmintest -y f.txt
+run_exact mergetool_tool_short "" -t zmintest --no-prompt f.txt
+run_exact mergetool_no_prompt_short "" --tool=zmintest -y f.txt
+run_exact mergetool_prompt_long "\n" --tool=zmintest --prompt f.txt

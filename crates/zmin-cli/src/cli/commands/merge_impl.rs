@@ -667,7 +667,12 @@ pub(crate) fn merge_index(
     }
 }
 
-pub(crate) fn mergetool(tool: Option<&str>, paths: Vec<PathBuf>) -> Result<()> {
+pub(crate) fn mergetool(
+    tool: Option<&str>,
+    no_prompt: bool,
+    prompt: bool,
+    paths: Vec<PathBuf>,
+) -> Result<()> {
     let repo = find_repo()?;
     let tool = match tool {
         Some(tool) => tool.to_owned(),
@@ -694,8 +699,9 @@ pub(crate) fn mergetool(tool: Option<&str>, paths: Vec<PathBuf>) -> Result<()> {
         println!("{}", String::from_utf8_lossy(path));
     }
     println!();
+    let prompt = prompt && !no_prompt;
     for path in selected {
-        run_mergetool_path(&repo, &store, &mut index, &command, &path)?;
+        run_mergetool_path(&repo, &store, &mut index, &tool, &command, prompt, &path)?;
     }
     index.write_to_path(&repo.index_path)?;
     Ok(())
@@ -722,7 +728,9 @@ fn run_mergetool_path(
     repo: &GitRepo,
     store: &LooseObjectStore,
     index: &mut GitIndex,
+    tool: &str,
     command: &str,
+    prompt: bool,
     path: &[u8],
 ) -> Result<()> {
     let (base, ours, theirs) = merge_index_stages(index, path);
@@ -731,6 +739,12 @@ fn run_mergetool_path(
     println!("Normal merge conflict for '{path_text}':");
     println!("  {{local}}: modified file");
     println!("  {{remote}}: modified file");
+    if prompt {
+        print!("Hit return to start merge resolution tool ({tool}): ");
+        io::stdout().flush()?;
+        let mut answer = String::new();
+        io::stdin().read_line(&mut answer)?;
+    }
     let temp_root = diff_commands::create_difftool_temp_root()?;
     let result = run_mergetool_command_for_path(repo, store, command, &temp_root, path, &stages)
         .and_then(|()| stage_mergetool_result(repo, store, index, path));
