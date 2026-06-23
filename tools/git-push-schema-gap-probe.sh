@@ -18,10 +18,10 @@ seed_pair() {
   local name="$1"
   local mode="$2"
   local source="$tmpdir/${name}.source"
-  git_remote="$tmpdir/${name}.git.remote.git"
-  zmin_remote="$tmpdir/${name}.zmin.remote.git"
+  remote="$tmpdir/${name}.remote.git"
   git_work="$tmpdir/${name}.git"
   zmin_work="$tmpdir/${name}.zmin"
+  initial_remote_main=""
 
   "$GIT_BIN" init -q -b main "$source"
   "$GIT_BIN" -C "$source" config user.name "Oracle"
@@ -29,12 +29,11 @@ seed_pair() {
   printf 'one\n' >"$source/a.txt"
   "$GIT_BIN" -C "$source" add -A
   commit_fixed "$source" "one"
-  "$GIT_BIN" clone -q --bare "$source" "$git_remote"
-  "$GIT_BIN" clone -q --bare "$source" "$zmin_remote"
+  "$GIT_BIN" clone -q --bare "$source" "$remote"
   "$GIT_BIN" clone -q "$source" "$git_work"
   "$GIT_BIN" clone -q "$source" "$zmin_work"
-  "$GIT_BIN" -C "$git_work" remote set-url origin "$git_remote"
-  "$GIT_BIN" -C "$zmin_work" remote set-url origin "$zmin_remote"
+  "$GIT_BIN" -C "$git_work" remote set-url origin "$remote"
+  "$GIT_BIN" -C "$zmin_work" remote set-url origin "$remote"
   "$GIT_BIN" -C "$git_work" config --unset-all branch.main.remote || true
   "$GIT_BIN" -C "$git_work" config --unset-all branch.main.merge || true
   "$GIT_BIN" -C "$zmin_work" config --unset-all branch.main.remote || true
@@ -46,8 +45,8 @@ seed_pair() {
       "$GIT_BIN" -C "$work" add -A
       commit_fixed "$work" "two"
     done
-    rewrite_remote "$git_remote"
-    rewrite_remote "$zmin_remote"
+    rewrite_remote "$remote"
+    initial_remote_main="$("$GIT_BIN" --git-dir="$remote" rev-parse refs/heads/main)"
   fi
 }
 
@@ -60,7 +59,7 @@ commit_fixed() {
     GIT_COMMITTER_NAME="Oracle" \
     GIT_COMMITTER_EMAIL="oracle@example.test" \
     GIT_COMMITTER_DATE="2030-01-01T00:00:00 +0000" \
-    "$GIT_BIN" -C "$repo" commit -qm "$message"
+    "$GIT_BIN" -c commit.gpgsign=false -C "$repo" commit -qm "$message"
 }
 
 rewrite_remote() {
@@ -76,7 +75,7 @@ rewrite_remote() {
     GIT_COMMITTER_NAME="Oracle" \
     GIT_COMMITTER_EMAIL="oracle@example.test" \
     GIT_COMMITTER_DATE="2030-01-02T00:00:00 +0000" \
-    "$GIT_BIN" -C "$work" commit -am "remote" -q
+    "$GIT_BIN" -c commit.gpgsign=false -C "$work" commit -am "remote" -q
   "$GIT_BIN" -C "$work" push -q origin main
 }
 
@@ -88,6 +87,24 @@ remote_refs() {
 upstream_config() {
   local repo="$1"
   "$GIT_BIN" -C "$repo" config --get-regexp '^branch\.main\.' || true
+}
+
+reset_remote_after_stock_push() {
+  if [ -n "${initial_remote_main:-}" ]; then
+    "$GIT_BIN" --git-dir="$remote" update-ref refs/heads/main "$initial_remote_main"
+  fi
+}
+
+capture_stock_state() {
+  local name="$1"
+  remote_refs "$remote" >"$tmpdir/${name}.git.refs"
+  upstream_config "$git_work" >"$tmpdir/${name}.git.config"
+}
+
+capture_zmin_state() {
+  local name="$1"
+  remote_refs "$remote" >"$tmpdir/${name}.zmin.refs"
+  upstream_config "$zmin_work" >"$tmpdir/${name}.zmin.config"
 }
 
 compare_files() {
@@ -113,14 +130,13 @@ run_case() {
   set +e
   "$GIT_BIN" -C "$git_work" push "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
   git_exit=$?
+  capture_stock_state "$name"
+  reset_remote_after_stock_push
   (cd "$zmin_work" && "$ZMIN_BIN" push "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
   zmin_exit=$?
   set -e
 
-  remote_refs "$git_remote" >"$tmpdir/${name}.git.refs"
-  remote_refs "$zmin_remote" >"$tmpdir/${name}.zmin.refs"
-  upstream_config "$git_work" >"$tmpdir/${name}.git.config"
-  upstream_config "$zmin_work" >"$tmpdir/${name}.zmin.config"
+  capture_zmin_state "$name"
 
   test "$git_exit" = "$zmin_exit"
   compare_files refs "$tmpdir/${name}.git.refs" "$tmpdir/${name}.zmin.refs"
@@ -146,14 +162,13 @@ run_gap() {
   set +e
   "$GIT_BIN" -C "$git_work" push "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
   git_exit=$?
+  capture_stock_state "$name"
+  reset_remote_after_stock_push
   (cd "$zmin_work" && "$ZMIN_BIN" push "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
   zmin_exit=$?
   set -e
 
-  remote_refs "$git_remote" >"$tmpdir/${name}.git.refs"
-  remote_refs "$zmin_remote" >"$tmpdir/${name}.zmin.refs"
-  upstream_config "$git_work" >"$tmpdir/${name}.git.config"
-  upstream_config "$zmin_work" >"$tmpdir/${name}.zmin.config"
+  capture_zmin_state "$name"
   cmp -s "$tmpdir/${name}.git.refs" "$tmpdir/${name}.zmin.refs" && refs_match=1
   cmp -s "$tmpdir/${name}.git.config" "$tmpdir/${name}.zmin.config" && config_match=1
   cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" && stdout_match=1
@@ -163,11 +178,13 @@ run_gap() {
     [ "$config_match" = 1 ] &&
     [ "$stdout_match" = 1 ] &&
     [ "$stderr_match" = 1 ]; then
-    echo "$name unexpectedly matches stock Git; update the matrix row" >&2
-    return 1
+    printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\trefs_match=%s\tconfig_match=%s\tstdout_match=%s\tstderr_match=%s\n' \
+      "$name" "$git_exit" "$zmin_exit" "$refs_match" "$config_match" "$stdout_match" "$stderr_match"
+    return 0
   fi
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\trefs_match=%s\tconfig_match=%s\tstdout_match=%s\tstderr_match=%s\n' \
     "$name" "$git_exit" "$zmin_exit" "$refs_match" "$config_match" "$stdout_match" "$stderr_match"
+  return 1
 }
 
 run_case push_set_upstream_long initial --set-upstream origin main
