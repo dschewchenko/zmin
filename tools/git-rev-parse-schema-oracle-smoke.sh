@@ -78,4 +78,37 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_gap() {
+  local name="$1"
+  shift
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$seed"
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  if test "$git_exit" = "$zmin_exit" \
+    && cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
+    && cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
+    echo "$name unexpectedly matched" >&2
+    exit 1
+  fi
+  "$GIT_BIN" -C "$git_work" status --short >"$tmpdir/${name}.git.status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$tmpdir/${name}.zmin.status"
+  compare_files worktree_status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
+  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_case rev_parse_positional_revs rev-parse HEAD
+run_gap rev_parse_quiet_short_gap rev-parse -q --verify missing
