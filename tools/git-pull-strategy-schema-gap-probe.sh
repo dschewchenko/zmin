@@ -54,16 +54,23 @@ parent_count() {
   "$GIT_BIN" -C "$repo" rev-list --parents -1 HEAD | awk '{ print NF }'
 }
 
-run_gap() {
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+run_case() {
   local name="pull_strategy_long"
   local git_repo="$tmpdir/$name.git"
   local zmin_repo="$tmpdir/$name.zmin"
   local git_exit=0
   local zmin_exit=0
-  local stdout_match=0
-  local stderr_match=0
-  local tree_names_match=0
-  local parent_count_match=0
 
   seed_repo "$git_repo"
   seed_repo "$zmin_repo"
@@ -80,22 +87,13 @@ run_gap() {
   parent_count "$git_repo" >"$tmpdir/$name.git.parent-count"
   parent_count "$zmin_repo" >"$tmpdir/$name.zmin.parent-count"
 
-  cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" && stdout_match=1
-  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err" && stderr_match=1
-  cmp -s "$tmpdir/$name.git.tree-names" "$tmpdir/$name.zmin.tree-names" && tree_names_match=1
-  cmp -s "$tmpdir/$name.git.parent-count" "$tmpdir/$name.zmin.parent-count" && parent_count_match=1
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
+  compare_files stderr "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
+  compare_files tree_names "$tmpdir/$name.git.tree-names" "$tmpdir/$name.zmin.tree-names"
+  compare_files parent_count "$tmpdir/$name.git.parent-count" "$tmpdir/$name.zmin.parent-count"
 
-  if [ "$git_exit" = "$zmin_exit" ] &&
-    [ "$stdout_match" = 1 ] &&
-    [ "$stderr_match" = 1 ] &&
-    [ "$tree_names_match" = 1 ] &&
-    [ "$parent_count_match" = 1 ]; then
-    echo "$name unexpectedly matches stock Git; update the matrix row" >&2
-    return 1
-  fi
-
-  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\ttree_names_match=%s\tparent_count_match=%s\n' \
-    "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match" "$tree_names_match" "$parent_count_match"
+  printf '%s\texact\texit=%s\n' "$name" "$git_exit"
 }
 
-run_gap
+run_case
