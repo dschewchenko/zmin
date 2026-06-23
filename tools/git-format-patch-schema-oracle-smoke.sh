@@ -142,6 +142,44 @@ run_directory_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_directory_gap() {
+  local name="$1"
+  shift
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git"
+  local zmin_work="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_seed_repo "$seed"
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+  mkdir "$git_work/out" "$zmin_work/out"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" format-patch "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" format-patch "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  (cd "$git_work/out" && find . -type f | sort) >"$tmpdir/${name}.git.files"
+  (cd "$zmin_work/out" && find . -type f | sort) >"$tmpdir/${name}.zmin.files"
+
+  if test "$git_exit" = "$zmin_exit" &&
+    cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" &&
+    cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" &&
+    cmp -s "$tmpdir/${name}.git.files" "$tmpdir/${name}.zmin.files"; then
+    echo "$name unexpectedly matches stock Git; update the open matrix row" >&2
+    return 1
+  fi
+
+  compare_status "$name" "$git_work" "$zmin_work"
+  printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_stdout_case format_patch_attach_long --stdout --attach HEAD~2..HEAD
 run_stdout_case format_patch_numbered_long --stdout --numbered HEAD~2..HEAD
 run_directory_case format_patch_output_directory_long --output-directory out HEAD~2..HEAD
+run_directory_gap format_patch_numbered_files_long --output-directory out --numbered-files HEAD~2..HEAD
+run_directory_gap format_patch_suffix_long --output-directory out --suffix=.mbox HEAD~2..HEAD
