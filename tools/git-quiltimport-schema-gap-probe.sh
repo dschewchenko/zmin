@@ -20,6 +20,7 @@ make_seed_repo() {
   "$GIT_BIN" -C "$repo" init -q -b main
   "$GIT_BIN" -C "$repo" config user.name "Oracle"
   "$GIT_BIN" -C "$repo" config user.email "oracle@example.test"
+  "$GIT_BIN" -C "$repo" config commit.gpgsign false
   printf 'base\n' >"$repo/file.txt"
   "$GIT_BIN" -C "$repo" add -A
   GIT_AUTHOR_DATE="1893456000 +0000" \
@@ -59,6 +60,7 @@ make_keep_non_patch_seed_repo() {
   "$GIT_BIN" -C "$repo" init -q -b main
   "$GIT_BIN" -C "$repo" config user.name "Oracle"
   "$GIT_BIN" -C "$repo" config user.email "oracle@example.test"
+  "$GIT_BIN" -C "$repo" config commit.gpgsign false
   printf 'base\n' >"$repo/file.txt"
   "$GIT_BIN" -C "$repo" add -A
   GIT_AUTHOR_DATE="1893456000 +0000" \
@@ -80,15 +82,15 @@ index df967b9..ce01362 100644
 PATCH
 }
 
-run_probe() {
+run_series_explicit_case() {
   local name="$1"
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
   local git_exit=0
   local zmin_exit=0
 
-  cp -R "$base_seed" "$git_work"
-  cp -R "$base_seed" "$zmin_work"
+  copy_seed_repo "$base_seed" "$git_work"
+  copy_seed_repo "$base_seed" "$zmin_work"
 
   set +e
   (
@@ -107,10 +109,19 @@ run_probe() {
   zmin_exit=$?
   set -e
 
-  test "$git_exit" = 4
-  test "$zmin_exit" = 0
-  grep -F "error: file.txt: does not match index" "$tmpdir/${name}.git.err" >/dev/null
-  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  compare_files status \
+    <("$GIT_BIN" -C "$git_work" status --short) \
+    <("$GIT_BIN" -C "$zmin_work" status --short)
+  compare_files log \
+    <("$GIT_BIN" -C "$git_work" log --format='%an <%ae>|%s|%b' --reverse) \
+    <("$GIT_BIN" -C "$zmin_work" log --format='%an <%ae>|%s|%b' --reverse)
+  compare_files tree \
+    <("$GIT_BIN" -C "$git_work" rev-parse HEAD^{tree}) \
+    <("$GIT_BIN" -C "$zmin_work" rev-parse HEAD^{tree})
+  printf '%s\texact\texit=%s\n' "$name" "$git_exit"
 }
 
 compare_files() {
@@ -124,6 +135,13 @@ compare_files() {
   fi
 }
 
+copy_seed_repo() {
+  local source="$1"
+  local target="$2"
+  cp -R "$source" "$target"
+  "$GIT_BIN" -C "$target" update-index --refresh >/dev/null
+}
+
 run_keep_non_patch_case() {
   local name="$1"
   local git_work="$tmpdir/${name}.git"
@@ -131,8 +149,8 @@ run_keep_non_patch_case() {
   local git_exit=0
   local zmin_exit=0
 
-  cp -R "$keep_non_patch_seed" "$git_work"
-  cp -R "$keep_non_patch_seed" "$zmin_work"
+  copy_seed_repo "$keep_non_patch_seed" "$git_work"
+  copy_seed_repo "$keep_non_patch_seed" "$zmin_work"
 
   set +e
   (
@@ -161,5 +179,5 @@ base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 keep_non_patch_seed="$tmpdir/keep-non-patch-base"
 make_keep_non_patch_seed_repo "$keep_non_patch_seed"
-run_probe quiltimport_series_explicit_gap
+run_series_explicit_case quiltimport_series_explicit
 run_keep_non_patch_case quiltimport_keep_non_patch
