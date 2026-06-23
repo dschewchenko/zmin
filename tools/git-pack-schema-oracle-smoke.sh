@@ -108,7 +108,13 @@ run_index_pack_exact() {
   test "$git_exit" = "$zmin_exit"
   compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
   compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
-  compare_files out_idx "$git_work/out.idx" "$zmin_work/out.idx"
+  local git_idx="$git_work/out.idx"
+  local zmin_idx="$zmin_work/out.idx"
+  if ! test -e "$git_idx"; then
+    git_idx="${git_pack%.pack}.idx"
+    zmin_idx="${zmin_pack%.pack}.idx"
+  fi
+  compare_files out_idx "$git_idx" "$zmin_idx"
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
@@ -199,6 +205,6 @@ run_repack_gap() {
 
 run_pack_objects_gap pack_objects_all_long --all
 run_index_pack_exact index_pack_output_short -o out.idx
-run_index_pack_gap index_pack_verbose_short -v
+run_index_pack_exact index_pack_verbose_short -v
 run_repack_exact repack_quiet_long --quiet
 run_repack_gap repack_threads_long --threads=1

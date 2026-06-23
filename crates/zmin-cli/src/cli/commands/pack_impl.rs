@@ -4513,7 +4513,10 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
-        let _ = (options.rev_index, options.verbose);
+        if options.verbose {
+            print_index_pack_verbose_progress(&indexed.index)?;
+        }
+        let _ = options.rev_index;
         print_index_pack_installed_output(&indexed.pack_id, kept);
         return Ok(());
     }
@@ -4568,7 +4571,10 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
-        let _ = (options.rev_index, options.verbose);
+        if options.verbose {
+            print_index_pack_verbose_progress(&indexed.index)?;
+        }
+        let _ = options.rev_index;
         print_index_pack_installed_output(&indexed.pack_id, kept);
         return Ok(());
     }
@@ -4636,7 +4642,10 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
-        let _ = (options.rev_index, options.verbose, repair.fixed_objects);
+        if options.verbose {
+            print_index_pack_verbose_progress(&repair.indexed.index)?;
+        }
+        let _ = (options.rev_index, repair.fixed_objects);
         print_index_pack_installed_output(&repair.indexed.pack_id, kept);
         return Ok(());
     }
@@ -4680,7 +4689,10 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
-        let _ = (options.rev_index, options.verbose);
+        if options.verbose {
+            print_index_pack_verbose_progress(&indexed.index)?;
+        }
+        let _ = options.rev_index;
         print_index_pack_output(&indexed.pack_id, kept);
         return Ok(());
     }
@@ -4707,8 +4719,21 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
     } else {
         false
     };
-    let _ = (options.rev_index, options.verbose);
+    if options.verbose {
+        print_index_pack_verbose_progress(&indexed.index)?;
+    }
+    let _ = options.rev_index;
     print_index_pack_output(&indexed.pack_id, kept);
+    Ok(())
+}
+
+fn print_index_pack_verbose_progress(index: &[u8]) -> Result<()> {
+    let total = decode_pack_index(GitHashAlgorithm::Sha1, index.to_vec())?.len();
+    for current in 1..=total {
+        let percent = current * 100 / total;
+        eprint!("Indexing objects: {percent:3}% ({current}/{total})\r");
+    }
+    eprintln!("Indexing objects: 100% ({total}/{total}), done.");
     Ok(())
 }
 
