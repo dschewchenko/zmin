@@ -592,11 +592,6 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
                         matrix_options_by_status[(command, option)][row["zmin_status"]] += 1
         matrix_rows_by_command[row["command"]] += 1
 
-    schema_arg_statuses: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
-    for (command, option), statuses in matrix_options_by_status.items():
-        for arg_ref in zmin_options.get((command, option), []):
-            schema_arg_statuses[(command, arg_ref["arg_id"])].update(statuses)
-
     verified = [
         row_from_matrix(row, "verified", "exact_behavior_variant", "safe to skip unless code or evidence changes")
         for row in matrices
@@ -621,12 +616,11 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
             continue
         statuses = matrix_options_by_status.get((command, option), Counter())
         for arg_ref in arg_refs:
-            arg_statuses = statuses + schema_arg_statuses.get((command, arg_ref["arg_id"]), Counter())
             if (
-                arg_statuses["closed"]
-                or arg_statuses["invalid-input"]
-                or arg_statuses["open"]
-                or arg_statuses["partial"]
+                statuses["closed"]
+                or statuses["invalid-input"]
+                or statuses["open"]
+                or statuses["partial"]
             ):
                 continue
             implemented_unverified.append(
