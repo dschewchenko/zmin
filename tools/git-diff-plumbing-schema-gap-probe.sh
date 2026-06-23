@@ -84,7 +84,7 @@ run_case() {
   cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
 }
 
-run_gap diff_files_break_rewrites diff-files -p --break-rewrites
+run_case diff_files_break_rewrites diff-files -p --break-rewrites
 run_case diff_files_reverse diff-files -p --reverse
-run_gap diff_index_break_rewrites diff-index -p --break-rewrites HEAD
+run_case diff_index_break_rewrites diff-index -p --break-rewrites HEAD
 run_case diff_index_reverse diff-index -p --reverse HEAD

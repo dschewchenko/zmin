@@ -1939,7 +1939,7 @@ pub enum Command {
         name_only: bool,
         #[arg(short = 'M', long = "find-renames", num_args = 0..=1, default_missing_value = "")]
         find_renames: Option<String>,
-        #[arg(short = 'B', long = "break-rewrites", num_args = 0..=1, default_missing_value = "")]
+        #[arg(short = 'B', long = "break-rewrites", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         break_rewrites: Option<String>,
         #[arg(short = 'D', long = "irreversible-delete", action = ArgAction::SetTrue)]
         irreversible_delete: bool,
