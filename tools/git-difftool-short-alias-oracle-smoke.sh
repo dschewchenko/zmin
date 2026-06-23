@@ -39,7 +39,8 @@ make_seed_repo() {
 
 run_case() {
   local name="$1"
-  shift
+  local stdin_text="$2"
+  shift 2
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
   local git_out="$tmpdir/${name}.git.out"
@@ -65,9 +66,9 @@ run_case() {
   "$GIT_BIN" -C "$zmin_work" config difftool.prompt false
 
   set +e
-  (cd "$git_work" && "$GIT_BIN" "$@") >"$git_out" 2>"$git_err"
+  (cd "$git_work" && printf '%b' "$stdin_text" | "$GIT_BIN" "$@") >"$git_out" 2>"$git_err"
   git_exit=$?
-  (cd "$zmin_work" && "$ZMIN_BIN" "$@") >"$zmin_out" 2>"$zmin_err"
+  (cd "$zmin_work" && printf '%b' "$stdin_text" | "$ZMIN_BIN" "$@") >"$zmin_out" 2>"$zmin_err"
   zmin_exit=$?
   set -e
 
@@ -84,7 +85,8 @@ base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 extcmd="sh -c 'printf \"L:\"; cat \"\$1\"; printf \"R:\"; cat \"\$2\"' _"
 
-run_case difftool_extcmd_short_alias difftool -y -x "$extcmd" a.txt
-run_case difftool_tool_short_alias difftool -y -t zmintest a.txt
-run_case difftool_no_prompt_short_alias difftool -y a.txt
-run_case difftool_positional_path difftool -y -t zmintest a.txt
+run_case difftool_extcmd_short_alias "" difftool -y -x "$extcmd" a.txt
+run_case difftool_tool_short_alias "" difftool -y -t zmintest a.txt
+run_case difftool_no_prompt_short_alias "" difftool -y a.txt
+run_case difftool_positional_path "" difftool -y -t zmintest a.txt
+run_case difftool_prompt_long "y\n" difftool --prompt -t zmintest a.txt

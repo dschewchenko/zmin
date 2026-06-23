@@ -1939,6 +1939,8 @@ pub(crate) fn difftool(
     cached: bool,
     tool: Option<&str>,
     extcmd: Option<&str>,
+    no_prompt: bool,
+    prompt: bool,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
     let repo = find_repo()?;
@@ -1966,6 +1968,7 @@ pub(crate) fn difftool(
         new_side_from_index: diff_input.new_side_from_index,
         temp_root: &temp_root,
         command: &command,
+        prompt: prompt && !no_prompt,
     };
     let result = run_difftool_entries(&context, &entries);
     let cleanup = fs::remove_dir_all(&temp_root);
@@ -1984,10 +1987,12 @@ struct DifftoolRunContext<'a> {
     new_side_from_index: bool,
     temp_root: &'a std::path::Path,
     command: &'a DifftoolCommand,
+    prompt: bool,
 }
 
 #[derive(Debug, Clone)]
 struct DifftoolCommand {
+    name: String,
     command: String,
     append_paths: bool,
 }
@@ -1999,6 +2004,7 @@ fn resolve_difftool_command(
 ) -> Result<DifftoolCommand> {
     if let Some(extcmd) = extcmd {
         return Ok(DifftoolCommand {
+            name: extcmd.to_owned(),
             command: extcmd.to_owned(),
             append_paths: true,
         });
@@ -2017,6 +2023,7 @@ fn resolve_difftool_command(
         }
     })?;
     Ok(DifftoolCommand {
+        name: tool,
         command,
         append_paths: false,
     })
@@ -2026,7 +2033,7 @@ fn run_difftool_entries(
     context: &DifftoolRunContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
 ) -> Result<()> {
-    for entry in entries {
+    for (idx, entry) in entries.iter().enumerate() {
         let old_entry = find_index_entry(context.old_index, &entry.path);
         let new_entry = find_index_entry(context.new_index, &entry.path);
         let local = match old_entry {
@@ -2061,9 +2068,30 @@ fn run_difftool_entries(
             }
             None => null_device_path(),
         };
+        if context.prompt
+            && !confirm_difftool_launch(context.command, &entry.path, idx, entries.len())?
+        {
+            continue;
+        }
         run_difftool_command(context.repo, context.command, &local, &remote)?;
     }
     Ok(())
+}
+
+fn confirm_difftool_launch(
+    command: &DifftoolCommand,
+    path: &[u8],
+    idx: usize,
+    total: usize,
+) -> Result<bool> {
+    let path = String::from_utf8_lossy(path);
+    println!();
+    println!("Viewing ({}/{}): '{}'", idx + 1, total, path);
+    print!("Launch '{}' [Y/n]? ", command.name);
+    io::stdout().flush()?;
+    let mut answer = String::new();
+    io::stdin().read_line(&mut answer)?;
+    Ok(!answer.trim_start().starts_with(['n', 'N']))
 }
 
 pub(crate) fn create_difftool_temp_root() -> Result<PathBuf> {
