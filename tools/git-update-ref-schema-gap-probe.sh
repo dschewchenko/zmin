@@ -28,37 +28,6 @@ make_seed_repo() {
 
 base_seed="$tmpdir/base-for-oid"
 make_seed_repo "$base_seed"
-head_oid="$("$GIT_BIN" -C "$base_seed" rev-parse HEAD)"
-git_work="$tmpdir/deref.git"
-zmin_work="$tmpdir/deref.zmin"
-cp -R "$base_seed" "$git_work"
-cp -R "$base_seed" "$zmin_work"
-
-git_exit=0
-zmin_exit=0
-set +e
-"$GIT_BIN" -C "$git_work" update-ref --deref HEAD "$head_oid" >"$tmpdir/git.out" 2>"$tmpdir/git.err"
-git_exit=$?
-"$ZMIN_BIN" -C "$zmin_work" update-ref --deref HEAD "$head_oid" >"$tmpdir/zmin.out" 2>"$tmpdir/zmin.err"
-zmin_exit=$?
-set -e
-
-"$GIT_BIN" -C "$git_work" reflog show --all --format='%gD %H %gs' 2>/dev/null | sort >"$tmpdir/git.reflog" || true
-"$GIT_BIN" -C "$zmin_work" reflog show --all --format='%gD %H %gs' 2>/dev/null | sort >"$tmpdir/zmin.reflog" || true
-
-printf 'update_ref_deref_head\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
-printf 'stock reflog:\n'
-sed -n '1,8p' "$tmpdir/git.reflog"
-printf 'zmin reflog:\n'
-sed -n '1,8p' "$tmpdir/zmin.reflog"
-test "$git_exit" = 0
-test "$zmin_exit" = 0
-if cmp -s "$tmpdir/git.out" "$tmpdir/zmin.out" \
-  && cmp -s "$tmpdir/git.err" "$tmpdir/zmin.err" \
-  && cmp -s "$tmpdir/git.reflog" "$tmpdir/zmin.reflog"; then
-  echo "update_ref_deref_head unexpectedly matched" >&2
-  exit 1
-fi
 
 git_work="$tmpdir/delete-long.git"
 zmin_work="$tmpdir/delete-long.zmin"

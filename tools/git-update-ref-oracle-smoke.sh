@@ -111,6 +111,7 @@ run_case update_ref_message "" update-ref -m msg refs/heads/new "$head_oid"
 run_case update_ref_create_reflog "" update-ref --create-reflog refs/heads/new "$head_oid"
 run_case update_ref_no_create_reflog "" update-ref --no-create-reflog refs/heads/new "$head_oid"
 run_case update_ref_no_deref_head "" update-ref --no-deref HEAD "$head_oid"
+run_case update_ref_deref_head "" update-ref --deref HEAD "$head_oid"
 run_case update_ref_delete_short "" update-ref -d refs/heads/old
 run_case update_ref_stdin "update refs/heads/new $head_oid\n" update-ref --stdin
 run_case update_ref_stdin_z "__UPDATE_REF_STDIN_Z__" update-ref --stdin -z

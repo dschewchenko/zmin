@@ -1273,6 +1273,10 @@ fn update_ref_write(
     let effective_name = update_ref_effective_name(refs, name, no_deref);
     let old_id = update_ref_reflog_old_id(refs, &effective_name, true)?;
     refs.write_ref(&effective_name, id)?;
+    if name == "HEAD" && effective_name != "HEAD" && old_id == *id {
+        update_ref_append_reflog(repo, "HEAD", &old_id, id, message)?;
+        return Ok(());
+    }
     update_ref_record_reflogs(
         repo,
         refs,
