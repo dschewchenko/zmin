@@ -381,6 +381,7 @@ fn merge_commit(
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     println!("Merge made by the '{strategy_label}' strategy.");
+    print_merge_commit_stat(repo, store, &ours, &merged)?;
     Ok(())
 }
 
@@ -418,6 +419,35 @@ fn write_auto_merge(repo: &GitRepo, store: &LooseObjectStore, index: &GitIndex) 
     let tree = write_tree_from_index(store, index)?;
     fs::write(repo.git_dir.join("AUTO_MERGE"), tree.to_hex() + "\n")?;
     Ok(())
+}
+
+fn print_merge_commit_stat(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+) -> Result<()> {
+    let entries = diff_indexes(old_index, new_index)?;
+    let context = DiffIndexContext {
+        repo,
+        store,
+        old_index,
+        new_index,
+        old_source: DiffSideSource::Index,
+        new_source: DiffSideSource::Index,
+    };
+    print_stat_entries(
+        &context,
+        &entries,
+        DiffStatOptions {
+            whitespace_mode: DiffWhitespaceMode::None,
+            relative_prefix: None,
+            ignore_matching_lines: &[],
+            ignore_blank_lines: false,
+            compact_summary: false,
+        },
+    )?;
+    print_summary_entries(old_index, new_index, &entries, None)
 }
 
 fn write_squash_message(

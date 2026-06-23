@@ -24,6 +24,7 @@ seed_pair() {
   "$GIT_BIN" init -q -b main "$source"
   "$GIT_BIN" -C "$source" config user.name "Oracle"
   "$GIT_BIN" -C "$source" config user.email "oracle@example.test"
+  "$GIT_BIN" -C "$source" config commit.gpgsign false
   printf 'base\n' >"$source/base.txt"
   "$GIT_BIN" -C "$source" add -A
   "$GIT_BIN" -C "$source" commit -qm "base"
@@ -43,8 +44,10 @@ seed_pair() {
   "$GIT_BIN" -C "$zmin_work" branch --quiet feature origin/feature
   "$GIT_BIN" -C "$git_work" config user.name "Oracle"
   "$GIT_BIN" -C "$git_work" config user.email "oracle@example.test"
+  "$GIT_BIN" -C "$git_work" config commit.gpgsign false
   "$GIT_BIN" -C "$zmin_work" config user.name "Oracle"
   "$GIT_BIN" -C "$zmin_work" config user.email "oracle@example.test"
+  "$GIT_BIN" -C "$zmin_work" config commit.gpgsign false
 }
 
 side_effect_snapshot() {
@@ -79,9 +82,11 @@ run_gap() {
   seed_pair "$name" "$diverge"
 
   set +e
-  "$GIT_BIN" -C "$git_work" merge "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  GIT_AUTHOR_DATE="2020-01-02T03:04:05+0000" GIT_COMMITTER_DATE="2020-01-02T03:04:05+0000" \
+    "$GIT_BIN" -C "$git_work" merge "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
   git_exit=$?
-  (cd "$zmin_work" && "$ZMIN_BIN" merge "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  (cd "$zmin_work" && GIT_AUTHOR_DATE="2020-01-02T03:04:05+0000" GIT_COMMITTER_DATE="2020-01-02T03:04:05+0000" \
+    "$ZMIN_BIN" merge "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
   zmin_exit=$?
   set -e
 
@@ -107,9 +112,11 @@ run_exact() {
   seed_pair "$name" "$diverge"
 
   set +e
-  "$GIT_BIN" -C "$git_work" merge "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  GIT_AUTHOR_DATE="2020-01-02T03:04:05+0000" GIT_COMMITTER_DATE="2020-01-02T03:04:05+0000" \
+    "$GIT_BIN" -C "$git_work" merge "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
   git_exit=$?
-  (cd "$zmin_work" && "$ZMIN_BIN" merge "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  (cd "$zmin_work" && GIT_AUTHOR_DATE="2020-01-02T03:04:05+0000" GIT_COMMITTER_DATE="2020-01-02T03:04:05+0000" \
+    "$ZMIN_BIN" merge "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
   zmin_exit=$?
   set -e
 
@@ -129,8 +136,8 @@ run_exact() {
 }
 
 run_exact merge_ff_only_long ff --ff-only feature
-run_gap merge_no_ff_long ff --no-ff feature
+run_exact merge_no_ff_long ff --no-ff feature
 run_exact merge_no_commit_long diverge --no-commit feature
 run_exact merge_squash_long diverge --squash feature
-run_gap merge_strategy_long diverge --strategy ort feature
+run_exact merge_strategy_long diverge --strategy ort feature
 run_exact merge_positional_commit ff feature
