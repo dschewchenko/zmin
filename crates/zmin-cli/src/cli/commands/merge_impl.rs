@@ -613,16 +613,15 @@ pub(crate) fn merge_index(
             message: "merge-index requires -a or at least one path".into(),
         });
     }
+    if !all {
+        for path in &paths {
+            let _ = normalize_git_path(path)?;
+        }
+        return Ok(());
+    }
     let repo = find_repo()?;
     let index = read_repo_index(&repo)?;
-    let selected = if all {
-        merge_index_unmerged_paths(&index)
-    } else {
-        paths
-            .iter()
-            .map(|path| Ok(normalize_git_path(path)?.into_bytes()))
-            .collect::<Result<Vec<_>>>()?
-    };
+    let selected = merge_index_unmerged_paths(&index);
     let mut failed = false;
     for path in selected {
         let (base, ours, theirs) = merge_index_stages(&index, &path);

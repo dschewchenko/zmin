@@ -136,6 +136,6 @@ run_gap() {
   printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
-run_gap merge_index_one_shot_path -o git-merge-one-file file.txt
-run_gap merge_index_quiet_path -q git-merge-one-file file.txt
-run_gap merge_index_explicit_path git-merge-one-file file.txt
+run_exact merge_index_one_shot_path -o git-merge-one-file file.txt
+run_exact merge_index_quiet_path -q git-merge-one-file file.txt
+run_exact merge_index_explicit_path git-merge-one-file file.txt
