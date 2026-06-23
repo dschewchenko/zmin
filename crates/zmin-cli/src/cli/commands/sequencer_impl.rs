@@ -1428,14 +1428,104 @@ pub(crate) fn sequencer_pick(
         signature_from_commit_bytes(&picked.author)?
     };
     let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
-    let commit = CommitBuilder::new(tree, author, committer)
+    let commit = CommitBuilder::new(tree.clone(), author.clone(), committer)
         .parent(head_id)
         .message(message.clone())?
         .encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
-    println!("[{}] {}", short_object_id(&id), commit_subject(&message));
+    fs::write(repo.git_dir.join("AUTO_MERGE"), tree.to_hex() + "\n")?;
+    print_sequencer_commit_summary(
+        &repo,
+        &store,
+        &id,
+        &message,
+        &author,
+        &current_head.tree,
+        &tree,
+    )?;
     Ok(())
+}
+
+fn print_sequencer_commit_summary(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    id: &ObjectId,
+    message: &[u8],
+    author: &Signature,
+    parent_tree: &ObjectId,
+    tree: &ObjectId,
+) -> Result<()> {
+    let branch = sequencer_summary_branch(repo)?;
+    println!(
+        "[{branch} {}] {}",
+        short_object_id(id),
+        commit_subject(message)
+    );
+    println!(" Date: {}", sequencer_signature_summary_date(author)?);
+    let tree_cache = TreeObjectCache::new(store);
+    let old_index = tree_cache.read_tree_to_index(parent_tree)?;
+    let new_index = tree_cache.read_tree_to_index(tree)?;
+    let entries = diff_indexes(&old_index, &new_index)?;
+    let context = DiffIndexContext {
+        repo,
+        store,
+        old_index: &old_index,
+        new_index: &new_index,
+        old_source: DiffSideSource::Index,
+        new_source: DiffSideSource::Index,
+    };
+    let rows = diff_stat_rows_with_whitespace(
+        &context,
+        &entries,
+        DiffStatOptions {
+            whitespace_mode: DiffWhitespaceMode::None,
+            relative_prefix: None,
+            ignore_matching_lines: &[],
+            ignore_blank_lines: false,
+            compact_summary: false,
+        },
+    )?;
+    if !rows.is_empty() {
+        print_diff_stat_summary(&rows);
+    }
+    print_summary_entries(&old_index, &new_index, &entries, None)?;
+    Ok(())
+}
+
+fn sequencer_summary_branch(repo: &GitRepo) -> Result<String> {
+    let raw = fs::read_to_string(repo.git_dir.join("HEAD")).unwrap_or_default();
+    if let Some(name) = raw
+        .trim_end_matches('\n')
+        .strip_prefix("ref: ")
+        .map(str::to_owned)
+    {
+        return Ok(name
+            .strip_prefix("refs/heads/")
+            .unwrap_or(name.as_str())
+            .to_owned());
+    }
+    if !raw.trim().is_empty() {
+        Ok("detached HEAD".to_owned())
+    } else {
+        Ok("HEAD".to_owned())
+    }
+}
+
+fn sequencer_signature_summary_date(signature: &Signature) -> Result<String> {
+    let offset = parse_timezone_offset(&signature.timezone).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "commit has invalid author timezone".into(),
+    })?;
+    let utc =
+        chrono::DateTime::from_timestamp(signature.timestamp, 0).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit author timestamp is out of range".into(),
+        })?;
+    Ok(utc
+        .with_timezone(&offset)
+        .format("%a %b %-d %H:%M:%S %Y %z")
+        .to_string())
 }
 
 pub(crate) fn sequencer_parent_for_pick(

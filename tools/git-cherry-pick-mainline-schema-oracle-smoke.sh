@@ -73,7 +73,7 @@ record_clean_state() {
   done | sort >"$prefix.git-side-effects"
 }
 
-run_mainline_gap() {
+run_mainline_case() {
   local name="$1"
   shift
   local seed="$tmpdir/${name}.seed"
@@ -97,12 +97,9 @@ run_mainline_gap() {
   zmin_exit=$?
   set -e
 
-  if test "$git_exit" = "$zmin_exit" &&
-    cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" &&
-    cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
-    echo "$name unexpectedly matches stock Git; update the open matrix row" >&2
-    return 1
-  fi
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
 
   record_clean_state "$git_work" "$tmpdir/${name}.git"
   record_clean_state "$zmin_work" "$tmpdir/${name}.zmin"
@@ -111,7 +108,8 @@ run_mainline_gap() {
   compare_files tree "$tmpdir/${name}.git.tree" "$tmpdir/${name}.zmin.tree"
   compare_files status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
   compare_files index "$tmpdir/${name}.git.index" "$tmpdir/${name}.zmin.index"
-  printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  compare_files git-side-effects "$tmpdir/${name}.git.git-side-effects" "$tmpdir/${name}.zmin.git-side-effects"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_mainline_gap cherry_pick_mainline_long --mainline 1
+run_mainline_case cherry_pick_mainline_long --mainline 1
