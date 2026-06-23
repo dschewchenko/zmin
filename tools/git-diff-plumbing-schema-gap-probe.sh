@@ -60,7 +60,31 @@ run_gap() {
   fi
 }
 
+run_case() {
+  local name="$1"
+  shift
+  local git_repo="$tmpdir/${name}.git"
+  local zmin_repo="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_rewrite_repo "$git_repo"
+  make_rewrite_repo "$zmin_repo"
+
+  set +e
+  "$GIT_BIN" -C "$git_repo" "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_repo" "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+}
+
 run_gap diff_files_break_rewrites diff-files -p --break-rewrites
-run_gap diff_files_reverse diff-files -p --reverse
+run_case diff_files_reverse diff-files -p --reverse
 run_gap diff_index_break_rewrites diff-index -p --break-rewrites HEAD
-run_gap diff_index_reverse diff-index -p --reverse HEAD
+run_case diff_index_reverse diff-index -p --reverse HEAD

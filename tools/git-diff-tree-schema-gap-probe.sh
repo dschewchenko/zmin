@@ -67,10 +67,34 @@ run_gap_case() {
   printf '%s\topen-gap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
+run_case() {
+  local name="$1"
+  shift
+  local git_repo="$tmpdir/${name}.git"
+  local zmin_repo="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_history_repo "$git_repo"
+  make_history_repo "$zmin_repo"
+
+  set +e
+  "$GIT_BIN" -C "$git_repo" "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_repo" "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_gap_case diff_tree_break_rewrites diff-tree -p --break-rewrites HEAD~1 HEAD
 run_gap_case diff_tree_find_copies diff-tree --name-status --find-copies HEAD~1 HEAD
 run_gap_case diff_tree_find_renames diff-tree --name-status --find-renames HEAD~1 HEAD
-run_gap_case diff_tree_reverse_long diff-tree --reverse -p HEAD~1 HEAD
+run_case diff_tree_reverse_long diff-tree --reverse -p HEAD~1 HEAD
 run_gap_case diff_tree_short_B diff-tree -p -B HEAD~1 HEAD
 run_gap_case diff_tree_short_C diff-tree --name-status -C HEAD~1 HEAD
 run_gap_case diff_tree_short_M diff-tree --name-status -M HEAD~1 HEAD

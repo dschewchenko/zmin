@@ -1603,8 +1603,10 @@ pub enum Command {
         nul_terminated: bool,
         #[arg(long = "cached", alias = "staged", action = ArgAction::SetTrue)]
         cached: bool,
-        #[arg(short = 'R', long = "reverse", action = ArgAction::SetTrue)]
+        #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "reverse", action = ArgAction::SetTrue)]
+        reverse_long: bool,
         #[arg(long = "check", action = ArgAction::SetTrue)]
         check: bool,
         #[arg(short = 'p', short_alias = 'u', long = "patch", action = ArgAction::SetTrue)]
@@ -1807,8 +1809,10 @@ pub enum Command {
         find_copies_harder: bool,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
-        #[arg(short = 'R', long = "reverse", action = ArgAction::SetTrue)]
+        #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "reverse", action = ArgAction::SetTrue)]
+        reverse_long: bool,
         #[arg(short = 'S')]
         pickaxe_string: Option<String>,
         #[arg(short = 'G')]
@@ -1949,8 +1953,10 @@ pub enum Command {
         find_copies_harder: bool,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
-        #[arg(short = 'R', long = "reverse", action = ArgAction::SetTrue)]
+        #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "reverse", action = ArgAction::SetTrue)]
+        reverse_long: bool,
         #[arg(long = "root", action = ArgAction::SetTrue)]
         root: bool,
         #[arg(short = 'S')]
@@ -2098,8 +2104,10 @@ pub enum Command {
         combined: bool,
         #[arg(long = "cc", action = ArgAction::SetTrue)]
         dense_combined: bool,
-        #[arg(short = 'R', long = "reverse", action = ArgAction::SetTrue)]
+        #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "reverse", action = ArgAction::SetTrue)]
+        reverse_long: bool,
         #[arg(long = "root", action = ArgAction::SetTrue)]
         root: bool,
         #[arg(short = 'S')]

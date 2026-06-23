@@ -131,5 +131,5 @@ run_case diff_ignore_blank_lines make_worktree_repo diff --ignore-blank-lines
 run_case diff_no_color_moved_ws make_worktree_repo diff --no-color-moved-ws
 run_case diff_no_full_index make_worktree_repo diff --raw --no-full-index
 run_case diff_no_renames make_rename_repo diff --cached --name-status --no-renames
-run_gap diff_reverse_long make_worktree_repo diff --reverse -p
+run_case diff_reverse_long make_worktree_repo diff --reverse -p
 run_case diff_dense_combined make_merge_repo diff --cc HEAD
