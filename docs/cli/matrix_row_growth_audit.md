@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2833` | `+1739` |
-| Matching stock Git rows | `823` | `2444` | `+1621` |
+| Written behavior rows | `1094` | `2840` | `+1746` |
+| Matching stock Git rows | `823` | `2451` | `+1628` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
-| Commands with rows | `50/151` | `107/151` | `+57` |
-| Represented doc-option pairs | `253/4632` | `721/4632` | `+468` |
+| Commands with rows | `50/151` | `108/151` | `+58` |
+| Represented doc-option pairs | `253/4632` | `725/4632` | `+472` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4525,3 +4525,48 @@ Actual post-import movement matched the declaration for matrix and census
 counts: `+7` behavior rows, `+7` closed rows, `+0` open rows, `+0`
 invalid-input rows, `+1` command with rows, `+5` represented doc-option pairs,
 `-6` implemented-but-unverified schema rows and `-1` remaining checklist row.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `show-branch` schema
+surfaces, with focused stock-oracle test evidence.
+
+Evidence source:
+
+- `git_ref_resolution_compat::show_branch_matches_stock_git_for_local_branch_graphs`
+
+Expected movement:
+
+- behavior rows: `+7`
+- closed rows: `+7`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: expected `-1`
+- commands with rows: `+1`
+- represented doc-option pairs: expected `+4` for `--sha1-name`, `--all`,
+  `--remotes` and `--current`; `-a`/`-r` aliases share the represented
+  `arg_id`, while the default and positional rev rows close schema surfaces
+- implemented-but-unverified schema rows: expected `-7`
+- remaining checklist rows: expected `-1` because `show-branch` now has a
+  matrix file
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git show-branch`
+- `git show-branch main feature`
+- `git show-branch --sha1-name main feature`
+- `git show-branch --all`
+- `git show-branch --remotes`
+- `git show-branch --current`
+- `git show-branch --current main`
+
+The evidence compares stock Git and Zmin outputs in the focused Rust oracle
+test. `show-branch --no-name` remains implemented-but-unverified until an exact
+row is added.
+
+Actual post-import movement matched the declaration for matrix and census
+counts: `+7` behavior rows, `+7` closed rows, `+0` open rows, `+0`
+invalid-input rows, `+1` command with rows, `+4` represented doc-option pairs,
+`-7` implemented-but-unverified schema rows and `-1` remaining checklist row.
