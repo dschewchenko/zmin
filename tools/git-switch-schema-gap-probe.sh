@@ -57,9 +57,9 @@ run_gap() {
   cat "$tmpdir/${name}.zmin.err"
 
   test "$git_exit" = "$zmin_exit"
-  if cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
-    && cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
-    echo "$name unexpectedly matched" >&2
+  if ! cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
+    || ! cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
+    echo "$name mismatch" >&2
     return 1
   fi
 }

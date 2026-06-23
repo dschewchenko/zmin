@@ -10217,7 +10217,7 @@ pub(crate) fn switch(
             message: format!("invalid reference: {start}"),
         })?;
         write_ref_with_reflog(&repo, &refs, &ref_name, &id, "branch: Created from HEAD")?;
-        return checkout_existing(force, &branch);
+        return checkout_existing_with_message(force, &branch, CheckoutBranchMessage::NewBranch);
     }
 
     let Some(target) = target else {
