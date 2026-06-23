@@ -1,2 +1,3 @@
 group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
 Debugging	bisect	visualize option	--bad	invalid log option	bisect session	local	all	git bisect visualize --bad	invalid-input	git_bisect_invalid_compat::bisect_visualize_unknown_option_matches_stock_git	unknown visualize log option exits 128 with stock fatal diagnostic instead of a custom unsupported-option fatal diagnostic
+Debugging	bisect	<positional:args>	start HEAD HEAD~4	linear history start range	linear five-commit history	local	all	git bisect start HEAD HEAD~4	closed	git_sequencer_compat::bisect_matches_stock_git_for_linear_history	bisect start with bad and good commit positional args selects the same candidate HEAD as stock Git
