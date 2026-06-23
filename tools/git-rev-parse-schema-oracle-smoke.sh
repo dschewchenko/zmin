@@ -111,4 +111,4 @@ run_gap() {
 }
 
 run_case rev_parse_positional_revs rev-parse HEAD
-run_gap rev_parse_quiet_short_gap rev-parse -q --verify missing
+run_case rev_parse_quiet_short rev-parse -q --verify missing
