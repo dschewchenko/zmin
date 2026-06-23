@@ -103,6 +103,23 @@ def stable_id(prefix: str, parts: Iterable[str]) -> str:
     return f"{prefix}:{hashlib.sha1(payload).hexdigest()[:16]}"
 
 
+def nested_parent_statuses(
+    command: str,
+    command_set: set[str],
+    matrix_primary_by_status: dict[tuple[str, str], Counter[str]],
+) -> Counter[str]:
+    parts = command.split("-")
+    for split in range(len(parts) - 1, 0, -1):
+        parent = "-".join(parts[:split])
+        subcommand = "-".join(parts[split:])
+        if parent not in command_set:
+            continue
+        statuses = matrix_primary_by_status.get((parent, subcommand), Counter())
+        if statuses:
+            return statuses
+    return Counter()
+
+
 def read_tsv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         die(f"required TSV is missing: {path}")
@@ -545,8 +562,10 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     extension_options = zmin_extension_option_keys(root)
 
     matrix_options_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
+    matrix_primary_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     matrix_rows_by_command: Counter[str] = Counter()
     for row in matrices:
+        matrix_primary_by_status[(row["command"], row["option"])][row["zmin_status"]] += 1
         for option in matrix_option_spellings(row):
             matrix_options_by_status[(row["command"], option)][row["zmin_status"]] += 1
         placeholder_names = normalized_placeholder_names(row["option"])
@@ -619,6 +638,9 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
 
     for command in sorted(additional_commands):
         if command in extension_commands:
+            continue
+        statuses = nested_parent_statuses(command, command_set, matrix_primary_by_status)
+        if statuses["closed"] or statuses["invalid-input"] or statuses["open"] or statuses["partial"]:
             continue
         implemented_unverified.append(
             {
