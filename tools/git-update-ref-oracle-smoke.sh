@@ -51,6 +51,8 @@ run_case() {
   local zmin_refs="$tmpdir/${name}.zmin.refs"
   local git_reflog="$tmpdir/${name}.git.reflog"
   local zmin_reflog="$tmpdir/${name}.zmin.reflog"
+  local git_head="$tmpdir/${name}.git.head"
+  local zmin_head="$tmpdir/${name}.zmin.head"
   local git_exit=0
   local zmin_exit=0
 
@@ -80,6 +82,9 @@ run_case() {
   "$GIT_BIN" -C "$git_work" reflog show --all --format='%gD %H %gs' >"$git_reflog" 2>/dev/null || true
   "$GIT_BIN" -C "$zmin_work" reflog show --all --format='%gD %H %gs' >"$zmin_reflog" 2>/dev/null || true
   compare_files reflog "$git_reflog" "$zmin_reflog"
+  cat "$git_work/.git/HEAD" >"$git_head"
+  cat "$zmin_work/.git/HEAD" >"$zmin_head"
+  compare_files head "$git_head" "$zmin_head"
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
@@ -89,7 +94,9 @@ head_oid="$("$GIT_BIN" -C "$base_seed" rev-parse HEAD)"
 
 run_case update_ref_positional "" update-ref refs/heads/new "$head_oid"
 run_case update_ref_message "" update-ref -m msg refs/heads/new "$head_oid"
+run_case update_ref_create_reflog "" update-ref --create-reflog refs/heads/new "$head_oid"
 run_case update_ref_no_create_reflog "" update-ref --no-create-reflog refs/heads/new "$head_oid"
+run_case update_ref_no_deref_head "" update-ref --no-deref HEAD "$head_oid"
 run_case update_ref_delete_short "" update-ref -d refs/heads/old
 run_case update_ref_stdin "update refs/heads/new $head_oid\n" update-ref --stdin
 run_case update_ref_stdin_batch "update refs/heads/new $head_oid\n" update-ref --stdin --batch-updates

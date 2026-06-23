@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2843` | `+1749` |
-| Matching stock Git rows | `823` | `2454` | `+1631` |
+| Written behavior rows | `1094` | `2845` | `+1751` |
+| Matching stock Git rows | `823` | `2456` | `+1633` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `108/151` | `+58` |
-| Represented doc-option pairs | `253/4632` | `727/4632` | `+474` |
+| Represented doc-option pairs | `253/4632` | `729/4632` | `+476` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -127,7 +127,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `prune` | `0` | `7` | `+7` |
 | `push` | `0` | `7` | `+7` |
 | `submodule` | `0` | `7` | `+7` |
-| `update-ref` | `0` | `7` | `+7` |
+| `update-ref` | `0` | `9` | `+9` |
 | `fetch-pack` | `0` | `6` | `+6` |
 | `format-patch` | `0` | `6` | `+6` |
 | `multi-pack-index` | `0` | `6` | `+6` |
@@ -4650,3 +4650,44 @@ closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+1` represented doc-option pair, `-1` implemented-but-unverified schema
 row and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `update-ref` schema surfaces,
+with focused stock-oracle shell evidence.
+
+Evidence source:
+
+- `tools/git-update-ref-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+2` for `--create-reflog` and
+  `--no-deref`
+- implemented-but-unverified schema rows: expected `-2`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git update-ref --create-reflog refs/heads/new <oid>`
+- `git update-ref --no-deref HEAD <oid>`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr, refs,
+reflogs and `.git/HEAD` contents using copied workdirs from one seed
+repository. Probe attempts showed `git update-ref --deref HEAD <oid>` still has
+reflog differences and the three-operand positional form is not parser-compatible
+yet, so those surfaces are not counted as closed rows.
+
+Actual post-import movement matched the declaration: `+2` behavior rows, `+2`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+2` represented doc-option pairs, `-2` implemented-but-unverified schema
+rows and `+0` remaining checklist rows.
