@@ -269,6 +269,9 @@ fn validate_unavailable_foreign_helper_invocation_before_clap(args: &[String]) -
         [command, subcommand] if command == "cvsexportcommit" && subcommand == "unknown" => {
             "git: 'cvsexportcommit' is not a git command. See 'git --help'.\n"
         }
+        [command, subcommand] if command == "cvsimport" && subcommand == "unknown" => {
+            "git: 'cvsimport' is not a git command. See 'git --help'.\n"
+        }
         _ => return Ok(()),
     };
     Err(CliError::Stderr {

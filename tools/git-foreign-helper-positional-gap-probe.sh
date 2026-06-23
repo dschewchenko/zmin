@@ -139,7 +139,7 @@ run_exact() {
 }
 
 run_exact cvsexportcommit unknown cvsexportcommit_positional_unknown 1
-run_probe cvsimport unknown cvsimport_positional_unknown_gap
+run_exact cvsimport unknown cvsimport_positional_unknown 1
 run_exact gui unknown gui_positional_unknown 1
 run_help_exact
 run_exact svn unknown svn_positional_unknown 1
