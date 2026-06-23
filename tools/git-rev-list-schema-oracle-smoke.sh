@@ -78,4 +78,44 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_gap() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_status_file="$tmpdir/${name}.git.status"
+  local zmin_status_file="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" rev-list "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" rev-list "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status_file"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status_file"
+
+  if test "$git_exit" = "$zmin_exit" &&
+    cmp -s "$git_out" "$zmin_out" &&
+    cmp -s "$git_err" "$zmin_err" &&
+    cmp -s "$git_status_file" "$zmin_status_file"; then
+    echo "$name unexpectedly matches stock Git; update the open matrix row" >&2
+    return 1
+  fi
+
+  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_case rev_list_max_count_short -n 1 HEAD
+run_gap rev_list_filter_blob_none --filter=blob:none --objects HEAD
+run_gap rev_list_filter_provided_objects --filter=blob:none --filter-provided-objects --objects HEAD
