@@ -5,7 +5,7 @@ pub(crate) fn quiltimport(
     author: Option<&str>,
     patches: Option<PathBuf>,
     series: Option<PathBuf>,
-    _keep_non_patch: bool,
+    keep_non_patch: bool,
 ) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -26,6 +26,10 @@ pub(crate) fn quiltimport(
         println!("{patch_name}");
         let patch_path = patches_dir.join(&patch_name);
         let patch_bytes = fs::read(&patch_path)?;
+        if keep_non_patch && !quilt_patch_has_diff(&patch_bytes) {
+            println!("Patch is empty.  Was it split wrong?");
+            return Err(CliError::Exit(1));
+        }
         let description = quilt_patch_description(&patch_bytes)?;
         let author = quilt_patch_author(description.as_str(), fallback_author)?;
         if dry_run {
@@ -41,6 +45,12 @@ pub(crate) fn quiltimport(
         )?;
     }
     Ok(())
+}
+
+fn quilt_patch_has_diff(patch: &[u8]) -> bool {
+    patch
+        .split(|byte| *byte == b'\n')
+        .any(|line| line.starts_with(b"diff --git "))
 }
 
 fn resolve_quilt_patches_dir(patches: Option<PathBuf>) -> PathBuf {

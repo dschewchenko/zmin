@@ -113,7 +113,18 @@ run_probe() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
-run_keep_non_patch_probe() {
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+run_keep_non_patch_case() {
   local name="$1"
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
@@ -140,11 +151,10 @@ run_keep_non_patch_probe() {
   zmin_exit=$?
   set -e
 
-  test "$git_exit" = 1
-  test "$zmin_exit" = 128
-  grep -F "Patch is empty.  Was it split wrong?" "$tmpdir/${name}.git.out" >/dev/null
-  grep -F "fatal: No valid patches in input" "$tmpdir/${name}.zmin.err" >/dev/null
-  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\texact\texit=%s\n' "$name" "$git_exit"
 }
 
 base_seed="$tmpdir/base"
@@ -152,4 +162,4 @@ make_seed_repo "$base_seed"
 keep_non_patch_seed="$tmpdir/keep-non-patch-base"
 make_keep_non_patch_seed_repo "$keep_non_patch_seed"
 run_probe quiltimport_series_explicit_gap
-run_keep_non_patch_probe quiltimport_keep_non_patch_gap
+run_keep_non_patch_case quiltimport_keep_non_patch
