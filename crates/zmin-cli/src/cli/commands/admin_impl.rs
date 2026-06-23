@@ -2688,14 +2688,23 @@ fn p4(args: Vec<String>) -> Result<()> {
 }
 
 fn p4_unknown_command(command: &str) -> Result<()> {
+    let git_p4 = p4_invocation_name();
     let text = format!(
         "unknown command {command}\n\n\
-         usage: git-p4 <command> [options]\n\n\
+         usage: {git_p4} <command> [options]\n\n\
          valid commands: submit, commit, sync, rebase, clone, branches, unshelve\n\n\
-         Try git-p4 <command> --help for command specific help.\n\n"
+         Try {git_p4} <command> --help for command specific help.\n\n"
     );
     io::stdout().write_all(text.as_bytes())?;
     Err(CliError::Exit(2))
+}
+
+fn p4_invocation_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-p4"
+    } else {
+        "git-p4"
+    }
 }
 
 fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {

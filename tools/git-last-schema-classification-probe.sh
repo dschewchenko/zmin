@@ -14,10 +14,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
 run_p4_probe() {
   local repo="$tmpdir/p4"
   local git_exit=0
   local zmin_exit=0
+  local git_status="$tmpdir/p4.git.status"
+  local zmin_status="$tmpdir/p4.zmin.status"
 
   "$GIT_BIN" -C "$tmpdir" init -q "$repo"
 
@@ -34,11 +47,13 @@ run_p4_probe() {
   zmin_exit=$?
   set -e
 
-  test "$git_exit" = 2
-  test "$zmin_exit" = 129
-  grep -F "unknown command unknown" "$tmpdir/p4.git.out" >/dev/null
-  grep -F "fatal: unsupported p4 command 'unknown'" "$tmpdir/p4.zmin.err" >/dev/null
-  printf 'p4_positional_unknown_gap\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  compare_files p4_stdout "$tmpdir/p4.git.out" "$tmpdir/p4.zmin.out"
+  compare_files p4_stderr "$tmpdir/p4.git.err" "$tmpdir/p4.zmin.err"
+  "$GIT_BIN" -C "$repo" status --short >"$git_status"
+  "$GIT_BIN" -C "$repo" status --short >"$zmin_status"
+  compare_files p4_status "$git_status" "$zmin_status"
+  printf 'p4_positional_unknown\texact\texit=%s\n' "$git_exit"
 }
 
 run_scalar_probe() {
