@@ -1,3 +1,3 @@
 group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
-Plumbing Commands	fast-export	--all	<empty>	<none>	one-commit repository	local	all	git fast-export --all	open	tools/git-fast-export-schema-gap-probe.sh::fast_export_all	Zmin currently emits a different fast-import stream shape than stock Git, including deleteall and reset/from ordering
-Plumbing Commands	fast-export	<positional:refs>	HEAD	<none>	one-commit repository	local	all	git fast-export HEAD	open	tools/git-fast-export-schema-gap-probe.sh::fast_export_head	stock Git accepts a positional HEAD ref and exits 0, while Zmin currently exits 1
+Plumbing Commands	fast-export	--all	<empty>	<none>	one-commit repository	local	all	git fast-export --all	closed	tools/git-fast-export-schema-gap-probe.sh::fast_export_all	one-commit --all stream matches stock Git stdout/stderr/exit
+Plumbing Commands	fast-export	<positional:refs>	HEAD	<none>	one-commit repository	local	all	git fast-export HEAD	closed	tools/git-fast-export-schema-gap-probe.sh::fast_export_head	positional HEAD resolves to the current branch ref and matches stock Git stdout/stderr/exit

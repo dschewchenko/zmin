@@ -32,7 +32,7 @@ seed_repo() {
   "$GIT_BIN" -C "$repo" commit -q -m one
 }
 
-run_gap() {
+run_case() {
   local name="$1"
   shift
   local git_work="$tmpdir/${name}.git.work"
@@ -50,16 +50,11 @@ run_gap() {
   zmin_exit=$?
   set -e
 
-  if test "$git_exit" = "$zmin_exit" &&
-    cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" &&
-    cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
-    echo "$name unexpectedly matches stock Git; update the open matrix row" >&2
-    return 1
-  fi
-
-  test "$git_exit" = 0
-  printf '%s\topen-gap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
 }
 
-run_gap fast_export_all --all
-run_gap fast_export_head HEAD
+run_case fast_export_all --all
+run_case fast_export_head HEAD

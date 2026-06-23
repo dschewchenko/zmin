@@ -183,6 +183,7 @@ pub(crate) fn fast_export(all: bool, refs: Vec<String>) -> Result<()> {
             None,
         )?;
         commits.reverse();
+        let mut wrote_ref_commit = false;
         for id in &commits {
             if !state.commit_marks.contains_key(&id.to_hex()) {
                 write_fast_export_commit(
@@ -193,10 +194,14 @@ pub(crate) fn fast_export(all: bool, refs: Vec<String>) -> Result<()> {
                     &mut state,
                     &ref_name,
                     id,
+                    !wrote_ref_commit,
                 )?;
+                wrote_ref_commit = true;
             }
         }
-        if let Some(mark) = state.commit_marks.get(&tip) {
+        if !wrote_ref_commit
+            && let Some(mark) = state.commit_marks.get(&tip)
+        {
             writeln!(out, "reset {ref_name}")?;
             writeln!(out, "from :{mark}")?;
             writeln!(out)?;
@@ -219,13 +224,16 @@ fn fast_export_refs(repo: &GitRepo, all: bool, refs: Vec<String>) -> Result<Vec<
     } else {
         refs.into_iter()
             .map(|name| {
-                if name.starts_with("refs/") {
+                let resolved = if name == "HEAD" {
+                    current_branch_ref(&ref_store)?.unwrap_or(name)
+                } else if name.starts_with("refs/") {
                     name
                 } else {
                     format!("refs/heads/{name}")
-                }
+                };
+                Ok(resolved)
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?
     };
     names
         .into_iter()
@@ -258,6 +266,7 @@ fn write_fast_export_commit<W: Write>(
     state: &mut FastExportState,
     ref_name: &str,
     id: &ObjectId,
+    reset_ref: bool,
 ) -> Result<()> {
     let commit = commit_cache.read_commit(id)?;
     let files = collect_tree_blobs(tree_cache, &commit.tree)?;
@@ -277,11 +286,15 @@ fn write_fast_export_commit<W: Write>(
             if !object.content.ends_with(b"\n") {
                 writeln!(out)?;
             }
+            writeln!(out)?;
         }
     }
 
     let mark = state.alloc_mark();
     state.commit_marks.insert(id.to_hex(), mark);
+    if reset_ref {
+        writeln!(out, "reset {ref_name}")?;
+    }
     writeln!(out, "commit {ref_name}")?;
     writeln!(out, "mark :{mark}")?;
     writeln!(out, "author {}", String::from_utf8_lossy(&commit.author))?;
@@ -300,7 +313,6 @@ fn write_fast_export_commit<W: Write>(
     {
         writeln!(out, "from :{parent_mark}")?;
     }
-    writeln!(out, "deleteall")?;
     for file in files {
         write_fast_export_file_command(out, state, &file)?;
     }
