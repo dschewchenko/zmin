@@ -7983,7 +7983,13 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
         if rewritten.contains_key(&old_id_hex) {
             continue;
         }
-        println!("Rewrite {} ({}/{})", old_id.to_hex(), idx + 1, total);
+        print!("\r");
+        println!(
+            "Rewrite {} ({}/{}) (0 seconds passed, remaining 0 predicted)    ",
+            old_id.to_hex(),
+            idx + 1,
+            total
+        );
         let commit = commit_cache.read_commit(old_id)?;
         let mut parents = commit
             .parents
