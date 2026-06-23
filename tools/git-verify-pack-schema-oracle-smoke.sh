@@ -24,17 +24,26 @@ printf 'content\n' >"$repo/a.txt"
 "$GIT_BIN" -C "$repo" repack -adq
 idx="$(find "$repo/.git/objects/pack" -name '*.idx' | head -1)"
 
-git_exit=0
-zmin_exit=0
-set +e
-"$GIT_BIN" -C "$repo" verify-pack --object-format=sha1 "$idx" >"$tmpdir/git.out" 2>"$tmpdir/git.err"
-git_exit=$?
-"$ZMIN_BIN" -C "$repo" verify-pack --object-format=sha1 "$idx" >"$tmpdir/zmin.out" 2>"$tmpdir/zmin.err"
-zmin_exit=$?
-set -e
+run_case() {
+  local name="$1"
+  shift
+  local git_exit=0
+  local zmin_exit=0
 
-printf 'verify_pack_object_format_sha1\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
-test "$git_exit" = 0
-test "$zmin_exit" = 0
-cmp -s "$tmpdir/git.out" "$tmpdir/zmin.out"
-cmp -s "$tmpdir/git.err" "$tmpdir/zmin.err"
+  set +e
+  "$GIT_BIN" -C "$repo" verify-pack "$@" "$idx" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$repo" verify-pack "$@" "$idx" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = 0
+  test "$zmin_exit" = 0
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+}
+
+run_case verify_pack_object_format_sha1 --object-format=sha1
+run_case verify_pack_verbose_long --verbose
+run_case verify_pack_stat_only_long --stat-only
