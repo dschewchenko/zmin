@@ -2600,7 +2600,7 @@ pub enum Command {
         no_progress: bool,
         #[arg(long = "diag-url", action = ArgAction::SetTrue)]
         diag_url: bool,
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
+        #[arg(short = 'v', action = ArgAction::SetTrue)]
         verbose: bool,
         directory: String,
         refs: Vec<String>,

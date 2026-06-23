@@ -151,7 +151,7 @@ run_oracle fetch_pack_quiet "" --quiet "$remote" refs/heads/main
 run_oracle fetch_pack_keep "" --keep "$remote" refs/heads/main
 run_oracle fetch_pack_upload_pack "" --upload-pack=git-upload-pack "$remote" refs/heads/main
 run_oracle fetch_pack_diag_url "" --diag-url "$remote"
-run_gap fetch_pack_verbose_long 129 0 "" --verbose "$remote" refs/heads/main
+run_oracle fetch_pack_verbose_long "" --verbose "$remote" refs/heads/main
 run_oracle fetch_pack_keep_short "" -k "$remote" refs/heads/main
 run_oracle fetch_pack_quiet_short "" -q "$remote" refs/heads/main
 run_oracle fetch_pack_verbose_short "" -v "$remote" refs/heads/main

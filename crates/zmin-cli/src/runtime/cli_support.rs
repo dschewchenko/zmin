@@ -112,6 +112,7 @@ pub(crate) fn parse_cli_invocation(
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
+    validate_fetch_pack_invocation_before_clap(&command_args)?;
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
@@ -374,6 +375,24 @@ fn validate_fetch_invocation_before_clap(command_args: &[String]) -> Result<()> 
                 text: "error: option `server-option' requires a value\n".into(),
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_fetch_pack_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("fetch-pack") {
+        return Ok(());
+    }
+    if command_args
+        .iter()
+        .skip(1)
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--verbose")
+    {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "usage: git fetch-pack [--all] [--stdin] [--quiet | -q] [--keep | -k] [--thin] [--include-tag] [--upload-pack=<git-upload-pack>] [--depth=<n>] [--no-progress] [--diag-url] [-v] [<host>:]<directory> [<refs>...]\n".into(),
+        });
     }
     Ok(())
 }
