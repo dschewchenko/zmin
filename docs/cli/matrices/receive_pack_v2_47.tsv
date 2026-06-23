@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Server Admin	receive-pack	<positional:directory>	<bare repository path>	stock git send-pack creates, updates and deletes refs	local bare repository	local	all	git send-pack --receive-pack 'zmin receive-pack' <path> refs/heads/main	closed	git_transport_local_compat::receive_pack_accepts_stock_git_send_pack	stock Git send-pack interoperates with Zmin receive-pack and leaves remote refs/object contents correct
