@@ -9,6 +9,7 @@ case "$ZMIN_BIN" in
 esac
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-init-gap.XXXXXX")"
+tmpdir="$(cd "$tmpdir" && pwd -P)"
 cleanup() {
   rm -rf "$tmpdir"
 }
@@ -20,11 +21,16 @@ printf '# sample\n' >"$tmpdir/template/hooks/pre-commit"
 normalize_text() {
   local root="$1"
   local file="$2"
+  local private_root="/private${root}"
   sed \
-    -e "s#$root/git#<work>#g" \
-    -e "s#$root/zmin#<work>#g" \
+    -e "s#$private_root/gitdir#<gitdir>#g" \
+    -e "s#$private_root/zmindir#<gitdir>#g" \
+    -e "s#$private_root/git#<work>#g" \
+    -e "s#$private_root/zmin#<work>#g" \
     -e "s#$root/gitdir#<gitdir>#g" \
     -e "s#$root/zmindir#<gitdir>#g" \
+    -e "s#$root/git#<work>#g" \
+    -e "s#$root/zmin#<work>#g" \
     "$file"
 }
 
@@ -36,7 +42,18 @@ summarize_tree() {
   )
 }
 
-run_gap() {
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+run_case() {
   local name="$1"
   shift
   local root="$tmpdir/$name"
@@ -72,30 +89,23 @@ run_gap() {
 
   normalize_text "$root" "$root/git.out" >"$root/git.norm.out"
   normalize_text "$root" "$root/zmin.out" >"$root/zmin.norm.out"
+  normalize_text "$root" "$root/git.err" >"$root/git.norm.err"
+  normalize_text "$root" "$root/zmin.err" >"$root/zmin.norm.err"
   summarize_tree "$root/git" >"$root/git.tree"
   summarize_tree "$root/zmin" >"$root/zmin.tree"
 
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stdout:\n'
-  sed -n '1,4p' "$root/git.norm.out"
-  printf 'zmin stdout:\n'
-  sed -n '1,4p' "$root/zmin.norm.out"
-  printf 'stock tree:\n'
-  sed -n '1,20p' "$root/git.tree"
-  printf 'zmin tree:\n'
-  sed -n '1,20p' "$root/zmin.tree"
-
-  test "$git_exit" = "$zmin_exit"
-  if cmp -s "$root/git.norm.out" "$root/zmin.norm.out" \
-    && cmp -s "$root/git.err" "$root/zmin.err" \
-    && cmp -s "$root/git.tree" "$root/zmin.tree"; then
-    echo "$name unexpectedly matched" >&2
+  if [ "$git_exit" != "$zmin_exit" ]; then
+    echo "$name exit differs: stock=$git_exit zmin=$zmin_exit" >&2
     return 1
   fi
+  compare_files stdout "$root/git.norm.out" "$root/zmin.norm.out"
+  compare_files stderr "$root/git.norm.err" "$root/zmin.norm.err"
+  compare_files tree "$root/git.tree" "$root/zmin.tree"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_gap init_bare --bare repo.git
-run_gap init_initial_branch --initial-branch main repo
-run_gap init_separate_git_dir --separate-git-dir __GITDIR__ repo
-run_gap init_shared_group --shared=group repo
-run_gap init_template --template=__TEMPLATE__ repo
+run_case init_bare --bare repo.git
+run_case init_initial_branch --initial-branch main repo
+run_case init_separate_git_dir --separate-git-dir __GITDIR__ repo
+run_case init_shared_group --shared=group repo
+run_case init_template --template=__TEMPLATE__ repo

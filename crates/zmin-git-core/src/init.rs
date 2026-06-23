@@ -40,8 +40,8 @@ pub fn init_repository(
     fs::create_dir_all(git_dir.join("objects/pack"))?;
     fs::create_dir_all(git_dir.join("refs/heads"))?;
     fs::create_dir_all(git_dir.join("refs/tags"))?;
-    fs::create_dir_all(git_dir.join("branches"))?;
     fs::create_dir_all(git_dir.join("hooks"))?;
+    write_default_sample_hooks(&git_dir)?;
     fs::create_dir_all(git_dir.join("info"))?;
     let exclude = git_dir.join("info/exclude");
     if !exclude.exists() {
@@ -65,6 +65,31 @@ pub fn init_repository(
         worktree: worktree.to_path_buf(),
         git_dir,
     })
+}
+
+fn write_default_sample_hooks(git_dir: &Path) -> io::Result<()> {
+    for name in [
+        "applypatch-msg.sample",
+        "commit-msg.sample",
+        "fsmonitor-watchman.sample",
+        "post-update.sample",
+        "pre-applypatch.sample",
+        "pre-commit.sample",
+        "pre-merge-commit.sample",
+        "pre-push.sample",
+        "pre-rebase.sample",
+        "pre-receive.sample",
+        "prepare-commit-msg.sample",
+        "push-to-checkout.sample",
+        "sendemail-validate.sample",
+        "update.sample",
+    ] {
+        let path = git_dir.join("hooks").join(name);
+        if !path.exists() {
+            fs::write(path, "#!/bin/sh\n")?;
+        }
+    }
+    Ok(())
 }
 
 fn default_exclude_contents() -> &'static str {

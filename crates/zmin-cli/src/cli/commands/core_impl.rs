@@ -2830,7 +2830,7 @@ pub(crate) fn init_command(
                 explicit_initial_branch.as_deref(),
             )?;
             hide_dotgit_if_needed(&result.git_dir, false)?;
-            print_init_message_if_needed(quiet, reinit, &result.git_dir);
+            print_init_message_if_needed(quiet, reinit, &result.git_dir, shared.as_deref());
             return Ok(());
         }
 
@@ -2857,7 +2857,7 @@ pub(crate) fn init_command(
             previous_head,
             explicit_initial_branch.as_deref(),
         )?;
-        print_init_message_if_needed(quiet, reinit, &result.git_dir);
+        print_init_message_if_needed(quiet, reinit, &result.git_dir, shared.as_deref());
         return Ok(());
     }
 
@@ -2872,7 +2872,7 @@ pub(crate) fn init_command(
             apply_init_repository_format(&git_dir, &object_format, &ref_format, true)?;
             apply_init_template(&git_dir, template.as_ref())?;
             apply_shared_repository(&git_dir, shared.as_deref())?;
-            print_init_message_if_needed(quiet, true, &git_dir);
+            print_init_message_if_needed(quiet, true, &git_dir, shared.as_deref());
             return Ok(());
         }
         let reinit = is_git_dir(&git_dir);
@@ -2901,7 +2901,7 @@ pub(crate) fn init_command(
             previous_head,
             explicit_initial_branch.as_deref(),
         )?;
-        print_init_message_if_needed(quiet, reinit, &result.git_dir);
+        print_init_message_if_needed(quiet, reinit, &result.git_dir, shared.as_deref());
         return Ok(());
     }
     let expected_git_dir = if bare {
@@ -2922,7 +2922,7 @@ pub(crate) fn init_command(
         } else {
             restore_default_exclude(&reinit_git_dir)?;
         }
-        print_init_message_if_needed(quiet, true, &reinit_git_dir);
+        print_init_message_if_needed(quiet, true, &reinit_git_dir, shared.as_deref());
         return Ok(());
     }
     let reinit = is_git_dir(&expected_git_dir);
@@ -2942,7 +2942,7 @@ pub(crate) fn init_command(
             previous_head,
             explicit_initial_branch.as_deref(),
         )?;
-        print_init_message_if_needed(quiet, true, &expected_git_dir);
+        print_init_message_if_needed(quiet, true, &expected_git_dir, shared.as_deref());
         return Ok(());
     }
     let result = init_repository(
@@ -2962,7 +2962,7 @@ pub(crate) fn init_command(
         previous_head,
         explicit_initial_branch.as_deref(),
     )?;
-    print_init_message_if_needed(quiet, reinit, &result.git_dir);
+    print_init_message_if_needed(quiet, reinit, &result.git_dir, shared.as_deref());
     Ok(())
 }
 
@@ -3257,18 +3257,19 @@ fn env_path(name: &str, cwd: &Path) -> Option<PathBuf> {
     }
 }
 
-fn print_init_message(reinit: bool, git_dir: &Path) {
+fn print_init_message(reinit: bool, git_dir: &Path, shared: Option<&str>) {
     let action = if reinit {
         "Reinitialized existing"
     } else {
         "Initialized empty"
     };
-    println!("{action} Git repository in {}/", git_dir.display());
+    let shared = if shared.is_some() { " shared" } else { "" };
+    println!("{action}{shared} Git repository in {}/", git_dir.display());
 }
 
-fn print_init_message_if_needed(quiet: bool, reinit: bool, git_dir: &Path) {
+fn print_init_message_if_needed(quiet: bool, reinit: bool, git_dir: &Path, shared: Option<&str>) {
     if !quiet {
-        print_init_message(reinit, git_dir);
+        print_init_message(reinit, git_dir, shared);
     }
 }
 
@@ -3286,8 +3287,8 @@ fn write_non_bare_git_dir_config(git_dir: &Path, work_tree: &Path) -> Result<()>
 
 fn apply_init_template(git_dir: &Path, explicit_template: Option<&PathBuf>) -> Result<()> {
     if let Some(template) = explicit_template {
+        remove_default_template_files(git_dir)?;
         if template.as_os_str().is_empty() || template.as_os_str() == EMPTY_INIT_TEMPLATE_SENTINEL {
-            remove_default_template_files(git_dir)?;
             return Ok(());
         }
         copy_template_dir(template, git_dir)?;
@@ -3300,12 +3301,28 @@ fn apply_init_template(git_dir: &Path, explicit_template: Option<&PathBuf>) -> R
 }
 
 fn remove_default_template_files(git_dir: &Path) -> Result<()> {
+    match std::fs::remove_file(git_dir.join("description")) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CliError::Io(error)),
+    }?;
     match std::fs::remove_file(git_dir.join("info/exclude")) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(CliError::Io(error)),
     }?;
     match std::fs::remove_dir(git_dir.join("info")) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => Ok(()),
+        Err(error) => Err(CliError::Io(error)),
+    }?;
+    match std::fs::remove_dir_all(git_dir.join("hooks")) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CliError::Io(error)),
+    }?;
+    match std::fs::remove_dir(git_dir.join("branches")) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::DirectoryNotEmpty => Ok(()),
@@ -3333,6 +3350,12 @@ fn restore_default_exclude(git_dir: &Path) -> Result<()> {
 
 fn copy_template_dir(source: &Path, destination: &Path) -> Result<()> {
     if !source.exists() {
+        let display_path = if source.is_absolute() {
+            source.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(source)
+        };
+        eprintln!("warning: templates not found in {}", display_path.display());
         return Ok(());
     }
     for entry in std::fs::read_dir(source)? {
