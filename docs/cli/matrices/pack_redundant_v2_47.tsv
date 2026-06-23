@@ -1,0 +1,3 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Plumbing	pack-redundant	--i-still-use-this	<empty>	--all repository with overlapping packs	repository with two overlapping pack files	local	all	git pack-redundant --i-still-use-this --all	closed	git_pack_integrity_compat::pack_redundant_lists_redundant_pack_like_stock_git	required warning-acknowledgement flag output matches stock Git
+Plumbing	pack-redundant	--all	<empty>	--i-still-use-this repository with overlapping packs	repository with two overlapping pack files	local	all	git pack-redundant --i-still-use-this --all	closed	git_pack_integrity_compat::pack_redundant_lists_redundant_pack_like_stock_git	all-pack scan output matches stock Git
