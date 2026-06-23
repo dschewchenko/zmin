@@ -647,6 +647,10 @@ pub(crate) fn fast_forward_to_cached(
         let _trace = phase_trace("fast_forward.read_target_commit");
         commit_cache.read_commit(&target_id)?
     };
+    let current_commit = current_id
+        .as_ref()
+        .map(|current_id| commit_cache.read_commit(current_id))
+        .transpose()?;
     let checkout_metadata = WorktreeCheckoutMetadata {
         ref_name: None,
         treeish: Some(target_id.clone()),
@@ -682,11 +686,41 @@ pub(crate) fn fast_forward_to_cached(
             );
         }
         println!("Fast-forward");
-        println!(
-            "{} {}",
-            short_object_id(&target_id),
-            commit_subject(&target_commit.message)
-        );
+        if let Some(current_commit) = &current_commit {
+            print_fast_forward_stat(repo, store, current_commit, &target_commit)?;
+        }
     }
     Ok(())
+}
+
+fn print_fast_forward_stat(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    current_commit: &CommitObject,
+    target_commit: &CommitObject,
+) -> Result<()> {
+    let tree_cache = TreeObjectCache::new(store);
+    let old_index = read_commit_tree_index_cached(&tree_cache, current_commit)?;
+    let new_index = read_commit_tree_index_cached(&tree_cache, target_commit)?;
+    let entries = diff_indexes(&old_index, &new_index)?;
+    let context = DiffIndexContext {
+        repo,
+        store,
+        old_index: &old_index,
+        new_index: &new_index,
+        old_source: DiffSideSource::Index,
+        new_source: DiffSideSource::Index,
+    };
+    print_stat_entries(
+        &context,
+        &entries,
+        DiffStatOptions {
+            whitespace_mode: DiffWhitespaceMode::None,
+            relative_prefix: None,
+            ignore_matching_lines: &[],
+            ignore_blank_lines: false,
+            compact_summary: false,
+        },
+    )?;
+    print_summary_entries(&old_index, &new_index, &entries, None)
 }

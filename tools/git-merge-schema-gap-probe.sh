@@ -96,9 +96,40 @@ run_gap() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
-run_gap merge_ff_only_long ff --ff-only feature
+run_exact() {
+  local name="$1"
+  local diverge="$2"
+  shift 2
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_pair "$name" "$diverge"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" merge "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  (cd "$zmin_work" && "$ZMIN_BIN" merge "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  repo_snapshot "$git_work" >"$tmpdir/${name}.git.snapshot"
+  repo_snapshot "$zmin_work" >"$tmpdir/${name}.zmin.snapshot"
+  if [ "$git_exit" != "$zmin_exit" ] ||
+    ! cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" ||
+    ! cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" ||
+    ! cmp -s "$tmpdir/${name}.git.snapshot" "$tmpdir/${name}.zmin.snapshot"; then
+    echo "$name diverged from stock Git" >&2
+    diff -u "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" >&2 || true
+    diff -u "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" >&2 || true
+    diff -u "$tmpdir/${name}.git.snapshot" "$tmpdir/${name}.zmin.snapshot" >&2 || true
+    return 1
+  fi
+  printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
+run_exact merge_ff_only_long ff --ff-only feature
 run_gap merge_no_ff_long ff --no-ff feature
 run_gap merge_no_commit_long diverge --no-commit feature
 run_gap merge_squash_long diverge --squash feature
 run_gap merge_strategy_long diverge --strategy ort feature
-run_gap merge_positional_commit ff feature
+run_exact merge_positional_commit ff feature
