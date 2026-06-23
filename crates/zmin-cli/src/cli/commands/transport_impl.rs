@@ -152,23 +152,40 @@ pub(crate) fn upload_pack(options: UploadPackOptions) -> Result<()> {
     let _ = options.timeout;
     let repo = upload_pack_repo_from_path(&options.directory, options.strict)?;
     let runtime = primitive_runtime_for_repo(&repo);
-    {
+    if options.advertise_refs {
         let stdout = io::stdout();
         let stdout = stdout.lock();
         let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout);
-        write_upload_pack_advertisement_for_repo(&repo, runtime.refs_store_adapter(), &mut stdout)?;
+        write_upload_pack_advertisement_for_repo(
+            &repo,
+            runtime.refs_store_adapter(),
+            &mut stdout,
+            true,
+        )?;
         stdout.flush()?;
-    }
-
-    if options.advertise_refs {
         return Ok(());
+    }
+    if !options.stateless_rpc {
+        let stdout = io::stdout();
+        let stdout = stdout.lock();
+        let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout);
+        write_upload_pack_advertisement_for_repo(
+            &repo,
+            runtime.refs_store_adapter(),
+            &mut stdout,
+            false,
+        )?;
+        stdout.flush()?;
     }
 
     let stdin = io::stdin();
     let mut stdin = io::BufReader::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdin.lock());
     let request = read_upload_pack_request_from_stdin(&mut stdin)?;
     if request.wants.is_empty() {
-        return Ok(());
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the remote end hung up unexpectedly".into(),
+        });
     }
     upload_pack_respond_with_pack(&repo, request, options.stateless_rpc)
 }
@@ -4165,14 +4182,15 @@ fn write_upload_pack_advertisement_for_repo<W: Write>(
     repo: &GitRepo,
     refs: &OwnedCliRefsStoreAdapter,
     out: &mut W,
+    include_no_done: bool,
 ) -> Result<()> {
     let common_dir = read_common_git_dir(&repo.git_dir)?;
     if common_dir == repo.git_dir {
-        return write_upload_pack_advertisement_from_adapter(&refs, out);
+        return write_upload_pack_advertisement_from_adapter(&refs, out, include_no_done);
     }
 
     let common_refs = refs_adapter_from_git_dir(&common_dir);
-    let capabilities = upload_pack_capabilities_from_adapter(&refs)?;
+    let capabilities = upload_pack_capabilities_from_adapter(&refs, include_no_done)?;
     let mut wrote = false;
     if let Some(head) = refs.resolve_ref("HEAD")? {
         write_ref_advertisement_pkt_line(out, Some(&head), "HEAD", Some(&capabilities))?;
@@ -4257,7 +4275,7 @@ fn daemon_serve_connection<R: BufRead, W: Write>(
     }
     let runtime = primitive_runtime_for_repo(&repo);
     let refs = runtime.refs_store_adapter();
-    write_upload_pack_advertisement_from_adapter(&refs, output)?;
+    write_upload_pack_advertisement_from_adapter(&refs, output, true)?;
     output.flush()?;
 
     let request = read_upload_pack_request_from_stdin(input)?;
@@ -4442,7 +4460,8 @@ fn write_upload_pack_advertisement<W: Write>(refs: &RefStore, out: &mut W) -> Re
 #[cfg(test)]
 fn upload_pack_capabilities(refs: &RefStore) -> Result<String> {
     let mut capabilities = String::from(
-        "multi_ack thin-pack side-band side-band-64k ofs-delta shallow filter \
+        "multi_ack thin-pack side-band side-band-64k ofs-delta shallow \
+         deepen-since deepen-not deepen-relative \
          no-progress include-tag multi_ack_detailed no-done",
     );
     if let Ok(RefTarget::Symbolic(target)) = refs.read_head() {
@@ -22895,7 +22914,7 @@ pub(crate) fn http_backend() -> Result<()> {
         http_backend_no_cache_headers(&mut stdout, "application/x-git-upload-pack-advertisement")?;
         write_pkt_line(&mut stdout, b"# service=git-upload-pack\n")?;
         stdout.write_all(b"0000")?;
-        write_upload_pack_advertisement_from_adapter(&refs, &mut stdout)?;
+        write_upload_pack_advertisement_from_adapter(&refs, &mut stdout, true)?;
         stdout.flush()?;
         return Ok(());
     }
@@ -23354,8 +23373,9 @@ fn apply_receive_pack_update(
 fn write_upload_pack_advertisement_from_adapter<W: Write>(
     refs: &OwnedCliRefsStoreAdapter,
     out: &mut W,
+    include_no_done: bool,
 ) -> Result<()> {
-    let capabilities = upload_pack_capabilities_from_adapter(refs)?;
+    let capabilities = upload_pack_capabilities_from_adapter(refs, include_no_done)?;
     let mut wrote = false;
     if let Some(head) = refs.resolve_ref("HEAD")? {
         write_ref_advertisement_pkt_line(out, Some(&head), "HEAD", Some(&capabilities))?;
@@ -23380,11 +23400,18 @@ fn write_upload_pack_advertisement_from_adapter<W: Write>(
     Ok(())
 }
 
-fn upload_pack_capabilities_from_adapter(refs: &OwnedCliRefsStoreAdapter) -> Result<String> {
+fn upload_pack_capabilities_from_adapter(
+    refs: &OwnedCliRefsStoreAdapter,
+    include_no_done: bool,
+) -> Result<String> {
     let mut capabilities = String::from(
-        "multi_ack thin-pack side-band side-band-64k ofs-delta shallow filter \
-         no-progress include-tag multi_ack_detailed no-done",
+        "multi_ack thin-pack side-band side-band-64k ofs-delta shallow \
+         deepen-since deepen-not deepen-relative \
+         no-progress include-tag multi_ack_detailed",
     );
+    if include_no_done {
+        capabilities.push_str(" no-done");
+    }
     if let Some(target) = refs.head_symbolic_ref() {
         capabilities.push_str(" symref=HEAD:");
         capabilities.push_str(&target);
