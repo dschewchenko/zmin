@@ -49,8 +49,8 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2845` | `+1751` |
-| Matching stock Git rows | `823` | `2456` | `+1633` |
+| Written behavior rows | `1094` | `2846` | `+1752` |
+| Matching stock Git rows | `823` | `2457` | `+1634` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `108/151` | `+58` |
@@ -140,7 +140,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `stripspace` | `0` | `5` | `+5` |
 | `column` | `0` | `4` | `+4` |
 | `commit-tree` | `0` | `5` | `+5` |
-| `credential` | `0` | `4` | `+4` |
+| `credential` | `0` | `5` | `+5` |
 | `credential-cache` | `0` | `6` | `+6` |
 | `difftool` | `0` | `4` | `+4` |
 | `fmt-merge-msg` | `0` | `4` | `+4` |
@@ -4691,3 +4691,42 @@ closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+2` represented doc-option pairs, `-2` implemented-but-unverified schema
 rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `credential` positional
+operation schema surface, with focused stock-oracle Rust test evidence.
+
+Evidence source:
+
+- `git_credential_compat::credential_matches_stock_git_for_basic_protocol_flows`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0` because this closes a positional
+  schema surface rather than a documented option spelling
+- implemented-but-unverified schema rows: expected `-1`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected row:
+
+- `git credential fill`
+
+The evidence compares stock Git and Zmin stdout, stderr, exit status and basic
+credential protocol behavior for `fill`, `approve`, `reject` and a missing-field
+failure. This row makes the required positional operation parser surface
+explicit in the matrix.
+
+Actual post-import movement matched the declaration: `+1` behavior row, `+1`
+closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `-1` implemented-but-unverified schema
+row and `+0` remaining checklist rows.
