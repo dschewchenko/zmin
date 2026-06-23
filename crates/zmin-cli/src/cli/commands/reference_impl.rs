@@ -4575,6 +4575,7 @@ fn branch(options: BranchOptions) -> Result<()> {
             set_config_value(&repo, &format!("branch.{name}.remote"), &upstream.remote)?;
             set_config_value(&repo, &format!("branch.{name}.merge"), &upstream.merge)?;
             set_autosetuprebase_config(&repo, &name, &upstream)?;
+            println!("branch '{name}' set up to track '{}'.", upstream.display);
         }
         return Ok(());
     }

@@ -161,6 +161,8 @@ run_in_seed_repos branch_remotes_long branch --remotes
 run_in_seed_repos branch_force_short branch -f feature HEAD
 run_in_seed_repos branch_force_long branch --force feature HEAD
 run_in_seed_repos branch_no_track branch --no-track no_track_branch HEAD
+run_in_seed_repos branch_track_long branch --track tracked_branch HEAD
+run_in_seed_repos branch_track_short branch -t short_tracked_branch HEAD
 run_in_seed_repos branch_force_delete branch -D feature
 run_in_seed_repos branch_force_copy branch -C feature copydst
 run_in_seed_repos branch_copy_duplicate_long branch --copy feature copydst
