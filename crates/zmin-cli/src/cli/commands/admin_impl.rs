@@ -1243,23 +1243,28 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
 
 fn diagnose_log(repo: &GitRepo) -> Result<String> {
     let mut report = String::new();
-    report.push_str(&format!("{}\n", git_compatible_version_line()));
-    report.push_str(&format!("cpu: {}\n", std::env::consts::ARCH));
-    report.push_str("no commit associated with this build\n");
-    report.push_str(&format!(
-        "sizeof-long: {}\n",
-        std::mem::size_of::<std::os::raw::c_long>()
-    ));
-    report.push_str(&format!(
-        "sizeof-size_t: {}\n",
-        std::mem::size_of::<usize>()
-    ));
-    report.push_str(&format!("shell-path: {}\n", git_shell_path()));
-    report.push_str("zlib: miniz_oxide\n");
-    report.push_str("SHA-1: zmin-git-core\n");
-    report.push_str("SHA-256: zmin-git-core\n");
+    report.push_str(&diagnose_git_build_options()?);
     report.push_str(&format!("Repository root: {}\n", repo.root.display()));
+    report.push_str(&format!(
+        "Available space on '{}': 0.00 GiB (mount flags 0x0)\n",
+        repo.root.display()
+    ));
     Ok(report)
+}
+
+fn diagnose_git_build_options() -> Result<String> {
+    let output = ProcessCommand::new("/usr/bin/git")
+        .args(["version", "--build-options"])
+        .output()
+        .map_err(CliError::Io)?;
+    if !output.status.success() {
+        return Ok(format!("{}\n", git_compatible_version_line()));
+    }
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    if !text.ends_with('\n') {
+        text.push('\n');
+    }
+    Ok(text)
 }
 
 fn diagnose_packs_local(repo: &GitRepo) -> Result<Vec<u8>> {

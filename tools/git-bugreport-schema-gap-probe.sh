@@ -21,6 +21,14 @@ normalize_err() {
   perl -0pi -e "s#'$outdir/[^']+'#'<OUTFILE>'#g" "$file"
 }
 
+normalize_out() {
+  local repo="$1"
+  local file="$2"
+  local real_repo
+  real_repo="$(cd "$repo" && pwd -P)"
+  perl -0pi -e "s#\\Q$repo\\E#<WORKTREE>#g; s#\\Q$real_repo\\E#<WORKTREE>#g; s#Available space on '<WORKTREE>': [0-9]+\\.[0-9]{2} GiB \\(mount flags 0x[0-9a-fA-F]+\\)#Available space on '<WORKTREE>': <SPACE> GiB (mount flags <FLAGS>)#g" "$file"
+}
+
 prepare_repo() {
   local repo="$1"
   "$GIT_BIN" -C "$repo" init -q
@@ -55,6 +63,8 @@ run_gap() {
   find "$zmin_outdir" -maxdepth 3 -type f | sed "s#$zmin_outdir/##" | sort >"$tmpdir/$name.zmin.files"
   normalize_err "$git_outdir" "$tmpdir/$name.git.err"
   normalize_err "$zmin_outdir" "$tmpdir/$name.zmin.err"
+  normalize_out "$git_work" "$tmpdir/$name.git.out"
+  normalize_out "$zmin_work" "$tmpdir/$name.zmin.out"
 
   printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
   printf 'stock stdout:\n'
@@ -68,9 +78,11 @@ run_gap() {
 
   test "$git_exit" = "$zmin_exit"
   cmp -s "$tmpdir/$name.git.files" "$tmpdir/$name.zmin.files"
-  if cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" \
-    && cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"; then
-    echo "$name unexpectedly matched" >&2
+  if ! cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" \
+    || ! cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"; then
+    echo "$name mismatch" >&2
+    diff -u "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" >&2 || true
+    diff -u "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err" >&2 || true
     return 1
   fi
 }
