@@ -10193,11 +10193,14 @@ fn fetch_multiple_refspecs(
         write_configured_fetch_head_file(
             &repo,
             &source_refs,
+            &destination_refs,
             &remote,
             &url,
             &refspecs,
             append,
             true,
+            false,
+            false,
         )?;
     }
     if prune {
@@ -12375,11 +12378,14 @@ pub(crate) fn fetch_with_repo_and_remote(
             write_configured_fetch_head_file(
                 &repo,
                 &source_refs,
+                &destination_refs,
                 &remote,
                 &url,
                 &fetch_refspecs,
                 append,
                 true,
+                false,
+                false,
             )?;
         }
         {
@@ -12485,7 +12491,7 @@ pub(crate) fn fetch_with_repo_and_remote(
                 &source_refs,
                 &destination_refs,
                 &fetch_refspecs,
-                !no_tags,
+                !no_tags && !dry_run,
                 prune,
             )?
         };
@@ -12537,11 +12543,14 @@ pub(crate) fn fetch_with_repo_and_remote(
             write_configured_fetch_head_file(
                 &repo,
                 &source_refs,
+                &destination_refs,
                 &remote,
                 &url,
                 &fetch_refspecs,
                 append,
                 false,
+                !no_tags && !dry_run,
+                tags,
             )?;
         }
         let hook_head_branch = if atomic {
@@ -12567,7 +12576,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         {
             let _trace = phase_trace("fetch.local.copy_tags");
-            if !no_tags {
+            if !no_tags && !dry_run {
                 copy_configured_fetch_tags(&source_refs, &destination_refs)?;
             }
         }
@@ -14922,6 +14931,12 @@ fn fetch_update_row(source: &str, destination: &str) -> String {
     } else {
         ("new ref", source.rsplit('/').next().unwrap_or(source))
     };
+    if kind == "new tag" {
+        return format!(
+            " * [{kind}]         {source_display:<11}-> {}",
+            fetch_update_destination_display(destination)
+        );
+    }
     format!(
         " * [{kind}]         {source_display}        -> {}",
         fetch_update_destination_display(destination)
@@ -15242,11 +15257,14 @@ fn write_configured_fetch_head_ref(
 fn write_configured_fetch_head_file(
     repo: &GitRepo,
     source_refs: &RefStore,
+    destination_refs: &RefStore,
     remote: &str,
     url: &str,
     refspecs: &[String],
     append: bool,
     explicit_refspec_fetch: bool,
+    include_tag_rows: bool,
+    include_existing_tag_rows: bool,
 ) -> Result<()> {
     let current_merge = current_branch_ref(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1))?
         .and_then(|current| {
@@ -15329,7 +15347,43 @@ fn write_configured_fetch_head_file(
         }
     }
     merge_rows.extend(rows);
+    if include_tag_rows {
+        append_configured_fetch_head_tag_rows(
+            source_refs,
+            destination_refs,
+            &fetch_head_url_display(url),
+            include_existing_tag_rows,
+            &mut merge_rows,
+        )?;
+    }
     write_fetch_head_content(repo, merge_rows.concat().as_bytes(), append)
+}
+
+fn append_configured_fetch_head_tag_rows(
+    source_refs: &RefStore,
+    destination_refs: &RefStore,
+    display_url: &str,
+    include_existing_tag_rows: bool,
+    rows: &mut Vec<String>,
+) -> Result<()> {
+    source_refs.for_each_ref_name("refs/tags/", |ref_name| {
+        let id = source_refs.resolve(ref_name)?;
+        if !include_existing_tag_rows
+            && destination_refs
+                .resolve(ref_name)
+                .is_ok_and(|destination_id| destination_id == id)
+        {
+            return Ok::<(), CliError>(());
+        }
+        let tag = ref_name.strip_prefix("refs/tags/").unwrap_or(ref_name);
+        rows.push(format!(
+            "{}\tnot-for-merge\ttag '{}' of {}\n",
+            id.to_hex(),
+            tag,
+            display_url
+        ));
+        Ok::<(), CliError>(())
+    })
 }
 
 fn write_explicit_location_refspec_fetch_head_file(

@@ -38,6 +38,37 @@ fetch_head_snapshot() {
   fi
 }
 
+copy_source_objects() {
+  local client="$1"
+  if [ -d "$client/.git/objects" ]; then
+    chmod -R u+w "$client/.git/objects"
+  fi
+  mkdir -p "$client/.git/objects"
+  cp -R "$source_repo/.git/objects/." "$client/.git/objects/"
+}
+
+sync_client_main_from_source() {
+  local client="$1"
+  local commit="$2"
+  copy_source_objects "$client"
+  "$GIT_BIN" -C "$client" update-ref refs/heads/main "$commit"
+  "$GIT_BIN" -C "$client" update-ref refs/remotes/origin/main "$commit"
+  "$GIT_BIN" -C "$client" symbolic-ref HEAD refs/heads/main
+  "$GIT_BIN" -C "$client" config branch.main.remote origin
+  "$GIT_BIN" -C "$client" config branch.main.merge refs/heads/main
+  if "$GIT_BIN" -C "$source_repo" rev-parse --verify -q refs/tags/v1 >/dev/null; then
+    "$GIT_BIN" -C "$client" update-ref refs/tags/v1 "$("$GIT_BIN" -C "$source_repo" rev-parse refs/tags/v1)"
+  fi
+}
+
+sync_client_remote_branch_from_source() {
+  local client="$1"
+  local branch="$2"
+  local commit="$3"
+  copy_source_objects "$client"
+  "$GIT_BIN" -C "$client" update-ref "refs/remotes/origin/$branch" "$commit"
+}
+
 seed_remote_pair() {
   local name="$1"
   local mode="${2:-default}"
@@ -53,8 +84,14 @@ seed_remote_pair() {
   "$GIT_BIN" -C "$source_repo" add -A
   "$GIT_BIN" -C "$source_repo" commit -qm "one"
   "$GIT_BIN" -C "$source_repo" tag v1
-  "$GIT_BIN" clone -q "$source_repo" "$git_work"
-  "$GIT_BIN" clone -q "$source_repo" "$zmin_work"
+  "$GIT_BIN" init -q -b main "$git_work"
+  "$GIT_BIN" init -q -b main "$zmin_work"
+  "$GIT_BIN" -C "$git_work" remote add origin "$source_repo"
+  "$GIT_BIN" -C "$zmin_work" remote add origin "$source_repo"
+  local main_commit
+  main_commit="$("$GIT_BIN" -C "$source_repo" rev-parse refs/heads/main)"
+  sync_client_main_from_source "$git_work" "$main_commit"
+  sync_client_main_from_source "$zmin_work" "$main_commit"
 
   case "$mode" in
     stale)
@@ -62,16 +99,20 @@ seed_remote_pair() {
       printf 'old\n' >"$source_repo/old.txt"
       "$GIT_BIN" -C "$source_repo" add -A
       "$GIT_BIN" -C "$source_repo" commit -qm "old"
-      "$GIT_BIN" -C "$git_work" fetch -q origin
-      "$GIT_BIN" -C "$zmin_work" fetch -q origin
+      local old_commit
+      old_commit="$("$GIT_BIN" -C "$source_repo" rev-parse refs/heads/old)"
+      sync_client_remote_branch_from_source "$git_work" old "$old_commit"
+      sync_client_remote_branch_from_source "$zmin_work" old "$old_commit"
       "$GIT_BIN" -C "$source_repo" checkout -q main
       "$GIT_BIN" -C "$source_repo" branch -D old >/dev/null
       ;;
     nonff)
       printf 'two\n' >"$source_repo/a.txt"
       "$GIT_BIN" -C "$source_repo" commit -am "two" -q
-      "$GIT_BIN" -C "$git_work" fetch -q origin
-      "$GIT_BIN" -C "$zmin_work" fetch -q origin
+      local two_commit
+      two_commit="$("$GIT_BIN" -C "$source_repo" rev-parse refs/heads/main)"
+      sync_client_main_from_source "$git_work" "$two_commit"
+      sync_client_main_from_source "$zmin_work" "$two_commit"
       "$GIT_BIN" -C "$source_repo" reset --hard HEAD~1 >/dev/null
       printf 'alt\n' >"$source_repo/a.txt"
       "$GIT_BIN" -C "$source_repo" commit -am "alt" -q
@@ -142,10 +183,10 @@ run_gap() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
-run_gap fetch_quiet_short default -q origin
-run_gap fetch_prune_short stale -p origin
+run_exact fetch_quiet_short default -q origin
+run_exact fetch_prune_short stale -p origin
 run_exact fetch_append_short append -a origin
-run_gap fetch_dry_run_short default -n origin
-run_gap fetch_tags_short default -t origin
-run_gap fetch_verbose_short default -v origin
+run_exact fetch_dry_run_short default -n origin
+run_exact fetch_tags_short default -t origin
+run_exact fetch_verbose_short default -v origin
 run_gap fetch_force_long nonff --force origin main:refs/remotes/origin/main
