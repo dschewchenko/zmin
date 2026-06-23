@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2824` | `+1730` |
-| Matching stock Git rows | `823` | `2435` | `+1612` |
+| Written behavior rows | `1094` | `2826` | `+1732` |
+| Matching stock Git rows | `823` | `2437` | `+1614` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `106/151` | `+56` |
-| Represented doc-option pairs | `253/4632` | `715/4632` | `+462` |
+| Represented doc-option pairs | `253/4632` | `716/4632` | `+463` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4438,3 +4438,44 @@ closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+0` represented doc-option pairs, `-2` implemented-but-unverified
 schema rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `describe` schema surfaces,
+with focused stock-oracle smoke evidence.
+
+Evidence command:
+
+- `tools/git-describe-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `--exact-match`; the
+  positional commit-ish row closes a schema surface rather than a documented
+  option spelling
+- implemented-but-unverified schema rows: expected `-2`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git describe v1.0.0`
+- `git describe --exact-match v1.0.0`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and clean
+worktree status using copied workdirs from one seed repository. Negative
+`git describe --exact-match HEAD` remains a fix-needed surface because probe
+output showed current stderr differences.
+
+Actual post-import movement matched the declaration: `+2` behavior rows, `+2`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+1` represented doc-option pair, `-2` implemented-but-unverified schema
+rows and `+0` remaining checklist rows.
