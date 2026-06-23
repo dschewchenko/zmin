@@ -35,11 +35,10 @@ run_probe() {
   set -e
 
   test "$git_exit" = 1
-  test "$zmin_exit" = 0
-  grep -F "git: '$command' is not a git command" "$tmpdir/${name}.git.err" >/dev/null
-  test ! -s "$tmpdir/${name}.zmin.out"
-  test ! -s "$tmpdir/${name}.zmin.err"
-  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$zmin_exit" = 1
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 run_probe sh-i18n ignored sh_i18n_positional_helper_entrypoint_gap

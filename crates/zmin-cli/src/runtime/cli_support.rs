@@ -106,6 +106,7 @@ pub(crate) fn parse_cli_invocation(
     let command_args = normalize_log_date_hyphen_value(command_args);
     validate_version_invocation_before_clap(&command_args)?;
     validate_var_invocation_before_clap(&command_args)?;
+    validate_sh_helper_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
@@ -240,6 +241,16 @@ fn validate_var_invocation_before_clap(args: &[String]) -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn validate_sh_helper_invocation_before_clap(args: &[String]) -> Result<()> {
+    let Some(command @ ("sh-i18n" | "sh-setup")) = args.first().map(String::as_str) else {
+        return Ok(());
+    };
+    Err(CliError::Stderr {
+        code: 1,
+        text: format!("git: '{command}' is not a git command. See 'git --help'.\n"),
+    })
 }
 
 fn is_known_command(command: &str) -> bool {
