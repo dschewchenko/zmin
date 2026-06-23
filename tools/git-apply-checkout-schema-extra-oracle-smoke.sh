@@ -133,4 +133,4 @@ run_checkout_case() {
 run_exact_apply_case apply_patch_path clean change.patch
 run_exact_apply_case apply_reverse_long applied --reverse change.patch
 run_checkout_case checkout_force_long exact --force HEAD
-run_checkout_case checkout_quiet_short gap -q .
+run_checkout_case checkout_quiet_short exact -q .

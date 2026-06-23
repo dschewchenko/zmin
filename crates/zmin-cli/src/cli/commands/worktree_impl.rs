@@ -9511,7 +9511,7 @@ fn stash_ref_name() -> &'static str {
 
 pub(crate) fn checkout(
     force: bool,
-    _quiet: bool,
+    quiet: bool,
     _no_progress: bool,
     detach: bool,
     _recurse_submodules: bool,
@@ -9597,7 +9597,7 @@ pub(crate) fn checkout(
         return checkout_paths(
             source,
             paths,
-            report_updated_paths && !explicit_pathspec_separator,
+            report_updated_paths && !explicit_pathspec_separator && !quiet,
         );
     }
     let Some(target) = args.first() else {
@@ -9626,7 +9626,7 @@ pub(crate) fn checkout(
         return checkout_paths(
             None,
             vec![PathBuf::from(target)],
-            !explicit_pathspec_separator,
+            !explicit_pathspec_separator && !quiet,
         );
     }
     checkout_existing(force, target)
