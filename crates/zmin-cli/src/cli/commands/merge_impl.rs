@@ -114,6 +114,7 @@ fn merge_abort() -> Result<()> {
     remove_file_if_exists(&merge_head_path)?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_MODE"))?;
+    remove_file_if_exists(&repo.git_dir.join("AUTO_MERGE"))?;
     Ok(())
 }
 
@@ -160,6 +161,8 @@ fn merge_continue() -> Result<()> {
     update_head_to_commit(&refs, &id)?;
     remove_file_if_exists(&merge_head_path)?;
     remove_file_if_exists(&merge_message_path)?;
+    remove_file_if_exists(&repo.git_dir.join("MERGE_MODE"))?;
+    remove_file_if_exists(&repo.git_dir.join("AUTO_MERGE"))?;
     println!(
         "[{}] {}",
         short_object_id(&id),
@@ -336,7 +339,7 @@ fn merge_commit(
                 }
             }
             index.write_to_path(&repo.index_path)?;
-            write_merge_state(repo, &target_id, &merge_display_name(repo, target))?;
+            write_merge_state(repo, &target_id, &merge_display_name(repo, target), true)?;
             eprintln!("Automatic merge failed; fix conflicts and then commit the result.");
             return Err(CliError::Exit(1));
         }
@@ -350,14 +353,16 @@ fn merge_commit(
     refresh_tracked_index_metadata_matching(repo, &mut merged, &[])?;
     merged.write_to_path(&repo.index_path)?;
     if mode.squash {
+        write_auto_merge(repo, store, &merged)?;
         write_squash_message(repo, commit_cache, &target_id)?;
         println!("Squash commit -- not updating HEAD");
         eprintln!("Automatic merge went well; stopped before committing as requested");
         return Ok(());
     }
     if mode.no_commit {
+        write_auto_merge(repo, store, &merged)?;
         let target_label = merge_display_name_or_label(repo, target, target_label);
-        write_merge_state(repo, &target_id, &target_label)?;
+        write_merge_state(repo, &target_id, &target_label, false)?;
         eprintln!("Automatic merge went well; stopped before committing as requested");
         return Ok(());
     }
@@ -389,15 +394,29 @@ fn merge_display_name_or_label(repo: &GitRepo, target: &str, target_label: Optio
         .unwrap_or_else(|| merge_display_name(repo, target))
 }
 
-fn write_merge_state(repo: &GitRepo, target_id: &ObjectId, target_label: &str) -> Result<()> {
+fn write_merge_state(
+    repo: &GitRepo,
+    target_id: &ObjectId,
+    target_label: &str,
+    conflicted: bool,
+) -> Result<()> {
     fs::write(
         repo.git_dir.join("MERGE_HEAD"),
         format!("{}\n", target_id.to_hex()),
     )?;
-    fs::write(
-        repo.git_dir.join("MERGE_MSG"),
-        format!("Merge branch '{}'\n\n# Conflicts:\n", target_label),
-    )?;
+    let message = if conflicted {
+        format!("Merge branch '{}'\n\n# Conflicts:\n", target_label)
+    } else {
+        format!("Merge branch '{}'\n", target_label)
+    };
+    fs::write(repo.git_dir.join("MERGE_MSG"), message)?;
+    fs::write(repo.git_dir.join("MERGE_MODE"), "")?;
+    Ok(())
+}
+
+fn write_auto_merge(repo: &GitRepo, store: &LooseObjectStore, index: &GitIndex) -> Result<()> {
+    let tree = write_tree_from_index(store, index)?;
+    fs::write(repo.git_dir.join("AUTO_MERGE"), tree.to_hex() + "\n")?;
     Ok(())
 }
 
@@ -407,13 +426,22 @@ fn write_squash_message(
     target_id: &ObjectId,
 ) -> Result<()> {
     let target = commit_cache.read_commit(target_id)?;
-    let subject = commit_subject(&target.message);
+    let author_name = signature_name(&target.author);
+    let author_email = signature_email(&target.author);
+    let date = signature_log_date(&target.author)?;
+    let body = String::from_utf8_lossy(&target.message)
+        .lines()
+        .map(|line| format!("    {line}\n"))
+        .collect::<String>();
     fs::write(
         repo.git_dir.join("SQUASH_MSG"),
         format!(
-            "Squashed commit of the following:\n\ncommit {}\n{}\n",
+            "Squashed commit of the following:\n\ncommit {}\nAuthor: {} <{}>\nDate:   {}\n\n{}",
             target_id.to_hex(),
-            subject
+            author_name,
+            author_email,
+            date,
+            body
         ),
     )?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_HEAD"))?;

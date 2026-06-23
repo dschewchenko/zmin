@@ -53,6 +53,7 @@ side_effect_snapshot() {
   for side_effect in MERGE_HEAD MERGE_MSG MERGE_MODE SQUASH_MSG AUTO_MERGE; do
     if [ -e "$repo/.git/$side_effect" ]; then
       printf '%s\n' "$side_effect"
+      sed -n l "$repo/.git/$side_effect"
     fi
   done
 }
@@ -129,7 +130,7 @@ run_exact() {
 
 run_exact merge_ff_only_long ff --ff-only feature
 run_gap merge_no_ff_long ff --no-ff feature
-run_gap merge_no_commit_long diverge --no-commit feature
-run_gap merge_squash_long diverge --squash feature
+run_exact merge_no_commit_long diverge --no-commit feature
+run_exact merge_squash_long diverge --squash feature
 run_gap merge_strategy_long diverge --strategy ort feature
 run_exact merge_positional_commit ff feature
