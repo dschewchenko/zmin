@@ -84,3 +84,4 @@ run_case() {
 }
 
 run_case show_ref_positional_refs show-ref refs/heads/main
+run_case show_ref_hash_short show-ref -s
