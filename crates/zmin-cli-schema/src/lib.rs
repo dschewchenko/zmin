@@ -2850,7 +2850,7 @@ pub enum Command {
         paths: Vec<String>,
     },
     UpdateRef {
-        #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]
+        #[arg(short = 'd', action = ArgAction::SetTrue)]
         delete: bool,
         #[arg(long = "no-deref", overrides_with = "deref", action = ArgAction::SetTrue)]
         no_deref: bool,

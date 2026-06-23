@@ -107,6 +107,7 @@ pub(crate) fn parse_cli_invocation(
     validate_version_invocation_before_clap(&command_args)?;
     validate_var_invocation_before_clap(&command_args)?;
     validate_sh_helper_invocation_before_clap(&command_args)?;
+    validate_update_ref_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
@@ -251,6 +252,16 @@ fn validate_sh_helper_invocation_before_clap(args: &[String]) -> Result<()> {
         code: 1,
         text: format!("git: '{command}' is not a git command. See 'git --help'.\n"),
     })
+}
+
+fn validate_update_ref_invocation_before_clap(args: &[String]) -> Result<()> {
+    if matches!(args, [command, option, ..] if command == "update-ref" && option == "--delete") {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: unknown option `delete'\nusage: git update-ref [<options>] -d <refname> [<old-oid>]\n   or: git update-ref [<options>]    <refname> <new-oid> [<old-oid>]\n   or: git update-ref [<options>] --stdin [-z] [--batch-updates]\n\n    -m <reason>           reason of the update\n    -d                    delete the reference\n    --no-deref            update <refname> not the one it points to\n    --deref               opposite of --no-deref\n    -z                    stdin has NUL-terminated arguments\n    --[no-]stdin          read updates from stdin\n    --[no-]create-reflog  create a reflog\n    -0, --[no-]batch-updates\n                          batch reference updates\n\n".into(),
+        });
+    }
+    Ok(())
 }
 
 fn is_known_command(command: &str) -> bool {

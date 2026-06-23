@@ -83,10 +83,10 @@ sed -n '1,8p' "$tmpdir/delete-long.git.err"
 printf 'zmin stderr:\n'
 sed -n '1,8p' "$tmpdir/delete-long.zmin.err"
 test "$git_exit" = 129
-test "$zmin_exit" = 0
-if cmp -s "$tmpdir/delete-long.git.out" "$tmpdir/delete-long.zmin.out" \
-  && cmp -s "$tmpdir/delete-long.git.err" "$tmpdir/delete-long.zmin.err" \
-  && cmp -s "$tmpdir/delete-long.git.refs" "$tmpdir/delete-long.zmin.refs"; then
-  echo "update_ref_delete_long unexpectedly matched" >&2
+test "$zmin_exit" = 129
+if ! cmp -s "$tmpdir/delete-long.git.out" "$tmpdir/delete-long.zmin.out" \
+  || ! cmp -s "$tmpdir/delete-long.git.err" "$tmpdir/delete-long.zmin.err" \
+  || ! cmp -s "$tmpdir/delete-long.git.refs" "$tmpdir/delete-long.zmin.refs"; then
+  echo "update_ref_delete_long mismatch" >&2
   exit 1
 fi
