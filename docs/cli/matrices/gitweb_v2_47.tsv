@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Other Git 2.47 commands	gitweb	<command>	-h	optional command unavailable	local oracle environment without optional gitweb command	local	all	git gitweb -h	invalid-input	git_admin_tools_compat::optional_gitk_and_gitweb_match_stock_unavailable_shape	when stock Git reports gitweb unavailable, Zmin matches exit/stdout/first stderr line instead of claiming gitweb support
