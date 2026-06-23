@@ -9858,6 +9858,7 @@ fn reject_orphan_checkout_dirty_worktree(repo: &GitRepo, _store: &LooseObjectSto
     Err(CliError::Stderr { code: 1, text })
 }
 
+#[derive(Clone, Copy)]
 enum CheckoutBranchMessage {
     ExistingBranch,
     NewBranch,
@@ -9903,15 +9904,22 @@ fn checkout_existing_with_message(
     }
 
     let source = current_head_reflog_name(&head_refs)?;
+    let current_branch = current_branch_ref(&head_refs)?;
     if let Some(ref_name) = target_branch_ref {
+        let already_on_branch = current_branch.as_deref() == Some(ref_name.as_str());
         let reflog_message = format!("checkout: moving from {source} to {target}");
         if !print_detached_orphan_warning(&store, &head_refs, &[])? {
             print_previous_detached_head_position(&repo, &store, &head_refs)?;
         }
         write_head_symbolic_with_reflog(&repo, &head_refs, &ref_name, &reflog_message)?;
         match branch_message {
+            CheckoutBranchMessage::ExistingBranch if already_on_branch => {
+                eprintln!("Already on '{target}'")
+            }
             CheckoutBranchMessage::ExistingBranch => eprintln!("Switched to branch '{target}'"),
-            CheckoutBranchMessage::NewBranch => eprintln!("Switched to a new branch '{target}'"),
+            CheckoutBranchMessage::NewBranch => {
+                eprintln!("Switched to a new branch '{target}'")
+            }
         }
         if let Some(lines) = human_status_upstream(&repo, &head_refs)? {
             for line in lines {
