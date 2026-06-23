@@ -1,0 +1,2 @@
+reference_group	command	option	value	combination	repository_state	transport	platform	example	status	evidence	notes
+Other Git 2.47 commands	sh-setup	<positional:args>	ignored	helper entrypoint invoked as user command	outside repository	local	all	git sh-setup ignored	open	tools/git-sh-helper-entrypoint-gap-probe.sh::sh_setup_positional_helper_entrypoint_gap	Git 2.47.1 command-list marks git-sh-setup as a pure helper; local stock Git does not dispatch it as a user command and exits 1, while Zmin currently accepts the positional helper invocation as a no-op
