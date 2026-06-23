@@ -23630,7 +23630,7 @@ fn split_shell_words(input: &str) -> Result<Vec<String>> {
 #[cfg(test)]
 fn write_receive_pack_advertisement<W: Write>(refs: &RefStore, out: &mut W) -> Result<()> {
     let capabilities =
-        "report-status delete-refs quiet ofs-delta object-format=sha1 agent=zmin/0.1.0";
+        "report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=zmin/0.1.0";
     let mut wrote = false;
     refs.for_each_server_info_ref(|id, name| {
         write_ref_advertisement_pkt_line(out, Some(id), name, (!wrote).then_some(capabilities))?;
@@ -23809,12 +23809,8 @@ fn write_receive_pack_advertisement_from_adapter_impl<W: Write>(
     out: &mut W,
 ) -> Result<()> {
     let capabilities =
-        "report-status delete-refs quiet ofs-delta object-format=sha1 agent=zmin/0.1.0";
+        "report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=zmin/0.1.0";
     let mut wrote = false;
-    if let Some(id) = refs.resolve_ref("HEAD")? {
-        write_ref_advertisement_pkt_line(out, Some(&id), "HEAD", Some(capabilities))?;
-        wrote = true;
-    }
     refs.for_each_server_info_ref(|id, name| {
         write_ref_advertisement_pkt_line(out, Some(id), name, (!wrote).then_some(capabilities))?;
         wrote = true;

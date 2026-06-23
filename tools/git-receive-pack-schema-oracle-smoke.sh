@@ -14,6 +14,7 @@ export GIT_AUTHOR_DATE="1700000000 +0000"
 export GIT_COMMITTER_NAME=Oracle
 export GIT_COMMITTER_EMAIL=oracle@example.com
 export GIT_COMMITTER_DATE="1700000000 +0000"
+export GIT_USER_AGENT="zmin/0.1.0"
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-receive-pack-oracle.XXXXXX")"
 cleanup() {
@@ -44,7 +45,7 @@ seed_bare_repo() {
   "$GIT_BIN" clone -q --bare "$src" "$bare"
 }
 
-run_quiet_gap() {
+run_quiet_exact() {
   local name="$1"
   shift
   local src="$tmpdir/${name}.src"
@@ -69,18 +70,14 @@ run_quiet_gap() {
 
   test "$git_exit" = "$zmin_exit"
   test "$git_exit" = "128"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
   compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
-  if cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"; then
-    echo "$name unexpectedly matches stock Git stdout; update the open matrix row" >&2
-    return 1
-  fi
-  test -s "$tmpdir/${name}.git.out"
   "$GIT_BIN" --git-dir="$git_bare" show-ref >"$tmpdir/${name}.git.refs.after"
   "$GIT_BIN" --git-dir="$zmin_bare" show-ref >"$tmpdir/${name}.zmin.refs.after"
   compare_files git-refs "$tmpdir/${name}.git.refs.before" "$tmpdir/${name}.git.refs.after"
   compare_files zmin-refs "$tmpdir/${name}.zmin.refs.before" "$tmpdir/${name}.zmin.refs.after"
-  printf '%s\tgap\texit=%s\n' "$name" "$git_exit"
+  printf '%s\texact\texit=%s\n' "$name" "$git_exit"
 }
 
-run_quiet_gap receive_pack_quiet_long --quiet
-run_quiet_gap receive_pack_quiet_short -q
+run_quiet_exact receive_pack_quiet_long --quiet
+run_quiet_exact receive_pack_quiet_short -q
