@@ -1,0 +1,2 @@
+reference_group	command	option	value	combination	repository_state	transport	platform	example	status	evidence	notes
+Other Git 2.47 commands	help	<positional:args>	unknown	unknown help topic	outside repository	local	macos	git help unknown	open	tools/git-foreign-helper-positional-gap-probe.sh::help_positional_unknown_gap	stock Git exits 1 with the system manpage diagnostic for gitunknown, while Zmin exits 2 from clap unrecognized subcommand handling

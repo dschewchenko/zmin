@@ -1,0 +1,2 @@
+reference_group	command	option	value	combination	repository_state	transport	platform	example	status	evidence	notes
+Other Git 2.47 commands	svn	<positional:args>	unknown	unknown SVN subcommand outside repository	outside repository	local	macos	git svn unknown	open	tools/git-foreign-helper-positional-gap-probe.sh::svn_positional_unknown_gap	local stock Git does not dispatch git-svn and exits 1, while Zmin currently exits 129 with an unsupported svn command diagnostic

@@ -1,0 +1,2 @@
+reference_group	command	option	value	combination	repository_state	transport	platform	example	status	evidence	notes
+Other Git 2.47 commands	cvsexportcommit	<positional:args>	unknown	unknown positional outside repository	outside repository	local	macos	git cvsexportcommit unknown	open	tools/git-foreign-helper-positional-gap-probe.sh::cvsexportcommit_positional_unknown_gap	local stock Git does not dispatch git-cvsexportcommit and exits 1, while Zmin currently reaches repository discovery and exits 128 with not a git repository

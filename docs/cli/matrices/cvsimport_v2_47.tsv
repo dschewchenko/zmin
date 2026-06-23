@@ -1,0 +1,2 @@
+reference_group	command	option	value	combination	repository_state	transport	platform	example	status	evidence	notes
+Other Git 2.47 commands	cvsimport	<positional:args>	unknown	unknown CVS module outside repository	outside repository	local	macos	git cvsimport unknown	open	tools/git-foreign-helper-positional-gap-probe.sh::cvsimport_positional_unknown_gap	local stock Git does not dispatch git-cvsimport and exits 1, while Zmin currently tries the CVS import path and exits 1 with a missing external helper/file diagnostic
