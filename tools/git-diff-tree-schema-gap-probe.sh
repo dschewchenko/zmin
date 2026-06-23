@@ -92,9 +92,9 @@ run_case() {
 }
 
 run_gap_case diff_tree_break_rewrites diff-tree -p --break-rewrites HEAD~1 HEAD
-run_gap_case diff_tree_find_copies diff-tree --name-status --find-copies HEAD~1 HEAD
-run_gap_case diff_tree_find_renames diff-tree --name-status --find-renames HEAD~1 HEAD
+run_case diff_tree_find_copies diff-tree --name-status --find-copies HEAD~1 HEAD
+run_case diff_tree_find_renames diff-tree --name-status --find-renames HEAD~1 HEAD
 run_case diff_tree_reverse_long diff-tree --reverse -p HEAD~1 HEAD
 run_gap_case diff_tree_short_B diff-tree -p -B HEAD~1 HEAD
-run_gap_case diff_tree_short_C diff-tree --name-status -C HEAD~1 HEAD
-run_gap_case diff_tree_short_M diff-tree --name-status -M HEAD~1 HEAD
+run_case diff_tree_short_C diff-tree --name-status -C HEAD~1 HEAD
+run_case diff_tree_short_M diff-tree --name-status -M HEAD~1 HEAD

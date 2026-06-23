@@ -499,12 +499,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             summary,
             name_status,
             name_only,
-            find_renames,
+            mut find_renames,
             break_rewrites,
             irreversible_delete,
             submodule,
             ignore_submodules,
-            find_copies,
+            mut find_copies,
             find_copies_harder,
             merge,
             combined,
@@ -559,10 +559,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             pretty,
             notes,
             format,
-            old,
-            new,
+            mut old,
+            mut new,
             paths,
         } => {
+            normalize_diff_tree_similarity_operand(&mut find_renames, &mut old, &mut new);
+            normalize_diff_tree_similarity_operand(&mut find_copies, &mut old, &mut new);
             let (treeish, paths) = if stdin {
                 let mut stdin_paths = Vec::new();
                 if let Some(path) = old {
@@ -700,4 +702,29 @@ fn normalize_porcelain_unified_operands(
     normalized_paths.push(PathBuf::from(value));
     normalized_paths.extend(paths);
     (Some("3".to_owned()), normalized_paths)
+}
+
+fn normalize_diff_tree_similarity_operand(
+    option: &mut Option<String>,
+    old: &mut Option<String>,
+    new: &mut Option<String>,
+) {
+    let Some(value) = option.as_ref() else {
+        return;
+    };
+    if new.is_some() || old.is_none() || is_similarity_threshold_value(value) {
+        return;
+    }
+    let consumed_old = option.take();
+    *new = old.take();
+    *old = consumed_old;
+    *option = Some(String::new());
+}
+
+fn is_similarity_threshold_value(value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    let digits = value.strip_suffix('%').unwrap_or(value);
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
