@@ -140,5 +140,5 @@ run_gap() {
 }
 
 run_exact pack_redundant_alt_odb_long --i-still-use-this --all --alt-odb
-run_gap pack_redundant_verbose_long --i-still-use-this --all --verbose
+run_exact pack_redundant_verbose_long --i-still-use-this --all --verbose
 run_explicit_pack_exact pack_redundant_explicit_pack

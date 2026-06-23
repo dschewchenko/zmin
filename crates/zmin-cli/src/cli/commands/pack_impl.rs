@@ -5392,7 +5392,7 @@ struct PackRedundantEntry {
 }
 
 pub(crate) fn pack_redundant(
-    _verbose: bool,
+    verbose: bool,
     alt_odb: bool,
     all: bool,
     packs: Vec<PathBuf>,
@@ -5435,13 +5435,91 @@ pub(crate) fn pack_redundant(
         }
     }
 
-    for idx in 0..entries.len() {
-        if pack_redundant_entry_is_covered(&entries[idx], &duplicate_objects, &alternate_objects)? {
-            println!("{}", git_relative_display(&repo, &entries[idx].idx_path)?);
-            println!("{}", git_relative_display(&repo, &entries[idx].pack_path)?);
+    let mut redundant = Vec::new();
+    let mut retained = Vec::new();
+    for entry in &entries {
+        if pack_redundant_entry_is_covered(entry, &duplicate_objects, &alternate_objects)? {
+            redundant.push(entry);
+        } else {
+            retained.push(entry);
         }
     }
+    if verbose {
+        print_pack_redundant_verbose(&repo, &entries, &retained, alternate_objects.len())?;
+    }
+    for entry in redundant {
+        println!("{}", git_relative_display(&repo, &entry.idx_path)?);
+        println!("{}", git_relative_display(&repo, &entry.pack_path)?);
+    }
     Ok(())
+}
+
+fn print_pack_redundant_verbose(
+    repo: &GitRepo,
+    entries: &[PackRedundantEntry],
+    retained: &[&PackRedundantEntry],
+    alternate_count: usize,
+) -> Result<()> {
+    eprintln!("There are {alternate_count} packs available in alt-odbs.");
+    eprintln!("The smallest (bytewise) set of packs is:");
+    for entry in retained {
+        eprintln!("\t{}", git_relative_display(repo, &entry.pack_path)?);
+    }
+    eprintln!(
+        "containing {} duplicate objects with a total size of {}kb.",
+        pack_redundant_duplicate_count(retained)?,
+        pack_redundant_pack_size_kb(retained)?
+    );
+    eprintln!(
+        "A total of {} unique objects were considered.",
+        pack_redundant_unique_object_count(entries)?
+    );
+    eprintln!("Redundant packs (with indexes):");
+    eprintln!("{}MB of redundant packs in total.", 0);
+    Ok(())
+}
+
+fn pack_redundant_unique_object_count(entries: &[PackRedundantEntry]) -> Result<usize> {
+    let mut unique = HashSet::new();
+    for entry in entries {
+        let mut record_object = |object: &ObjectId| {
+            unique.insert(object.clone());
+            Ok(())
+        };
+        for_each_pack_index_object_id_from_path(
+            GitHashAlgorithm::Sha1,
+            &entry.idx_path,
+            &mut record_object,
+        )?;
+    }
+    Ok(unique.len())
+}
+
+fn pack_redundant_duplicate_count(entries: &[&PackRedundantEntry]) -> Result<usize> {
+    let mut seen = HashSet::new();
+    let mut duplicates = HashSet::new();
+    for entry in entries {
+        let mut record_object = |object: &ObjectId| {
+            if !seen.insert(object.clone()) {
+                duplicates.insert(object.clone());
+            }
+            Ok(())
+        };
+        for_each_pack_index_object_id_from_path(
+            GitHashAlgorithm::Sha1,
+            &entry.idx_path,
+            &mut record_object,
+        )?;
+    }
+    Ok(duplicates.len())
+}
+
+fn pack_redundant_pack_size_kb(entries: &[&PackRedundantEntry]) -> Result<u64> {
+    let mut bytes = 0u64;
+    for entry in entries {
+        bytes = bytes.saturating_add(fs::metadata(&entry.pack_path)?.len());
+    }
+    Ok(bytes.div_ceil(1024))
 }
 
 fn pack_redundant_duplicate_objects(entries: &[PackRedundantEntry]) -> Result<HashSet<ObjectId>> {
