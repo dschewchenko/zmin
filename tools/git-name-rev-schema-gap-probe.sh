@@ -48,7 +48,7 @@ dangling_commit() {
   "$GIT_BIN" -C "$repo" commit-tree "$tree" -m dangling
 }
 
-run_gap() {
+run_exact() {
   local name="$1"
   shift
   local git_work="$tmpdir/${name}.git.work"
@@ -73,13 +73,37 @@ run_gap() {
 
   test "$git_exit" = "$zmin_exit"
   cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
-  if cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"; then
-    echo "$name unexpectedly matched" >&2
-    return 1
-  fi
+  cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
 }
 
-run_dangling_gap() {
+run_observe() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_exit=0
+  local zmin_exit=0
+  seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" "$@" >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" "$@" >"$tmpdir/$name.zmin.out" 2>"$tmpdir/$name.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  printf 'stock stdout:\n'
+  cat "$tmpdir/$name.git.out"
+  printf 'zmin stdout:\n'
+  cat "$tmpdir/$name.zmin.out"
+
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
+}
+
+run_dangling_exact() {
   local name="$1"
   shift
   local git_work="$tmpdir/${name}.git.work"
@@ -106,11 +130,8 @@ run_dangling_gap() {
 
   test "$git_exit" = "$zmin_exit"
   cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
-  if cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"; then
-    echo "$name unexpectedly matched" >&2
-    return 1
-  fi
+  cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
 }
 
-run_gap name_rev_all name-rev --all
-run_dangling_gap name_rev_always name-rev --always
+run_observe name_rev_all name-rev --all
+run_dangling_exact name_rev_always name-rev --always
