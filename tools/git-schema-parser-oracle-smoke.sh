@@ -136,6 +136,56 @@ run_in_seed_repos() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_in_seed_repos_with_home() {
+  local name="$1"
+  shift
+  local seed_work="$tmpdir/${name}.seed.work"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_home="$tmpdir/${name}.git.home"
+  local zmin_home="$tmpdir/${name}.zmin.home"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_refs="$tmpdir/${name}.git.refs"
+  local zmin_refs="$tmpdir/${name}.zmin.refs"
+  local git_config="$tmpdir/${name}.git.config"
+  local zmin_config="$tmpdir/${name}.zmin.config"
+  local git_home_files="$tmpdir/${name}.git.home.files"
+  local zmin_home_files="$tmpdir/${name}.zmin.home.files"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_seed_repo "$seed_work"
+  cp -R "$seed_work" "$git_work"
+  cp -R "$seed_work" "$zmin_work"
+  mkdir "$git_home" "$zmin_home"
+  set +e
+  (cd "$git_work" && HOME="$git_home" XDG_CONFIG_HOME="$git_home/xdg" "$GIT_BIN" "$@") >"$git_out" 2>"$git_err"
+  git_exit=$?
+  (cd "$zmin_work" && HOME="$zmin_home" XDG_CONFIG_HOME="$zmin_home/xdg" "$ZMIN_BIN" "$@") >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$git_out" "$zmin_out"
+  cmp -s "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" for-each-ref --format='%(refname)%00%(objectname)' >"$git_refs"
+  "$GIT_BIN" -C "$zmin_work" for-each-ref --format='%(refname)%00%(objectname)' >"$zmin_refs"
+  cmp -s "$git_refs" "$zmin_refs"
+  "$GIT_BIN" -C "$git_work" config --null --local --list >"$git_config"
+  "$GIT_BIN" -C "$zmin_work" config --null --local --list >"$zmin_config"
+  cmp -s "$git_config" "$zmin_config"
+  find "$git_home" -type f | sed "s#$git_home/##" | sort >"$git_home_files"
+  find "$zmin_home" -type f | sed "s#$zmin_home/##" | sort >"$zmin_home_files"
+  cmp -s "$git_home_files" "$zmin_home_files"
+  while IFS= read -r home_file; do
+    cmp -s "$git_home/$home_file" "$zmin_home/$home_file"
+  done <"$git_home_files"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_in_empty_dirs init_object_format_invalid init --object-format=bogus
 run_in_empty_dirs init_ref_format_invalid init --ref-format=bogus
 run_in_repo_dirs config_file_missing_long config --file=/no/such/file user.name
@@ -176,3 +226,5 @@ run_in_seed_repos config_add_value config --add user.nick Nick
 run_in_seed_repos config_unset_all_missing config --unset-all user.none
 run_in_seed_repos config_worktree_read config --worktree user.name
 run_in_seed_repos config_unset_existing config --unset user.email
+run_in_seed_repos_with_home config_global_set config --global user.name Oracle
+run_in_seed_repos_with_home config_global_missing config --global missing.key
