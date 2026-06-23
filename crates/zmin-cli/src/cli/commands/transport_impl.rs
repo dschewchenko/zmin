@@ -6436,7 +6436,11 @@ fn fetch_pack_tag_peels_into(
 }
 
 pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
-    if options.receive_pack.is_some() {
+    if options
+        .receive_pack
+        .as_deref()
+        .is_some_and(|value| value != "git-receive-pack")
+    {
         return Err(CliError::Fatal {
             code: 129,
             message: "send-pack currently supports local refs without optional protocol modes"
@@ -6492,7 +6496,9 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
     }
 
     let mut copied = HashSet::with_capacity(initial_capacity);
+    let mut statuses = Vec::with_capacity(push_refs.len());
     for push_ref in push_refs {
+        let old_id = send_pack_current_ref_id(&destination_refs, &push_ref.destination)?;
         if !options.dry_run {
             if let Some(id) = &push_ref.id {
                 copy_reachable_objects_into_undeltified_pack(
@@ -6507,17 +6513,61 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
                 destination_refs.delete_ref(&push_ref.destination)?;
             }
         }
-        if options.verbose && !options.dry_run {
-            let display = push_ref
-                .id
-                .as_ref()
-                .map(ObjectId::to_hex)
-                .unwrap_or_else(|| "(delete)".to_owned());
-            eprintln!("{} -> {}", display, push_ref.destination);
+        statuses.push(SendPackStatus { push_ref, old_id });
+    }
+    send_pack_write_status_report(&options.directory, &statuses)?;
+    let _ = (options.thin, options.atomic, options.verbose, copied);
+    Ok(())
+}
+
+struct SendPackStatus {
+    push_ref: PushRef,
+    old_id: Option<ObjectId>,
+}
+
+fn send_pack_current_ref_id(refs: &RefStore, ref_name: &str) -> Result<Option<ObjectId>> {
+    match refs.read_ref(ref_name) {
+        Ok(RefTarget::Direct(id)) => Ok(Some(id)),
+        Ok(RefTarget::Symbolic(target)) => refs.resolve(&target).map(Some).map_err(CliError::Io),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn send_pack_write_status_report(remote: &str, statuses: &[SendPackStatus]) -> Result<()> {
+    let mut stderr = io::stderr().lock();
+    writeln!(stderr, "To {remote}")?;
+    for status in statuses {
+        let destination = send_pack_display_ref(&status.push_ref.destination);
+        let source = status
+            .push_ref
+            .source_display
+            .as_deref()
+            .map(send_pack_display_ref)
+            .unwrap_or(destination);
+        match (&status.old_id, &status.push_ref.id) {
+            (None, Some(_)) => {
+                writeln!(stderr, " * [new branch]      {source} -> {destination}")?;
+            }
+            (Some(old), Some(new)) => {
+                writeln!(
+                    stderr,
+                    "   {}..{}  {source} -> {destination}",
+                    short_object_id(old),
+                    short_object_id(new)
+                )?;
+            }
+            (Some(_), None) => {
+                writeln!(stderr, " - [deleted]         {destination}")?;
+            }
+            (None, None) => {}
         }
     }
-    let _ = (options.thin, options.atomic, copied);
     Ok(())
+}
+
+fn send_pack_display_ref(ref_name: &str) -> &str {
+    ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name)
 }
 
 fn send_pack_mirror_refspecs(

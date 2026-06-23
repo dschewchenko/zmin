@@ -45,7 +45,17 @@ list_refs() {
   "$GIT_BIN" --git-dir="$git_dir" for-each-ref --format='%(refname) %(objectname)' refs | sort
 }
 
-run_gap() {
+normalize_stderr() {
+  local root="$1"
+  local input="$2"
+  local output="$3"
+  sed \
+    -e "s#${root}/git-remote.git#<remote>#g" \
+    -e "s#${root}/zmin-remote.git#<remote>#g" \
+    "$input" >"$output"
+}
+
+run_exact() {
   local name="$1"
   local seed="$2"
   local expected_git_exit="$3"
@@ -74,35 +84,25 @@ run_gap() {
   list_refs "$root/git-remote.git" >"$root/git.refs"
   list_refs "$root/zmin-remote.git" >"$root/zmin.refs"
 
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stderr:\n'
-  sed -n '1,6p' "$root/git.err"
-  printf 'zmin stderr:\n'
-  sed -n '1,6p' "$root/zmin.err"
-  printf 'stock refs:\n'
-  sed -n '1,6p' "$root/git.refs"
-  printf 'zmin refs:\n'
-  sed -n '1,6p' "$root/zmin.refs"
-
   test "$git_exit" = "$expected_git_exit"
   test "$zmin_exit" = "$expected_zmin_exit"
-  if [ "$git_exit" = "$zmin_exit" ] \
-    && cmp -s "$root/git.out" "$root/zmin.out" \
-    && cmp -s "$root/git.err" "$root/zmin.err"; then
-    echo "$name unexpectedly matched" >&2
-    return 1
-  fi
+  normalize_stderr "$root" "$root/git.err" "$root/git.err.normalized"
+  normalize_stderr "$root" "$root/zmin.err" "$root/zmin.err.normalized"
+  cmp -s "$root/git.out" "$root/zmin.out"
+  cmp -s "$root/git.err.normalized" "$root/zmin.err.normalized"
+  cmp -s "$root/git.refs" "$root/zmin.refs"
+  printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
 source="$tmpdir/source"
 make_source "$source"
 
-run_gap send_pack_all empty 0 0 "" --all
-run_gap send_pack_dry_run empty 0 0 "" --dry-run refs/heads/main
-run_gap send_pack_force main 0 0 "" --force refs/heads/main
-run_gap send_pack_receive_pack empty 0 129 "" --receive-pack=git-receive-pack refs/heads/main
-run_gap send_pack_stdin empty 0 0 "refs/heads/main"$'\n' --stdin
-run_gap send_pack_verbose empty 0 0 "" --verbose refs/heads/main
-run_gap send_pack_force_short main 0 0 "" -f refs/heads/main
-run_gap send_pack_dry_run_short empty 0 0 "" -n refs/heads/main
-run_gap send_pack_verbose_short empty 0 0 "" -v refs/heads/main
+run_exact send_pack_all empty 0 0 "" --all
+run_exact send_pack_dry_run empty 0 0 "" --dry-run refs/heads/main
+run_exact send_pack_force main 0 0 "" --force refs/heads/main
+run_exact send_pack_receive_pack empty 0 0 "" --receive-pack=git-receive-pack refs/heads/main
+run_exact send_pack_stdin empty 0 0 "refs/heads/main"$'\n' --stdin
+run_exact send_pack_verbose empty 0 0 "" --verbose refs/heads/main
+run_exact send_pack_force_short main 0 0 "" -f refs/heads/main
+run_exact send_pack_dry_run_short empty 0 0 "" -n refs/heads/main
+run_exact send_pack_verbose_short empty 0 0 "" -v refs/heads/main
