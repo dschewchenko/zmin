@@ -46,9 +46,11 @@ run_probe() {
       ;;
     replay_head_outside_repo_gap)
       test "$git_exit" = 128
-      test "$zmin_exit" = 129
-      grep -F "fatal: not a git repository (or any of the parent directories): .git" "$tmpdir/${name}.git.err" >/dev/null
-      grep -F "error: exactly one of --onto, --advance, or --revert is required" "$tmpdir/${name}.zmin.err" >/dev/null
+      test "$zmin_exit" = 128
+      cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+      cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+      printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+      return
       ;;
     *)
       echo "unknown probe case: $name" >&2

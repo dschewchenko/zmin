@@ -72,6 +72,7 @@ pub(crate) fn run_replay(
             message: "options '--advance' and '--contained' cannot be used together".into(),
         });
     }
+    let repo = find_repo_with_parent_dir_error()?;
     if advance.is_none() && onto.is_none() {
         return Err(CliError::Stderr {
             code: 129,
@@ -85,7 +86,6 @@ pub(crate) fn run_replay(
         });
     }
 
-    let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
