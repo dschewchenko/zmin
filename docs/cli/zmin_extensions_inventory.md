@@ -11,7 +11,7 @@ coverage numbers in the Git compatibility matrix.
 | Layer | Count | Meaning |
 | --- | ---: | --- |
 | Zmin-only commands | `12` | additive top-level commands that are not Git command names |
-| Zmin-only options on Git commands | `8` | additive options on existing Git-compatible commands |
+| Zmin-only options on Git commands | `11` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
 | Zmin-only schema command aliases | `9` | flattened schema entries that belong to Zmin-only command groups |
 | Deferred/non-Git-2.47 schema commands | `1` | schema commands compared to newer/current stock Git but outside the Git `2.47.1` denominator |
@@ -74,6 +74,9 @@ evidence compares against newer/current stock Git rather than Git `2.47.1`.
 | `zmin cat-file` | `--size` | stable | `manual stock oracle 2026-06-23: git cat-file --size exits 129; zmin cat-file --size maps to -s` | Zmin-only long alias for `cat-file -s`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 | `zmin cat-file` | `--exists` | stable | `manual stock oracle 2026-06-23: git cat-file --exists exits 129; zmin cat-file --exists maps to -e` | Zmin-only long alias for `cat-file -e`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 | `zmin cat-file` | `--pretty` | stable | `manual stock oracle 2026-06-23: git cat-file --pretty exits 129; zmin cat-file --pretty maps to -p` | Zmin-only long alias for `cat-file -p`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
+| `zmin imap-send` | `--folder` | stable | `manual stock oracle 2026-06-23: git imap-send --folder exits 129; zmin imap-send --folder selects the target mailbox` | Zmin-only mailbox override; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
+| `zmin imap-send` | `--list` | stable | `manual stock oracle 2026-06-23: git imap-send --list exits 129; zmin imap-send --list lists mailboxes` | Zmin-only mailbox listing mode; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
+| `zmin imap-send` | `-f` | stable | `manual stock oracle 2026-06-23: git imap-send -f exits 129; zmin imap-send -f aliases --folder` | Zmin-only short mailbox override; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 
 ## Zmin-Only Environment Controls
 
