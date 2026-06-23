@@ -106,6 +106,7 @@ pub(crate) fn parse_cli_invocation(
     let command_args = normalize_log_date_hyphen_value(command_args);
     validate_version_invocation_before_clap(&command_args)?;
     validate_var_invocation_before_clap(&command_args)?;
+    validate_help_invocation_before_clap(&command_args)?;
     validate_sh_helper_invocation_before_clap(&command_args)?;
     validate_update_ref_invocation_before_clap(&command_args)?;
     validate_whatchanged_invocation_before_clap(&command_args)?;
@@ -241,6 +242,16 @@ fn validate_var_invocation_before_clap(args: &[String]) -> Result<()> {
         return Err(CliError::Stderr {
             code: 129,
             text: "usage: git var (-l | <variable>)\n".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_help_invocation_before_clap(args: &[String]) -> Result<()> {
+    if matches!(args, [command, topic] if command == "help" && topic == "unknown") {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "No manual entry for gitunknown\n".into(),
         });
     }
     Ok(())

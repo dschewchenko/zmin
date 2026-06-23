@@ -74,8 +74,44 @@ run_probe() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+run_help_exact() {
+  local name="help_positional_unknown"
+  local git_exit=0
+  local zmin_exit=0
+
+  set +e
+  (
+    cd "$tmpdir"
+    "$GIT_BIN" help unknown
+  ) >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  (
+    cd "$tmpdir"
+    "$ZMIN_BIN" help unknown
+  ) >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  test "$git_exit" = 1
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_probe cvsexportcommit unknown cvsexportcommit_positional_unknown_gap
 run_probe cvsimport unknown cvsimport_positional_unknown_gap
 run_probe gui unknown gui_positional_unknown_gap
-run_probe help unknown help_positional_unknown_gap
+run_help_exact
 run_probe svn unknown svn_positional_unknown_gap
