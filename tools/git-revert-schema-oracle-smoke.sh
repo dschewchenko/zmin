@@ -87,6 +87,40 @@ record_repo_state() {
   done | sort >"$prefix.git-side-effects"
 }
 
+run_no_sequence_failure_case() {
+  local name="$1"
+  shift
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git"
+  local zmin_work="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_linear_seed_repo "$seed"
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" revert "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" revert "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  test "$git_exit" = "128"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  record_repo_state "$git_work" "$tmpdir/${name}.git"
+  record_repo_state "$zmin_work" "$tmpdir/${name}.zmin"
+  compare_files head "$tmpdir/${name}.git.head" "$tmpdir/${name}.zmin.head"
+  compare_files tree "$tmpdir/${name}.git.tree" "$tmpdir/${name}.zmin.tree"
+  compare_files status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
+  compare_files index "$tmpdir/${name}.git.index" "$tmpdir/${name}.zmin.index"
+  compare_files git-side-effects "$tmpdir/${name}.git.git-side-effects" "$tmpdir/${name}.zmin.git-side-effects"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_linear_case() {
   local name="$1"
   shift
@@ -168,6 +202,8 @@ run_mainline_case() {
   printf '%s\tgap\texit=%s\n' "$name" "$git_exit"
 }
 
+run_no_sequence_failure_case revert_abort_no_sequence --abort
+run_no_sequence_failure_case revert_continue_no_sequence --continue
 run_linear_case revert_no_commit_long --no-commit
 run_linear_case revert_no_commit_short -n
 run_mainline_case revert_mainline_long --mainline 1
