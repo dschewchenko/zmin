@@ -1,0 +1,2 @@
+reference_group	command	option	value	combination	repository_state	transport	platform	example	status	evidence	notes
+Other Git 2.47 commands	cvsserver	<positional:args>	unknown	ignored non-server argument	outside repository	local	macos	git cvsserver unknown	closed	tools/git-cvsserver-positional-oracle-smoke.sh::cvsserver_positional_unknown_noop	stock Git and Zmin both exit 0 with empty stdout/stderr for an ignored positional argument outside a repository
