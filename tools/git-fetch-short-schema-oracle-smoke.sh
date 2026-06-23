@@ -189,4 +189,4 @@ run_exact fetch_append_short append -a origin
 run_exact fetch_dry_run_short default -n origin
 run_exact fetch_tags_short default -t origin
 run_exact fetch_verbose_short default -v origin
-run_gap fetch_force_long nonff --force origin main:refs/remotes/origin/main
+run_exact fetch_force_long nonff --force origin main:refs/remotes/origin/main

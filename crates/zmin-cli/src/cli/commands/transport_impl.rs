@@ -4394,7 +4394,10 @@ fn resolve_daemon_repo_path(options: &DaemonOptions, request_path: &str) -> Resu
         } else {
             path.clone()
         };
-        if !allowed.iter().any(|directory| checked_path.starts_with(directory)) {
+        if !allowed
+            .iter()
+            .any(|directory| checked_path.starts_with(directory))
+        {
             return Err(CliError::Fatal {
                 code: 1,
                 message: "repository path is outside daemon export directories".into(),
@@ -5763,9 +5766,9 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     }
     let _ = options.quiet;
     if options
-            .upload_pack
-            .as_deref()
-            .is_some_and(|command| command != "git-upload-pack")
+        .upload_pack
+        .as_deref()
+        .is_some_and(|command| command != "git-upload-pack")
     {
         return Err(CliError::Fatal {
             code: 129,
@@ -5949,11 +5952,11 @@ fn write_fetch_pack_local_progress(objects: usize) {
                 percent, index, objects
             );
         }
-        eprintln!(
-            "remote: Counting objects: 100% ({objects}/{objects}), done.        "
-        );
+        eprintln!("remote: Counting objects: 100% ({objects}/{objects}), done.        ");
     }
-    eprintln!("remote: Total {objects} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)        ");
+    eprintln!(
+        "remote: Total {objects} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)        "
+    );
 }
 
 fn write_fetch_pack_receiving_progress(objects: usize) {
@@ -5962,7 +5965,10 @@ fn write_fetch_pack_receiving_progress(objects: usize) {
     }
     for index in 1..=objects {
         let percent = index * 100 / objects;
-        eprint!("Receiving objects: {:3}% ({}/{})\r", percent, index, objects);
+        eprint!(
+            "Receiving objects: {:3}% ({}/{})\r",
+            percent, index, objects
+        );
     }
     eprintln!("Receiving objects: 100% ({objects}/{objects}), done.");
 }
@@ -10167,6 +10173,7 @@ fn fetch_multiple_refspecs(
         collect_configured_fetch_update_rows(
             &source_refs,
             &destination_refs,
+            &destination_store,
             &refspecs,
             !no_tags,
             false,
@@ -10821,6 +10828,7 @@ fn fetch_multiple_refspecs_from_location(
         collect_configured_fetch_update_rows(
             &source_refs,
             &destination_refs,
+            &destination_store,
             refspecs,
             !no_tags,
             false,
@@ -12370,6 +12378,19 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
     }
     if explicit_refspec_fetch {
+        let fetch_update_rows = if quiet {
+            Vec::new()
+        } else {
+            let _trace = phase_trace("fetch.local.collect_update_rows");
+            collect_configured_fetch_update_rows(
+                &source_refs,
+                &destination_refs,
+                &destination_store,
+                &fetch_refspecs,
+                !no_tags,
+                prune,
+            )?
+        };
         if prune && !atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
         }
@@ -12407,6 +12428,10 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         if prune && atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
+        }
+        {
+            let _trace = phase_trace("fetch.local.render");
+            print_fetch_update_rows(&url, &fetch_update_rows);
         }
         {
             let _trace = phase_trace("fetch.local.copy_tags");
@@ -12490,6 +12515,7 @@ pub(crate) fn fetch_with_repo_and_remote(
             collect_configured_fetch_update_rows(
                 &source_refs,
                 &destination_refs,
+                &destination_store,
                 &fetch_refspecs,
                 !no_tags && !dry_run,
                 prune,
@@ -12661,6 +12687,8 @@ fn fetch_with_repo_and_location(
         });
     }
     if let Some(refspec) = branch.as_deref() {
+        let force = refspec.starts_with('+');
+        let refspec_body = refspec.trim_start_matches('+');
         if refspec == ":" {
             let source = local_clone_source(&source_path)?;
             return fetch_direct_location_head(
@@ -12672,7 +12700,7 @@ fn fetch_with_repo_and_location(
                 write_fetch_head,
             );
         }
-        if shallow_since.is_some() && refspec.contains(':') {
+        if shallow_since.is_some() && refspec_body.contains(':') {
             return Err(CliError::Fatal {
                 code: 128,
                 message:
@@ -12680,7 +12708,7 @@ fn fetch_with_repo_and_location(
                         .into(),
             });
         }
-        if !shallow_exclude.is_empty() && refspec.contains(':') {
+        if !shallow_exclude.is_empty() && refspec_body.contains(':') {
             return Err(CliError::Fatal {
                 code: 128,
                 message:
@@ -12688,21 +12716,21 @@ fn fetch_with_repo_and_location(
                         .into(),
             });
         }
-        if deepen.is_some() && refspec.contains(':') {
+        if deepen.is_some() && refspec_body.contains(':') {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "fetch --deepen currently supports explicit local and file branches"
                     .into(),
             });
         }
-        if unshallow && refspec.contains(':') {
+        if unshallow && refspec_body.contains(':') {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "fetch --unshallow currently supports explicit local and file branches"
                     .into(),
             });
         }
-        if let Some((source_name, destination)) = refspec.split_once(':')
+        if let Some((source_name, destination)) = refspec_body.split_once(':')
             && !source_name.is_empty()
             && !destination.is_empty()
             && (source_name.contains('*') || destination.contains('*'))
@@ -12738,14 +12766,14 @@ fn fetch_with_repo_and_location(
                 &repo,
                 &source,
                 &location,
-                refspec,
+                refspec_body,
                 missing_ref_code,
                 quiet,
                 prune,
                 no_tags,
             );
         }
-        if let Some(destination) = refspec.strip_prefix(':')
+        if let Some(destination) = refspec_body.strip_prefix(':')
             && !destination.is_empty()
             && !destination.contains(':')
         {
@@ -12772,7 +12800,7 @@ fn fetch_with_repo_and_location(
                 no_tags,
             );
         }
-        if let Some((source_name, destination)) = refspec.split_once(':')
+        if let Some((source_name, destination)) = refspec_body.split_once(':')
             && !source_name.is_empty()
             && destination.is_empty()
             && !source_name.contains(':')
@@ -12790,7 +12818,7 @@ fn fetch_with_repo_and_location(
                 quiet,
             );
         }
-        if let Some((source_name, destination)) = refspec.split_once(':')
+        if let Some((source_name, destination)) = refspec_body.split_once(':')
             && !source_name.is_empty()
             && !destination.is_empty()
             && !destination.contains(':')
@@ -12813,6 +12841,7 @@ fn fetch_with_repo_and_location(
                     &location,
                     source_name,
                     destination,
+                    force,
                     quiet,
                     update_head_ok,
                     no_tags,
@@ -12825,12 +12854,13 @@ fn fetch_with_repo_and_location(
                 &location,
                 source_name,
                 destination,
+                force,
                 quiet,
                 update_head_ok,
                 no_tags,
             );
         }
-        if !refspec.contains(':') {
+        if !refspec_body.contains(':') {
             let source = local_clone_source(&source_path)?;
             let source_refs = refs_adapter_from_git_dir(&source.git_dir);
             if let Some(since) = shallow_since {
@@ -12838,7 +12868,7 @@ fn fetch_with_repo_and_location(
                     &repo,
                     &source,
                     &source_refs,
-                    refspec,
+                    refspec_body,
                     &location,
                     no_tags,
                     since,
@@ -12849,7 +12879,7 @@ fn fetch_with_repo_and_location(
                     &repo,
                     &source,
                     &source_refs,
-                    refspec,
+                    refspec_body,
                     &location,
                     no_tags,
                     shallow_exclude,
@@ -12860,7 +12890,7 @@ fn fetch_with_repo_and_location(
                     &repo,
                     &source,
                     &source_refs,
-                    refspec,
+                    refspec_body,
                     &location,
                     no_tags,
                     deepen,
@@ -13124,6 +13154,7 @@ fn fetch_direct_location_prune_tags(
         collect_configured_fetch_update_rows(
             &source_refs,
             &destination_refs,
+            &destination_store,
             &refspecs,
             true,
             true,
@@ -13616,6 +13647,7 @@ fn fetch_direct_location_wildcard_refspec(
         collect_configured_fetch_update_rows(
             &source_refs,
             &destination_refs,
+            &destination_store,
             &refspecs,
             !no_tags,
             prune,
@@ -13976,6 +14008,7 @@ fn fetch_direct_location_refspec_to_ref(
     location: &str,
     source_name: &str,
     destination: &str,
+    force: bool,
     quiet: bool,
     update_head_ok: bool,
     no_tags: bool,
@@ -14012,6 +14045,19 @@ fn fetch_direct_location_refspec_to_ref(
     if !update_head_ok {
         reject_fetch_into_current_branch(repo, &destination_refs, &destination_ref)?;
     }
+    let previous_id = match destination_refs.read_ref(&destination_ref) {
+        Ok(RefTarget::Direct(id)) => Some(id),
+        Ok(RefTarget::Symbolic(_)) => None,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
     destination_refs.write_ref(&destination_ref, &resolved.id)?;
     if !no_tags {
         copy_configured_fetch_tags(&source_refs, &destination_refs)?;
@@ -14019,11 +14065,19 @@ fn fetch_direct_location_refspec_to_ref(
     write_direct_location_refspec_fetch_head_file(repo, &source_refs, &resolved, location)?;
     if !quiet {
         eprintln!("From {}", fetch_head_url_display(location));
-        eprintln!(
-            " * [new ref]         {}        -> {}",
-            resolved.display,
-            fetch_update_destination_display(&destination_ref)
-        );
+        let row = if let Some(previous_id) = previous_id.as_ref() {
+            fetch_changed_update_row(
+                &destination_store,
+                force,
+                &resolved.display,
+                &destination_ref,
+                previous_id,
+                &resolved.id,
+            )?
+        } else {
+            fetch_update_row(&resolved.display, &destination_ref)
+        };
+        eprintln!("{row}");
     }
     Ok(())
 }
@@ -14034,6 +14088,7 @@ fn fetch_direct_location_refspec_to_ref_depth(
     location: &str,
     source_name: &str,
     destination: &str,
+    force: bool,
     quiet: bool,
     update_head_ok: bool,
     no_tags: bool,
@@ -14056,6 +14111,20 @@ fn fetch_direct_location_refspec_to_ref_depth(
     if !update_head_ok {
         reject_fetch_into_current_branch(repo, &destination_refs, &destination_ref)?;
     }
+    let destination_store = object_adapter_from_objects_dir(repo.objects_dir.clone());
+    let previous_id = match destination_refs.read_ref(&destination_ref) {
+        Ok(RefTarget::Direct(id)) => Some(id),
+        Ok(RefTarget::Symbolic(_)) => None,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(CliError::Io(error)),
+    };
     destination_refs.write_ref(&destination_ref, &resolved.id)?;
     if !no_tags {
         copy_configured_fetch_tags(&source_refs, &destination_refs)?;
@@ -14063,11 +14132,19 @@ fn fetch_direct_location_refspec_to_ref_depth(
     write_direct_location_refspec_fetch_head_file(repo, &source_refs, &resolved, location)?;
     if !quiet {
         eprintln!("From {}", fetch_head_url_display(location));
-        eprintln!(
-            " * [new ref]         {}        -> {}",
-            resolved.display,
-            fetch_update_destination_display(&destination_ref)
-        );
+        let row = if let Some(previous_id) = previous_id.as_ref() {
+            fetch_changed_update_row(
+                &destination_store,
+                force,
+                &resolved.display,
+                &destination_ref,
+                previous_id,
+                &resolved.id,
+            )?
+        } else {
+            fetch_update_row(&resolved.display, &destination_ref)
+        };
+        eprintln!("{row}");
     }
     Ok(())
 }
@@ -14152,6 +14229,18 @@ fn resolve_direct_fetch_source_ref(
             fetch_head_kind: DirectFetchHeadKind::RemoteTracking,
         })
         .map_err(CliError::Io)
+}
+
+fn resolve_fetch_refspec_source_id(
+    source_refs: &RefStore,
+    source_name: &str,
+) -> io::Result<ObjectId> {
+    resolve_direct_fetch_source_ref(source_refs, source_name)
+        .map(|resolved| resolved.id)
+        .map_err(|error| match error {
+            CliError::Io(error) => error,
+            _ => io::Error::new(io::ErrorKind::Other, format!("{error:?}")),
+        })
 }
 
 fn destination_fetch_ref_name(destination: &str) -> Result<String> {
@@ -14633,6 +14722,7 @@ fn apply_configured_fetch_refspecs(
         Vec::new()
     };
     for refspec in refspecs {
+        let force = refspec.starts_with('+');
         let refspec = refspec.trim_start_matches('+');
         let Some((source, destination)) = refspec.split_once(':') else {
             continue;
@@ -14667,10 +14757,14 @@ fn apply_configured_fetch_refspecs(
             continue;
         }
         let destination_ref = destination_fetch_ref_name(destination)?;
-        match source_refs.resolve(source) {
-            Ok(id) => {
-                write_fetch_destination_ref(destination_refs, &destination_ref, &id, remote_hint)?
-            }
+        match resolve_fetch_refspec_source_id(source_refs, source) {
+            Ok(id) => write_fetch_destination_ref_with_force(
+                destination_refs,
+                &destination_ref,
+                &id,
+                remote_hint,
+                force,
+            )?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(CliError::Io(error)),
         }
@@ -14687,10 +14781,26 @@ fn write_fetch_destination_ref(
     id: &ObjectId,
     remote_hint: Option<&str>,
 ) -> Result<()> {
+    write_fetch_destination_ref_with_force(destination_refs, destination, id, remote_hint, false)
+}
+
+fn write_fetch_destination_ref_with_force(
+    destination_refs: &RefStore,
+    destination: &str,
+    id: &ObjectId,
+    remote_hint: Option<&str>,
+    force: bool,
+) -> Result<()> {
     if let Some(remote) = remote_hint
         && fetch_destination_has_refname_conflict(destination_refs, destination)?
     {
         return Err(fetch_refname_conflict_error(remote));
+    }
+    if force {
+        destination_refs
+            .write_ref(destination, id)
+            .map_err(CliError::Io)?;
+        return Ok(());
     }
     match destination_refs.write_ref(destination, id) {
         Ok(()) => Ok(()),
@@ -14786,6 +14896,7 @@ fn fetch_refname_conflict_error(remote: &str) -> CliError {
 fn collect_configured_fetch_update_rows(
     source_refs: &RefStore,
     destination_refs: &RefStore,
+    destination_store: &LooseObjectStore,
     refspecs: &[String],
     include_tags: bool,
     include_pruned_refs: bool,
@@ -14793,6 +14904,7 @@ fn collect_configured_fetch_update_rows(
     let mut deleted_rows = Vec::new();
     let mut update_rows = Vec::new();
     for refspec in refspecs {
+        let force = refspec.starts_with('+');
         let refspec = refspec.trim_start_matches('+');
         let Some((source, destination)) = refspec.split_once(':') else {
             continue;
@@ -14838,12 +14950,14 @@ fn collect_configured_fetch_update_rows(
                 match destination_refs.resolve(&destination_ref) {
                     Ok(destination_id) if destination_id == *source_id => {}
                     Ok(destination_id) => {
-                        update_rows.push(fetch_fast_forward_update_row(
+                        update_rows.push(fetch_changed_update_row(
+                            destination_store,
+                            force,
                             source_ref,
                             &destination_ref,
                             &destination_id,
                             &source_id,
-                        ));
+                        )?);
                     }
                     Err(error)
                         if matches!(
@@ -14865,16 +14979,18 @@ fn collect_configured_fetch_update_rows(
             continue;
         }
         let destination_ref = destination_fetch_ref_name(destination)?;
-        if let Ok(source_id) = source_refs.resolve(source) {
+        if let Ok(source_id) = resolve_fetch_refspec_source_id(source_refs, source) {
             match destination_refs.resolve(&destination_ref) {
                 Ok(destination_id) if destination_id == source_id => {}
                 Ok(destination_id) => {
-                    update_rows.push(fetch_fast_forward_update_row(
+                    update_rows.push(fetch_changed_update_row(
+                        destination_store,
+                        force,
                         source,
                         &destination_ref,
                         &destination_id,
                         &source_id,
-                    ));
+                    )?);
                 }
                 Err(error)
                     if matches!(
@@ -14941,6 +15057,28 @@ fn fetch_update_row(source: &str, destination: &str) -> String {
         " * [{kind}]         {source_display}        -> {}",
         fetch_update_destination_display(destination)
     )
+}
+
+fn fetch_changed_update_row(
+    destination_store: &LooseObjectStore,
+    force: bool,
+    source: &str,
+    destination: &str,
+    old_id: &ObjectId,
+    new_id: &ObjectId,
+) -> Result<String> {
+    if force {
+        let commit_cache = CommitObjectCache::new(destination_store);
+        if !is_ancestor_commit_cached(&commit_cache, old_id, new_id).unwrap_or(false) {
+            return Ok(fetch_forced_update_row(source, destination, old_id, new_id));
+        }
+    }
+    Ok(fetch_fast_forward_update_row(
+        source,
+        destination,
+        old_id,
+        new_id,
+    ))
 }
 
 fn fetch_fast_forward_update_row(
@@ -15046,7 +15184,7 @@ fn collect_atomic_fetch_ref_updates(
             continue;
         }
         let destination_ref = destination_fetch_ref_name(destination)?;
-        match source_refs.resolve(source) {
+        match resolve_fetch_refspec_source_id(source_refs, source) {
             Ok(id) => {
                 push_atomic_fetch_ref_update(
                     destination_refs,
@@ -15324,7 +15462,7 @@ fn write_configured_fetch_head_file(
             })?;
             continue;
         }
-        let Ok(id) = source_refs.resolve(source) else {
+        let Ok(id) = resolve_fetch_refspec_source_id(source_refs, source) else {
             continue;
         };
         let branch = source.strip_prefix("refs/heads/").unwrap_or(source);
@@ -15423,7 +15561,7 @@ fn write_explicit_location_refspec_fetch_head_file(
         if source.contains('*') || destination.contains('*') {
             continue;
         }
-        let Ok(id) = source_refs.resolve(source) else {
+        let Ok(id) = resolve_fetch_refspec_source_id(source_refs, source) else {
             continue;
         };
         let branch = source.strip_prefix("refs/heads/").unwrap_or(source);
@@ -16192,7 +16330,7 @@ fn collect_local_fetch_refspec_roots(
         if source.contains('*') || destination.contains('*') {
             continue;
         }
-        match source_refs.resolve(source) {
+        match resolve_fetch_refspec_source_id(source_refs, source) {
             Ok(id) => roots.push(id),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(CliError::Io(error)),
@@ -16240,7 +16378,7 @@ fn collect_configured_fetch_roots(
             continue;
         }
         let destination_ref = destination_fetch_ref_name(destination)?;
-        match source_refs.resolve(source) {
+        match resolve_fetch_refspec_source_id(source_refs, source) {
             Ok(id) => {
                 if !destination_ref_has_object(
                     destination_refs,
@@ -20622,7 +20760,7 @@ fn collect_unshallow_roots(
             })?;
             continue;
         }
-        match source_refs.resolve(source) {
+        match resolve_fetch_refspec_source_id(source_refs, source) {
             Ok(id) => roots.push(id),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(CliError::Io(error)),
