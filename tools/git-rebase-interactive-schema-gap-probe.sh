@@ -58,6 +58,7 @@ rebase_state() {
 
 run_gap() {
   local name="rebase_interactive_long_invalid_todo"
+  local source_repo="$tmpdir/$name.source"
   local git_repo="$tmpdir/$name.git"
   local zmin_repo="$tmpdir/$name.zmin"
   local git_exit=0
@@ -66,8 +67,9 @@ run_gap() {
   local stderr_match=0
   local state_match=0
 
-  seed_repo "$git_repo"
-  seed_repo "$zmin_repo"
+  seed_repo "$source_repo"
+  "$GIT_BIN" clone -q "$source_repo" "$git_repo"
+  "$GIT_BIN" clone -q "$source_repo" "$zmin_repo"
 
   set +e
   GIT_SEQUENCE_EDITOR="$editor" "$GIT_BIN" -C "$git_repo" rebase --interactive HEAD~1 >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
@@ -87,12 +89,14 @@ run_gap() {
     [ "$stdout_match" = 1 ] &&
     [ "$stderr_match" = 1 ] &&
     [ "$state_match" = 1 ]; then
-    echo "$name unexpectedly matches stock Git; update the matrix row" >&2
-    return 1
+    printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\tstate_match=%s\n' \
+      "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match" "$state_match"
+    return 0
   fi
 
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\tstate_match=%s\n' \
     "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match" "$state_match"
+  return 1
 }
 
 run_gap
