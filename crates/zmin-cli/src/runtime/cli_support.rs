@@ -105,6 +105,7 @@ pub(crate) fn parse_cli_invocation(
     let command_args = normalize_history_count_shorthand(command_args);
     let command_args = normalize_log_date_hyphen_value(command_args);
     validate_version_invocation_before_clap(&command_args)?;
+    validate_var_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
@@ -226,6 +227,16 @@ fn validate_version_invocation_before_clap(args: &[String]) -> Result<()> {
         return Err(CliError::Stderr {
             code: 129,
             text: "error: unknown option `version'\nusage: git version [--build-options]\n\n    --[no-]build-options  also print build options\n\n".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_var_invocation_before_clap(args: &[String]) -> Result<()> {
+    if matches!(args, [command, option] if command == "var" && option == "--list") {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "usage: git var (-l | <variable>)\n".into(),
         });
     }
     Ok(())

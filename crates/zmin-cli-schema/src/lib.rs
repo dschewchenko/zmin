@@ -977,7 +977,7 @@ pub enum Command {
         arg2: Option<String>,
     },
     Var {
-        #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
+        #[arg(short = 'l', action = ArgAction::SetTrue)]
         list: bool,
         variable: Option<String>,
     },
