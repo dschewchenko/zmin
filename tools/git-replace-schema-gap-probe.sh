@@ -31,7 +31,18 @@ list_replace_refs() {
   "$GIT_BIN" -C "$repo" for-each-ref --format='%(refname) %(objectname)' refs/replace | sort
 }
 
-run_edit_gap() {
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+run_edit_exact() {
   local name="$1"
   local option="$2"
   local root="$tmpdir/$name"
@@ -58,14 +69,13 @@ SH
 
   list_replace_refs "$git_repo" >"$root/git.refs"
   list_replace_refs "$zmin_repo" >"$root/zmin.refs"
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stderr:\n'
-  sed -n '1,4p' "$root/git.err"
-  printf 'zmin stderr:\n'
-  sed -n '1,4p' "$root/zmin.err"
+  test "$git_exit" = "$zmin_exit"
   test "$git_exit" = 255
-  test "$zmin_exit" = 0
+  compare_files stdout "$root/git.out" "$root/zmin.out"
+  compare_files stderr "$root/git.err" "$root/zmin.err"
+  compare_files refs "$root/git.refs" "$root/zmin.refs"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_edit_gap replace_raw_edit_noop --raw
-run_edit_gap replace_no_raw_edit_noop --no-raw
+run_edit_exact replace_raw_edit_noop --raw
+run_edit_exact replace_no_raw_edit_noop --no-raw

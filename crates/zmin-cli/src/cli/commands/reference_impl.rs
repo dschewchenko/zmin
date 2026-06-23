@@ -3128,7 +3128,13 @@ fn replace_edit(
     let edited = edit_temp_buffer(repo, "REPLACE_EDITOBJ", &initial, false)?;
     let replacement_id = replace_store_edited_object(store, &object, edited, raw)?;
     if replacement_id == object_id {
-        return Ok(());
+        return Err(CliError::Stderr {
+            code: 255,
+            text: format!(
+                "error: new object is the same as the old one: '{}'\n",
+                object_id.to_hex()
+            ),
+        });
     }
 
     let ref_name = replace_ref_name(&object_id);
