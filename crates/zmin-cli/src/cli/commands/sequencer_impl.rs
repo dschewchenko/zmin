@@ -1405,7 +1405,16 @@ pub(crate) fn sequencer_pick(
         &repo.root,
         CheckoutIndexOptions { force: true },
     )?;
+    let message = if revert {
+        revert_message(&picked_id, &picked)
+    } else {
+        picked.message.clone()
+    };
     if no_commit {
+        let auto_merge_tree = write_tree_from_index(&store, &new_index)?;
+        fs::write(repo.git_dir.join("AUTO_MERGE"), auto_merge_tree.to_hex() + "\n")?;
+        fs::write(repo.git_dir.join("MERGE_MSG"), &message)?;
+        fs::write(repo.git_dir.join("COMMIT_EDITMSG"), &message)?;
         return Ok(());
     }
     let tree = write_tree_from_index(&store, &new_index)?;
@@ -1419,11 +1428,6 @@ pub(crate) fn sequencer_pick(
         signature_from_commit_bytes(&picked.author)?
     };
     let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
-    let message = if revert {
-        revert_message(&picked_id, &picked)
-    } else {
-        picked.message.clone()
-    };
     let commit = CommitBuilder::new(tree, author, committer)
         .parent(head_id)
         .message(message.clone())?
