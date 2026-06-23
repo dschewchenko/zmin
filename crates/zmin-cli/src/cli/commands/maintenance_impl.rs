@@ -1532,16 +1532,10 @@ fn prune_packed(dry_run: bool, _quiet: bool) -> Result<()> {
 fn repack(options: RepackOptions) -> Result<()> {
     let write_bitmap_index = options.write_bitmap_index && !options.no_write_bitmap_index;
     let write_midx = options.write_midx && !options.no_write_midx;
-    if options.threads.is_some() {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "repack currently supports -a, -A, -d, -q, -n, -f, -F, -l, -m, --window, --depth, --no-write-bitmap-index, --no-write-midx and --keep-pack"
-                .into(),
-        });
-    }
     let _ = (
         options.no_reuse_delta,
         options.no_reuse_object,
+        options.threads,
         write_bitmap_index,
     );
     let repo = find_repo()?;

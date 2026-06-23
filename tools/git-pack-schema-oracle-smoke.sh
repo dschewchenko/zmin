@@ -207,4 +207,4 @@ run_pack_objects_gap pack_objects_all_long --all
 run_index_pack_exact index_pack_output_short -o out.idx
 run_index_pack_exact index_pack_verbose_short -v
 run_repack_exact repack_quiet_long --quiet
-run_repack_gap repack_threads_long --threads=1
+run_repack_exact repack_threads_long --threads=1
