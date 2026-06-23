@@ -1511,7 +1511,7 @@ pub enum Command {
         config_file: Option<PathBuf>,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "task")]
         tasks: Vec<String>,

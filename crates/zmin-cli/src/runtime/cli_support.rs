@@ -108,6 +108,7 @@ pub(crate) fn parse_cli_invocation(
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
+    validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
@@ -325,6 +326,26 @@ fn validate_fetch_invocation_before_clap(command_args: &[String]) -> Result<()> 
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: option `server-option' requires a value\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_maintenance_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("maintenance")
+        || command_args.get(1).map(String::as_str) != Some("run")
+    {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(2) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "-q" {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: unknown switch `q'\nusage: git maintenance run [--auto] [--[no-]quiet] [--task=<task>] [--schedule]\n\n    --[no-]auto           run tasks based on the state of the repository\n    --[no-]detach         perform maintenance in the background\n    --[no-]schedule <frequency>\n                          run tasks based on frequency\n    --[no-]quiet          do not report progress or other information over stderr\n    --task <task>         run a specific task\n\n".into(),
             });
         }
     }
