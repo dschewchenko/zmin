@@ -500,7 +500,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             name_status,
             name_only,
             mut find_renames,
-            break_rewrites,
+            mut break_rewrites,
             irreversible_delete,
             submodule,
             ignore_submodules,
@@ -565,6 +565,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => {
             normalize_diff_tree_similarity_operand(&mut find_renames, &mut old, &mut new);
             normalize_diff_tree_similarity_operand(&mut find_copies, &mut old, &mut new);
+            normalize_diff_tree_similarity_operand(&mut break_rewrites, &mut old, &mut new);
             let (treeish, paths) = if stdin {
                 let mut stdin_paths = Vec::new();
                 if let Some(path) = old {

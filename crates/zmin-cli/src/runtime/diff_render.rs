@@ -8,6 +8,7 @@ use zmin_git_core::GitObjectStore;
 
 const DIFF_STAT_ROW_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const ZERO_SHA1_HEX: &str = "0000000000000000000000000000000000000000";
+const BREAK_REWRITE_MIN_LINES: usize = 100;
 
 pub(crate) fn parse_find_renames_option(value: Option<&str>) -> Result<Option<u8>> {
     value
@@ -460,13 +461,51 @@ pub(crate) fn apply_break_rewrites(
             if entry.status == IndexDiffStatus::Modified {
                 let score = diff_entry_similarity_score(context, &entry, &entry)?;
                 let dissimilarity = 100_u8.saturating_sub(score);
-                if dissimilarity >= threshold {
+                if dissimilarity >= threshold && diff_entry_break_rewrite_large_enough(context, &entry)? {
                     entry.similarity = Some(dissimilarity);
                 }
             }
             Ok(entry)
         })
         .collect()
+}
+
+fn diff_entry_break_rewrite_large_enough(
+    context: &DiffIndexContext<'_>,
+    entry: &zmin_git_core::IndexDiffEntry,
+) -> Result<bool> {
+    let Some(old_index_entry) = find_index_entry(context.old_index, &entry.path) else {
+        return Ok(false);
+    };
+    let Some(new_index_entry) = find_index_entry(context.new_index, &entry.path) else {
+        return Ok(false);
+    };
+    let old_content = read_diff_side_content(
+        context.repo,
+        context.store,
+        old_index_entry,
+        context.old_source,
+    )?;
+    let new_content = read_diff_side_content(
+        context.repo,
+        context.store,
+        new_index_entry,
+        context.new_source,
+    )?;
+    Ok(diff_content_line_count(&old_content) >= BREAK_REWRITE_MIN_LINES
+        && diff_content_line_count(&new_content) >= BREAK_REWRITE_MIN_LINES)
+}
+
+fn diff_content_line_count(content: &[u8]) -> usize {
+    if content.is_empty() {
+        return 0;
+    }
+    let newline_count = content.iter().filter(|byte| **byte == b'\n').count();
+    if content.ends_with(b"\n") {
+        newline_count
+    } else {
+        newline_count + 1
+    }
 }
 
 pub(crate) fn content_similarity_score(old_content: &[u8], new_content: &[u8]) -> u8 {
