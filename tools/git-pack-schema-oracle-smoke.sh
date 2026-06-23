@@ -83,6 +83,37 @@ run_pack_objects_gap() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
+run_pack_objects_exact() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git"
+  local zmin_work="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" pack-objects "$@" "$git_work/out" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" pack-objects "$@" "$zmin_work/out" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  list_basename_side_effects "$git_work" out >"$tmpdir/${name}.git.files"
+  list_basename_side_effects "$zmin_work" out >"$tmpdir/${name}.zmin.files"
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  compare_files side_effects "$tmpdir/${name}.git.files" "$tmpdir/${name}.zmin.files"
+  while IFS= read -r file; do
+    compare_files "$file" "$git_work/$file" "$zmin_work/$file"
+  done <"$tmpdir/${name}.git.files"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_index_pack_exact() {
   local name="$1"
   shift
@@ -203,7 +234,7 @@ run_repack_gap() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
-run_pack_objects_gap pack_objects_all_long --all
+run_pack_objects_exact pack_objects_all_long --all
 run_index_pack_exact index_pack_output_short -o out.idx
 run_index_pack_exact index_pack_verbose_short -v
 run_repack_exact repack_quiet_long --quiet

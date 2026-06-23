@@ -3472,8 +3472,10 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
         };
     let pack_name = pack_objects_output_path(&base_name, &indexed.pack_id, "pack");
     let index_name = pack_objects_output_path(&base_name, &indexed.pack_id, "idx");
+    let reverse_index_name = pack_objects_output_path(&base_name, &indexed.pack_id, "rev");
     fs::rename(&temp_pack, pack_name)?;
     fs::write(index_name, &indexed.index)?;
+    fs::write(reverse_index_name, &indexed.reverse_index)?;
     println!("{}", indexed.pack_id.to_hex());
     Ok(())
 }
