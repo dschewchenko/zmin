@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Debugging	annotate	<positional:args>	a.txt	<none>	tracked file	local	all	git annotate a.txt	closed	git_history_query_compat::blame_and_annotate_match_stock_git_for_simple_linear_history	annotate alias output for a tracked file matches stock Git stdout and exit status
