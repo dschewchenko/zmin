@@ -42,6 +42,47 @@ make_pack_file() {
   find "$repo" -maxdepth 1 -name 'input-*.pack' | head -1
 }
 
+list_basename_side_effects() {
+  local repo="$1"
+  local prefix="$2"
+  local path
+  for path in "$repo"/"$prefix"-*; do
+    test -e "$path" || continue
+    basename "$path"
+  done | sort
+}
+
+run_pack_objects_gap() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git"
+  local zmin_work="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  make_seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" pack-objects "$@" "$git_work/out" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" pack-objects "$@" "$zmin_work/out" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  list_basename_side_effects "$git_work" out >"$tmpdir/${name}.git.files"
+  list_basename_side_effects "$zmin_work" out >"$tmpdir/${name}.zmin.files"
+
+  if test "$git_exit" = "$zmin_exit" \
+    && cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
+    && cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" \
+    && cmp -s "$tmpdir/${name}.git.files" "$tmpdir/${name}.zmin.files"; then
+    echo "$name unexpectedly matched" >&2
+    exit 1
+  fi
+  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_index_pack_exact() {
   local name="$1"
   shift
@@ -156,6 +197,7 @@ run_repack_gap() {
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
+run_pack_objects_gap pack_objects_all_long --all
 run_index_pack_exact index_pack_output_short -o out.idx
 run_index_pack_gap index_pack_verbose_short -v
 run_repack_exact repack_quiet_long --quiet
