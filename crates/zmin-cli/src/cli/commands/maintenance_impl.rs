@@ -1835,6 +1835,19 @@ fn collect_repack_candidate_ids_in_walk_order(
         }
     }
 
+    if repo.index_path.exists() {
+        let index = read_index(&repo.index_path)?;
+        for entry in index.entries() {
+            if entry.mode != IndexMode::Gitlink
+                && reachable.contains(&entry.id)
+                && !keep_pack_object_ids.contains(&entry.id)
+                && seen.insert(entry.id.clone())
+            {
+                ids.push(entry.id.clone());
+            }
+        }
+    }
+
     let extra_objects = extra_objects
         .into_iter()
         .filter(|id| reachable.contains(id) && !keep_pack_object_ids.contains(id))
@@ -1848,19 +1861,6 @@ fn collect_repack_candidate_ids_in_walk_order(
         &mut seen,
         &mut ids,
     )?;
-
-    if repo.index_path.exists() {
-        let index = read_index(&repo.index_path)?;
-        for entry in index.entries() {
-            if entry.mode != IndexMode::Gitlink
-                && reachable.contains(&entry.id)
-                && !keep_pack_object_ids.contains(&entry.id)
-                && seen.insert(entry.id.clone())
-            {
-                ids.push(entry.id.clone());
-            }
-        }
-    }
 
     Ok(ids)
 }
@@ -1914,6 +1914,7 @@ fn gc(options: GcOptions) -> Result<()> {
         }
         prune(args)?;
     }
+    pack_commands::commit_graph_write(true)?;
     Ok(())
 }
 

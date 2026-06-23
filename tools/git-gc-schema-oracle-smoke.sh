@@ -114,5 +114,5 @@ run_gap() {
 }
 
 run_exact gc_auto_long gc --auto
-run_gap gc_quiet_short gc -q
-run_gap gc_no_prune_long gc --no-prune --quiet
+run_exact gc_quiet_short gc -q
+run_exact gc_no_prune_long gc --no-prune --quiet
