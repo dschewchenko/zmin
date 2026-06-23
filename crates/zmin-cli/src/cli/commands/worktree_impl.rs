@@ -5564,7 +5564,7 @@ fn default_submodule_path(repository: &str) -> PathBuf {
 }
 
 fn submodule_status(args: &[String]) -> Result<()> {
-    let repo = find_repo()?;
+    let repo = find_repo_with_parent_dir_error()?;
     let mut cached = false;
     let mut recursive = false;
     let mut quiet = false;

@@ -272,6 +272,26 @@ pub(crate) fn find_repo() -> Result<GitRepo> {
     }
 }
 
+pub(crate) fn find_repo_with_parent_dir_error() -> Result<GitRepo> {
+    parent_dir_not_repo_error(find_repo())
+}
+
+pub(crate) fn find_repo_or_bare_with_parent_dir_error() -> Result<GitRepo> {
+    parent_dir_not_repo_error(find_repo_or_bare())
+}
+
+fn parent_dir_not_repo_error(result: Result<GitRepo>) -> Result<GitRepo> {
+    result.map_err(|error| match error {
+        CliError::Fatal { code: 128, message } if message == "not a git repository" => {
+            CliError::Fatal {
+                code: 128,
+                message: "not a git repository (or any of the parent directories): .git".into(),
+            }
+        }
+        other => other,
+    })
+}
+
 pub(crate) fn repo_from_worktree_root(root: PathBuf) -> Result<GitRepo> {
     let git_dir_path = root.join(".git");
     if git_dir_path.is_dir() {

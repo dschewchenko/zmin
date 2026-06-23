@@ -477,7 +477,7 @@ pub(crate) fn http_push(options: HttpPushOptions) -> Result<()> {
             message: "http-push --all cannot be combined with explicit heads".into(),
         });
     }
-    let repo = find_repo_or_bare()?;
+    let repo = find_repo_or_bare_with_parent_dir_error()?;
     let refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let commit_cache = CommitObjectCache::new(&store);
