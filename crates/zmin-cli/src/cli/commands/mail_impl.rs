@@ -1027,6 +1027,8 @@ pub(crate) fn interpret_trailers_content(
             output.push(String::new());
         }
         output.extend(trailer_output_lines(&entries, options.unfold));
+    } else if !suffix.is_empty() {
+        output.push(String::new());
     }
     output.extend_from_slice(suffix);
     Ok(lines_with_final_newline(&output))
