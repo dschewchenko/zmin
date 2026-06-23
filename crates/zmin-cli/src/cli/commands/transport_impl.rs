@@ -4265,13 +4265,22 @@ fn daemon_serve_connection<R: BufRead, W: Write>(
             text: String::new(),
         });
     }
-    let repo_path = resolve_daemon_repo_path(options, &request.path)?;
+    let repo_path = match resolve_daemon_repo_path(options, &request.path) {
+        Ok(path) => path,
+        Err(CliError::Fatal { message, .. })
+            if message == "repository path is outside daemon export directories" =>
+        {
+            write_daemon_access_denied(output, &request.path)?;
+            output.flush()?;
+            return Ok(());
+        }
+        Err(err) => return Err(err),
+    };
     let repo = upload_pack_repo_from_path(&repo_path, true)?;
     if !options.export_all && !repo.git_dir.join("git-daemon-export-ok").is_file() {
-        return Err(CliError::Fatal {
-            code: 1,
-            message: "repository is not exported".into(),
-        });
+        write_daemon_access_denied(output, &request.path)?;
+        output.flush()?;
+        return Ok(());
     }
     let runtime = primitive_runtime_for_repo(&repo);
     let refs = runtime.refs_store_adapter();
@@ -4283,6 +4292,13 @@ fn daemon_serve_connection<R: BufRead, W: Write>(
         return Ok(());
     }
     upload_pack_respond_with_pack_to_writer(&repo, request, false, output)
+}
+
+fn write_daemon_access_denied<W: Write>(output: &mut W, request_path: &str) -> Result<()> {
+    write_pkt_line(
+        output,
+        format!("ERR access denied or repository not exported: {request_path}\n").as_bytes(),
+    )
 }
 
 fn unsupported_remote_helper_error(url: &str, prefix: String) -> CliError {
@@ -4373,7 +4389,12 @@ fn resolve_daemon_repo_path(options: &DaemonOptions, request_path: &str) -> Resu
             .iter()
             .map(|directory| absolute_path_from_arg(directory))
             .collect::<Result<Vec<_>>>()?;
-        if !allowed.iter().any(|directory| path.starts_with(directory)) {
+        let checked_path = if options.strict_paths && options.base_path.is_some() {
+            absolute_path_from_arg(std::path::Path::new(request_path))?
+        } else {
+            path.clone()
+        };
+        if !allowed.iter().any(|directory| checked_path.starts_with(directory)) {
             return Err(CliError::Fatal {
                 code: 1,
                 message: "repository path is outside daemon export directories".into(),

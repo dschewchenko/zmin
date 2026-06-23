@@ -167,6 +167,7 @@ run_server_case daemon_pid_file "--pid-file=$pid_file"
 test -s "$pid_file"
 run_server_case daemon_port
 run_server_case daemon_reuseaddr --reuseaddr
+run_server_rejection_case daemon_strict_paths --strict-paths
 run_server_case daemon_timeout --timeout=3
 run_server_case daemon_verbose --verbose
 run_server_case daemon_directories "$base_root"
