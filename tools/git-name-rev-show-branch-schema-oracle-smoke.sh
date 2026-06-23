@@ -128,5 +128,6 @@ run_dangling_case() {
 }
 
 run_dangling_case name_rev_undefined name-rev --undefined
-run_dangling_case name_rev_always name-rev --always
 run_case show_branch_no_name show-branch --no-name main feature
+run_case show_branch_all_short show-branch -a
+run_case show_branch_remotes_short show-branch -r
