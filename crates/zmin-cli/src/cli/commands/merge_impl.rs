@@ -924,8 +924,10 @@ fn read_optional_blob(store: &LooseObjectStore, id: &str) -> Result<Option<Vec<u
 }
 
 pub(crate) fn merge_tree_command(options: MergeTreeOptions) -> Result<()> {
-    if options.write_tree
-        || options.messages
+    if options.write_tree {
+        return merge_tree_write_tree(options);
+    }
+    if options.messages
         || options.no_messages
         || options.quiet
         || options.nul_terminated
@@ -985,6 +987,333 @@ pub(crate) fn merge_tree_command(options: MergeTreeOptions) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn merge_tree_write_tree(options: MergeTreeOptions) -> Result<()> {
+    if options.stdin {
+        return merge_tree_write_tree_stdin(&options);
+    }
+    if options.args.len() != 2 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "usage: git merge-tree --write-tree <branch1> <branch2>".into(),
+        });
+    }
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    let result = merge_tree_write_tree_once(
+        &repo,
+        &store,
+        &commit_cache,
+        &options,
+        &options.args[0],
+        &options.args[1],
+    )?;
+    merge_tree_emit_write_tree_result(&result, &options, false)?;
+    if result.conflicted {
+        return Err(CliError::Exit(1));
+    }
+    Ok(())
+}
+
+fn merge_tree_write_tree_stdin(options: &MergeTreeOptions) -> Result<()> {
+    if !options.args.is_empty() {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "usage: git merge-tree --write-tree --stdin".into(),
+        });
+    }
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let mut out = io::stdout().lock();
+    for line in input.lines().filter(|line| !line.trim().is_empty()) {
+        let mut parts = line.split_whitespace();
+        let Some(ours) = parts.next() else {
+            continue;
+        };
+        let Some(theirs) = parts.next() else {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "malformed input line".into(),
+            });
+        };
+        let result =
+            merge_tree_write_tree_once(&repo, &store, &commit_cache, options, ours, theirs)?;
+        out.write_all(b"0\0")?;
+        merge_tree_write_result_to(&mut out, &result, options, true, true)?;
+        out.write_all(b"\0")?;
+    }
+    Ok(())
+}
+
+struct MergeTreeWriteResult {
+    tree: ObjectId,
+    conflicted: bool,
+    stages: Vec<IndexEntry>,
+    messages: Vec<MergeTreeConflictMessage>,
+}
+
+struct MergeTreeConflictMessage {
+    path: Vec<u8>,
+    reason: &'static str,
+    text: String,
+}
+
+fn merge_tree_write_tree_once(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    options: &MergeTreeOptions,
+    ours: &str,
+    theirs: &str,
+) -> Result<MergeTreeWriteResult> {
+    let ours_id = resolve_commitish(repo, store, ours)?;
+    let theirs_id = resolve_commitish(repo, store, theirs)?;
+    let ours_commit = commit_cache.read_commit(&ours_id)?;
+    if merge_tree_uses_ours_strategy(options) {
+        return Ok(MergeTreeWriteResult {
+            tree: ours_commit.tree.clone(),
+            conflicted: false,
+            stages: Vec::new(),
+            messages: Vec::new(),
+        });
+    }
+    let theirs_commit = commit_cache.read_commit(&theirs_id)?;
+    let base_id = if let Some(base) = &options.merge_base {
+        resolve_commitish(repo, store, base)?
+    } else {
+        best_merge_base_cached(commit_cache, &ours_id, &theirs_id)?.ok_or_else(|| {
+            CliError::Fatal {
+                code: 128,
+                message: "refusing to merge unrelated histories".into(),
+            }
+        })?
+    };
+    let base_commit = commit_cache.read_commit(&base_id)?;
+    let tree_cache = TreeObjectCache::new(store);
+    let base = read_commit_tree_index_cached(&tree_cache, &base_commit)?;
+    let ours_index = read_commit_tree_index_cached(&tree_cache, &ours_commit)?;
+    let theirs_index = read_commit_tree_index_cached(&tree_cache, &theirs_commit)?;
+    match merge_indexes(store, &base, &ours_index, &theirs_index, theirs)? {
+        MergeIndexResult::Clean(index) => Ok(MergeTreeWriteResult {
+            tree: write_tree_from_index(store, &index)?,
+            conflicted: false,
+            stages: Vec::new(),
+            messages: Vec::new(),
+        }),
+        MergeIndexResult::Conflicted { index, files } => {
+            let tree = write_tree_from_index(
+                store,
+                &merge_tree_automerge_index(
+                    store,
+                    &index,
+                    &files,
+                    &ours_id.to_hex(),
+                    &theirs_id.to_hex(),
+                )?,
+            )?;
+            let messages = files
+                .iter()
+                .map(|file| MergeTreeConflictMessage {
+                    path: file.path.clone(),
+                    reason: match file.kind {
+                        MergeConflictKind::Content => "CONFLICT (contents)",
+                        MergeConflictKind::Binary => "CONFLICT (binary)",
+                        MergeConflictKind::ModifyDelete { .. } => "CONFLICT (modify/delete)",
+                        MergeConflictKind::RenameDelete { .. } => "CONFLICT (rename/delete)",
+                    },
+                    text: merge_tree_conflict_message_text(file),
+                })
+                .collect();
+            Ok(MergeTreeWriteResult {
+                tree,
+                conflicted: true,
+                stages: index
+                    .entries()
+                    .iter()
+                    .filter(|entry| entry.stage != 0)
+                    .cloned()
+                    .collect(),
+                messages,
+            })
+        }
+    }
+}
+
+fn merge_tree_uses_ours_strategy(options: &MergeTreeOptions) -> bool {
+    options
+        .strategy_options
+        .iter()
+        .any(|option| option == "ours")
+}
+
+fn merge_tree_automerge_index(
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    files: &[MergeConflictFile],
+    ours_label: &str,
+    theirs_label: &str,
+) -> Result<GitIndex> {
+    let mut entries = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .cloned()
+        .collect::<Vec<_>>();
+    for file in files {
+        let mode = index
+            .entry(&file.path, 2)
+            .or_else(|| index.entry(&file.path, 3))
+            .or_else(|| index.entry(&file.path, 1))
+            .map(|entry| entry.mode)
+            .unwrap_or(IndexMode::File);
+        let content = merge_tree_automerge_file_content(store, index, file, ours_label, theirs_label)?;
+        let id = store.write_object(GitObjectKind::Blob, &content)?;
+        entries.push(IndexEntry::new(
+            file.path.clone(),
+            id,
+            mode,
+            content.len().min(u32::MAX as usize) as u32,
+        )?);
+    }
+    Ok(GitIndex::from_entries(entries)?)
+}
+
+fn merge_tree_automerge_file_content(
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    file: &MergeConflictFile,
+    ours_label: &str,
+    theirs_label: &str,
+) -> Result<Vec<u8>> {
+    if !matches!(file.kind, MergeConflictKind::Content) {
+        return Ok(file.content.clone());
+    }
+    let Some(ours) = index.entry(&file.path, 2) else {
+        return Ok(file.content.clone());
+    };
+    let Some(theirs) = index.entry(&file.path, 3) else {
+        return Ok(file.content.clone());
+    };
+    let ours_content = read_index_entry_content(store, ours)?;
+    let theirs_content = read_index_entry_content(store, theirs)?;
+    let mut content = Vec::new();
+    content.extend_from_slice(b"<<<<<<< ");
+    content.extend_from_slice(ours_label.as_bytes());
+    content.push(b'\n');
+    content.extend_from_slice(&ours_content);
+    if !ours_content.ends_with(b"\n") {
+        content.push(b'\n');
+    }
+    content.extend_from_slice(b"=======\n");
+    content.extend_from_slice(&theirs_content);
+    if !theirs_content.ends_with(b"\n") {
+        content.push(b'\n');
+    }
+    content.extend_from_slice(b">>>>>>> ");
+    content.extend_from_slice(theirs_label.as_bytes());
+    content.push(b'\n');
+    Ok(content)
+}
+
+fn merge_tree_conflict_message_text(file: &MergeConflictFile) -> String {
+    match &file.kind {
+        MergeConflictKind::Content => format!(
+            "CONFLICT (content): Merge conflict in {}\n",
+            String::from_utf8_lossy(&file.path)
+        ),
+        MergeConflictKind::Binary => format!(
+            "CONFLICT (binary): Merge conflict in {}\n",
+            String::from_utf8_lossy(&file.path)
+        ),
+        MergeConflictKind::ModifyDelete { message }
+        | MergeConflictKind::RenameDelete { message } => {
+            let mut message = message.clone();
+            if !message.ends_with('\n') {
+                message.push('\n');
+            }
+            message
+        }
+    }
+}
+
+fn merge_tree_emit_write_tree_result(
+    result: &MergeTreeWriteResult,
+    options: &MergeTreeOptions,
+    force_nul: bool,
+) -> Result<()> {
+    let mut out = io::stdout().lock();
+    merge_tree_write_result_to(&mut out, result, options, force_nul, false)
+}
+
+fn merge_tree_write_result_to<W: Write>(
+    out: &mut W,
+    result: &MergeTreeWriteResult,
+    options: &MergeTreeOptions,
+    force_nul: bool,
+    stdin_record: bool,
+) -> Result<()> {
+    if options.quiet {
+        return Ok(());
+    }
+    let nul = force_nul || options.nul_terminated;
+    let sep = if nul { b"\0" as &[u8] } else { b"\n" as &[u8] };
+    out.write_all(result.tree.to_hex().as_bytes())?;
+    out.write_all(sep)?;
+    if result.conflicted {
+        if options.name_only {
+            for message in &result.messages {
+                out.write_all(&message.path)?;
+                out.write_all(sep)?;
+            }
+        } else {
+            for entry in &result.stages {
+                write!(
+                    out,
+                    "{} {} {}\t{}",
+                    index_mode_octal(entry.mode),
+                    entry.id.to_hex(),
+                    entry.stage,
+                    String::from_utf8_lossy(&entry.path)
+                )?;
+                out.write_all(sep)?;
+            }
+        }
+        if merge_tree_should_emit_messages(options) {
+            out.write_all(sep)?;
+            for message in &result.messages {
+                if nul {
+                    out.write_all(b"1\0")?;
+                    out.write_all(&message.path)?;
+                    out.write_all(b"\0Auto-merging\0Auto-merging ")?;
+                    out.write_all(&message.path)?;
+                    out.write_all(b"\n\0")?;
+                    out.write_all(b"1\0")?;
+                    out.write_all(&message.path)?;
+                    out.write_all(b"\0")?;
+                    out.write_all(message.reason.as_bytes())?;
+                    out.write_all(b"\0")?;
+                    out.write_all(message.text.as_bytes())?;
+                    out.write_all(b"\0")?;
+                } else {
+                    writeln!(out, "Auto-merging {}", String::from_utf8_lossy(&message.path))?;
+                    write!(out, "{}", message.text)?;
+                }
+            }
+        }
+    }
+    if stdin_record && !result.conflicted {
+        out.write_all(sep)?;
+    }
+    Ok(())
+}
+
+fn merge_tree_should_emit_messages(options: &MergeTreeOptions) -> bool {
+    !options.no_messages
 }
 
 fn merge_tree_print_remote_change(

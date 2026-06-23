@@ -20,6 +20,7 @@ make_repo() {
   "$GIT_BIN" -C "$repo" init -q -b main
   "$GIT_BIN" -C "$repo" config user.name "Oracle"
   "$GIT_BIN" -C "$repo" config user.email "oracle@example.com"
+  "$GIT_BIN" -C "$repo" config commit.gpgsign false
   printf 'base\n' >"$repo/a.txt"
   "$GIT_BIN" -C "$repo" add -A
   "$GIT_BIN" -C "$repo" commit -qm "base"
@@ -41,7 +42,7 @@ make_repo() {
   theirs_tree="$("$GIT_BIN" -C "$repo" rev-parse HEAD^{tree})"
 }
 
-run_gap() {
+run_exact() {
   local name="$1"
   local stdin_data="$2"
   shift 2
@@ -55,35 +56,23 @@ run_gap() {
   zmin_exit=$?
   set -e
 
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stdout:\n'
-  sed -n '1,6p' "$tmpdir/$name.git.out"
-  printf 'zmin stdout:\n'
-  sed -n '1,6p' "$tmpdir/$name.zmin.out"
-  printf 'stock stderr:\n'
-  sed -n '1,4p' "$tmpdir/$name.git.err"
-  printf 'zmin stderr:\n'
-  sed -n '1,4p' "$tmpdir/$name.zmin.err"
-
-  if [ "$git_exit" = "$zmin_exit" ] \
-    && cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" \
-    && cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"; then
-    echo "$name unexpectedly matched" >&2
-    return 1
-  fi
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
+  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 repo="$tmpdir/repo"
 make_repo "$repo"
 
-run_gap merge_tree_write_tree "" --write-tree "$ours_commit" "$theirs_commit"
-run_gap merge_tree_messages "" --write-tree --messages "$ours_commit" "$theirs_commit"
-run_gap merge_tree_no_messages "" --write-tree --no-messages "$ours_commit" "$theirs_commit"
-run_gap merge_tree_quiet "" --write-tree --quiet "$ours_commit" "$theirs_commit"
-run_gap merge_tree_z "" --write-tree -z "$ours_commit" "$theirs_commit"
-run_gap merge_tree_name_only "" --write-tree --name-only "$ours_commit" "$theirs_commit"
-run_gap merge_tree_allow_unrelated "" --write-tree --allow-unrelated-histories "$ours_commit" "$theirs_commit"
-run_gap merge_tree_stdin "$ours_commit $theirs_commit"$'\n' --write-tree --stdin
-run_gap merge_tree_merge_base "" --write-tree --merge-base="$base_commit" "$ours_commit" "$theirs_commit"
-run_gap merge_tree_strategy_option "" --write-tree --strategy-option=ours "$ours_commit" "$theirs_commit"
-run_gap merge_tree_strategy_option_short "" --write-tree -X ours "$ours_commit" "$theirs_commit"
+run_exact merge_tree_write_tree "" --write-tree "$ours_commit" "$theirs_commit"
+run_exact merge_tree_messages "" --write-tree --messages "$ours_commit" "$theirs_commit"
+run_exact merge_tree_no_messages "" --write-tree --no-messages "$ours_commit" "$theirs_commit"
+run_exact merge_tree_quiet "" --write-tree --quiet "$ours_commit" "$theirs_commit"
+run_exact merge_tree_z "" --write-tree -z "$ours_commit" "$theirs_commit"
+run_exact merge_tree_name_only "" --write-tree --name-only "$ours_commit" "$theirs_commit"
+run_exact merge_tree_allow_unrelated "" --write-tree --allow-unrelated-histories "$ours_commit" "$theirs_commit"
+run_exact merge_tree_stdin "$ours_commit $theirs_commit"$'\n' --write-tree --stdin
+run_exact merge_tree_merge_base "" --write-tree --merge-base="$base_commit" "$ours_commit" "$theirs_commit"
+run_exact merge_tree_strategy_option "" --write-tree --strategy-option=ours "$ours_commit" "$theirs_commit"
+run_exact merge_tree_strategy_option_short "" --write-tree -X ours "$ours_commit" "$theirs_commit"
