@@ -8630,6 +8630,7 @@ pub(crate) fn run_ls_remote(
     heads: bool,
     tags: bool,
     refs_only: bool,
+    upload_pack: Option<String>,
     repository: Option<String>,
     patterns: Vec<String>,
 ) -> Result<()> {
@@ -8671,7 +8672,14 @@ pub(crate) fn run_ls_remote(
         return Ok(());
     }
     if is_ssh_transport_url(&url) {
-        let rows = ssh_ls_remote_rows(&url, heads, tags, refs_only, &patterns)?;
+        let rows = ssh_ls_remote_rows_with_upload_pack(
+            &url,
+            heads,
+            tags,
+            refs_only,
+            &patterns,
+            upload_pack.as_deref(),
+        )?;
         for row in rows {
             println!("{}\t{}", row.id.to_hex(), row.name);
         }
@@ -8681,23 +8689,55 @@ pub(crate) fn run_ls_remote(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let remote = source_path.to_string_lossy().to_string();
-    let discovery = CliTransportAdapter
-        .discover_refs(&remote)
-        .map_err(|error| CliError::Fatal {
-            code: 128,
-            message: format!("transport discovery failed: {error}"),
-        })?;
-    let mut rows = Vec::with_capacity(transport_ref_collection_capacity(discovery.refs.len()));
-    for (name, id) in discovery.refs {
-        let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id.as_bytes())?;
-        if ls_remote_ref_name_selected(name.as_bytes(), heads, tags, refs_only) {
-            push_ls_remote_row(&mut rows, id, &name, &patterns);
+    let rows = if let Some(upload_pack) = upload_pack.as_deref() {
+        local_upload_pack_ls_remote_rows(upload_pack, &remote, heads, tags, refs_only, &patterns)?
+    } else {
+        let discovery = CliTransportAdapter
+            .discover_refs(&remote)
+            .map_err(|error| CliError::Fatal {
+                code: 128,
+                message: format!("transport discovery failed: {error}"),
+            })?;
+        let mut rows = Vec::with_capacity(transport_ref_collection_capacity(discovery.refs.len()));
+        for (name, id) in discovery.refs {
+            let id = ObjectId::from_hex_bytes(GitHashAlgorithm::Sha1, id.as_bytes())?;
+            if ls_remote_ref_name_selected(name.as_bytes(), heads, tags, refs_only) {
+                push_ls_remote_row(&mut rows, id, &name, &patterns);
+            }
         }
-    }
+        rows
+    };
     for row in rows {
         println!("{}\t{}", row.id.to_hex(), row.name);
     }
     Ok(())
+}
+
+fn local_upload_pack_ls_remote_rows(
+    command: &str,
+    repository_path: &str,
+    heads: bool,
+    tags: bool,
+    refs_only: bool,
+    patterns: &[String],
+) -> Result<Vec<LsRemoteRow>> {
+    let mut session = spawn_local_upload_pack_command(command, repository_path)?;
+    let rows = {
+        let stdout = session.stdout.as_mut().ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "local upload-pack stdout is unavailable".into(),
+        })?;
+        parse_upload_pack_advertisement_rows_with_shallows(
+            stdout, heads, tags, refs_only, patterns,
+        )?
+        .0
+    };
+    if rows.is_empty() {
+        session.finish()?;
+    } else {
+        session.abandon()?;
+    }
+    Ok(rows)
 }
 
 pub(crate) fn run_fetch(

@@ -95,10 +95,10 @@ pub(crate) fn dispatch(
             heads,
             tags,
             refs_only,
-            upload_pack: _,
+            upload_pack,
             repository,
             patterns,
-        } => run_ls_remote(heads, tags, refs_only, repository, patterns),
+        } => run_ls_remote(heads, tags, refs_only, upload_pack, repository, patterns),
         runtime::Command::Fetch {
             all,
             multiple,
@@ -340,10 +340,18 @@ pub(crate) fn run_ls_remote(
     heads: bool,
     tags: bool,
     refs_only: bool,
+    upload_pack: Option<String>,
     repository: Option<String>,
     patterns: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::transport_commands::run_ls_remote(heads, tags, refs_only, repository, patterns)
+    super::transport_commands::run_ls_remote(
+        heads,
+        tags,
+        refs_only,
+        upload_pack,
+        repository,
+        patterns,
+    )
 }
 
 pub(crate) fn run_fetch(
