@@ -1406,7 +1406,7 @@ pub(crate) fn sequencer_pick(
         CheckoutIndexOptions { force: true },
     )?;
     let message = if revert {
-        revert_message(&picked_id, &picked)
+        revert_message(&picked_id, &picked, &parent_id)
     } else {
         picked.message.clone()
     };
@@ -1593,13 +1593,26 @@ pub(crate) fn apply_tree_delta(
     Ok(next)
 }
 
-fn revert_message(id: &ObjectId, commit: &zmin_git_core::CommitObject) -> Vec<u8> {
+fn revert_message(
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    mainline_parent: &ObjectId,
+) -> Vec<u8> {
     let subject = commit_subject(&commit.message);
-    format!(
-        "Revert \"{subject}\"\n\nThis reverts commit {}.\n",
-        id.to_hex()
-    )
-    .into_bytes()
+    if commit.parents.len() > 1 {
+        format!(
+            "Revert \"{subject}\"\n\nThis reverts commit {}, reversing\nchanges made to {}.\n",
+            id.to_hex(),
+            mainline_parent.to_hex()
+        )
+        .into_bytes()
+    } else {
+        format!(
+            "Revert \"{subject}\"\n\nThis reverts commit {}.\n",
+            id.to_hex()
+        )
+        .into_bytes()
+    }
 }
 
 pub(crate) fn rebase(

@@ -186,18 +186,17 @@ run_mainline_case() {
   set -e
 
   test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
   compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
-  if cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"; then
-    echo "$name unexpectedly matches stock Git stdout; update the open matrix row" >&2
-    return 1
-  fi
 
   record_repo_state "$git_work" "$tmpdir/${name}.git"
   record_repo_state "$zmin_work" "$tmpdir/${name}.zmin"
+  compare_files head "$tmpdir/${name}.git.head" "$tmpdir/${name}.zmin.head"
+  compare_files commit "$tmpdir/${name}.git.commit" "$tmpdir/${name}.zmin.commit"
   compare_files tree "$tmpdir/${name}.git.tree" "$tmpdir/${name}.zmin.tree"
   compare_files status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
   compare_files index "$tmpdir/${name}.git.index" "$tmpdir/${name}.zmin.index"
-  printf '%s\tgap\texit=%s\n' "$name" "$git_exit"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 run_no_sequence_failure_case revert_abort_no_sequence --abort
