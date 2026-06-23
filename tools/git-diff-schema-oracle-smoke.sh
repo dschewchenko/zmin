@@ -96,10 +96,40 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_gap() {
+  local name="$1"
+  local repo_builder="$2"
+  shift 2
+  local git_repo="$tmpdir/${name}.git"
+  local zmin_repo="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  "$repo_builder" "$git_repo"
+  "$repo_builder" "$zmin_repo"
+
+  set +e
+  "$GIT_BIN" -C "$git_repo" "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_repo" "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  if test "$git_exit" = "$zmin_exit" &&
+    cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" &&
+    cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
+    echo "$name unexpectedly matches stock Git; update the open matrix row" >&2
+    return 1
+  fi
+
+  printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_case diff_compact_summary make_worktree_repo diff --stat --compact-summary
 run_case diff_default_prefix make_worktree_repo diff --default-prefix
 run_case diff_ignore_blank_lines make_worktree_repo diff --ignore-blank-lines
 run_case diff_no_color_moved_ws make_worktree_repo diff --no-color-moved-ws
 run_case diff_no_full_index make_worktree_repo diff --raw --no-full-index
 run_case diff_no_renames make_rename_repo diff --cached --name-status --no-renames
+run_gap diff_reverse_long make_worktree_repo diff --reverse -p
 run_case diff_dense_combined make_merge_repo diff --cc HEAD
