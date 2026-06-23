@@ -4388,9 +4388,7 @@ fn print_name_rev(
     candidates: &[NameRevCandidate],
     options: &NameRevOptions,
 ) -> Result<()> {
-    let name = best_name_rev(id, candidates)
-        .or_else(|| options.always.then(|| short_object_id(id)))
-        .unwrap_or_else(|| "undefined".to_owned());
+    let name = best_name_rev(id, candidates).unwrap_or_else(|| "undefined".to_owned());
     if options.name_only {
         println!("{name}");
     } else {

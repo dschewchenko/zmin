@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2842` | `+1748` |
-| Matching stock Git rows | `823` | `2453` | `+1630` |
+| Written behavior rows | `1094` | `2843` | `+1749` |
+| Matching stock Git rows | `823` | `2454` | `+1631` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
 | Commands with rows | `50/151` | `108/151` | `+58` |
-| Represented doc-option pairs | `253/4632` | `726/4632` | `+473` |
+| Represented doc-option pairs | `253/4632` | `727/4632` | `+474` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4604,11 +4604,49 @@ Expected rows:
 The evidence compares stock Git and Zmin exit status, stdout, stderr and clean
 worktree status using copied workdirs from one seed repository. Probe attempts
 for `git name-rev --all` and `git name-rev --always <dangling-commit>` exposed
-current output-order/fallback mismatches, so those schema surfaces remain
-implemented-but-unverified/fix-needed and are not counted as closed rows.
+current output-order/fallback mismatches, so those schema surfaces were not
+counted as closed rows in this import.
 
 Actual post-import movement matched the narrowed declaration: `+2` behavior
 rows, `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
 represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+1` represented doc-option pair, `-2`
 implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `name-rev --always` schema
+surface plus the fallback behavior gap found by the previous smoke probe.
+
+Evidence source:
+
+- `tools/git-name-rev-show-branch-schema-oracle-smoke.sh`
+
+Expected movement:
+
+- behavior rows: `+1`
+- closed rows: `+1`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+1` for `name-rev --always`
+- implemented-but-unverified schema rows: expected `-1`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: yes, positional `name-rev` fallback naming
+
+Expected row:
+
+- `git name-rev --always <dangling-commit>`
+
+The evidence compares stock Git and Zmin exit status, stdout, stderr and clean
+worktree status using copied workdirs from one seed repository. `git name-rev
+--all` remains open because stock output ordering does not match Zmin's current
+object-id ordering.
+
+Actual post-import movement matched the declaration: `+1` behavior row, `+1`
+closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+1` represented doc-option pair, `-1` implemented-but-unverified schema
+row and `+0` remaining checklist rows.
