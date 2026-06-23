@@ -4292,10 +4292,8 @@ fn ls_tree(
 
 fn branch(options: BranchOptions) -> Result<()> {
     if options.help {
-        return Err(CliError::Stderr {
-            code: 129,
-            text: branch_usage(),
-        });
+        print!("{}", branch_usage());
+        return Err(CliError::Exit(129));
     }
     if options.column.is_some() && options.verbose > 0 {
         return Err(CliError::Fatal {
@@ -4623,13 +4621,59 @@ fn resolve_branch_start_point(
 }
 
 fn branch_usage() -> String {
-    "usage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\n\
-     or: git branch [<options>] [-f] <branch-name> [<start-point>]\n\
-     or: git branch [<options>] [-l] [<pattern>...]\n\
-     or: git branch [<options>] [-r] (-d | -D) <branch-name>...\n\
-     or: git branch [<options>] (-m | -M) [<old-branch>] <new-branch>\n\
-     or: git branch [<options>] (-c | -C) [<old-branch>] <new-branch>\n"
-        .to_owned()
+    concat!(
+        "usage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\n",
+        "   or: git branch [<options>] [-f] [--recurse-submodules] <branch-name> [<start-point>]\n",
+        "   or: git branch [<options>] [-l] [<pattern>...]\n",
+        "   or: git branch [<options>] [-r] (-d | -D) <branch-name>...\n",
+        "   or: git branch [<options>] (-m | -M) [<old-branch>] <new-branch>\n",
+        "   or: git branch [<options>] (-c | -C) [<old-branch>] <new-branch>\n",
+        "   or: git branch [<options>] [-r | -a] [--points-at]\n",
+        "   or: git branch [<options>] [-r | -a] [--format]\n\n",
+        "Generic options\n",
+        "    -v, --[no-]verbose    show hash and subject, give twice for upstream branch\n",
+        "    -q, --[no-]quiet      suppress informational messages\n",
+        "    -t, --[no-]track[=(direct|inherit)]\n",
+        "                          set branch tracking configuration\n",
+        "    -u, --[no-]set-upstream-to <upstream>\n",
+        "                          change the upstream info\n",
+        "    --[no-]unset-upstream unset the upstream info\n",
+        "    --[no-]color[=<when>] use colored output\n",
+        "    -r, --remotes         act on remote-tracking branches\n",
+        "    --contains <commit>   print only branches that contain the commit\n",
+        "    --no-contains <commit>\n",
+        "                          print only branches that don't contain the commit\n",
+        "    --[no-]abbrev[=<n>]   use <n> digits to display object names\n\n",
+        "Specific git-branch actions:\n",
+        "    -a, --all             list both remote-tracking and local branches\n",
+        "    -d, --[no-]delete     delete fully merged branch\n",
+        "    -D                    delete branch (even if not merged)\n",
+        "    -m, --[no-]move       move/rename a branch and its reflog\n",
+        "    -M                    move/rename a branch, even if target exists\n",
+        "    --[no-]omit-empty     do not output a newline after empty formatted refs\n",
+        "    -c, --[no-]copy       copy a branch and its reflog\n",
+        "    -C                    copy a branch, even if target exists\n",
+        "    -l, --[no-]list       list branch names\n",
+        "    --[no-]show-current   show current branch name\n",
+        "    --[no-]create-reflog  create the branch's reflog\n",
+        "    --[no-]edit-description\n",
+        "                          edit the description for the branch\n",
+        "    -f, --[no-]force      force creation, move/rename, deletion\n",
+        "    --merged <commit>     print only branches that are merged\n",
+        "    --no-merged <commit>  print only branches that are not merged\n",
+        "    --[no-]column[=<style>]\n",
+        "                          list branches in columns\n",
+        "    --[no-]sort <key>     field name to sort on\n",
+        "    --[no-]points-at <object>\n",
+        "                          print only branches of the object\n",
+        "    -i, --[no-]ignore-case\n",
+        "                          sorting and filtering are case insensitive\n",
+        "    --[no-]recurse-submodules\n",
+        "                          recurse through submodules\n",
+        "    --[no-]format <format>\n",
+        "                          format to use for the output\n\n",
+    )
+    .to_owned()
 }
 
 fn branch_list(

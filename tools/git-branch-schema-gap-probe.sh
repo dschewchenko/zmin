@@ -45,5 +45,29 @@ run_gap() {
   fi
 }
 
+run_exact() {
+  local name="$1"
+  shift
+  local git_exit=0
+  local zmin_exit=0
+
+  set +e
+  "$GIT_BIN" branch "$@" >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" branch "$@" >"$tmpdir/$name.zmin.out" 2>"$tmpdir/$name.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  if ! cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" \
+    || ! cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"; then
+    echo "$name mismatch" >&2
+    diff -u "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" >&2 || true
+    diff -u "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err" >&2 || true
+    return 1
+  fi
+}
+
 run_gap branch_help_long --help
-run_gap branch_help_short -h
+run_exact branch_help_short -h
