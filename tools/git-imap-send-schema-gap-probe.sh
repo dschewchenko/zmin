@@ -31,14 +31,11 @@ repo_state() {
   }
 }
 
-run_gap() {
+run_case() {
   local name="$1"
   shift
   local git_exit=0
   local zmin_exit=0
-  local stdout_match=0
-  local stderr_match=0
-  local state_match=0
 
   seed_pair "$name"
   repo_state "$git_work" >"$tmpdir/${name}.git.before"
@@ -54,27 +51,25 @@ run_gap() {
   repo_state "$git_work" >"$tmpdir/${name}.git.after"
   repo_state "$zmin_work" >"$tmpdir/${name}.zmin.after"
 
-  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" && stdout_match=1
-  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" && stderr_match=1
-  cmp -s "$tmpdir/${name}.git.before" "$tmpdir/${name}.git.after" &&
-    cmp -s "$tmpdir/${name}.zmin.before" "$tmpdir/${name}.zmin.after" &&
-    state_match=1
-
-  if [ "$git_exit" = "$zmin_exit" ] &&
-    [ "$stdout_match" = 1 ] &&
-    [ "$stderr_match" = 1 ] &&
-    [ "$state_match" = 1 ]; then
-    echo "$name unexpectedly matches stock Git; update the matrix row" >&2
+  if ! test "$git_exit" = "$zmin_exit" ||
+    ! cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" ||
+    ! cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" ||
+    ! cmp -s "$tmpdir/${name}.git.before" "$tmpdir/${name}.git.after" ||
+    ! cmp -s "$tmpdir/${name}.zmin.before" "$tmpdir/${name}.zmin.after"; then
+    echo "$name mismatch" >&2
+    diff -u "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" >&2 || true
+    diff -u "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err" >&2 || true
+    diff -u "$tmpdir/${name}.git.before" "$tmpdir/${name}.git.after" >&2 || true
+    diff -u "$tmpdir/${name}.zmin.before" "$tmpdir/${name}.zmin.after" >&2 || true
     return 1
   fi
 
-  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\tstate_match=%s\n' \
-    "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match" "$state_match"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_gap imap_send_curl_long --curl
-run_gap imap_send_no_curl_long --no-curl
-run_gap imap_send_quiet_long --quiet
-run_gap imap_send_verbose_long --verbose
-run_gap imap_send_quiet_short -q
-run_gap imap_send_verbose_short -v
+run_case imap_send_curl_long --curl
+run_case imap_send_no_curl_long --no-curl
+run_case imap_send_quiet_long --quiet
+run_case imap_send_verbose_long --verbose
+run_case imap_send_quiet_short -q
+run_case imap_send_verbose_short -v

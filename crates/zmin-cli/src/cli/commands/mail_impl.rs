@@ -694,13 +694,18 @@ pub(crate) struct ImapSendOptions {
 
 pub(crate) fn imap_send(options: ImapSendOptions) -> Result<()> {
     let repo = find_repo()?;
-    let folder = options
-        .folder
-        .or(read_config_value(&repo, "imap.folder")?)
-        .ok_or_else(|| CliError::Fatal {
+    let folder = options.folder.or(read_config_value(&repo, "imap.folder")?);
+    let Some(folder) = folder else {
+        let warning = if options.no_curl {
+            "warning: --no-curl not supported in this build\n"
+        } else {
+            ""
+        };
+        return Err(CliError::Stderr {
             code: 1,
-            message: "no imap store specified".into(),
-        })?;
+            text: format!("{warning}no imap store specified\n"),
+        });
+    };
     let host = read_config_value(&repo, "imap.host")?.ok_or_else(|| CliError::Fatal {
         code: 1,
         message: "no imap host specified".into(),
