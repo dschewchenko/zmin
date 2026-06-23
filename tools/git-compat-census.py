@@ -112,11 +112,11 @@ def nested_parent_statuses(
     for split in range(len(parts) - 1, 0, -1):
         parent = "-".join(parts[:split])
         subcommand = "-".join(parts[split:])
-        if parent not in command_set:
-            continue
         statuses = matrix_primary_by_status.get((parent, subcommand), Counter())
         if statuses:
             return statuses
+        if parent not in command_set:
+            continue
     return Counter()
 
 
