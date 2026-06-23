@@ -30,12 +30,30 @@ list_zip() {
 import sys
 import zipfile
 with zipfile.ZipFile(sys.argv[1]) as archive:
-    for info in archive.infolist():
-        print(f"{info.filename}\t{info.file_size}")
+    for name in sorted(archive.namelist()):
+        data = archive.read(name).decode("utf-8", "replace")
+        print(f"### {name}")
+        print(data, end="" if data.endswith("\n") else "\n")
 PY
 }
 
-run_gap() {
+normalize_text() {
+  local path="$1"
+  local root="$2"
+  python3 - "$path" "$root" <<'PY'
+import re
+import sys
+path, root = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8", errors="replace").read()
+text = text.replace(root, "__ROOT__")
+text = text.replace("git-repo", "__REPO__").replace("zmin-repo", "__REPO__")
+text = text.replace("git-out", "__OUT__").replace("zmin-out", "__OUT__")
+text = re.sub(r"Available space on '([^']+)': [0-9.]+ GiB", r"Available space on '\1': __SPACE__ GiB", text)
+print(text, end="")
+PY
+}
+
+run_oracle() {
   local name="$1"
   local expected_file="$2"
   shift 2
@@ -76,31 +94,21 @@ run_gap() {
   test -f "$zmin_archive"
   list_zip "$git_archive" >"$root/git.zip"
   list_zip "$zmin_archive" >"$root/zmin.zip"
+  normalize_text "$root/git.stdout" "$root" >"$root/git.stdout.norm"
+  normalize_text "$root/zmin.stdout" "$root" >"$root/zmin.stdout.norm"
+  normalize_text "$root/git.stderr" "$root" >"$root/git.stderr.norm"
+  normalize_text "$root/zmin.stderr" "$root" >"$root/zmin.stderr.norm"
+  normalize_text "$root/git.zip" "$root" >"$root/git.zip.norm"
+  normalize_text "$root/zmin.zip" "$root" >"$root/zmin.zip.norm"
 
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stdout:\n'
-  sed -n '1,8p' "$root/git.stdout"
-  printf 'zmin stdout:\n'
-  sed -n '1,8p' "$root/zmin.stdout"
-  printf 'stock stderr:\n'
-  sed -n '1,4p' "$root/git.stderr"
-  printf 'zmin stderr:\n'
-  sed -n '1,4p' "$root/zmin.stderr"
-  printf 'stock zip:\n'
-  sed -n '1,8p' "$root/git.zip"
-  printf 'zmin zip:\n'
-  sed -n '1,8p' "$root/zmin.zip"
-
-  if cmp -s "$root/git.stdout" "$root/zmin.stdout" \
-    && cmp -s "$root/git.stderr" "$root/zmin.stderr" \
-    && cmp -s "$root/git.zip" "$root/zmin.zip"; then
-    echo "$name unexpectedly matched" >&2
-    return 1
-  fi
+  cmp -s "$root/git.stdout.norm" "$root/zmin.stdout.norm"
+  cmp -s "$root/git.stderr.norm" "$root/zmin.stderr.norm"
+  cmp -s "$root/git.zip.norm" "$root/zmin.zip.norm"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_gap diagnose_mode_all git-diagnostics-mode-all.zip --output-directory __OUT__ --suffix mode-all --mode all
-run_gap diagnose_output_directory_long git-diagnostics-out-long.zip --output-directory __OUT__ --suffix out-long
-run_gap diagnose_suffix_long git-diagnostics-suffix-long.zip --output-directory __OUT__ --suffix suffix-long
-run_gap diagnose_output_directory_short git-diagnostics-out-short.zip -o __OUT__ --suffix out-short
-run_gap diagnose_suffix_short git-diagnostics-suffix-short.zip -o __OUT__ -s suffix-short
+run_oracle diagnose_mode_all git-diagnostics-mode-all.zip --output-directory __OUT__ --suffix mode-all --mode all
+run_oracle diagnose_output_directory_long git-diagnostics-out-long.zip --output-directory __OUT__ --suffix out-long
+run_oracle diagnose_suffix_long git-diagnostics-suffix-long.zip --output-directory __OUT__ --suffix suffix-long
+run_oracle diagnose_output_directory_short git-diagnostics-out-short.zip -o __OUT__ --suffix out-short
+run_oracle diagnose_suffix_short git-diagnostics-suffix-short.zip -o __OUT__ -s suffix-short

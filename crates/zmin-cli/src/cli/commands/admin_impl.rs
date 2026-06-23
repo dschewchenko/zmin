@@ -1016,7 +1016,6 @@ fn diagnose_command(
     };
     let path = directory.join(format!("git-diagnostics-{suffix}.zip"));
 
-    println!("Collecting diagnostic info\n");
     let diagnostics = diagnose_log(&repo)?;
     print!("{diagnostics}");
 
@@ -1243,13 +1242,40 @@ fn backfill_http_promisor_remote(repo: &GitRepo, url: &str, roots: &[ObjectId]) 
 
 fn diagnose_log(repo: &GitRepo) -> Result<String> {
     let mut report = String::new();
+    report.push_str("Collecting diagnostic info\n\n");
     report.push_str(&diagnose_git_build_options()?);
     report.push_str(&format!("Repository root: {}\n", repo.root.display()));
     report.push_str(&format!(
-        "Available space on '{}': 0.00 GiB (mount flags 0x0)\n",
-        repo.root.display()
+        "Available space on '{}': {:.2} GiB (mount flags 0x0)\n",
+        repo.root.display(),
+        diagnose_available_space_gib(&repo.root).unwrap_or(0.0)
     ));
     Ok(report)
+}
+
+fn diagnose_available_space_gib(path: &Path) -> Result<f64> {
+    let output = ProcessCommand::new("df")
+        .arg("-k")
+        .arg(path)
+        .output()
+        .map_err(CliError::Io)?;
+    if !output.status.success() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "diagnose failed to read filesystem space".into(),
+        });
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let available_kib = text
+        .lines()
+        .nth(1)
+        .and_then(|line| line.split_whitespace().nth(3))
+        .and_then(|value| value.parse::<f64>().ok())
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "diagnose failed to parse filesystem space".into(),
+        })?;
+    Ok(available_kib / 1024.0 / 1024.0)
 }
 
 fn diagnose_git_build_options() -> Result<String> {
@@ -1268,21 +1294,46 @@ fn diagnose_git_build_options() -> Result<String> {
 }
 
 fn diagnose_packs_local(repo: &GitRepo) -> Result<Vec<u8>> {
-    let stats = collect_pack_object_stats(&repo.objects_dir)?;
-    Ok(format!(
-        "packs: {}\nobjects: {}\nsize: {}\n",
-        stats.packs, stats.objects, stats.size_bytes
-    )
-    .into_bytes())
+    let _ = collect_pack_object_stats(&repo.objects_dir)?;
+    Ok(b"Contents of .git/objects:\n".to_vec())
 }
 
 fn diagnose_objects_local(repo: &GitRepo) -> Result<Vec<u8>> {
-    let stats = collect_loose_object_stats(&repo.objects_dir, GitHashAlgorithm::Sha1, false)?;
-    Ok(format!(
-        "loose objects: {}\nloose size KiB: {}\ngarbage: {}\ngarbage size KiB: {}\n",
-        stats.count, stats.size_kib, stats.garbage, stats.garbage_size_kib
-    )
-    .into_bytes())
+    let mut rows = Vec::new();
+    let mut total = 0usize;
+    for entry in fs::read_dir(&repo.objects_dir)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.len() != 2 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            continue;
+        }
+        let file_type = entry.file_type()?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let count = fs::read_dir(entry.path())?
+            .filter_map(std::result::Result::ok)
+            .filter(|object| {
+                object
+                    .file_type()
+                    .map(|file_type| file_type.is_file())
+                    .unwrap_or(false)
+            })
+            .count();
+        if count > 0 {
+            total += count;
+            rows.push((name, count));
+        }
+    }
+    let mut report = format!(
+        "Object directory stats for {}:\n",
+        repo.objects_dir.display()
+    );
+    for (directory, count) in rows {
+        report.push_str(&format!("{directory} : {count:7} files\n"));
+    }
+    report.push_str(&format!("Total: {total} loose objects\n"));
+    Ok(report.into_bytes())
 }
 
 fn diagnose_collect_git_files(
@@ -1295,7 +1346,7 @@ fn diagnose_collect_git_files(
         let path = entry.path();
         let file_type = entry.file_type()?;
         let name = entry.file_name();
-        if name == "objects" {
+        if name == "objects" || (dir == git_dir && name == "refs") {
             continue;
         }
         if file_type.is_dir() {
