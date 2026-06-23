@@ -9575,7 +9575,7 @@ pub(crate) fn checkout(
         );
     }
     if let Some(branch) = orphan {
-        return orphan_checkout(force, &branch);
+        return checkout_orphan(force, &branch);
     }
     let explicit_pathspec_separator = checkout_raw_args_have_separator();
     if detach && args.len() > 1 {
@@ -9824,6 +9824,25 @@ fn orphan_checkout(force: bool, branch: &str) -> Result<()> {
     let empty_index = GitIndex::new();
     remove_tracked_paths_missing_from_target(&repo, &old_index, &empty_index)?;
     empty_index.write_to_path(&repo.index_path)?;
+    refs.write_head_symbolic(&ref_name)?;
+    eprintln!("Switched to a new branch '{branch}'");
+    Ok(())
+}
+
+fn checkout_orphan(force: bool, branch: &str) -> Result<()> {
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let ref_name = branch_ref_name(branch)?;
+    if ref_exists(&refs, &ref_name)? {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("a branch named '{branch}' already exists"),
+        });
+    }
+    if !force {
+        reject_orphan_checkout_dirty_worktree(&repo, &store)?;
+    }
     refs.write_head_symbolic(&ref_name)?;
     eprintln!("Switched to a new branch '{branch}'");
     Ok(())
