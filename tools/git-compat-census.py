@@ -407,6 +407,10 @@ def markdown_cells(line: str) -> list[str]:
     ]
 
 
+def clean_markdown_cell(cell: str) -> str:
+    return cell.replace("`; `", "; ").strip("`")
+
+
 def zmin_extension_command_names(root: Path) -> set[str]:
     extension_doc = root / "docs/cli/zmin_extensions_inventory.md"
     if not extension_doc.exists():
@@ -422,6 +426,8 @@ def zmin_extension_command_names(root: Path) -> set[str]:
         parts = cells[0].split()
         if len(parts) >= 2:
             commands.add(parts[1])
+        if len(parts) >= 3:
+            commands.add("-".join(parts[1:]))
     return commands
 
 
@@ -466,13 +472,21 @@ def zmin_extension_rows(root: Path) -> list[dict[str, str]]:
             continue
         if command.startswith("zmin "):
             item_kind = "zmin_extension_surface"
-            option = cells[1] if cells[1].startswith("-") else "<command>"
+            if len(cells) >= 5 and cells[1].startswith("-"):
+                option = cells[1]
+                evidence = cells[3]
+                notes = cells[4]
+            else:
+                option = "<command>"
+                evidence = cells[2] if len(cells) > 2 else ""
+                notes = cells[3] if len(cells) > 3 else cells[-1]
         elif command.startswith("ZMIN_"):
             item_kind = "zmin_extension_environment"
             option = "<environment>"
+            evidence = cells[2] if len(cells) > 2 else ""
+            notes = cells[3] if len(cells) > 3 else cells[-1]
         else:
             continue
-        evidence = cells[2] if len(cells) > 2 else ""
         rows.append(
             {
                 "item_id": stable_id("extension-doc", [command, option, evidence]),
@@ -486,11 +500,11 @@ def zmin_extension_rows(root: Path) -> list[dict[str, str]]:
                 "transport": "<not-applicable>",
                 "platform": "all",
                 "implementation_source": "zmin extension inventory",
-                "evidence_source": evidence,
+                "evidence_source": clean_markdown_cell(evidence),
                 "evidence_kind": "classification_evidence",
                 "source_detail": str(extension_doc.relative_to(root)),
                 "next_action": "keep outside Git compatibility denominator unless explicitly reclassified",
-                "notes": cells[-1] if cells else "",
+                "notes": clean_markdown_cell(notes),
             }
         )
 
@@ -544,7 +558,7 @@ def zmin_extension_rows(root: Path) -> list[dict[str, str]]:
                     "evidence_kind": "classification_evidence",
                     "source_detail": str(doc_path.relative_to(root)),
                     "next_action": "do not count as Git 2.47.1 behavior row unless reclassified",
-                    "notes": "",
+                    "notes": "classification evidence only",
                 }
             )
     return rows

@@ -13,6 +13,7 @@ coverage numbers in the Git compatibility matrix.
 | Zmin-only commands | `11` | additive top-level commands that are not Git command names |
 | Zmin-only options on Git commands | `4` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
+| Zmin-only schema command aliases | `6` | flattened schema entries that belong to Zmin-only command groups |
 | Stable extensions | `5` | implemented and covered by focused tests |
 | Experimental extensions | `2` | implemented but still preview-only |
 | Planned extensions | `1` | designed backlog, not implemented |
@@ -33,11 +34,26 @@ coverage numbers in the Git compatibility matrix.
 | `zmin timeline` | experimental | `git_cms_porcelain_compat` | human-readable history wrapper |
 | `zmin recover` | experimental | `git_cms_porcelain_compat` | safe file restore wrapper |
 
+## Zmin-Only Schema Command Aliases
+
+These rows map flattened `zmin compat` schema names back to additive command
+groups. They are machine-readable classification rows only; they do not add
+Git `2.47.1` compatibility coverage.
+
+| Command | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| `zmin hooks init` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-init`; initializes managed-hook metadata without replacing manual hooks |
+| `zmin hooks add` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks`; `git_admin_tools_compat::managed_hooks_reject_unsupported_hook_names_as_zmin_extension_validation` | flattened schema alias `hooks-add`; adds managed hook commands and validates supported Zmin hook names |
+| `zmin hooks list` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-list`; lists configured managed-hook commands |
+| `zmin hooks remove` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-remove`; removes managed hook commands without deleting manual hooks |
+| `zmin repo info` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-info`; reports Zmin-only repository metadata |
+| `zmin repo structure` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-structure`; reports Zmin-only repository layout summaries |
+
 ## Zmin-Only Options
 
 | Command | Option | Status | Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| `zmin clone` | `--worktree-first` | stable | `git_clone_compat`, `git_transport_http_compat clone_instant_` | materializes selected `HEAD` first and records `zmin.worktreeFirst=true` |
+| `zmin clone` | `--worktree-first` | stable | `git_clone_compat::clone_instant_local_repo_marks_worktree_first_without_changing_git_state`; `git_clone_compat::clone_worktree_first_rejects_non_worktree_or_remote_modes` | materializes selected `HEAD` first and records `zmin.worktreeFirst=true` |
 | `zmin clone` | `--instant` | stable | `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs` | alias for worktree-first clone mode over git-daemon, SSH and smart HTTP transport |
 | `zmin clone` | `--background-fetch` | experimental | `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs` | starts a detached `fetch origin` after an instant remote clone |
 | `zmin clone` | `--demand-hydrate` | experimental | `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects` | marks instant remote clones as promisor-backed for missing-object hydration |
