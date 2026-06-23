@@ -117,5 +117,5 @@ run_gap() {
 }
 
 run_case rev_list_max_count_short -n 1 HEAD
-run_gap rev_list_filter_blob_none --filter=blob:none --objects HEAD
-run_gap rev_list_filter_provided_objects --filter=blob:none --filter-provided-objects --objects HEAD
+run_case rev_list_filter_blob_none --filter=blob:none --objects HEAD
+run_case rev_list_filter_provided_objects --filter=blob:none --filter-provided-objects --objects HEAD

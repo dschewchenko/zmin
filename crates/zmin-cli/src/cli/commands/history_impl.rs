@@ -7434,6 +7434,11 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
             &revs.extra_objects,
             &excluded_commits,
             |id, name| {
+                if let Some(filter) = object_filter {
+                    if !rev_list_filter_includes(&store, id, filter)? {
+                        return Ok(());
+                    }
+                }
                 write!(out, "{id}")?;
                 if let Some(name) = name {
                     write!(out, " {}", String::from_utf8_lossy(name))?;
