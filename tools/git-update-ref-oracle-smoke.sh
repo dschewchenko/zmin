@@ -25,6 +25,18 @@ compare_files() {
   fi
 }
 
+write_stdin_payload() {
+  local payload="$1"
+  case "$payload" in
+    __UPDATE_REF_STDIN_Z__)
+      printf 'update refs/heads/new\0%s\0\0' "$head_oid"
+      ;;
+    *)
+      printf '%b' "$payload"
+      ;;
+  esac
+}
+
 make_seed_repo() {
   local repo="$1"
   mkdir "$repo"
@@ -61,9 +73,9 @@ run_case() {
 
   set +e
   if [[ -n "$stdin_payload" ]]; then
-    printf '%b' "$stdin_payload" | (cd "$git_work" && "$GIT_BIN" "$@") >"$git_out" 2>"$git_err"
+    write_stdin_payload "$stdin_payload" | (cd "$git_work" && "$GIT_BIN" "$@") >"$git_out" 2>"$git_err"
     git_exit=$?
-    printf '%b' "$stdin_payload" | (cd "$zmin_work" && "$ZMIN_BIN" "$@") >"$zmin_out" 2>"$zmin_err"
+    write_stdin_payload "$stdin_payload" | (cd "$zmin_work" && "$ZMIN_BIN" "$@") >"$zmin_out" 2>"$zmin_err"
     zmin_exit=$?
   else
     (cd "$git_work" && "$GIT_BIN" "$@") >"$git_out" 2>"$git_err"
@@ -101,6 +113,7 @@ run_case update_ref_no_create_reflog "" update-ref --no-create-reflog refs/heads
 run_case update_ref_no_deref_head "" update-ref --no-deref HEAD "$head_oid"
 run_case update_ref_delete_short "" update-ref -d refs/heads/old
 run_case update_ref_stdin "update refs/heads/new $head_oid\n" update-ref --stdin
-run_case update_ref_stdin_z "update refs/heads/new\000$head_oid\000\000" update-ref --stdin -z
+run_case update_ref_stdin_z "__UPDATE_REF_STDIN_Z__" update-ref --stdin -z
 run_case update_ref_stdin_batch "update refs/heads/new $head_oid\n" update-ref --stdin --batch-updates
+run_case update_ref_stdin_batch_short "update refs/heads/new $head_oid\n" update-ref --stdin -0
 run_case update_ref_stdin_no_batch "update refs/heads/new $head_oid\n" update-ref --stdin --no-batch-updates

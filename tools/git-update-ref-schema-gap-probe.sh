@@ -59,3 +59,34 @@ if cmp -s "$tmpdir/git.out" "$tmpdir/zmin.out" \
   echo "update_ref_deref_head unexpectedly matched" >&2
   exit 1
 fi
+
+git_work="$tmpdir/delete-long.git"
+zmin_work="$tmpdir/delete-long.zmin"
+cp -R "$base_seed" "$git_work"
+cp -R "$base_seed" "$zmin_work"
+
+git_exit=0
+zmin_exit=0
+set +e
+"$GIT_BIN" -C "$git_work" update-ref --delete refs/heads/old >"$tmpdir/delete-long.git.out" 2>"$tmpdir/delete-long.git.err"
+git_exit=$?
+"$ZMIN_BIN" -C "$zmin_work" update-ref --delete refs/heads/old >"$tmpdir/delete-long.zmin.out" 2>"$tmpdir/delete-long.zmin.err"
+zmin_exit=$?
+set -e
+
+"$GIT_BIN" -C "$git_work" for-each-ref --format='%(refname)%00%(objectname)' >"$tmpdir/delete-long.git.refs"
+"$GIT_BIN" -C "$zmin_work" for-each-ref --format='%(refname)%00%(objectname)' >"$tmpdir/delete-long.zmin.refs"
+
+printf 'update_ref_delete_long\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
+printf 'stock stderr:\n'
+sed -n '1,8p' "$tmpdir/delete-long.git.err"
+printf 'zmin stderr:\n'
+sed -n '1,8p' "$tmpdir/delete-long.zmin.err"
+test "$git_exit" = 129
+test "$zmin_exit" = 0
+if cmp -s "$tmpdir/delete-long.git.out" "$tmpdir/delete-long.zmin.out" \
+  && cmp -s "$tmpdir/delete-long.git.err" "$tmpdir/delete-long.zmin.err" \
+  && cmp -s "$tmpdir/delete-long.git.refs" "$tmpdir/delete-long.zmin.refs"; then
+  echo "update_ref_delete_long unexpectedly matched" >&2
+  exit 1
+fi
