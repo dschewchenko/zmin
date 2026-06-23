@@ -40,8 +40,11 @@ make_seed_repo() {
 
 run_case() {
   local name="$1"
+  local restored_paths="$2"
   shift
-  local restored_path="${!#}"
+  shift
+  test "$1" = "--"
+  shift
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
   local git_out="$tmpdir/${name}.git.out"
@@ -71,12 +74,16 @@ run_case() {
   "$GIT_BIN" -C "$git_work" status --short >"$git_status"
   "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
   compare_files status "$git_status" "$zmin_status"
-  compare_files "$restored_path" "$git_work/$restored_path" "$zmin_work/$restored_path"
+  for restored_path in $restored_paths; do
+    compare_files "$restored_path" "$git_work/$restored_path" "$zmin_work/$restored_path"
+  done
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 
-run_case checkout_index_quiet_long checkout-index --quiet README.md
-run_case checkout_index_quiet_short checkout-index -q docs/guide.md
+run_case checkout_index_all_long "README.md docs/guide.md" -- checkout-index --all
+run_case checkout_index_force_long "README.md" -- checkout-index --force README.md
+run_case checkout_index_quiet_long "README.md" -- checkout-index --quiet README.md
+run_case checkout_index_quiet_short "docs/guide.md" -- checkout-index -q docs/guide.md
