@@ -570,6 +570,27 @@ pub(crate) fn collect_add_files(
     force: bool,
     files: &mut Vec<PathBuf>,
 ) -> Result<()> {
+    collect_add_files_inner(root, path, ignore, force, files, false)
+}
+
+pub(crate) fn collect_add_files_ignore_errors(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    ignore: &GitIgnore,
+    force: bool,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    collect_add_files_inner(root, path, ignore, force, files, true)
+}
+
+fn collect_add_files_inner(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    ignore: &GitIgnore,
+    force: bool,
+    files: &mut Vec<PathBuf>,
+    ignore_errors: bool,
+) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     let relative = repo_relative_path(root, path)?;
     if !force && ignore.is_ignored(&relative, metadata.is_dir()) {
@@ -582,17 +603,44 @@ pub(crate) fn collect_add_files(
             files.push(path.to_path_buf());
             return Ok(());
         }
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) if ignore_errors => {
+                warn_could_not_open_directory(&relative, &error);
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if ignore_errors => {
+                    warn_could_not_open_directory(&relative, &error);
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
             if entry.file_name() == ".git" {
                 continue;
             }
-            collect_add_files(root, &entry.path(), ignore, force, files)?;
+            collect_add_files_inner(root, &entry.path(), ignore, force, files, ignore_errors)?;
         }
     } else if metadata.is_file() || metadata.file_type().is_symlink() {
         files.push(path.to_path_buf());
     }
     Ok(())
+}
+
+fn warn_could_not_open_directory(relative: &[u8], error: &std::io::Error) {
+    let mut display = String::from_utf8_lossy(relative).into_owned();
+    if !display.ends_with('/') {
+        display.push('/');
+    }
+    let message = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "Permission denied".to_owned(),
+        _ => error.to_string(),
+    };
+    eprintln!("warning: could not open directory '{display}': {message}");
 }
 
 pub(crate) fn stage_file(

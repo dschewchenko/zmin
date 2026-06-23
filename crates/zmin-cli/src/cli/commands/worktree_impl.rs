@@ -3106,7 +3106,11 @@ pub(crate) fn add(
     }
 
     let _collect_trace = phase_trace("add.collect_files");
-    let ignore = GitIgnore::load_from_root(&repo.root)?;
+    let ignore = if ignore_errors {
+        GitIgnore::load_from_root_ignore_errors(&repo.root)?
+    } else {
+        GitIgnore::load_from_root(&repo.root)?
+    };
     let mut files = Vec::new();
     let all_pathspecs = if all && paths.is_empty() {
         Vec::new()
@@ -3168,7 +3172,11 @@ pub(crate) fn add(
             files.push(absolute);
             continue;
         }
-        collect_add_files(&repo.root, &absolute, &ignore, force, &mut files)?;
+        if ignore_errors {
+            collect_add_files_ignore_errors(&repo.root, &absolute, &ignore, force, &mut files)?;
+        } else {
+            collect_add_files(&repo.root, &absolute, &ignore, force, &mut files)?;
+        }
     }
     files.sort();
     files.dedup();

@@ -30,7 +30,7 @@ make_repo() {
   chmod 000 "$repo/unreadable"
 }
 
-run_gap() {
+run_case() {
   local name="$1"
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
@@ -51,17 +51,10 @@ run_gap() {
   "$GIT_BIN" -C "$zmin_work" status --short >"$tmpdir/${name}.zmin.status"
 
   printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stderr:\n'
-  sed -n '1,4p' "$tmpdir/${name}.git.err"
-  printf 'zmin stderr:\n'
-  sed -n '1,4p' "$tmpdir/${name}.zmin.err"
-  printf 'stock status:\n'
-  cat "$tmpdir/${name}.git.status"
-  printf 'zmin status:\n'
-  cat "$tmpdir/${name}.zmin.status"
-
-  test "$git_exit" = 0
-  test "$zmin_exit" != 0
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  cmp -s "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
 }
 
-run_gap stage_ignore_errors_unreadable_sibling
+run_case stage_ignore_errors_unreadable_sibling

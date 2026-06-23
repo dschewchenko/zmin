@@ -40,7 +40,22 @@ impl GitIgnore {
         Ok(ignore)
     }
 
+    pub fn load_from_root_ignore_errors(root: &Path) -> io::Result<Self> {
+        let mut ignore = Self::default();
+        ignore.load_from_dir_with_options(root, root, true)?;
+        Ok(ignore)
+    }
+
     fn load_from_dir(&mut self, root: &Path, dir: &Path) -> io::Result<()> {
+        self.load_from_dir_with_options(root, dir, false)
+    }
+
+    fn load_from_dir_with_options(
+        &mut self,
+        root: &Path,
+        dir: &Path,
+        ignore_errors: bool,
+    ) -> io::Result<()> {
         let ignore_path = dir.join(".gitignore");
         if ignore_path.exists() {
             let content = fs::read_to_string(&ignore_path)?;
@@ -51,14 +66,36 @@ impl GitIgnore {
                 &ignore_path.to_string_lossy(),
             ));
         }
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(error) if ignore_errors => {
+                let _ = error;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) if ignore_errors => {
+                    let _ = error;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if entry.file_name() == ".git" {
                 continue;
             }
-            let metadata = entry.metadata()?;
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(error) if ignore_errors => {
+                    let _ = error;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             if metadata.is_dir() {
-                self.load_from_dir(root, &entry.path())?;
+                self.load_from_dir_with_options(root, &entry.path(), ignore_errors)?;
             }
         }
         Ok(())
