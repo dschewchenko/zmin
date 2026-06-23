@@ -1,0 +1,2 @@
+group	command	option	value	combination	repo_state	transport	platform	stock_git_case	zmin_status	evidence	notes
+Administration	upload-archive	<positional:repository>	<repo>	archive service invoked by git archive --remote	committed repository	local	all	git archive --remote=<repo> --exec='zmin upload-archive' --format=tar --prefix=pre/ HEAD -- dir	closed	git_archive_compat::upload_archive_serves_stock_git_archive_remote_tar	positional repository argument serves a remote tar archive whose listing and extracted contents match stock Git local archive output
