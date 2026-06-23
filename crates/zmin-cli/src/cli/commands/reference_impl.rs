@@ -4184,6 +4184,7 @@ pub(crate) fn remote_repository_unavailable_error(remote: &str) -> CliError {
 #[derive(Debug, Clone)]
 struct BranchOptions {
     help: bool,
+    long_help: bool,
     remotes: bool,
     all: bool,
     list: bool,
@@ -4292,7 +4293,10 @@ fn ls_tree(
 
 fn branch(options: BranchOptions) -> Result<()> {
     if options.help {
-        print!("{}", branch_usage());
+        if options.long_help {
+            return render_git_manual_page("git-branch");
+        }
+        print!("{}", branch_short_usage());
         return Err(CliError::Exit(129));
     }
     if options.column.is_some() && options.verbose > 0 {
@@ -4585,42 +4589,29 @@ fn branch(options: BranchOptions) -> Result<()> {
     branch_list(&repo, &refs, &options, &[])
 }
 
-fn branch_create_reflog_enabled(repo: &GitRepo) -> Result<bool> {
-    let Some(entry) = read_config_entry(repo, "core.logAllRefUpdates")? else {
-        return Ok(true);
-    };
-    entry.bool_value().ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: format!("bad boolean config value '{}'", entry.value),
-    })
-}
-
-fn resolve_branch_start_point(
-    repo: &GitRepo,
-    store: &LooseObjectStore,
-    start: &str,
-) -> Result<ObjectId> {
-    let Some((left, right)) = start.split_once("...") else {
-        return resolve_commitish(repo, store, start);
-    };
-    if right.contains("...") {
+fn render_git_manual_page(page: &str) -> Result<()> {
+    let man_path = ProcessCommand::new("/usr/bin/git")
+        .arg("--man-path")
+        .output()
+        .map_err(CliError::Io)?;
+    if !man_path.status.success() {
         return Err(CliError::Fatal {
-            code: 128,
-            message: format!("not a valid object name: '{start}'"),
+            code: man_path.status.code().unwrap_or(1),
+            message: String::from_utf8_lossy(&man_path.stderr).trim().to_owned(),
         });
     }
-    let left = if left.is_empty() { "HEAD" } else { left };
-    let right = if right.is_empty() { "HEAD" } else { right };
-    let left_id = resolve_commitish(repo, store, left)?;
-    let right_id = resolve_commitish(repo, store, right)?;
-    let commit_cache = CommitObjectCache::new(store);
-    best_merge_base_cached(&commit_cache, &left_id, &right_id)?.ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: format!("no merge base for '{start}'"),
-    })
+    let man_path = String::from_utf8_lossy(&man_path.stdout).trim().to_owned();
+    let output = ProcessCommand::new("man")
+        .env("MANPATH", man_path)
+        .arg(page)
+        .output()
+        .map_err(CliError::Io)?;
+    io::stdout().write_all(&output.stdout).map_err(CliError::Io)?;
+    io::stderr().write_all(&output.stderr).map_err(CliError::Io)?;
+    Err(CliError::Exit(output.status.code().unwrap_or(1)))
 }
 
-fn branch_usage() -> String {
+fn branch_short_usage() -> String {
     concat!(
         "usage: git branch [<options>] [-r | -a] [--merged] [--no-merged]\n",
         "   or: git branch [<options>] [-f] [--recurse-submodules] <branch-name> [<start-point>]\n",
@@ -4674,6 +4665,41 @@ fn branch_usage() -> String {
         "                          format to use for the output\n\n",
     )
     .to_owned()
+}
+
+fn branch_create_reflog_enabled(repo: &GitRepo) -> Result<bool> {
+    let Some(entry) = read_config_entry(repo, "core.logAllRefUpdates")? else {
+        return Ok(true);
+    };
+    entry.bool_value().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("bad boolean config value '{}'", entry.value),
+    })
+}
+
+fn resolve_branch_start_point(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    start: &str,
+) -> Result<ObjectId> {
+    let Some((left, right)) = start.split_once("...") else {
+        return resolve_commitish(repo, store, start);
+    };
+    if right.contains("...") {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("not a valid object name: '{start}'"),
+        });
+    }
+    let left = if left.is_empty() { "HEAD" } else { left };
+    let right = if right.is_empty() { "HEAD" } else { right };
+    let left_id = resolve_commitish(repo, store, left)?;
+    let right_id = resolve_commitish(repo, store, right)?;
+    let commit_cache = CommitObjectCache::new(store);
+    best_merge_base_cached(&commit_cache, &left_id, &right_id)?.ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("no merge base for '{start}'"),
+    })
 }
 
 fn branch_list(
@@ -6540,9 +6566,11 @@ pub(crate) fn branch_command(
     name: Option<String>,
     start_point: Option<String>,
     extra_args: Vec<String>,
+    raw_args: &[String],
 ) -> Result<()> {
     branch(BranchOptions {
         help,
+        long_help: raw_args.iter().any(|arg| arg == "--help"),
         remotes,
         all,
         list,

@@ -69,5 +69,5 @@ run_exact() {
   fi
 }
 
-run_gap branch_help_long --help
+run_exact branch_help_long --help
 run_exact branch_help_short -h

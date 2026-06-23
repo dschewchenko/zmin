@@ -132,6 +132,7 @@ pub(crate) fn dispatch(
             name,
             start_point,
             extra_args,
+            raw_args,
         ),
         runtime::Command::Tag {
             delete,
@@ -374,6 +375,7 @@ pub(crate) fn run_branch(
     name: Option<String>,
     start_point: Option<String>,
     extra_args: Vec<String>,
+    raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
     super::reference_commands::branch_command(
         help,
@@ -407,6 +409,7 @@ pub(crate) fn run_branch(
         name,
         start_point,
         extra_args,
+        raw_args,
     )
 }
 
