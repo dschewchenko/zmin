@@ -33,26 +33,28 @@ make_worktree_repo() {
   printf 'changed\n' >"$repo/a.txt"
 }
 
-git_repo="$tmpdir/git"
-zmin_repo="$tmpdir/zmin"
-make_worktree_repo "$git_repo"
-make_worktree_repo "$zmin_repo"
+run_case() {
+  local name="$1"
+  shift
+  local git_repo="$tmpdir/${name}.git"
+  local zmin_repo="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
 
-git_exit=0
-zmin_exit=0
-set +e
-"$GIT_BIN" -C "$git_repo" diff-files -m --name-status >"$tmpdir/git.out" 2>"$tmpdir/git.err"
-git_exit=$?
-"$ZMIN_BIN" -C "$zmin_repo" diff-files -m --name-status >"$tmpdir/zmin.out" 2>"$tmpdir/zmin.err"
-zmin_exit=$?
-set -e
+  make_worktree_repo "$git_repo"
+  make_worktree_repo "$zmin_repo"
 
-if [ "$git_exit" = "$zmin_exit" ] && cmp -s "$tmpdir/git.out" "$tmpdir/zmin.out" && cmp -s "$tmpdir/git.err" "$tmpdir/zmin.err"; then
-  echo "diff-files -m unexpectedly matches stock Git; update the open matrix row" >&2
-  exit 1
-fi
+  set +e
+  "$GIT_BIN" -C "$git_repo" "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_repo" "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
 
-test "$git_exit" = 0
-grep -q '^M[[:space:]]a.txt$' "$tmpdir/git.out"
-test "$zmin_exit" != 0
-printf 'diff_files_merge_option\topen-gap\tgit_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+}
+
+run_case diff_files_merge_option diff-files -m --name-status
