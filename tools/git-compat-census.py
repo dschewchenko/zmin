@@ -653,7 +653,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     for command in sorted(additional_commands):
         if command in extension_commands:
             continue
-        statuses = nested_parent_statuses(command, command_set, matrix_primary_by_status)
+        statuses = matrix_primary_by_status.get((command, "<command>"), Counter())
+        statuses += nested_parent_statuses(command, command_set | additional_commands, matrix_primary_by_status)
         if statuses["closed"] or statuses["invalid-input"] or statuses["open"] or statuses["partial"]:
             continue
         implemented_unverified.append(
