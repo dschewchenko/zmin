@@ -4304,15 +4304,16 @@ pub(crate) fn name_rev(options: NameRevOptions) -> Result<()> {
     let commit_cache = CommitObjectCache::new(&store);
     let candidates = name_rev_candidates(&repo, &store, &commit_cache, &options)?;
     if options.all {
-        let mut commits = HashSet::<ObjectId>::new();
+        let mut roots = Vec::<ObjectId>::new();
+        let mut seen_roots = HashSet::<ObjectId>::new();
         for candidate in &candidates {
-            for id in candidate.depths.keys() {
-                commits.insert(id.clone());
+            for (id, depth) in &candidate.depths {
+                if *depth == 0 && seen_roots.insert(id.clone()) {
+                    roots.push(id.clone());
+                }
             }
         }
-        let mut ids = commits.into_iter().collect::<Vec<_>>();
-        ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
-        for id in ids {
+        for id in collect_commits_from_ids_cached(&repo, &commit_cache, &roots, None)? {
             print_name_rev(&commit_cache, &id, &candidates, &options)?;
         }
         return Ok(());

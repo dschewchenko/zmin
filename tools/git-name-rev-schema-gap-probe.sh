@@ -27,6 +27,7 @@ seed_repo() {
   "$GIT_BIN" -C "$repo" init -q -b main
   "$GIT_BIN" -C "$repo" config user.name Oracle
   "$GIT_BIN" -C "$repo" config user.email oracle@example.com
+  "$GIT_BIN" -C "$repo" config commit.gpgsign false
   printf 'base\n' >"$repo/file.txt"
   "$GIT_BIN" -C "$repo" add file.txt
   "$GIT_BIN" -C "$repo" commit -q -m base
@@ -76,33 +77,6 @@ run_exact() {
   cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
 }
 
-run_observe() {
-  local name="$1"
-  shift
-  local git_work="$tmpdir/${name}.git.work"
-  local zmin_work="$tmpdir/${name}.zmin.work"
-  local git_exit=0
-  local zmin_exit=0
-  seed_repo "$git_work"
-  cp -R "$git_work" "$zmin_work"
-
-  set +e
-  "$GIT_BIN" -C "$git_work" "$@" >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
-  git_exit=$?
-  "$ZMIN_BIN" -C "$zmin_work" "$@" >"$tmpdir/$name.zmin.out" 2>"$tmpdir/$name.zmin.err"
-  zmin_exit=$?
-  set -e
-
-  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  printf 'stock stdout:\n'
-  cat "$tmpdir/$name.git.out"
-  printf 'zmin stdout:\n'
-  cat "$tmpdir/$name.zmin.out"
-
-  test "$git_exit" = "$zmin_exit"
-  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
-}
-
 run_dangling_exact() {
   local name="$1"
   shift
@@ -133,5 +107,5 @@ run_dangling_exact() {
   cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
 }
 
-run_observe name_rev_all name-rev --all
+run_exact name_rev_all name-rev --all
 run_dangling_exact name_rev_always name-rev --always
