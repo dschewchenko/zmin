@@ -47,15 +47,16 @@ seed_bare_repo() {
 run_quiet_gap() {
   local name="$1"
   shift
-  local git_src="$tmpdir/${name}.git.src"
-  local zmin_src="$tmpdir/${name}.zmin.src"
+  local src="$tmpdir/${name}.src"
+  local seed_bare="$tmpdir/${name}.seed.git"
   local git_bare="$tmpdir/${name}.git.git"
   local zmin_bare="$tmpdir/${name}.zmin.git"
   local git_exit=0
   local zmin_exit=0
 
-  seed_bare_repo "$git_src" "$git_bare"
-  seed_bare_repo "$zmin_src" "$zmin_bare"
+  seed_bare_repo "$src" "$seed_bare"
+  cp -R "$seed_bare" "$git_bare"
+  cp -R "$seed_bare" "$zmin_bare"
   "$GIT_BIN" --git-dir="$git_bare" show-ref >"$tmpdir/${name}.git.refs.before"
   "$GIT_BIN" --git-dir="$zmin_bare" show-ref >"$tmpdir/${name}.zmin.refs.before"
 
@@ -66,17 +67,19 @@ run_quiet_gap() {
   zmin_exit=$?
   set -e
 
+  test "$git_exit" = "$zmin_exit"
   test "$git_exit" = "128"
-  test "$zmin_exit" = "0"
-  grep -q "fatal: the remote end hung up unexpectedly" "$tmpdir/${name}.git.err"
-  test ! -s "$tmpdir/${name}.zmin.err"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  if cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"; then
+    echo "$name unexpectedly matches stock Git stdout; update the open matrix row" >&2
+    return 1
+  fi
   test -s "$tmpdir/${name}.git.out"
-  test -s "$tmpdir/${name}.zmin.out"
   "$GIT_BIN" --git-dir="$git_bare" show-ref >"$tmpdir/${name}.git.refs.after"
   "$GIT_BIN" --git-dir="$zmin_bare" show-ref >"$tmpdir/${name}.zmin.refs.after"
   compare_files git-refs "$tmpdir/${name}.git.refs.before" "$tmpdir/${name}.git.refs.after"
   compare_files zmin-refs "$tmpdir/${name}.zmin.refs.before" "$tmpdir/${name}.zmin.refs.after"
-  printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  printf '%s\tgap\texit=%s\n' "$name" "$git_exit"
 }
 
 run_quiet_gap receive_pack_quiet_long --quiet

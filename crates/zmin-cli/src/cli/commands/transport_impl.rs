@@ -23418,6 +23418,12 @@ pub(crate) fn receive_pack(_quiet: bool, directory: PathBuf) -> Result<()> {
 
     let stdin = io::stdin();
     let mut stdin = io::BufReader::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdin.lock());
+    if stdin.fill_buf()?.is_empty() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: the remote end hung up unexpectedly\n".into(),
+        });
+    }
     receive_pack_apply_request(&refs, &mut stdin, &mut stdout)
 }
 
