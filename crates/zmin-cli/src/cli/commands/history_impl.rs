@@ -5006,7 +5006,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 zero,
             )?;
             out = io::stdout().lock();
-            if next_output {
+            if next_output && !(matches!(diff_format, ShowDiffFormat::Raw) && terminates_lines) {
                 out.write_all(b"\n")?;
             }
         }
@@ -5303,7 +5303,7 @@ fn log_commit_matches_pickaxe(
         }
         return Ok(false);
     }
-    if commit.parents.len() > 1 {
+    if !commit.parents.is_empty() {
         return commit_diff_against_parent_matches_pickaxe(repo, store, commit, 0, pickaxe_options);
     }
     commit_diff_against_optional_parent_matches_pickaxe(repo, store, commit, None, pickaxe_options)

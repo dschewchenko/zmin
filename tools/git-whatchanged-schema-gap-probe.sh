@@ -111,19 +111,19 @@ run_exact whatchanged_oneline whatchanged --oneline --max-count 1
 run_exact whatchanged_parents whatchanged --parents --oneline --max-count 1
 run_exact whatchanged_patch whatchanged --patch --max-count 1
 run_exact whatchanged_patch_with_stat whatchanged --patch-with-stat --max-count 1
-run_open_mismatch whatchanged_pickaxe_all whatchanged -Sneedle --pickaxe-all --name-only
-run_open_mismatch whatchanged_pickaxe_regex whatchanged -Sneed.e --pickaxe-regex --name-only
+run_exact whatchanged_pickaxe_all whatchanged -Sneedle --pickaxe-all --name-only
+run_exact whatchanged_pickaxe_regex whatchanged -Sneed.e --pickaxe-regex --name-only
 run_exact whatchanged_pretty whatchanged --pretty=oneline --max-count 1
 run_exact whatchanged_raw whatchanged --raw --max-count 1
-run_open_mismatch whatchanged_reverse whatchanged --reverse --format=%s
+run_exact whatchanged_reverse whatchanged --reverse --format=%s
 run_exact whatchanged_root whatchanged --root --max-count 2
 run_exact whatchanged_shortstat whatchanged --shortstat --max-count 1
 run_exact whatchanged_since whatchanged --since=1.week.ago --format=%s
 run_exact whatchanged_stat whatchanged --stat --max-count 1
 run_exact whatchanged_summary whatchanged --summary --max-count 1
 run_exact whatchanged_pickaxe_G whatchanged -Gchanged --name-only
-run_open_mismatch whatchanged_pickaxe_S whatchanged -Sneedle --name-only
+run_exact whatchanged_pickaxe_S whatchanged -Sneedle --name-only
 run_exact whatchanged_short_c whatchanged -c --max-count 1
 run_exact whatchanged_short_n whatchanged -n 1
 run_exact whatchanged_short_p whatchanged -p --max-count 1
-run_open_mismatch whatchanged_revs whatchanged --oneline HEAD
+run_exact whatchanged_revs whatchanged --oneline HEAD
