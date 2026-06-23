@@ -19,7 +19,14 @@ seed_repo() {
   "$GIT_BIN" init -q -b main "$repo"
 }
 
-run_gap() {
+normalize_stderr() {
+  local input="$1"
+  local output="$2"
+  sed -E 's#format-patch -o [^ ]+ missing\.patch:#format-patch -o <tmp> missing.patch:#' \
+    "$input" >"$output"
+}
+
+run_case() {
   local name="send_email_missing_patch_arg"
   local git_repo="$tmpdir/$name.git"
   local zmin_repo="$tmpdir/$name.zmin"
@@ -41,20 +48,24 @@ run_gap() {
 
   "$GIT_BIN" -C "$git_repo" status --short >"$tmpdir/$name.git.status"
   "$GIT_BIN" -C "$zmin_repo" status --short >"$tmpdir/$name.zmin.status"
+  normalize_stderr "$tmpdir/$name.git.err" "$tmpdir/$name.git.err.norm"
+  normalize_stderr "$tmpdir/$name.zmin.err" "$tmpdir/$name.zmin.err.norm"
   cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" && stdout_match=1
-  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err" && stderr_match=1
+  cmp -s "$tmpdir/$name.git.err.norm" "$tmpdir/$name.zmin.err.norm" && stderr_match=1
   cmp -s "$tmpdir/$name.git.status" "$tmpdir/$name.zmin.status" && state_match=1
 
   if [ "$git_exit" = "$zmin_exit" ] &&
     [ "$stdout_match" = 1 ] &&
     [ "$stderr_match" = 1 ] &&
     [ "$state_match" = 1 ]; then
-    echo "$name unexpectedly matches stock Git; update the matrix row" >&2
-    return 1
+    printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\tstate_match=%s\n' \
+      "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match" "$state_match"
+    return 0
   fi
 
   printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\tstdout_match=%s\tstderr_match=%s\tstate_match=%s\n' \
     "$name" "$git_exit" "$zmin_exit" "$stdout_match" "$stderr_match" "$state_match"
+  return 1
 }
 
-run_gap
+run_case

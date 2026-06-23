@@ -346,6 +346,11 @@ pub(crate) fn send_email(
 
 fn send_email_patches(paths: Vec<String>) -> Result<()> {
     let repo = find_repo()?;
+    for path in &paths {
+        if !std::path::Path::new(path).exists() {
+            return Err(send_email_missing_patch_error(path)?);
+        }
+    }
     let smtp_server =
         read_config_value(&repo, "sendemail.smtpserver")?.ok_or_else(|| CliError::Fatal {
             code: 1,
@@ -385,6 +390,31 @@ fn send_email_patches(paths: Vec<String>) -> Result<()> {
         }
     }
     client.quit()
+}
+
+fn send_email_missing_patch_error(path: &str) -> Result<CliError> {
+    let out_dir = std::env::temp_dir().join(format!(
+        "zmin-send-email-{}-{}",
+        std::process::id(),
+        unique_timestamp_nanos()
+    ));
+    Ok(CliError::Stderr {
+        code: 128,
+        text: format!(
+            "fatal: ambiguous argument '{path}': unknown revision or path not in the working tree.\n\
+             Use '--' to separate paths from revisions, like this:\n\
+             'git <command> [<revision>...] -- [<file>...]'\n\
+             format-patch -o {} {path}: command returned error: 128\n",
+            out_dir.display()
+        ),
+    })
+}
+
+fn unique_timestamp_nanos() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0)
 }
 
 fn ensure_send_email_headers(
