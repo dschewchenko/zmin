@@ -65,5 +65,6 @@ run_oracle() {
 run_oracle mailinfo_encoding --encoding UTF-8
 run_oracle mailinfo_quoted_cr --quoted-cr nowarn
 run_oracle mailinfo_scissors --scissors
+run_oracle mailinfo_message_id_long --message-id
 run_oracle mailinfo_no_recode -n
 run_oracle mailinfo_recode -u
