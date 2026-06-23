@@ -1529,11 +1529,11 @@ pub(crate) fn fmt_merge_msg(
         input
     };
     let entries = parse_fetch_head_for_merge(&input);
-    if entries.is_empty() {
-        return Ok(());
-    }
     if let Some(message) = message {
         println!("{message}");
+        return Ok(());
+    }
+    if entries.is_empty() {
         return Ok(());
     }
 

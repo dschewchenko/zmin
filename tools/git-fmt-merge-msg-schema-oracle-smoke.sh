@@ -67,7 +67,7 @@ run_file_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_stdin_gap() {
+run_stdin_case_exact() {
   local name="$1"
   shift
   local git_exit=0
@@ -80,17 +80,13 @@ run_stdin_gap() {
   zmin_exit=$?
   set -e
 
-  if test "$git_exit" = "$zmin_exit" &&
-    cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" &&
-    cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
-    echo "$name unexpectedly matches stock Git; update the open matrix row" >&2
-    return 1
-  fi
-
-  printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 run_file_case fmt_merge_msg_file_long --file "$fetch_head"
 run_stdin_case fmt_merge_msg_log_long --log
 run_stdin_case fmt_merge_msg_no_log_long --no-log
-run_stdin_gap fmt_merge_msg_message_long --message "Custom merge"
+run_stdin_case_exact fmt_merge_msg_message_long --message "Custom merge"
