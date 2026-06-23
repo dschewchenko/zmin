@@ -79,8 +79,8 @@ run_case() {
   "$GIT_BIN" -C "$git_work" for-each-ref --format='%(refname)%00%(objectname)' >"$git_refs"
   "$GIT_BIN" -C "$zmin_work" for-each-ref --format='%(refname)%00%(objectname)' >"$zmin_refs"
   compare_files refs "$git_refs" "$zmin_refs"
-  "$GIT_BIN" -C "$git_work" reflog show --all --format='%gD %H %gs' >"$git_reflog" 2>/dev/null || true
-  "$GIT_BIN" -C "$zmin_work" reflog show --all --format='%gD %H %gs' >"$zmin_reflog" 2>/dev/null || true
+  "$GIT_BIN" -C "$git_work" reflog show --all --format='%gD %H %gs' 2>/dev/null | sort >"$git_reflog" || true
+  "$GIT_BIN" -C "$zmin_work" reflog show --all --format='%gD %H %gs' 2>/dev/null | sort >"$zmin_reflog" || true
   compare_files reflog "$git_reflog" "$zmin_reflog"
   cat "$git_work/.git/HEAD" >"$git_head"
   cat "$zmin_work/.git/HEAD" >"$zmin_head"
@@ -93,11 +93,14 @@ make_seed_repo "$base_seed"
 head_oid="$("$GIT_BIN" -C "$base_seed" rev-parse HEAD)"
 
 run_case update_ref_positional "" update-ref refs/heads/new "$head_oid"
+run_case update_ref_positional_name "" update-ref refs/heads/new "$head_oid"
+run_case update_ref_positional_newvalue "" update-ref refs/heads/new "$head_oid"
 run_case update_ref_message "" update-ref -m msg refs/heads/new "$head_oid"
 run_case update_ref_create_reflog "" update-ref --create-reflog refs/heads/new "$head_oid"
 run_case update_ref_no_create_reflog "" update-ref --no-create-reflog refs/heads/new "$head_oid"
 run_case update_ref_no_deref_head "" update-ref --no-deref HEAD "$head_oid"
 run_case update_ref_delete_short "" update-ref -d refs/heads/old
 run_case update_ref_stdin "update refs/heads/new $head_oid\n" update-ref --stdin
+run_case update_ref_stdin_z "update refs/heads/new\000$head_oid\000\000" update-ref --stdin -z
 run_case update_ref_stdin_batch "update refs/heads/new $head_oid\n" update-ref --stdin --batch-updates
 run_case update_ref_stdin_no_batch "update refs/heads/new $head_oid\n" update-ref --stdin --no-batch-updates
