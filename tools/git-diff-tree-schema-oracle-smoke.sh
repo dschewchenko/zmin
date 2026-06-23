@@ -80,6 +80,7 @@ run_case diff_tree_default_prefix diff-tree -p --default-prefix HEAD~1 HEAD
 run_case diff_tree_diff_algorithm diff-tree -p --diff-algorithm=histogram HEAD~1 HEAD
 run_case diff_tree_find_copies_harder diff-tree --name-status --find-copies-harder HEAD~1 HEAD
 run_case diff_tree_histogram diff-tree -p --histogram HEAD~1 HEAD
+run_case diff_tree_ignore_all_space_long diff-tree -p --ignore-all-space HEAD~1 HEAD
 run_case diff_tree_ignore_blank_lines diff-tree -p --ignore-blank-lines HEAD~1 HEAD
 run_case diff_tree_ignore_cr_at_eol diff-tree -p --ignore-cr-at-eol HEAD~1 HEAD
 run_case diff_tree_ignore_space_at_eol diff-tree -p --ignore-space-at-eol HEAD~1 HEAD
@@ -95,11 +96,14 @@ run_case diff_tree_no_relative diff-tree --relative=sub --no-relative --name-onl
 run_case diff_tree_no_textconv diff-tree -p --no-textconv HEAD~1 HEAD
 run_case diff_tree_numstat diff-tree --numstat HEAD~1 HEAD
 run_case diff_tree_patience diff-tree -p --patience HEAD~1 HEAD
+run_case diff_tree_patch_long diff-tree --patch HEAD~1 HEAD
 run_case diff_tree_pickaxe_regex diff-tree -Sneed.e --pickaxe-regex --name-only HEAD~1 HEAD
 run_case diff_tree_quiet diff-tree --quiet HEAD~1 HEAD
 run_case diff_tree_shortstat diff-tree --shortstat HEAD~1 HEAD
 run_case diff_tree_skip_to diff-tree --skip-to=b.txt --name-only HEAD~1 HEAD
 run_case diff_tree_word_diff diff-tree --word-diff=plain -p HEAD~1 HEAD
 run_case diff_tree_short_D diff-tree -p -D HEAD~1 HEAD
+run_case diff_tree_short_I diff-tree -p -Icommon HEAD~1 HEAD
+run_case diff_tree_short_a diff-tree -p -a HEAD~1 HEAD
 run_case diff_tree_short_b diff-tree -p -b HEAD~1 HEAD
 run_case diff_tree_short_m diff-tree -m --name-status HEAD~1 HEAD
