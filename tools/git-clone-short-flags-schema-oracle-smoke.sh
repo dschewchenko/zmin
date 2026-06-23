@@ -16,6 +16,7 @@ export GIT_COMMITTER_EMAIL=oracle@example.com
 export GIT_COMMITTER_DATE="1700000000 +0000"
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-clone-short-flags-oracle.XXXXXX")"
+tmpdir_real="$(cd "$tmpdir" && pwd -P)"
 cleanup() {
   rm -rf "$tmpdir"
 }
@@ -74,7 +75,7 @@ record_normalized_alternates() {
   local prefix="$2"
   local alternates="$repo/.git/objects/info/alternates"
   if test -f "$alternates"; then
-    sed -e "s#${tmpdir}#<tmp>#g" "$alternates" >"$prefix.alternates"
+    sed -e "s#${tmpdir}#<tmp>#g" -e "s#${tmpdir_real}#<tmp>#g" "$alternates" >"$prefix.alternates"
   else
     : >"$prefix.alternates"
   fi
@@ -121,3 +122,6 @@ run_case() {
 }
 
 run_case clone_quiet_short -q
+run_case clone_local_short -l
+run_case clone_no_checkout_short -n
+run_case clone_shared_short -s
