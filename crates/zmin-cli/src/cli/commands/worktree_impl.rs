@@ -9789,7 +9789,11 @@ fn checkout_new_branch(
     } else {
         refs.write_ref(&ref_name, &id)?;
     }
-    checkout_existing(force, branch)
+    if reset_existing {
+        checkout_existing(force, branch)
+    } else {
+        checkout_existing_with_message(force, branch, CheckoutBranchMessage::NewBranch)
+    }
 }
 
 fn checkout_branch_reflog_enabled(repo: &GitRepo) -> Result<bool> {
@@ -9854,7 +9858,20 @@ fn reject_orphan_checkout_dirty_worktree(repo: &GitRepo, _store: &LooseObjectSto
     Err(CliError::Stderr { code: 1, text })
 }
 
+enum CheckoutBranchMessage {
+    ExistingBranch,
+    NewBranch,
+}
+
 pub(crate) fn checkout_existing(force: bool, target: &str) -> Result<()> {
+    checkout_existing_with_message(force, target, CheckoutBranchMessage::ExistingBranch)
+}
+
+fn checkout_existing_with_message(
+    force: bool,
+    target: &str,
+    branch_message: CheckoutBranchMessage,
+) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
 
@@ -9892,7 +9909,10 @@ pub(crate) fn checkout_existing(force: bool, target: &str) -> Result<()> {
             print_previous_detached_head_position(&repo, &store, &head_refs)?;
         }
         write_head_symbolic_with_reflog(&repo, &head_refs, &ref_name, &reflog_message)?;
-        eprintln!("Switched to branch '{target}'");
+        match branch_message {
+            CheckoutBranchMessage::ExistingBranch => eprintln!("Switched to branch '{target}'"),
+            CheckoutBranchMessage::NewBranch => eprintln!("Switched to a new branch '{target}'"),
+        }
         if let Some(lines) = human_status_upstream(&repo, &head_refs)? {
             for line in lines {
                 println!("{line}");
