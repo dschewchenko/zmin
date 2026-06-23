@@ -79,6 +79,7 @@ run_case fsck_no_progress --no-progress
 run_case fsck_no_references --no-references
 run_case fsck_no_reflogs --no-reflogs
 run_case fsck_references --references
+run_case fsck_root --root
 run_case fsck_strict --strict
 run_case fsck_tags --tags
 run_case fsck_unreachable --unreachable

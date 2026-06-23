@@ -1860,7 +1860,14 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
         roots.len(),
     ));
     let mut has_connectivity_errors = false;
-    for root in roots {
+    for root in &roots {
+        if options.root {
+            if let Ok(object) = store.read_object(root)
+                && object.kind == GitObjectKind::Commit
+            {
+                println!("root {}", root.to_hex());
+            }
+        }
         if let Err(error) = fsck_mark_object(&store, &root, &mut seen, &mut has_connectivity_errors)
         {
             eprintln!("error: object {}: {}", root.to_hex(), error);

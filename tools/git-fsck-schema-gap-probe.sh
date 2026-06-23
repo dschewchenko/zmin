@@ -66,6 +66,5 @@ base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 
 run_gap fsck_progress --progress
-run_gap fsck_root --root
 run_gap fsck_verbose --verbose
 run_gap fsck_verbose_short -v
