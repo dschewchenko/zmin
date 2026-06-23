@@ -232,15 +232,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             since,
             date,
             pretty,
-            i_still_use_this,
+            i_still_use_this: _,
             revs,
         } => {
-            if !i_still_use_this {
-                return Err(runtime::CliError::Stderr {
-                    code: 128,
-                    text: "'git-whatchanged' is nominated for removal.\nrefusing to run without --i-still-use-this\n".into(),
-                });
-            }
             super::history_commands::log(super::history_commands::LogOptions {
                 oneline,
                 zero: false,
@@ -253,7 +247,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 dd: false,
                 reverse,
                 root,
-                patch,
+                patch: patch || combined || dense_combined,
                 patch_with_stat,
                 combined,
                 dense_combined,
@@ -263,6 +257,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 raw: raw
                     || !(patch
                         || patch_with_stat
+                        || combined
+                        || dense_combined
                         || stat
                         || numstat
                         || shortstat

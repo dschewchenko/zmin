@@ -108,6 +108,7 @@ pub(crate) fn parse_cli_invocation(
     validate_var_invocation_before_clap(&command_args)?;
     validate_sh_helper_invocation_before_clap(&command_args)?;
     validate_update_ref_invocation_before_clap(&command_args)?;
+    validate_whatchanged_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
@@ -259,6 +260,18 @@ fn validate_update_ref_invocation_before_clap(args: &[String]) -> Result<()> {
         return Err(CliError::Stderr {
             code: 129,
             text: "error: unknown option `delete'\nusage: git update-ref [<options>] -d <refname> [<old-oid>]\n   or: git update-ref [<options>]    <refname> <new-oid> [<old-oid>]\n   or: git update-ref [<options>] --stdin [-z] [--batch-updates]\n\n    -m <reason>           reason of the update\n    -d                    delete the reference\n    --no-deref            update <refname> not the one it points to\n    --deref               opposite of --no-deref\n    -z                    stdin has NUL-terminated arguments\n    --[no-]stdin          read updates from stdin\n    --[no-]create-reflog  create a reflog\n    -0, --[no-]batch-updates\n                          batch reference updates\n\n".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_whatchanged_invocation_before_clap(args: &[String]) -> Result<()> {
+    if args.first().map(String::as_str) == Some("whatchanged")
+        && args.iter().skip(1).any(|arg| arg == "--i-still-use-this")
+    {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: unrecognized argument: --i-still-use-this\n".into(),
         });
     }
     Ok(())
