@@ -90,3 +90,4 @@ run_case() {
 
 run_case prune_packed_quiet_long prune-packed --quiet
 run_case prune_packed_quiet_short prune-packed -q
+run_case prune_packed_dry_run_long prune-packed --dry-run
