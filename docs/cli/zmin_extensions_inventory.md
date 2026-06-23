@@ -10,10 +10,11 @@ coverage numbers in the Git compatibility matrix.
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Zmin-only commands | `11` | additive top-level commands that are not Git command names |
+| Zmin-only commands | `12` | additive top-level commands that are not Git command names |
 | Zmin-only options on Git commands | `4` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
-| Zmin-only schema command aliases | `6` | flattened schema entries that belong to Zmin-only command groups |
+| Zmin-only schema command aliases | `9` | flattened schema entries that belong to Zmin-only command groups |
+| Deferred/non-Git-2.47 schema commands | `1` | schema commands compared to newer/current stock Git but outside the Git `2.47.1` denominator |
 | Stable extensions | `5` | implemented and covered by focused tests |
 | Experimental extensions | `2` | implemented but still preview-only |
 | Planned extensions | `1` | designed backlog, not implemented |
@@ -26,6 +27,7 @@ coverage numbers in the Git compatibility matrix.
 | `zmin repo` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | exposes Zmin-only repository metadata and structure summaries; stock Git has no `git repo` command |
 | `zmin diff-pairs` | stable | `git_diff_compat::diff_pairs_matches_stock_git_for_raw_diff_input` | consumes raw `git diff-tree -z -r --raw` input on stdin and renders selected diff formats; stock Git has no `git diff-pairs` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin last-modified` | stable | `git_history_query_compat::last_modified_reports_latest_commit_per_path` | reports the latest commit that affected each selected path, with recursive and NUL-delimited modes; stock Git has no `git last-modified` command, so this is tracked outside the Git `2.47.1` denominator |
+| `zmin history` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch`; `git_admin_tools_compat::history_split_dry_run_splits_selected_file_hunks`; `git_admin_tools_compat::history_split_pathspec_can_select_all_matching_hunks` | additive history rewrite workflow with `reword` and `split` dry-run coverage; stock Git `2.47.1` has no `git history` command, so this is tracked outside the compatibility denominator |
 | `zmin save <message>` | experimental | `git_cms_porcelain_compat` | CMS-style `add -A` plus `commit -m` wrapper |
 | `zmin changes` | experimental | `git_cms_porcelain_compat` | human-readable status wrapper |
 | `zmin publish` | experimental | `git_cms_porcelain_compat` | safe push wrapper |
@@ -48,6 +50,17 @@ Git `2.47.1` compatibility coverage.
 | `zmin hooks remove` | stable | `git_admin_tools_compat::managed_hooks_add_list_remove_and_protect_manual_hooks` | flattened schema alias `hooks-remove`; removes managed hook commands without deleting manual hooks |
 | `zmin repo info` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-info`; reports Zmin-only repository metadata |
 | `zmin repo structure` | stable | `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension` | flattened schema alias `repo-structure`; reports Zmin-only repository layout summaries |
+| `zmin history reword` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch` | flattened schema alias `history-reword`; dry-run prints planned ref updates without moving the branch |
+| `zmin history split` | experimental | `git_admin_tools_compat::history_split_dry_run_splits_selected_file_hunks`; `git_admin_tools_compat::history_split_pathspec_can_select_all_matching_hunks` | flattened schema alias `history-split`; dry-run split planning supports selected file hunks and pathspec filtering |
+
+## Deferred Non-Git-2.47 Schema Commands
+
+These rows keep schema entries out of the Git `2.47.1` denominator when their
+evidence compares against newer/current stock Git rather than Git `2.47.1`.
+
+| Command | Status | Evidence | Notes |
+| --- | --- | --- | --- |
+| `zmin backfill` | deferred | `git_admin_tools_compat::backfill_matches_stock_git_for_complete_repository_noop`; `git_admin_tools_compat::backfill_promisor_remote_recovers_missing_local_objects` | local/current stock Git has `git backfill`, but Git `2.47.1` command-list does not; keep outside the Git `2.47.1` compatibility denominator until a target profile that includes `backfill` is active |
 
 ## Zmin-Only Options
 
