@@ -7006,6 +7006,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         write_shallow_file(&repo, shallow_boundaries(&source_store, &roots, depth)?)?;
     }
     if effective_bare || no_checkout {
+        if !quiet {
+            eprintln!("done.");
+        }
         return Ok(());
     }
 
@@ -7023,6 +7026,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             remote_submodules,
             shallow_submodules,
         )?;
+    }
+    if !quiet {
+        eprintln!("done.");
     }
     Ok(())
 }
