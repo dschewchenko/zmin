@@ -49,12 +49,12 @@ Pushed branch state audited from `9275ac4d` to `HEAD`:
 
 | Metric | At `9275ac4d` | At `HEAD` | Delta |
 | --- | ---: | ---: | ---: |
-| Written behavior rows | `1094` | `2826` | `+1732` |
-| Matching stock Git rows | `823` | `2437` | `+1614` |
+| Written behavior rows | `1094` | `2833` | `+1739` |
+| Matching stock Git rows | `823` | `2444` | `+1621` |
 | Open rows | `1` | `1` | `0` |
 | Invalid-input rows | `270` | `388` | `+118` |
-| Commands with rows | `50/151` | `106/151` | `+56` |
-| Represented doc-option pairs | `253/4632` | `716/4632` | `+463` |
+| Commands with rows | `50/151` | `107/151` | `+57` |
+| Represented doc-option pairs | `253/4632` | `721/4632` | `+468` |
 
 The text-level row delta audit must be regenerated with
 `tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD` after each slice. The strict
@@ -4479,3 +4479,49 @@ closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+1` represented doc-option pair, `-2` implemented-but-unverified schema
 rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: census implemented-but-unverified `name-rev` schema surfaces,
+with focused stock-oracle test evidence.
+
+Evidence source:
+
+- `git_ref_resolution_compat::name_rev_matches_stock_git_for_refs_tags_and_stdin_annotation`
+
+Expected movement:
+
+- behavior rows: `+7`
+- closed rows: `+7`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: expected `-1`
+- commands with rows: `+1`
+- represented doc-option pairs: expected `+5` for `--name-only`, `--tags`,
+  `--refs`, `--exclude` and `--annotate-stdin`; positional commit rows close
+  schema surfaces rather than documented option spellings
+- implemented-but-unverified schema rows: expected `-6`; the two positional
+  rows share one schema arg id
+- remaining checklist rows: expected `-1` because `name-rev` now has a matrix
+  file
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git name-rev <HEAD>`
+- `git name-rev --name-only <HEAD>`
+- `git name-rev <HEAD~1>`
+- `git name-rev --tags <HEAD~1>`
+- `git name-rev --refs=refs/heads/main <HEAD>`
+- `git name-rev --exclude=refs/heads/feature <HEAD>`
+- `printf 'head <HEAD> base <HEAD~1>\n' | git name-rev --annotate-stdin`
+
+The evidence compares stock Git and Zmin outputs in the focused Rust oracle
+test. `--all`, `--always` and `--undefined` remain implemented-but-unverified
+until exact rows are added.
+
+Actual post-import movement matched the declaration for matrix and census
+counts: `+7` behavior rows, `+7` closed rows, `+0` open rows, `+0`
+invalid-input rows, `+1` command with rows, `+5` represented doc-option pairs,
+`-6` implemented-but-unverified schema rows and `-1` remaining checklist row.

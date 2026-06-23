@@ -61,12 +61,12 @@ Generated on 2026-06-23 from the current branch census inputs.
 | Git doc option seed rows | `4632` | documented option spelling seed, not final denominator |
 | Zmin schema baseline commands | `151` | command entry points present in schema |
 | Zmin schema additional commands | `52` | outside Git `2.47.1` baseline |
-| Existing matrix rows | `2826` | evidence layer, not full denominator |
-| Verified exact rows | `2437` | closed behavior variants safe to skip exactly |
+| Existing matrix rows | `2833` | evidence layer, not full denominator |
+| Verified exact rows | `2444` | closed behavior variants safe to skip exactly |
 | Invalid-input parity rows | `388` | stock-compatible rejection variants |
 | Exact open or partial matrix rows | `1` | row exists but is not closed |
-| Implemented but unverified rows | `695` | schema args and additional schema paths without exact matrix evidence |
-| Remaining checklist rows | `4678` | doc-option expansion, exact opens and unclassified guards |
+| Implemented but unverified rows | `689` | schema args and additional schema paths without exact matrix evidence |
+| Remaining checklist rows | `4677` | doc-option expansion, exact opens and unclassified guards |
 | Zmin-only or deferred rows | `33` | extension and deferral classifications outside the denominator |
 | Oracle evidence layer rows | `961` | existing tests, not the primary backlog |
 | Source hard-fail rows | `88` | raw guard hits in source scan |
