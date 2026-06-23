@@ -90,6 +90,46 @@ upstream_config() {
   "$GIT_BIN" -C "$repo" config --get-regexp '^branch\.main\.' || true
 }
 
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+run_case() {
+  local name="$1"
+  local mode="$2"
+  shift 2
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_pair "$name" "$mode"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" push "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  (cd "$zmin_work" && "$ZMIN_BIN" push "$@") >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  remote_refs "$git_remote" >"$tmpdir/${name}.git.refs"
+  remote_refs "$zmin_remote" >"$tmpdir/${name}.zmin.refs"
+  upstream_config "$git_work" >"$tmpdir/${name}.git.config"
+  upstream_config "$zmin_work" >"$tmpdir/${name}.zmin.config"
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files refs "$tmpdir/${name}.git.refs" "$tmpdir/${name}.zmin.refs"
+  compare_files config "$tmpdir/${name}.git.config" "$tmpdir/${name}.zmin.config"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\texact\texit=%s\n' "$name" "$git_exit"
+}
+
 run_gap() {
   local name="$1"
   local mode="$2"
@@ -130,6 +170,6 @@ run_gap() {
     "$name" "$git_exit" "$zmin_exit" "$refs_match" "$config_match" "$stdout_match" "$stderr_match"
 }
 
-run_gap push_set_upstream_long initial --set-upstream origin main
+run_case push_set_upstream_long initial --set-upstream origin main
 run_gap push_force_long nonff --force origin main
 run_gap push_force_short nonff -f origin main

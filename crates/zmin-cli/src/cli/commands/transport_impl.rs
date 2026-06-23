@@ -6636,7 +6636,11 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
                 destination_refs.delete_ref(&push_ref.destination)?;
             }
         }
-        statuses.push(SendPackStatus { push_ref, old_id });
+        statuses.push(SendPackStatus {
+            push_ref,
+            old_id,
+            forced: options.mirror || options.force,
+        });
     }
     send_pack_write_status_report(&options.directory, &statuses)?;
     let _ = (options.thin, options.atomic, options.verbose, copied);
@@ -6646,6 +6650,7 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
 struct SendPackStatus {
     push_ref: PushRef,
     old_id: Option<ObjectId>,
+    forced: bool,
 }
 
 fn send_pack_current_ref_id(refs: &RefStore, ref_name: &str) -> Result<Option<ObjectId>> {
@@ -6673,12 +6678,21 @@ fn send_pack_write_status_report(remote: &str, statuses: &[SendPackStatus]) -> R
                 writeln!(stderr, " * [new branch]      {source} -> {destination}")?;
             }
             (Some(old), Some(new)) => {
-                writeln!(
-                    stderr,
-                    "   {}..{}  {source} -> {destination}",
-                    short_object_id(old),
-                    short_object_id(new)
-                )?;
+                if status.forced && !is_zero_object_id_object(old) && old != new {
+                    writeln!(
+                        stderr,
+                        " + {}...{} {source} -> {destination} (forced update)",
+                        short_object_id(old),
+                        short_object_id(new)
+                    )?;
+                } else {
+                    writeln!(
+                        stderr,
+                        "   {}..{}  {source} -> {destination}",
+                        short_object_id(old),
+                        short_object_id(new)
+                    )?;
+                }
             }
             (Some(_), None) => {
                 writeln!(stderr, " - [deleted]         {destination}")?;
@@ -11143,12 +11157,15 @@ pub(crate) fn run_push(
         specs.len(),
     ));
     let mut object_ids = Vec::with_capacity(transport_ref_collection_capacity(specs.len()));
+    let mut statuses = Vec::with_capacity(specs.len());
+    let mut upstream_branches = Vec::new();
 
     for spec in specs {
         let push_ref = {
             let _trace = phase_trace("push.local.parse_refspec");
             parse_push_refspec(&repo, &source_refs, &spec, &url)?
         };
+        let old_id = send_pack_current_ref_id(&destination_refs, &push_ref.destination)?;
         if let Some(id) = &push_ref.id {
             let destination_has_object = {
                 let _trace = phase_trace("push.local.destination_has_object");
@@ -11209,25 +11226,37 @@ pub(crate) fn run_push(
             let _trace = phase_trace("push.local.set_upstream");
             set_push_upstream(&repo, &push_ref, &remote)?;
             update_local_tracking_ref_after_push(&source_refs, &push_ref, &remote)?;
+            if let Some(branch) = push_ref.destination.strip_prefix("refs/heads/") {
+                upstream_branches.push(branch.to_owned());
+            }
         }
-        {
-            let _trace = phase_trace("push.local.render");
-            let source_display = push_ref
-                .source_display
-                .clone()
-                .or_else(|| push_ref.id.as_ref().map(ObjectId::to_hex))
-                .unwrap_or_else(|| "(delete)".to_owned());
-            println!(
-                "{} -> {}",
-                source_display,
-                push_ref
-                    .destination
-                    .strip_prefix("refs/heads/")
-                    .unwrap_or(&push_ref.destination)
-            );
-        }
+        statuses.push(SendPackStatus {
+            forced: force || push_ref.force,
+            push_ref,
+            old_id,
+        });
+    }
+    {
+        let _trace = phase_trace("push.local.render");
+        write_local_push_status_report(&url, &statuses, &remote, &upstream_branches)?;
     }
     Ok(())
+}
+
+fn write_local_push_status_report(
+    remote_url: &str,
+    statuses: &[SendPackStatus],
+    remote_name: &str,
+    upstream_branches: &[String],
+) -> Result<()> {
+    for branch in upstream_branches {
+        println!("branch '{branch}' set up to track '{remote_name}/{branch}'.");
+    }
+    if statuses.iter().all(|status| status.old_id == status.push_ref.id) {
+        eprintln!("Everything up-to-date");
+        return Ok(());
+    }
+    send_pack_write_status_report(remote_url, statuses)
 }
 
 fn update_local_tracking_ref_after_push(
