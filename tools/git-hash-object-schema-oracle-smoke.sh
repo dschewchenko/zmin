@@ -65,5 +65,37 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_gap() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  seed_repo "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  if test "$git_exit" = "$zmin_exit" \
+    && cmp -s "$git_out" "$zmin_out" \
+    && cmp -s "$git_err" "$zmin_err"; then
+    echo "$name unexpectedly matched" >&2
+    exit 1
+  fi
+  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_case hash_object_short_type_blob hash-object -t blob a.txt
-run_case hash_object_long_type_rejected hash-object --type blob a.txt
+run_gap hash_object_long_type_rejected hash-object --type blob a.txt
+run_gap hash_object_long_write_gap hash-object --write a.txt

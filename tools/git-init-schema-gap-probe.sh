@@ -95,6 +95,7 @@ run_gap() {
 }
 
 run_gap init_bare --bare repo.git
+run_gap init_initial_branch --initial-branch main repo
 run_gap init_separate_git_dir --separate-git-dir __GITDIR__ repo
 run_gap init_shared_group --shared=group repo
 run_gap init_template --template=__TEMPLATE__ repo
