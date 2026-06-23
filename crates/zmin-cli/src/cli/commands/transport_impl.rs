@@ -23165,6 +23165,18 @@ pub(crate) fn shell(command: Option<String>, args: Vec<String>) -> Result<()> {
             message: "Run with no arguments or with -c cmd".into(),
         });
     };
+    if command == "git-upload-pack" && !args.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "Run with no arguments or with -c cmd".into(),
+        });
+    }
+    if command.starts_with("git-upload-pack ") && !command.contains('\'') {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "bad argument".into(),
+        });
+    }
     let mut words = split_shell_words(&command)?;
     words.extend(args);
     let Some(program) = words.first().map(String::as_str) else {

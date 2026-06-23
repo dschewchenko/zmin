@@ -19,7 +19,7 @@ make_bare_repo() {
   "$GIT_BIN" init -q --bare "$repo"
 }
 
-run_probe() {
+run_exact() {
   local name="$1"
   shift
   local git_exit=0
@@ -33,15 +33,14 @@ run_probe() {
   set -e
 
   test "$git_exit" = 128
-  test "$zmin_exit" = 0
-  test ! -s "$tmpdir/${name}.git.out"
-  grep -F "fatal:" "$tmpdir/${name}.git.err" >/dev/null
-  test -s "$tmpdir/${name}.zmin.out"
-  printf '%s\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$zmin_exit" = 128
+  cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\texact\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
 repo="$tmpdir/repo.git"
 make_bare_repo "$repo"
 
-run_probe shell_inline_upload_pack_gap -c "git-upload-pack $repo"
-run_probe shell_split_upload_pack_gap -c git-upload-pack "$repo"
+run_exact shell_inline_upload_pack_gap -c "git-upload-pack $repo"
+run_exact shell_split_upload_pack_gap -c git-upload-pack "$repo"
