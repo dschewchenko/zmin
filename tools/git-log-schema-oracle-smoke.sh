@@ -77,5 +77,6 @@ run_case() {
 
 run_case log_patch_long --patch --max-count=1
 run_case log_patch_with_stat_long --patch-with-stat --max-count=1
+run_case log_pickaxe_regex_long --pickaxe-regex -Sneed.e --format=%s HEAD~1..HEAD
 run_case log_root_long --root --max-count=2
 run_case log_walk_reflogs_long --walk-reflogs --format=%gd\ %gs -2 HEAD
