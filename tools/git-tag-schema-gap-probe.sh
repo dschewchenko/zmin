@@ -61,10 +61,10 @@ run_gap() {
   printf 'zmin stderr:\n'
   cat "$tmpdir/${name}.zmin.err"
 
-  if test "$git_exit" = "$zmin_exit" \
-    && cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
-    && cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
-    echo "$name unexpectedly matched" >&2
+  if test "$git_exit" != "$zmin_exit" \
+    || ! cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out" \
+    || ! cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"; then
+    echo "$name mismatch" >&2
     return 1
   fi
 }

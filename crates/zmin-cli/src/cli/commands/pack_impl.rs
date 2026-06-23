@@ -5624,6 +5624,9 @@ pub(crate) fn verify_tag(verbose: bool, raw: bool, tags: Vec<String>) -> Result<
             continue;
         }
         let content = object.content.as_slice();
+        if verbose && !raw {
+            io::stdout().write_all(content).map_err(CliError::Io)?;
+        }
         let Some((signature, payload)) = tag_signature_payload(content) else {
             eprintln!("error: no signature found");
             failed = true;

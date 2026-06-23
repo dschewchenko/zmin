@@ -42,9 +42,9 @@ run_gap() {
   sed -n '1,8p' "$tmpdir/$name.zmin.out"
   test "$git_exit" = 1
   test "$zmin_exit" = 1
-  if cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" \
-    && cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"; then
-    echo "$name unexpectedly matched" >&2
+  if ! cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out" \
+    || ! cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"; then
+    echo "$name mismatch" >&2
     return 1
   fi
 }

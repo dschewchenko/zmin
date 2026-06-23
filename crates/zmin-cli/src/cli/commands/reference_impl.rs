@@ -6157,7 +6157,7 @@ fn tag(options: TagOptions) -> Result<()> {
                 message: "-v cannot be combined with other tag modes".into(),
             });
         }
-        return verify_tag(false, false, options.args);
+        return verify_tag(true, false, options.args);
     }
     if options.delete {
         if options.annotate || !options.messages.is_empty() || has_list_modifier {
@@ -6171,11 +6171,11 @@ fn tag(options: TagOptions) -> Result<()> {
         }
         for name in options.args {
             let ref_name = tag_ref_name(&name)?;
-            if refs.resolve(&ref_name).is_err() {
+            let Ok(id) = refs.resolve(&ref_name) else {
                 return Err(CliError::Message(format!("tag '{name}' not found.")));
-            }
+            };
             refs.delete_ref(&ref_name)?;
-            println!("Deleted tag '{name}'");
+            println!("Deleted tag '{name}' (was {})", short_object_id(&id));
         }
         return Ok(());
     }
