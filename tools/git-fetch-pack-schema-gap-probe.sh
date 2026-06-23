@@ -94,6 +94,21 @@ print(text, end="")
 PY
 }
 
+list_pack_side_effects() {
+  local client="$1"
+  python3 - "$client" <<'PY'
+import os
+import re
+import sys
+pack_dir = os.path.join(sys.argv[1], ".git", "objects", "pack")
+if not os.path.isdir(pack_dir):
+    sys.exit(0)
+for name in sorted(os.listdir(pack_dir)):
+    normalized = re.sub(r"pack-[0-9a-f]{40}", "pack-__PACK__", name)
+    print(normalized)
+PY
+}
+
 run_oracle() {
   local name="$1"
   local stdin_data="$2"
@@ -118,8 +133,11 @@ run_oracle() {
   normalize_trace "$tmpdir/$name.zmin.out" "$tmpdir" >"$tmpdir/$name.zmin.out.norm"
   normalize_trace "$tmpdir/$name.git.err" "$tmpdir" >"$tmpdir/$name.git.err.norm"
   normalize_trace "$tmpdir/$name.zmin.err" "$tmpdir" >"$tmpdir/$name.zmin.err.norm"
+  list_pack_side_effects "$git_client" >"$tmpdir/$name.git.pack"
+  list_pack_side_effects "$zmin_client" >"$tmpdir/$name.zmin.pack"
   cmp -s "$tmpdir/$name.git.out.norm" "$tmpdir/$name.zmin.out.norm"
   cmp -s "$tmpdir/$name.git.err.norm" "$tmpdir/$name.zmin.err.norm"
+  cmp -s "$tmpdir/$name.git.pack" "$tmpdir/$name.zmin.pack"
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
@@ -130,10 +148,10 @@ remote="$root/remote.git"
 run_oracle fetch_pack_all "" --all "$remote"
 run_oracle fetch_pack_stdin "refs/heads/main"$'\n' --stdin "$remote"
 run_oracle fetch_pack_quiet "" --quiet "$remote" refs/heads/main
-run_gap fetch_pack_keep 0 129 "" --keep "$remote" refs/heads/main
+run_oracle fetch_pack_keep "" --keep "$remote" refs/heads/main
 run_oracle fetch_pack_upload_pack "" --upload-pack=git-upload-pack "$remote" refs/heads/main
 run_oracle fetch_pack_diag_url "" --diag-url "$remote"
 run_gap fetch_pack_verbose_long 129 0 "" --verbose "$remote" refs/heads/main
-run_gap fetch_pack_keep_short 0 129 "" -k "$remote" refs/heads/main
+run_oracle fetch_pack_keep_short "" -k "$remote" refs/heads/main
 run_oracle fetch_pack_quiet_short "" -q "$remote" refs/heads/main
 run_oracle fetch_pack_verbose_short "" -v "$remote" refs/heads/main

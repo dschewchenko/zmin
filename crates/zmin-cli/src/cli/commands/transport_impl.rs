@@ -5762,8 +5762,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
         return fetch_pack_diag_url(&options.directory);
     }
     let _ = options.quiet;
-    if options.keep
-        || options
+    if options
             .upload_pack
             .as_deref()
             .is_some_and(|command| command != "git-upload-pack")
@@ -5810,6 +5809,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     let destination_store = object_adapter_from_objects_dir(&destination.objects_dir);
     let requested_capacity = transport_ref_collection_capacity(requested.len());
     let mut fetched_objects = HashSet::with_capacity(requested_capacity);
+    let mut output_rows = Vec::with_capacity(requested_capacity);
     let mut shallow_roots = Vec::with_capacity(if options.depth.is_some() {
         requested_capacity
     } else {
@@ -5852,10 +5852,18 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
                 &mut fetched_objects,
             )?;
         }
-        println!("{} {}", id.to_hex(), ref_name);
+        output_rows.push((id, ref_name));
     }
     if !options.no_progress {
         write_fetch_pack_local_progress(fetched_objects.len());
+    }
+    if options.keep {
+        let pack_id = write_fetch_pack_keep_pack(&source_store, &destination, &fetched_objects)?;
+        println!("keep\t{}", pack_id.to_hex());
+        write_fetch_pack_receiving_progress(fetched_objects.len());
+    }
+    for (id, ref_name) in output_rows {
+        println!("{} {}", id.to_hex(), ref_name);
     }
     if let Some(depth) = options.depth {
         let shallow_root_capacity = transport_ref_collection_capacity(shallow_roots.len());
@@ -5885,6 +5893,43 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     Ok(())
 }
 
+fn write_fetch_pack_keep_pack(
+    source_store: &LooseObjectStore,
+    destination: &GitRepo,
+    fetched_objects: &HashSet<ObjectId>,
+) -> Result<ObjectId> {
+    if fetched_objects.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch-pack --keep did not fetch any objects".into(),
+        });
+    }
+    let mut ids = fetched_objects.iter().cloned().collect::<Vec<_>>();
+    ids.sort_by_key(|id| id.to_hex());
+    let pack = encode_pack_from_store_with_options(
+        source_store,
+        GitHashAlgorithm::Sha1,
+        &ids,
+        PackEncodeOptions::delta(10, 50),
+    )
+    .map_err(CliError::Io)?;
+    let indexed = index_pack_bytes(GitHashAlgorithm::Sha1, &pack).map_err(CliError::Io)?;
+    let pack_dir = destination.objects_dir.join("pack");
+    fs::create_dir_all(&pack_dir)?;
+    let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
+    let pack_path = pack_dir.join(format!("{pack_name}.pack"));
+    let temp_pack = unique_temp_sibling(&pack_path);
+    fs::write(&temp_pack, &pack)?;
+    install_temp_pack_file(&pack_path, &temp_pack, &indexed.pack_id)?;
+    write_content_addressed_file(&pack_dir.join(format!("{pack_name}.idx")), &indexed.index)?;
+    write_content_addressed_file(
+        &pack_dir.join(format!("{pack_name}.rev")),
+        &indexed.reverse_index,
+    )?;
+    fs::write(pack_dir.join(format!("{pack_name}.keep")), [])?;
+    Ok(indexed.pack_id)
+}
+
 fn fetch_pack_diag_url(directory: &str) -> Result<()> {
     let path = absolute_path_from_arg(std::path::Path::new(directory))?;
     println!("Diag: url={}", path.display());
@@ -5909,6 +5954,17 @@ fn write_fetch_pack_local_progress(objects: usize) {
         );
     }
     eprintln!("remote: Total {objects} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)        ");
+}
+
+fn write_fetch_pack_receiving_progress(objects: usize) {
+    if objects == 0 {
+        return;
+    }
+    for index in 1..=objects {
+        let percent = index * 100 / objects;
+        eprint!("Receiving objects: {:3}% ({}/{})\r", percent, index, objects);
+    }
+    eprintln!("Receiving objects: 100% ({objects}/{objects}), done.");
 }
 
 pub(crate) fn copy_reachable_objects(
