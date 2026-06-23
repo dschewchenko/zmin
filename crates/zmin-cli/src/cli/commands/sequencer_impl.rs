@@ -1412,9 +1412,17 @@ pub(crate) fn sequencer_pick(
     };
     if no_commit {
         let auto_merge_tree = write_tree_from_index(&store, &new_index)?;
-        fs::write(repo.git_dir.join("AUTO_MERGE"), auto_merge_tree.to_hex() + "\n")?;
+        fs::write(
+            repo.git_dir.join("AUTO_MERGE"),
+            auto_merge_tree.to_hex() + "\n",
+        )?;
         fs::write(repo.git_dir.join("MERGE_MSG"), &message)?;
-        fs::write(repo.git_dir.join("COMMIT_EDITMSG"), &message)?;
+        if revert {
+            fs::write(repo.git_dir.join("COMMIT_EDITMSG"), &picked.message)?;
+            fs::write(repo.git_dir.join("REVERT_HEAD"), picked_id.to_hex() + "\n")?;
+        } else {
+            fs::write(repo.git_dir.join("COMMIT_EDITMSG"), &message)?;
+        }
         return Ok(());
     }
     let tree = write_tree_from_index(&store, &new_index)?;

@@ -75,16 +75,20 @@ make_merge_seed_repo() {
 record_repo_state() {
   local repo="$1"
   local prefix="$2"
+  local side_effect
   "$GIT_BIN" -C "$repo" rev-parse HEAD >"$prefix.head"
   "$GIT_BIN" -C "$repo" cat-file -p HEAD >"$prefix.commit"
   "$GIT_BIN" -C "$repo" cat-file -p HEAD^{tree} >"$prefix.tree"
   "$GIT_BIN" -C "$repo" status --short >"$prefix.status"
   "$GIT_BIN" -C "$repo" ls-files -s >"$prefix.index"
-  for name in AUTO_MERGE COMMIT_EDITMSG MERGE_HEAD MERGE_MSG ORIG_HEAD REVERT_HEAD; do
-    if test -e "$repo/.git/$name"; then
-      printf '%s\n' "$name"
-    fi
-  done | sort >"$prefix.git-side-effects"
+  {
+    for side_effect in AUTO_MERGE COMMIT_EDITMSG MERGE_HEAD MERGE_MSG ORIG_HEAD REVERT_HEAD; do
+      if test -e "$repo/.git/$side_effect"; then
+        printf '%s\n' "$side_effect"
+        sed -n l "$repo/.git/$side_effect"
+      fi
+    done
+  } >"$prefix.git-side-effects"
 }
 
 run_no_sequence_failure_case() {
@@ -152,18 +156,12 @@ run_linear_case() {
   compare_files tree "$tmpdir/${name}.git.tree" "$tmpdir/${name}.zmin.tree"
   compare_files status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
   compare_files index "$tmpdir/${name}.git.index" "$tmpdir/${name}.zmin.index"
-  if cmp -s "$tmpdir/${name}.git.git-side-effects" "$tmpdir/${name}.zmin.git-side-effects"; then
-    echo "$name unexpectedly matches stock Git side effects; update the open matrix row" >&2
-    return 1
-  fi
+  compare_files git-side-effects "$tmpdir/${name}.git.git-side-effects" "$tmpdir/${name}.zmin.git-side-effects"
   grep -qx AUTO_MERGE "$tmpdir/${name}.git.git-side-effects"
   grep -qx MERGE_MSG "$tmpdir/${name}.git.git-side-effects"
   grep -qx REVERT_HEAD "$tmpdir/${name}.git.git-side-effects"
-  ! grep -qx AUTO_MERGE "$tmpdir/${name}.zmin.git-side-effects"
-  ! grep -qx MERGE_MSG "$tmpdir/${name}.zmin.git-side-effects"
-  ! grep -qx REVERT_HEAD "$tmpdir/${name}.zmin.git-side-effects"
   compare_files worktree-file "$git_work/file.txt" "$zmin_work/file.txt"
-  printf '%s\tgap\texit=%s\n' "$name" "$git_exit"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 run_mainline_case() {
