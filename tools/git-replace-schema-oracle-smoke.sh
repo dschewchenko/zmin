@@ -67,5 +67,53 @@ run_force_oracle() {
   cmp -s "$root/git.refs" "$root/zmin.refs"
 }
 
+run_existing_replace_oracle() {
+  local name="$1"
+  shift
+  local root="$tmpdir/$name"
+  local git_repo="$root/git"
+  local zmin_repo="$root/zmin"
+  local git_exit=0
+  local zmin_exit=0
+  mkdir "$root"
+  make_repo "$git_repo"
+  cp -R "$git_repo" "$zmin_repo"
+  local one
+  local three
+  one="$("$GIT_BIN" -C "$git_repo" rev-parse HEAD~2)"
+  three="$("$GIT_BIN" -C "$git_repo" rev-parse HEAD)"
+  "$GIT_BIN" -C "$git_repo" replace "$three" "$one"
+  "$GIT_BIN" -C "$zmin_repo" replace "$three" "$one"
+  local args=()
+  for arg in "$@"; do
+    case "$arg" in
+      __REPLACED_OBJECT__)
+        args+=("$three")
+        ;;
+      *)
+        args+=("$arg")
+        ;;
+    esac
+  done
+
+  set +e
+  "$GIT_BIN" -C "$git_repo" replace "${args[@]}" >"$root/git.out" 2>"$root/git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_repo" replace "${args[@]}" >"$root/zmin.out" 2>"$root/zmin.err"
+  zmin_exit=$?
+  set -e
+
+  list_replace_refs "$git_repo" >"$root/git.refs"
+  list_replace_refs "$zmin_repo" >"$root/zmin.refs"
+  printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+  test "$git_exit" = 0
+  test "$zmin_exit" = 0
+  cmp -s "$root/git.out" "$root/zmin.out"
+  cmp -s "$root/git.err" "$root/zmin.err"
+  cmp -s "$root/git.refs" "$root/zmin.refs"
+}
+
 run_force_oracle replace_force_long --force
 run_force_oracle replace_force_short -f
+run_existing_replace_oracle replace_list_long --list '*'
+run_existing_replace_oracle replace_delete_long --delete __REPLACED_OBJECT__
