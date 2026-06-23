@@ -82,6 +82,42 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_gc_short_quiet_gap() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" maintenance run "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" maintenance run "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  if test "$git_exit" = "$zmin_exit"; then
+    echo "$name unexpectedly matches stock Git exit; update the open matrix row" >&2
+    return 1
+  fi
+  test "$git_exit" = "129"
+  test "$zmin_exit" = "0"
+  grep -q "unknown switch \`q'" "$tmpdir/${name}.git.err"
+  test ! -s "$tmpdir/${name}.zmin.err"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  "$GIT_BIN" -C "$git_work" status --short >"$tmpdir/${name}.git.status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$tmpdir/${name}.zmin.status"
+  compare_files status "$tmpdir/${name}.git.status" "$tmpdir/${name}.zmin.status"
+  "$GIT_BIN" -C "$git_work" rev-parse --verify HEAD >"$tmpdir/${name}.git.head"
+  "$GIT_BIN" -C "$zmin_work" rev-parse --verify HEAD >"$tmpdir/${name}.zmin.head"
+  compare_files head "$tmpdir/${name}.git.head" "$tmpdir/${name}.zmin.head"
+  printf '%s\tgap\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
+}
+
 run_config_file_case() {
   local name="$1"
   local git_work="$tmpdir/${name}.git.work"
@@ -131,5 +167,6 @@ run_config_file_case() {
 }
 
 run_config_file_case maintenance_register_unregister_config_file_long
+run_gc_short_quiet_gap maintenance_run_gc_quiet_short --task=gc -q
 run_case maintenance_unregister_force_long --force
 run_case maintenance_unregister_force_short -f
