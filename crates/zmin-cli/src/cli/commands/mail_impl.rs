@@ -237,7 +237,15 @@ pub(crate) fn format_patch(
     fs::create_dir_all(&output_directory)?;
     for (idx, entry) in commits.iter().enumerate() {
         let _trace = phase_trace("format_patch.emit_file_patch");
-        let filename = format_patch_filename(idx + 1, &commit_subject(&entry.commit.message));
+        let filename = if numbered_files {
+            (idx + 1).to_string()
+        } else {
+            format_patch_filename_with_suffix(
+                idx + 1,
+                &commit_subject(&entry.commit.message),
+                suffix,
+            )
+        };
         let path = output_directory.join(filename);
         let mut file = io::BufWriter::new(fs::File::create(&path)?);
         write_format_patch_with_tree_diff_cached(

@@ -181,5 +181,5 @@ run_directory_gap() {
 run_stdout_case format_patch_attach_long --stdout --attach HEAD~2..HEAD
 run_stdout_case format_patch_numbered_long --stdout --numbered HEAD~2..HEAD
 run_directory_case format_patch_output_directory_long --output-directory out HEAD~2..HEAD
-run_directory_gap format_patch_numbered_files_long --output-directory out --numbered-files HEAD~2..HEAD
-run_directory_gap format_patch_suffix_long --output-directory out --suffix=.mbox HEAD~2..HEAD
+run_directory_case format_patch_numbered_files_long --output-directory out --numbered-files HEAD~2..HEAD
+run_directory_case format_patch_suffix_long --output-directory out --suffix=.mbox HEAD~2..HEAD

@@ -3628,11 +3628,11 @@ fn write_commit_message_body<W: Write>(out: &mut W, message: &[u8]) -> Result<()
     Ok(())
 }
 
-pub(crate) fn format_patch_filename(number: usize, subject: &str) -> String {
-    format_patch_filename_with_suffix(number, subject, ".patch")
-}
-
-fn format_patch_filename_with_suffix(number: usize, subject: &str, suffix: &str) -> String {
+pub(crate) fn format_patch_filename_with_suffix(
+    number: usize,
+    subject: &str,
+    suffix: &str,
+) -> String {
     let mut slug = String::new();
     let mut previous_dash = false;
     for ch in subject.chars() {
