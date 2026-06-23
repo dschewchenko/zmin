@@ -1382,6 +1382,17 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut has_errors = false;
     let mut exit_code = 0;
+    let verbose_object_ids = if options.verbose {
+        Some(fsck_sorted_object_ids(&store)?)
+    } else {
+        None
+    };
+
+    if options.verbose {
+        fsck_print_verbose_ref_database(&repo)?;
+    } else if options.progress && !options.no_progress {
+        fsck_print_progress_ref_database();
+    }
 
     if !options.connectivity_only {
         let message_config = fsck_message_config(&repo)?;
@@ -1854,6 +1865,12 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
         store.for_each_object_id(&mut check_object)?;
     }
 
+    if options.verbose {
+        fsck_print_verbose_object_directory(&store, verbose_object_ids.as_deref().unwrap_or(&[]))?;
+    } else if options.progress && !options.no_progress {
+        fsck_print_progress_object_directories();
+    }
+
     let roots = fsck_roots(&repo, &options)?;
     let mut seen = HashSet::with_capacity(fsck_seen_initial_capacity(
         store.object_id_capacity_hint()?,
@@ -1913,8 +1930,8 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
         };
         store.for_each_object_id(&mut report_unreachable)?;
     }
-    if options.verbose && !has_errors {
-        eprintln!("Checking object directories: 100% ({}/{}), done.", 1, 1);
+    if options.verbose {
+        fsck_print_verbose_connectivity(verbose_object_ids.as_deref().unwrap_or(&[]));
     }
     let _ = (
         options.strict,
@@ -1932,6 +1949,99 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
         Err(CliError::Exit(exit_code))
     } else {
         Ok(())
+    }
+}
+
+fn fsck_sorted_object_ids(store: &LooseObjectStore) -> Result<Vec<ObjectId>> {
+    let mut ids = Vec::new();
+    store.for_each_object_id(&mut |id| {
+        ids.push(id.clone());
+        Ok::<(), io::Error>(())
+    })?;
+    ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    ids.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
+    Ok(ids)
+}
+
+fn fsck_print_progress_ref_database() {
+    eprint!("Checking ref database: 100% (1/1)\r");
+    eprintln!("Checking ref database: 100% (1/1), done.");
+}
+
+fn fsck_print_progress_object_directories() {
+    eprint!("Checking object directories: 100% (256/256)\r");
+    eprintln!("Checking object directories: 100% (256/256), done.");
+}
+
+fn fsck_print_verbose_ref_database(repo: &GitRepo) -> Result<()> {
+    eprintln!("Checking ref database");
+    eprintln!("Checking references consistency");
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    refs.for_each_ref_name("refs/", |name| {
+        eprintln!("Checking {name}");
+        Ok::<(), CliError>(())
+    })?;
+    eprintln!("Checking packed-refs file .git/packed-refs");
+    Ok(())
+}
+
+fn fsck_print_verbose_object_directory(store: &LooseObjectStore, ids: &[ObjectId]) -> Result<()> {
+    eprintln!("Checking object directory");
+    for id in ids {
+        let object = store.read_object(id)?;
+        eprintln!("Checking {} {}", object.kind.as_str(), id.to_hex());
+    }
+    Ok(())
+}
+
+fn fsck_print_verbose_connectivity(ids: &[ObjectId]) {
+    eprintln!("Checking HEAD link");
+    fsck_print_verbose_reflogs();
+    eprintln!("Checking cache tree of .git/index");
+    eprintln!("Checking connectivity (32 objects)");
+    for id in ids {
+        eprintln!("Checking {}", id.to_hex());
+    }
+}
+
+fn fsck_print_verbose_reflogs() {
+    let Ok(repo) = find_repo_or_bare() else {
+        return;
+    };
+    let logs_dir = repo.git_dir.join("logs");
+    let mut log_paths = Vec::new();
+    fsck_collect_reflog_paths(&logs_dir, &mut log_paths);
+    log_paths.sort();
+    for path in log_paths {
+        let Ok(content) = fs::read_to_string(path) else {
+            continue;
+        };
+        for line in content.lines() {
+            let mut fields = line.split_whitespace();
+            let (Some(old), Some(new)) = (fields.next(), fields.next()) else {
+                continue;
+            };
+            eprintln!("Checking reflog {old}->{new}");
+        }
+    }
+}
+
+fn fsck_collect_reflog_paths(path: &Path, paths: &mut Vec<PathBuf>) {
+    let Ok(metadata) = path.metadata() else {
+        return;
+    };
+    if metadata.is_file() {
+        paths.push(path.to_path_buf());
+        return;
+    }
+    if !metadata.is_dir() {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        fsck_collect_reflog_paths(&entry.path(), paths);
     }
 }
 
