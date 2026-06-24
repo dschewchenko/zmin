@@ -261,14 +261,14 @@ pub enum Command {
         objects: Vec<String>,
     },
     CountObjects {
-        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        #[arg(short = 'v', long = "verbose", overrides_with = "no_verbose", action = ArgAction::Count)]
         verbose: u8,
-        #[arg(long = "no-verbose", action = ArgAction::Count)]
-        no_verbose: u8,
-        #[arg(short = 'H', long = "human-readable", action = ArgAction::Count)]
+        #[arg(long = "no-verbose", overrides_with = "verbose", action = ArgAction::SetTrue)]
+        no_verbose: bool,
+        #[arg(short = 'H', long = "human-readable", overrides_with = "no_human_readable", action = ArgAction::Count)]
         human_readable: u8,
-        #[arg(long = "no-human-readable", action = ArgAction::Count)]
-        no_human_readable: u8,
+        #[arg(long = "no-human-readable", overrides_with = "human_readable", action = ArgAction::SetTrue)]
+        no_human_readable: bool,
     },
     UnpackFile {
         object: String,

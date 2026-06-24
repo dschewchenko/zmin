@@ -77,12 +77,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         ),
         runtime::Command::CountObjects {
             verbose,
-            no_verbose,
+            no_verbose: _,
             human_readable,
-            no_human_readable,
+            no_human_readable: _,
         } => run_count_objects(
-            verbose > 0 && no_verbose == 0,
-            human_readable > 0 && no_human_readable == 0,
+            verbose > 0,
+            human_readable > 0,
         ),
         runtime::Command::UnpackFile { object } => run_unpack_file(object),
         runtime::Command::ShowIndex {
