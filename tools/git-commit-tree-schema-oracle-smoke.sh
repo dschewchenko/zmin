@@ -122,6 +122,41 @@ run_stdin_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_invalid_case() {
+  local name="$1"
+  local expected_exit="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case commit_tree_positional_tree -m root
 run_case commit_tree_message_file -F message.txt
 run_stdin_case commit_tree_message_file_stdin 'stdin message
@@ -130,3 +165,4 @@ run_case commit_tree_message_then_file -m inline -F message.txt
 run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
+run_invalid_case commit_tree_missing_message_file 128 -F missing.txt

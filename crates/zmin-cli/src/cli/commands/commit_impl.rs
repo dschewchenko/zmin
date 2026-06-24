@@ -1712,7 +1712,9 @@ pub(crate) fn commit_tree_message(
                 message.push(b'\n');
                 parts.push(message);
             }
-            CommitTreeMessageSource::File(path) => parts.push(read_commit_message_file(&path)?),
+            CommitTreeMessageSource::File(path) => {
+                parts.push(read_commit_tree_message_file(&path)?)
+            }
         }
     }
     let mut message = parts.join(b"\n".as_slice());
@@ -1720,6 +1722,19 @@ pub(crate) fn commit_tree_message(
         message.push(b'\n');
     }
     Ok(message)
+}
+
+fn read_commit_tree_message_file(path: &std::path::Path) -> Result<Vec<u8>> {
+    read_commit_message_file(path).map_err(|error| match error {
+        CliError::Io(io_error) if io_error.kind() == io::ErrorKind::NotFound => CliError::Fatal {
+            code: 128,
+            message: format!(
+                "could not open '{}' for reading: No such file or directory",
+                path.display()
+            ),
+        },
+        other => other,
+    })
 }
 
 fn mktree(nul_terminated: bool, missing: bool, batch: bool) -> Result<()> {
