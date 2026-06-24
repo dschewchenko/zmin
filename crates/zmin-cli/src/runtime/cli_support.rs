@@ -117,6 +117,7 @@ pub(crate) fn parse_cli_invocation(
     validate_fetch_pack_invocation_before_clap(&command_args)?;
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
+    validate_credential_store_invocation_before_clap(&command_args)?;
     validate_cherry_invocation_before_clap(&command_args)?;
     validate_commit_tree_invocation_before_clap(&command_args)?;
     validate_write_tree_invocation_before_clap(&command_args)?;
@@ -486,6 +487,32 @@ fn validate_hash_object_invocation_before_clap(command_args: &[String]) -> Resul
         }
     }
     Ok(())
+}
+
+fn validate_credential_store_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("credential-store") {
+        return Ok(());
+    }
+    let mut index = 1usize;
+    while index < command_args.len() {
+        let arg = command_args[index].as_str();
+        if arg == "--file" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with("--file=") {
+            index += 1;
+            continue;
+        }
+        if matches!(arg, "get" | "store" | "erase") {
+            return Ok(());
+        }
+        return Ok(());
+    }
+    Err(CliError::Stderr {
+        code: 129,
+        text: "usage: git credential-store [<options>] <action>\n\n    --[no-]file <path>    fetch and store credentials in <path>\n\n".into(),
+    })
 }
 
 fn validate_cherry_invocation_before_clap(command_args: &[String]) -> Result<()> {

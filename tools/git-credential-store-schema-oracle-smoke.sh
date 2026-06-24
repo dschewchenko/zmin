@@ -81,4 +81,54 @@ run_case() {
   printf '%s\tok\texit=0\n' "$name"
 }
 
+run_equals_case() {
+  local name="$1"
+  local git_home="$tmpdir/${name}.git.home"
+  local zmin_home="$tmpdir/${name}.zmin.home"
+  local git_store="$tmpdir/${name}.git.credentials"
+  local zmin_store="$tmpdir/${name}.zmin.credentials"
+  local complete="$tmpdir/${name}.complete.stdin"
+  mkdir "$git_home" "$zmin_home"
+  printf 'protocol=https\nhost=example.com\nusername=u\npassword=p\n\n' >"$complete"
+
+  run_with_stdin "$GIT_BIN" "$git_home" "$complete" "$tmpdir/${name}.git.out" "$tmpdir/${name}.git.err" \
+    credential-store --file="$git_store" store
+  run_with_stdin "$ZMIN_BIN" "$zmin_home" "$complete" "$tmpdir/${name}.zmin.out" "$tmpdir/${name}.zmin.err" \
+    credential-store --file="$zmin_store" store
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  compare_files credentials "$git_store" "$zmin_store"
+  printf '%s\tok\texit=0\n' "$name"
+}
+
+run_missing_action_case() {
+  local name="$1"
+  shift
+  local git_home="$tmpdir/${name}.git.home"
+  local zmin_home="$tmpdir/${name}.zmin.home"
+  local stdin_file="$tmpdir/${name}.stdin"
+  local git_exit=0
+  local zmin_exit=0
+  mkdir "$git_home" "$zmin_home"
+  printf 'protocol=https\nhost=example.com\nusername=u\npassword=p\n\n' >"$stdin_file"
+
+  set +e
+  run_with_stdin "$GIT_BIN" "$git_home" "$stdin_file" "$tmpdir/${name}.git.out" "$tmpdir/${name}.git.err" "$@"
+  git_exit=$?
+  run_with_stdin "$ZMIN_BIN" "$zmin_home" "$stdin_file" "$tmpdir/${name}.zmin.out" "$tmpdir/${name}.zmin.err" "$@"
+  zmin_exit=$?
+  set -e
+
+  if [ "$git_exit" != "$zmin_exit" ]; then
+    echo "$name exit differs: stock=$git_exit zmin=$zmin_exit" >&2
+    return 1
+  fi
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case credential_store_file_actions
+run_equals_case credential_store_file_equals_store
+run_missing_action_case credential_store_file_missing_action_separate credential-store --file "$tmpdir/missing-action.credentials"
+run_missing_action_case credential_store_file_missing_action_equals credential-store --file="$tmpdir/missing-action-equals.credentials"
