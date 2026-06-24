@@ -4222,6 +4222,7 @@ struct BranchOptions {
     format: Option<String>,
     no_format: bool,
     no_sort: bool,
+    no_recurse_submodules: bool,
     contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
@@ -4310,6 +4311,7 @@ fn branch(options: BranchOptions) -> Result<()> {
     let _no_column = options.no_column;
     let _ignore_case = options.ignore_case;
     let _no_format = options.no_format;
+    let _no_recurse_submodules = options.no_recurse_submodules;
     let _color = &options.color;
     let _no_color = options.no_color;
     if options.help {
@@ -6587,6 +6589,7 @@ pub(crate) fn branch_command(
     format: Option<String>,
     no_format: bool,
     no_sort: bool,
+    no_recurse_submodules: bool,
     contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
@@ -6629,6 +6632,7 @@ pub(crate) fn branch_command(
         format,
         no_format,
         no_sort,
+        no_recurse_submodules,
         contains,
         merged,
         no_merged,
