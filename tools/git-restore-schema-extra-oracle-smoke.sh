@@ -82,6 +82,11 @@ run_case restore_worktree_short_repeated -W -W a.txt
 run_case restore_worktree_long_repeated --worktree --worktree a.txt
 run_case restore_no_overlay_long --no-overlay a.txt
 run_case restore_no_overlay_repeated --no-overlay --no-overlay a.txt
+run_case restore_staged_short -S a.txt
+run_case restore_staged_short_repeated -S -S a.txt
+run_case restore_staged_short_no_staged -S --no-staged a.txt
+run_case restore_no_staged_staged_short --no-staged -S a.txt
+run_case restore_staged_short_no_worktree -S --no-worktree a.txt
 run_case restore_no_staged --no-staged a.txt
 run_case restore_staged_no_staged --staged --no-staged a.txt
 run_case restore_no_staged_staged --no-staged --staged a.txt

@@ -1742,7 +1742,7 @@ pub enum Command {
     Restore {
         #[arg(short = 's', long = "source")]
         source: Vec<String>,
-        #[arg(long = "staged", overrides_with = "no_staged", action = ArgAction::Count)]
+        #[arg(short = 'S', long = "staged", overrides_with = "no_staged", action = ArgAction::Count)]
         staged: u8,
         #[arg(long = "no-staged", overrides_with = "staged", action = ArgAction::SetTrue)]
         no_staged: bool,
