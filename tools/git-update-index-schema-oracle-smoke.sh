@@ -342,9 +342,11 @@ run_stdin_case update_index_z_repeated_stdin 'a.txt\0' update-index -z -z --stdi
 run_invalid_case update_index_stdin_repeated tracked update-index --stdin --stdin
 run_cacheinfo_case update_index_cacheinfo_add --add --cacheinfo '100644,__BLOB__,b.txt'
 run_invalid_case update_index_cacheinfo_invalid_value tracked update-index --cacheinfo bogus
+run_invalid_case update_index_cacheinfo_split_missing tracked update-index --cacheinfo 100644
 run_cacheinfo_case update_index_cacheinfo_split --add --cacheinfo 100644 __BLOB__ b.txt
 run_cacheinfo_case update_index_replace_repeated_cacheinfo --replace --replace --cacheinfo '100644,__BLOB__,a.txt'
 run_cacheinfo_case update_index_replace_cacheinfo --replace --cacheinfo '100644,__BLOB__,a.txt'
 run_invalid_case update_index_index_info_repeated tracked update-index --index-info --index-info
+run_index_info_case update_index_index_info_malformed 'bad\n' --index-info
 run_index_info_case update_index_index_info_blob '100644 blob __BLOB__\tb.txt\n' --index-info
 run_index_info_case update_index_index_info_stage '100644 __BLOB__ 0\tb.txt\n' --index-info

@@ -768,27 +768,33 @@ fn update_index_index_info(_store: &LooseObjectStore, index: &mut GitIndex) -> R
 fn update_index_index_info_line(index: &mut GitIndex, line: &str) -> Result<()> {
     let (header, path) = line
         .split_once('\t')
-        .ok_or_else(update_index_index_info_error)?;
+        .ok_or_else(|| update_index_index_info_error(line))?;
     let mut header = header.split_whitespace();
-    let mode = header.next().ok_or_else(update_index_index_info_error)?;
-    let second = header.next().ok_or_else(update_index_index_info_error)?;
-    let third = header.next().ok_or_else(update_index_index_info_error)?;
+    let mode = header
+        .next()
+        .ok_or_else(|| update_index_index_info_error(line))?;
+    let second = header
+        .next()
+        .ok_or_else(|| update_index_index_info_error(line))?;
+    let third = header
+        .next()
+        .ok_or_else(|| update_index_index_info_error(line))?;
     let fourth = header.next();
     if fourth.is_some() || header.next().is_some() {
-        return Err(update_index_index_info_error());
+        return Err(update_index_index_info_error(line));
     }
     let (id, stage) = if update_index_index_info_object_type(second).is_some() {
         (third, 0)
     } else {
         let stage = third
             .parse::<u8>()
-            .map_err(|_| update_index_index_info_error())?;
+            .map_err(|_| update_index_index_info_error(line))?;
         (second, stage)
     };
     let mode = parse_index_mode(mode)?;
     let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?;
     if stage > 3 {
-        return Err(update_index_index_info_error());
+        return Err(update_index_index_info_error(line));
     }
     let mut entry = IndexEntry::new(normalize_git_path(path)?.into_bytes(), id, mode, 0)?;
     entry.stage = stage;
@@ -800,10 +806,10 @@ fn update_index_index_info_object_type(value: &str) -> Option<()> {
     matches!(value, "blob" | "tree" | "commit").then_some(())
 }
 
-fn update_index_index_info_error() -> CliError {
+fn update_index_index_info_error(line: &str) -> CliError {
     CliError::Fatal {
         code: 128,
-        message: "malformed index info".into(),
+        message: format!("malformed index info {line}"),
     }
 }
 
