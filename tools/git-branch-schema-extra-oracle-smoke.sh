@@ -85,6 +85,9 @@ run_case() {
 }
 
 run_case branch_all_long --all
+run_case branch_all_short -a
 run_case branch_list_short -l
 run_case branch_delete_long --delete feature
 run_case branch_move_long --move feature moved
+run_case branch_move_short -m feature moved
+run_case branch_copy_short -c feature copied
