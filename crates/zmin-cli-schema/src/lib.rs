@@ -1413,12 +1413,12 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     Mv {
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
-        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
-        dry_run: bool,
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
+        #[arg(short = 'f', long = "force", action = ArgAction::Count)]
+        force: u8,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
+        dry_run: u8,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbose: u8,
         #[arg(short = 'k', action = ArgAction::Count)]
         skip_errors: u8,
         #[arg(value_hint = ValueHint::AnyPath)]

@@ -85,12 +85,17 @@ run_exact() {
 }
 
 run_exact mv_dry_run_short -n a.txt b.txt
+run_exact mv_dry_run_short_repeated -n -n a.txt b.txt
 run_exact mv_dry_run_long --dry-run a.txt b.txt
+run_exact mv_dry_run_long_repeated --dry-run --dry-run a.txt b.txt
 run_exact mv_verbose_short -v a.txt b.txt
+run_exact mv_verbose_short_repeated -v -v a.txt b.txt
 run_exact mv_verbose_long --verbose a.txt b.txt
+run_exact mv_verbose_long_repeated --verbose --verbose a.txt b.txt
 run_exact mv_skip_errors_short -k missing.txt a.txt dst
 run_exact mv_dry_run_verbose_short -n -v a.txt b.txt
 run_exact mv_force_dry_run_short --tracked-destination -f -n a.txt b.txt
+run_exact mv_force_short_repeated --tracked-destination -f -f a.txt b.txt
 run_exact mv_dry_run_verbose_long --dry-run --verbose a.txt b.txt
 run_exact mv_force_dry_run_long --tracked-destination --force --dry-run a.txt b.txt
 run_exact mv_skip_errors_repeated -k -k missing.txt a.txt dst

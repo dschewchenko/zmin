@@ -174,7 +174,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             verbose,
             skip_errors,
             paths,
-        } => run_mv(force, dry_run, verbose, skip_errors > 0, paths),
+        } => run_mv(force > 0, dry_run > 0, verbose > 0, skip_errors > 0, paths),
         runtime::Command::Status {
             porcelain,
             branch,
