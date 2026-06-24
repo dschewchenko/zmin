@@ -16,13 +16,17 @@ trap cleanup EXIT
 
 seed_repo() {
   local repo="$1"
+  local tracked_destination="${2:-false}"
   mkdir "$repo"
   "$GIT_BIN" -C "$repo" init -q -b main
   "$GIT_BIN" -C "$repo" config user.name Oracle
   "$GIT_BIN" -C "$repo" config user.email oracle@example.com
   printf 'a\n' >"$repo/a.txt"
+  if [ "$tracked_destination" = true ]; then
+    printf 'b\n' >"$repo/b.txt"
+  fi
   mkdir "$repo/dst"
-  "$GIT_BIN" -C "$repo" add a.txt
+  "$GIT_BIN" -C "$repo" add a.txt b.txt 2>/dev/null || "$GIT_BIN" -C "$repo" add a.txt
   "$GIT_BIN" -C "$repo" commit -qm base
 }
 
@@ -52,8 +56,14 @@ run_exact() {
   local zmin_work="$tmpdir/$name.zmin"
   local git_exit=0
   local zmin_exit=0
+  local tracked_destination=false
 
-  seed_repo "$git_work"
+  if [ "${1:-}" = "--tracked-destination" ]; then
+    tracked_destination=true
+    shift
+  fi
+
+  seed_repo "$git_work" "$tracked_destination"
   cp -R "$git_work" "$zmin_work"
 
   set +e
@@ -79,3 +89,5 @@ run_exact mv_dry_run_long --dry-run a.txt b.txt
 run_exact mv_verbose_short -v a.txt b.txt
 run_exact mv_verbose_long --verbose a.txt b.txt
 run_exact mv_skip_errors_short -k missing.txt a.txt dst
+run_exact mv_dry_run_verbose_short -n -v a.txt b.txt
+run_exact mv_force_dry_run_short --tracked-destination -f -n a.txt b.txt
