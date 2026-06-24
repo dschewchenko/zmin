@@ -1631,7 +1631,19 @@ fn normalize_write_tree_prefix(prefix: &str) -> Result<(Vec<u8>, String)> {
             "invalid git tree path",
         )));
     }
-    let mut match_prefix = prefix.as_bytes().to_vec();
+    let mut match_prefix = Vec::with_capacity(prefix.len());
+    let mut previous_was_slash = false;
+    for byte in prefix.bytes() {
+        if byte == b'/' {
+            if previous_was_slash {
+                continue;
+            }
+            previous_was_slash = true;
+        } else {
+            previous_was_slash = false;
+        }
+        match_prefix.push(byte);
+    }
     while match_prefix.last() == Some(&b'/') {
         match_prefix.pop();
     }
