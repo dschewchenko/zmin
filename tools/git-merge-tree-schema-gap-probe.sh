@@ -101,6 +101,10 @@ run_invalid merge_tree_stdin_one_token_invalid "$ours_commit"$'\n' --write-tree 
 run_invalid merge_tree_stdin_extra_token_invalid "$ours_commit $theirs_commit extra"$'\n' --write-tree --stdin
 run_exact merge_tree_merge_base "" --write-tree --merge-base="$base_commit" "$ours_commit" "$theirs_commit"
 run_exact merge_tree_merge_base_separate "" --write-tree --merge-base "$base_commit" "$ours_commit" "$theirs_commit"
+run_exact merge_tree_merge_base_tree "" --write-tree --merge-base="$base_tree" "$ours_commit" "$theirs_commit"
+run_invalid merge_tree_merge_base_missing_invalid "" --write-tree --merge-base=missing-ref "$ours_commit" "$theirs_commit"
+run_invalid merge_tree_merge_base_empty_invalid "" --write-tree --merge-base= "$ours_commit" "$theirs_commit"
+run_invalid merge_tree_merge_base_separate_missing_invalid "" --write-tree --merge-base missing-ref "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option "" --write-tree --strategy-option=ours "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option_space "" --write-tree --strategy-option ours "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option_theirs "" --write-tree --strategy-option=theirs "$ours_commit" "$theirs_commit"

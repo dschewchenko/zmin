@@ -1420,19 +1420,19 @@ fn merge_tree_write_tree_once(
             messages: Vec::new(),
         });
     }
-    let base_id = if let Some(base) = &options.merge_base {
-        resolve_commitish(repo, store, base)?
+    let tree_cache = TreeObjectCache::new(store);
+    let base = if let Some(base) = &options.merge_base {
+        merge_tree_resolve_merge_base_index(repo, store, &tree_cache, base)?
     } else {
-        best_merge_base_cached(commit_cache, &ours_id, &theirs_id)?.ok_or_else(|| {
+        let base_id = best_merge_base_cached(commit_cache, &ours_id, &theirs_id)?.ok_or_else(|| {
             CliError::Fatal {
                 code: 128,
                 message: "refusing to merge unrelated histories".into(),
             }
-        })?
+        })?;
+        let base_commit = commit_cache.read_commit(&base_id)?;
+        read_commit_tree_index_cached(&tree_cache, &base_commit)?
     };
-    let base_commit = commit_cache.read_commit(&base_id)?;
-    let tree_cache = TreeObjectCache::new(store);
-    let base = read_commit_tree_index_cached(&tree_cache, &base_commit)?;
     let ours_index = read_commit_tree_index_cached(&tree_cache, &ours_commit)?;
     let theirs_index = read_commit_tree_index_cached(&tree_cache, &theirs_commit)?;
     match merge_indexes(store, &base, &ours_index, &theirs_index, theirs)? {
@@ -1493,6 +1493,19 @@ fn merge_tree_uses_theirs_strategy(options: &MergeTreeOptions) -> bool {
         .strategy_options
         .iter()
         .any(|option| option == "theirs")
+}
+
+fn merge_tree_resolve_merge_base_index(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    merge_base: &str,
+) -> Result<GitIndex> {
+    let tree = resolve_treeish(repo, store, merge_base).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("could not parse as tree '{merge_base}'"),
+    })?;
+    Ok(tree_cache.read_tree_to_index(&tree)?)
 }
 
 fn merge_tree_automerge_index(
