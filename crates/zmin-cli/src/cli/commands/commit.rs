@@ -77,8 +77,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             missing_ok,
             no_missing_ok,
         } => {
-            let _no_prefix = no_prefix;
             let _no_missing_ok = no_missing_ok;
+            let prefix = effective_write_tree_prefix(prefix, no_prefix);
             super::commit_commands::write_tree_command_entry(prefix.as_deref(), missing_ok)
         }
         runtime::Command::CommitTree {
@@ -99,6 +99,42 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             batch,
         } => super::commit_commands::mktree_command(nul_terminated, missing, batch),
         _ => unreachable!("non-commit command dispatched to commit"),
+    }
+}
+
+fn effective_write_tree_prefix(
+    prefixes: Vec<String>,
+    no_prefix: bool,
+) -> Option<String> {
+    let raw_args: Vec<String> = std::env::args().skip_while(|arg| arg != "write-tree").collect();
+    let mut prefix_iter = prefixes.into_iter();
+    let mut effective = None;
+    let mut index = 0usize;
+    while index < raw_args.len() {
+        match raw_args[index].as_str() {
+            "--prefix" => {
+                if index + 1 < raw_args.len() {
+                    effective = prefix_iter.next().or_else(|| Some(raw_args[index + 1].clone()));
+                    index += 2;
+                    continue;
+                }
+            }
+            "--no-prefix" => {
+                effective = None;
+            }
+            arg if arg.starts_with("--prefix=") => {
+                effective = prefix_iter
+                    .next()
+                    .or_else(|| Some(arg.trim_start_matches("--prefix=").to_owned()));
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if effective.is_none() && !no_prefix {
+        prefix_iter.next()
+    } else {
+        effective
     }
 }
 

@@ -1486,7 +1486,7 @@ pub enum Command {
     },
     WriteTree {
         #[arg(long = "prefix")]
-        prefix: Option<String>,
+        prefix: Vec<String>,
         #[arg(long = "no-prefix", action = ArgAction::SetTrue)]
         no_prefix: bool,
         #[arg(long = "missing-ok", action = ArgAction::SetTrue)]
