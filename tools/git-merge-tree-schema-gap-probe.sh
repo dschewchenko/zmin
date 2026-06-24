@@ -95,6 +95,7 @@ run_exact merge_tree_name_only_no_messages "" --write-tree --name-only --no-mess
 run_exact merge_tree_allow_unrelated "" --write-tree --allow-unrelated-histories "$ours_commit" "$theirs_commit"
 run_exact merge_tree_stdin_empty "" --write-tree --stdin
 run_exact merge_tree_stdin "$ours_commit $theirs_commit"$'\n' --write-tree --stdin
+run_exact merge_tree_stdin_with_args "$ours_commit $theirs_commit"$'\n' --write-tree --stdin "$ours_commit" "$theirs_commit"
 run_exact merge_tree_stdin_two_lines "$ours_commit $theirs_commit"$'\n'"$ours_commit $theirs_commit"$'\n' --write-tree --stdin
 run_invalid merge_tree_stdin_blank_line_invalid $'\n' --write-tree --stdin
 run_invalid merge_tree_stdin_one_token_invalid "$ours_commit"$'\n' --write-tree --stdin
@@ -105,6 +106,10 @@ run_exact merge_tree_merge_base_tree "" --write-tree --merge-base="$base_tree" "
 run_invalid merge_tree_merge_base_missing_invalid "" --write-tree --merge-base=missing-ref "$ours_commit" "$theirs_commit"
 run_invalid merge_tree_merge_base_empty_invalid "" --write-tree --merge-base= "$ours_commit" "$theirs_commit"
 run_invalid merge_tree_merge_base_separate_missing_invalid "" --write-tree --merge-base missing-ref "$ours_commit" "$theirs_commit"
+run_invalid merge_tree_trivial_write_tree_invalid "" --trivial-merge --write-tree "$ours_commit" "$theirs_commit"
+run_invalid merge_tree_messages_without_write_tree_invalid "" --messages "$base_tree" "$base_tree" "$theirs_tree"
+run_invalid merge_tree_merge_base_without_write_tree_invalid "" --merge-base="$base_tree" "$base_tree" "$base_tree" "$theirs_tree"
+run_invalid merge_tree_name_only_trivial_invalid "" --name-only "$base_tree" "$base_tree" "$theirs_tree"
 run_exact merge_tree_strategy_option "" --write-tree --strategy-option=ours "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option_space "" --write-tree --strategy-option ours "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option_theirs "" --write-tree --strategy-option=theirs "$ours_commit" "$theirs_commit"

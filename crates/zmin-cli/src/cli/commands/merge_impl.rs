@@ -1258,8 +1258,8 @@ pub(crate) fn merge_tree_command(options: MergeTreeOptions) -> Result<()> {
         || !options.strategy_options.is_empty()
     {
         return Err(CliError::Fatal {
-            code: 129,
-            message: "merge-tree currently supports the trivial three-tree form".into(),
+            code: 128,
+            message: "--trivial-merge is incompatible with all other options".into(),
         });
     }
     let _ = options.trivial_merge;
@@ -1310,6 +1310,13 @@ pub(crate) fn merge_tree_command(options: MergeTreeOptions) -> Result<()> {
 }
 
 fn merge_tree_write_tree(options: MergeTreeOptions) -> Result<()> {
+    if options.trivial_merge {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: options '--write-tree' and '--trivial-merge' cannot be used together\n"
+                .into(),
+        });
+    }
     if options.stdin {
         return merge_tree_write_tree_stdin(&options);
     }
@@ -1338,12 +1345,6 @@ fn merge_tree_write_tree(options: MergeTreeOptions) -> Result<()> {
 }
 
 fn merge_tree_write_tree_stdin(options: &MergeTreeOptions) -> Result<()> {
-    if !options.args.is_empty() {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "usage: git merge-tree --write-tree --stdin".into(),
-        });
-    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
