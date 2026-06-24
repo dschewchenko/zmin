@@ -158,7 +158,9 @@ run_invalid_case() {
 }
 
 run_case commit_tree_positional_tree -m root
+run_case commit_tree_attached_message -minline
 run_case commit_tree_message_file -F message.txt
+run_case commit_tree_attached_message_file -Fmessage.txt
 run_stdin_case commit_tree_message_file_stdin 'stdin message
 ' -F -
 run_case commit_tree_message_then_file -m inline -F message.txt
