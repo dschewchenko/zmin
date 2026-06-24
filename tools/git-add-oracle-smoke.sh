@@ -156,6 +156,8 @@ prepare_case() {
     add_no_warn_embedded_repo_long)
       cp -R "$inner_seed" "$work/inner"
       ;;
+    add_invalid_short_a|add_invalid_short_one|add_invalid_short_two)
+      ;;
   esac
 }
 
@@ -255,3 +257,6 @@ run_case add_no_sparse_repeated_long add --no-sparse --no-sparse sparse-off.txt
 run_case add_no_pathspec_from_file_long add --no-pathspec-from-file pathspec-default.txt
 run_case add_no_pathspec_from_file_repeated_long add --no-pathspec-from-file --no-pathspec-from-file pathspec-default.txt
 run_case add_no_warn_embedded_repo_long add --no-warn-embedded-repo inner
+run_case add_invalid_short_a add -a
+run_case add_invalid_short_one add -1
+run_case add_invalid_short_two add -2
