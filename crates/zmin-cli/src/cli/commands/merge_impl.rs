@@ -1059,12 +1059,6 @@ pub(crate) fn mergetool(
         })?,
     };
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let command = read_config_value(&repo, &format!("mergetool.{tool}.cmd"))?.ok_or_else(|| {
-        CliError::Fatal {
-            code: 1,
-            message: format!("merge tool '{}' is not configured", tool),
-        }
-    })?;
     let mut index = read_repo_index(&repo)?;
     let selected = selected_mergetool_paths(&repo, &index, &paths)?;
     if selected.is_empty() {
@@ -1076,6 +1070,12 @@ pub(crate) fn mergetool(
         println!("{}", String::from_utf8_lossy(path));
     }
     println!();
+    let command = read_config_value(&repo, &format!("mergetool.{tool}.cmd"))?.ok_or_else(|| {
+        CliError::Stderr {
+            code: 1,
+            text: format!("error: mergetool.{tool}.cmd not set for tool '{tool}'\n"),
+        }
+    })?;
     let prompt = prompt && !no_prompt;
     for path in selected {
         run_mergetool_path(&repo, &store, &mut index, &tool, &command, prompt, &path)?;

@@ -124,5 +124,7 @@ run_exact mergetool_prompt_long "\n" --tool=zmintest --prompt f.txt
 run_exact mergetool_gui_short "" -g --tool=zmintest --no-prompt f.txt
 run_exact mergetool_gui_long "" --gui --tool=zmintest --no-prompt f.txt
 run_exact mergetool_no_gui_long "" --no-gui --tool=zmintest --no-prompt f.txt
+run_exact mergetool_no_paths_all "" --tool=zmintest --no-prompt
+run_invalid mergetool_unknown_tool_invalid "" --tool=missingtool --no-prompt f.txt
 run_invalid mergetool_output_long_invalid "" --output out.txt --tool=zmintest --no-prompt f.txt
 run_invalid mergetool_auto_merge_invalid "" --auto-merge --tool=zmintest --no-prompt f.txt
