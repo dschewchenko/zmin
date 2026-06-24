@@ -117,6 +117,7 @@ pub(crate) fn parse_cli_invocation(
     validate_fetch_pack_invocation_before_clap(&command_args)?;
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
+    validate_commit_tree_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -481,6 +482,45 @@ fn validate_hash_object_invocation_before_clap(command_args: &[String]) -> Resul
                 text: "error: unknown option `write'\nusage: git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n                       [--stdin [--literally]] [--] <file>...\n   or: git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]\n\n    -t <type>             object type\n    -w                    write the object into the object database\n    --[no-]stdin          read the object from stdin\n    --[no-]stdin-paths    read file names from stdin\n    --no-filters          store file as is without filters\n    --filters             opposite of --no-filters\n    --[no-]literally      just hash any random garbage to create corrupt objects for debugging Git\n    --[no-]path <file>    process file as it were from this path\n\n".into(),
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_commit_tree_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("commit-tree") {
+        return Ok(());
+    }
+    let mut tree_args = 0usize;
+    let mut index = 1usize;
+    while index < command_args.len() {
+        let arg = command_args[index].as_str();
+        if arg == "--" {
+            tree_args += command_args.len().saturating_sub(index + 1);
+            break;
+        }
+        if matches!(arg, "-m" | "-F" | "-p") {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with("-m") && arg.len() > 2
+            || arg.starts_with("-F") && arg.len() > 2
+            || arg.starts_with("-p") && arg.len() > 2
+            || arg == "--no-gpg-sign"
+        {
+            index += 1;
+            continue;
+        }
+        if arg.starts_with('-') {
+            return Ok(());
+        }
+        tree_args += 1;
+        index += 1;
+    }
+    if tree_args != 1 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "must give exactly one tree".into(),
+        });
     }
     Ok(())
 }

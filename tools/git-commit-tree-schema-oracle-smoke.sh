@@ -293,3 +293,4 @@ run_parent_case commit_tree_message_before_parent message_first
 run_parent_case commit_tree_duplicate_parent duplicate
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
+run_invalid_case commit_tree_extra_tree_argument 128 -m root extra
