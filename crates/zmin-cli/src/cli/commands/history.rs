@@ -82,8 +82,13 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             head.as_deref(),
             limit.as_deref(),
         ),
-        runtime::Command::RequestPull { start, url, end } => {
-            super::history_commands::request_pull(&start, &url, end.as_deref())
+        runtime::Command::RequestPull {
+            patch,
+            start,
+            url,
+            end,
+        } => {
+            super::history_commands::request_pull(patch > 0, &start, &url, end.as_deref())
         }
         runtime::Command::Describe {
             all,

@@ -1722,7 +1722,7 @@ pub(crate) fn shortlog(
     Ok(())
 }
 
-pub(crate) fn request_pull(start: &str, url: &str, end: Option<&str>) -> Result<()> {
+pub(crate) fn request_pull(patch: bool, start: &str, url: &str, end: Option<&str>) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
@@ -1773,7 +1773,19 @@ pub(crate) fn request_pull(start: &str, url: &str, end: Option<&str>) -> Result<
             compact_summary: false,
         },
     )?;
-    print_summary_entries(&old_index, &new_index, &entries, None)
+    print_summary_entries(&old_index, &new_index, &entries, None)?;
+    if patch && !entries.is_empty() {
+        println!();
+        print_patch_entries(
+            &repo,
+            &store,
+            &old_index,
+            &new_index,
+            &entries,
+            PatchFormatOptions::cached(),
+        )?;
+    }
+    Ok(())
 }
 
 fn request_pull_commit_line(commit: &zmin_git_core::CommitObject) -> Result<String> {

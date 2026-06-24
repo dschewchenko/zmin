@@ -120,6 +120,7 @@ pub(crate) fn parse_cli_invocation(
     validate_hash_object_invocation_before_clap(&command_args)?;
     validate_fast_export_invocation_before_clap(&command_args)?;
     validate_range_diff_invocation_before_clap(&command_args)?;
+    validate_request_pull_invocation_before_clap(&command_args)?;
     validate_credential_store_invocation_before_clap(&command_args)?;
     validate_cherry_invocation_before_clap(&command_args)?;
     validate_commit_tree_invocation_before_clap(&command_args)?;
@@ -562,6 +563,24 @@ fn validate_range_diff_invocation_before_clap(command_args: &[String]) -> Result
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: option `no-dual-color' takes no value\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_request_pull_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("request-pull") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("-p=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: unknown switch `='\nusage: git request-pull [options] start url [end]\n\n    -p                    show patch text as well\n\n".into(),
             });
         }
     }

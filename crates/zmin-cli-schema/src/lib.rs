@@ -594,6 +594,8 @@ pub enum Command {
         commits: Vec<String>,
     },
     RequestPull {
+        #[arg(short = 'p', action = ArgAction::Count)]
+        patch: u8,
         start: String,
         url: String,
         end: Option<String>,
