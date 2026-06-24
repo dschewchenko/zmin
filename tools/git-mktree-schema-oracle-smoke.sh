@@ -48,6 +48,9 @@ run_case() {
   if [ "${1:-}" = "--missing-input" ]; then
     shift
     printf '100644 blob %s\tmissing.txt\n' "$missing_oid" >"$input"
+  elif [ "${1:-}" = "--missing-nul-input" ]; then
+    shift
+    printf '100644 blob %s\tmissing.txt\0' "$missing_oid" >"$input"
   elif [ "${1:-}" = "--empty-input" ]; then
     shift
     : >"$input"
@@ -87,6 +90,8 @@ run_case mktree_missing_allows_missing_blob --missing-input --missing
 run_case mktree_z_repeated --nul-input -z -z
 run_case mktree_batch_repeated --batch --batch
 run_case mktree_missing_repeated --missing-input --missing --missing
+run_case mktree_batch_missing_allows_missing_blob --missing-input --batch --missing
+run_case mktree_z_missing_allows_missing_blob --missing-nul-input -z --missing
 run_case mktree_no_batch --no-batch
 run_case mktree_no_missing --no-missing
 run_case mktree_no_z_rejected --no-z
