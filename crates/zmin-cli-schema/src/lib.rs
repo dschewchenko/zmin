@@ -1246,16 +1246,24 @@ pub enum Command {
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
         update: bool,
+        #[arg(long = "no-update", action = ArgAction::SetTrue)]
+        no_update: bool,
         #[arg(long = "renormalize", action = ArgAction::SetTrue)]
         renormalize: bool,
         #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
         no_renormalize: bool,
         #[arg(short = 'N', long = "intent-to-add", action = ArgAction::SetTrue)]
         intent_to_add: bool,
+        #[arg(long = "no-intent-to-add", action = ArgAction::SetTrue)]
+        no_intent_to_add: bool,
         #[arg(long = "refresh", action = ArgAction::SetTrue)]
         refresh: bool,
+        #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
+        no_refresh: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
+        no_verbose: bool,
         #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
         ignore_errors: bool,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
@@ -1264,6 +1272,8 @@ pub enum Command {
         chmod: Option<String>,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
+        #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
+        no_dry_run: bool,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
         #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
@@ -1282,16 +1292,24 @@ pub enum Command {
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
         update: bool,
+        #[arg(long = "no-update", action = ArgAction::SetTrue)]
+        no_update: bool,
         #[arg(long = "renormalize", action = ArgAction::SetTrue)]
         renormalize: bool,
         #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
         no_renormalize: bool,
         #[arg(short = 'N', long = "intent-to-add", action = ArgAction::SetTrue)]
         intent_to_add: bool,
+        #[arg(long = "no-intent-to-add", action = ArgAction::SetTrue)]
+        no_intent_to_add: bool,
         #[arg(long = "refresh", action = ArgAction::SetTrue)]
         refresh: bool,
+        #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
+        no_refresh: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
+        no_verbose: bool,
         #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
         ignore_errors: bool,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
@@ -1300,6 +1318,8 @@ pub enum Command {
         chmod: Option<String>,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
+        #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
+        no_dry_run: bool,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
         #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]

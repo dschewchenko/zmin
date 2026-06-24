@@ -92,8 +92,23 @@ prepare_case() {
     add_dry_run_short)
       printf 'dry\n' >"$work/dry.txt"
       ;;
+    add_no_dry_run_long)
+      printf 'real\n' >"$work/real.txt"
+      ;;
     add_verbose_long|add_verbose_short)
       printf 'verbose\n' >"$work/verbose.txt"
+      ;;
+    add_no_verbose_long)
+      printf 'quiet\n' >"$work/quiet.txt"
+      ;;
+    add_no_update_long)
+      printf 'new\n' >"$work/new.txt"
+      ;;
+    add_no_intent_to_add_long)
+      printf 'full\n' >"$work/full.txt"
+      ;;
+    add_no_refresh_long)
+      printf 'fresh\n' >"$work/fresh.txt"
       ;;
   esac
 }
@@ -153,5 +168,10 @@ run_case add_no_ignore_removal_long add --no-ignore-removal .
 run_case add_renormalize_long add --renormalize .
 run_case add_no_renormalize_long add --no-renormalize .
 run_case add_dry_run_short add -n dry.txt
+run_case add_no_dry_run_long add --no-dry-run real.txt
 run_case add_verbose_long add --verbose verbose.txt
 run_case add_verbose_short add -v verbose.txt
+run_case add_no_verbose_long add --no-verbose quiet.txt
+run_case add_no_update_long add --no-update new.txt
+run_case add_no_intent_to_add_long add --no-intent-to-add full.txt
+run_case add_no_refresh_long add --no-refresh fresh.txt
