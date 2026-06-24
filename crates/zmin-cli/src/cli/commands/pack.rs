@@ -120,8 +120,13 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             raw,
             commits,
         } => super::pack_commands::verify_commit(verbose, raw, commits),
-        runtime::Command::VerifyTag { verbose, raw, tags } => {
-            super::pack_commands::verify_tag(verbose, raw, tags)
+        runtime::Command::VerifyTag {
+            verbose,
+            raw,
+            format,
+            tags,
+        } => {
+            super::pack_commands::verify_tag(verbose, raw, format.as_deref(), tags)
         }
         runtime::Command::Mktag { strict: _ } => super::pack_commands::mktag_command(),
         runtime::Command::CommitGraph { command } => {

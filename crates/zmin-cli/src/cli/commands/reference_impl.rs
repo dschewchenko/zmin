@@ -6270,7 +6270,7 @@ fn tag(options: TagOptions) -> Result<()> {
                 message: "-v cannot be combined with other tag modes".into(),
             });
         }
-        return verify_tag(true, false, options.args);
+        return verify_tag(true, false, None, options.args);
     }
     if options.delete {
         if options.annotate || !options.messages.is_empty() || has_list_modifier {

@@ -51,3 +51,4 @@ run_gap() {
 
 run_gap verify_tag_verbose verify-tag --verbose v1
 run_gap verify_tag_verbose_short verify-tag -v v1
+run_gap verify_tag_format verify-tag --format='%(tag)' v1

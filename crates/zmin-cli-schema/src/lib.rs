@@ -721,6 +721,8 @@ pub enum Command {
         verbose: bool,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
         raw: bool,
+        #[arg(long = "format")]
+        format: Option<String>,
         tags: Vec<String>,
     },
     UpdateIndex {

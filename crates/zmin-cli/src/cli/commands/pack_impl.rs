@@ -5821,7 +5821,12 @@ pub(crate) fn verify_commit(verbose: bool, raw: bool, commits: Vec<String>) -> R
     }
 }
 
-pub(crate) fn verify_tag(verbose: bool, raw: bool, tags: Vec<String>) -> Result<()> {
+pub(crate) fn verify_tag(
+    verbose: bool,
+    raw: bool,
+    _format: Option<&str>,
+    tags: Vec<String>,
+) -> Result<()> {
     if tags.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
