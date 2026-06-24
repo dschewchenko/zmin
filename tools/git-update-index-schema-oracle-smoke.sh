@@ -65,6 +65,12 @@ seed_skip_worktree_repo() {
   "$GIT_BIN" -C "$repo" update-index --skip-worktree a.txt
 }
 
+seed_executable_repo() {
+  local repo="$1"
+  seed_tracked_repo "$repo"
+  "$GIT_BIN" -C "$repo" update-index --chmod=+x a.txt
+}
+
 run_case() {
   local name="$1"
   local seed_kind="$2"
@@ -272,13 +278,17 @@ run_case update_index_add_repeated empty update-index --add --add a.txt
 run_case update_index_positional_path tracked update-index a.txt
 run_case update_index_refresh tracked_clean update-index --refresh
 run_case update_index_really_refresh tracked_clean update-index --really-refresh
+run_case update_index_refresh_repeated tracked_clean update-index --refresh --refresh
+run_case update_index_really_refresh_repeated tracked_clean update-index --really-refresh --really-refresh
 run_case update_index_assume_unchanged tracked update-index --assume-unchanged a.txt
 run_case update_index_no_assume_unchanged assume_unchanged update-index --no-assume-unchanged a.txt
 run_case update_index_skip_worktree tracked update-index --skip-worktree a.txt
 run_case update_index_no_skip_worktree skip_worktree update-index --no-skip-worktree a.txt
+run_case update_index_skip_worktree_repeated tracked update-index --skip-worktree --skip-worktree a.txt
 run_case update_index_remove tracked update-index --remove a.txt
 run_case update_index_force_remove tracked update-index --force-remove a.txt
 run_case update_index_chmod_plus_x tracked update-index --chmod=+x a.txt
+run_case update_index_chmod_minus_x executable update-index --chmod=-x a.txt
 run_stdin_case update_index_stdin 'a.txt\n' update-index --stdin
 run_stdin_case update_index_z_stdin 'a.txt\0' update-index -z --stdin
 run_cacheinfo_case update_index_cacheinfo_add --add --cacheinfo '100644,__BLOB__,b.txt'

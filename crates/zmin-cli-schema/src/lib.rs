@@ -763,10 +763,10 @@ pub enum Command {
         force_remove: bool,
         #[arg(long = "replace", action = ArgAction::SetTrue)]
         replace: bool,
-        #[arg(long = "refresh", action = ArgAction::SetTrue)]
-        refresh: bool,
-        #[arg(long = "really-refresh", action = ArgAction::SetTrue)]
-        really_refresh: bool,
+        #[arg(long = "refresh", action = ArgAction::Count)]
+        refresh: u8,
+        #[arg(long = "really-refresh", action = ArgAction::Count)]
+        really_refresh: u8,
         #[arg(long = "cacheinfo")]
         cacheinfo: Vec<String>,
         #[arg(long = "index-info", action = ArgAction::SetTrue)]
@@ -777,8 +777,8 @@ pub enum Command {
         assume_unchanged: bool,
         #[arg(long = "no-assume-unchanged", action = ArgAction::SetTrue)]
         no_assume_unchanged: bool,
-        #[arg(long = "skip-worktree", action = ArgAction::SetTrue)]
-        skip_worktree: bool,
+        #[arg(long = "skip-worktree", action = ArgAction::Count)]
+        skip_worktree: u8,
         #[arg(long = "no-skip-worktree", action = ArgAction::SetTrue)]
         no_skip_worktree: bool,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
