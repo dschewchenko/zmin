@@ -1,0 +1,4 @@
+item	status	evidence	next_action	notes
+clone_ref_format_reftable_storage	open	tools/git-clone-reftable-schema-gap-probe.sh	implement real reftable writer and reader	Do not close with config-only metadata or empty .git/reftable directory
+clone_ref_format_reftable_ref_resolution	open	tools/git-clone-reftable-schema-gap-probe.sh	route RefStore read/list/resolve through reftable storage when extensions.refStorage=reftable	Required before normal branch/status/log commands can operate on a reftable clone
+clone_ref_format_reftable_stock_probe	open	tools/git-clone-reftable-schema-gap-probe.sh	extend probe to compare HEAD, symbolic HEAD, refs, status and worktree contents	Matrix row may close only after this exact probe passes against stock Git and Zmin
