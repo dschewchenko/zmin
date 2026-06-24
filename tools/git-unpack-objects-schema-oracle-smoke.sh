@@ -82,3 +82,5 @@ run_case() {
 
 make_pack
 run_case unpack_objects_dry_run_short -n
+run_case unpack_objects_quiet_short -q
+run_case unpack_objects_dry_run_quiet -n -q
