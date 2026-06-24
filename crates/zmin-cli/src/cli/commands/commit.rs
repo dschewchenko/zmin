@@ -90,8 +90,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => super::commit_commands::commit_tree_command(
             &tree,
             parents,
-            messages,
-            message_files,
+            ordered_commit_tree_message_sources(messages, message_files),
             no_gpg_sign,
         ),
         runtime::Command::Mktree {
@@ -101,4 +100,71 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => super::commit_commands::mktree_command(nul_terminated, missing, batch),
         _ => unreachable!("non-commit command dispatched to commit"),
     }
+}
+
+fn ordered_commit_tree_message_sources(
+    messages: Vec<String>,
+    message_files: Vec<std::path::PathBuf>,
+) -> Vec<super::commit_commands::CommitTreeMessageSource> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let Some(command_index) = args.iter().position(|arg| arg == "commit-tree") else {
+        return grouped_commit_tree_message_sources(messages, message_files);
+    };
+    let mut sources = Vec::new();
+    let mut index = command_index + 2;
+    while index < args.len() {
+        let arg = args[index].to_string_lossy();
+        match arg.as_ref() {
+            "-m" => {
+                if let Some(value) = args.get(index + 1) {
+                    sources.push(super::commit_commands::CommitTreeMessageSource::Message(
+                        value.to_string_lossy().into_owned(),
+                    ));
+                    index += 2;
+                    continue;
+                }
+            }
+            "-F" => {
+                if let Some(value) = args.get(index + 1) {
+                    sources.push(super::commit_commands::CommitTreeMessageSource::File(
+                        value.into(),
+                    ));
+                    index += 2;
+                    continue;
+                }
+            }
+            _ if arg.starts_with("-m") && arg.len() > 2 => {
+                sources.push(super::commit_commands::CommitTreeMessageSource::Message(
+                    arg[2..].to_owned(),
+                ));
+            }
+            _ if arg.starts_with("-F") && arg.len() > 2 => {
+                sources.push(super::commit_commands::CommitTreeMessageSource::File(
+                    std::path::PathBuf::from(&arg[2..]),
+                ));
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if sources.len() == messages.len() + message_files.len() {
+        sources
+    } else {
+        grouped_commit_tree_message_sources(messages, message_files)
+    }
+}
+
+fn grouped_commit_tree_message_sources(
+    messages: Vec<String>,
+    message_files: Vec<std::path::PathBuf>,
+) -> Vec<super::commit_commands::CommitTreeMessageSource> {
+    messages
+        .into_iter()
+        .map(super::commit_commands::CommitTreeMessageSource::Message)
+        .chain(
+            message_files
+                .into_iter()
+                .map(super::commit_commands::CommitTreeMessageSource::File),
+        )
+        .collect()
 }

@@ -54,11 +54,10 @@ pub(crate) fn write_tree_command_entry(prefix: Option<&str>, missing_ok: bool) -
 pub(crate) fn commit_tree_command(
     tree: &str,
     parents: Vec<String>,
-    messages: Vec<String>,
-    message_files: Vec<PathBuf>,
+    message_sources: Vec<CommitTreeMessageSource>,
     no_gpg_sign: bool,
 ) -> Result<()> {
-    commit_tree(tree, parents, messages, message_files, no_gpg_sign)
+    commit_tree(tree, parents, message_sources, no_gpg_sign)
 }
 
 pub(crate) fn mktree_command(nul_terminated: bool, missing: bool, batch: bool) -> Result<()> {
@@ -1658,8 +1657,7 @@ fn normalize_write_tree_prefix(prefix: &str) -> Result<(Vec<u8>, String)> {
 fn commit_tree(
     tree: &str,
     parents: Vec<String>,
-    messages: Vec<String>,
-    message_files: Vec<PathBuf>,
+    message_sources: Vec<CommitTreeMessageSource>,
     no_gpg_sign: bool,
 ) -> Result<()> {
     let _no_gpg_sign = no_gpg_sign;
@@ -1686,30 +1684,36 @@ fn commit_tree(
             builder = builder.parent(parent);
         }
     }
-    let message = commit_tree_message(messages, message_files)?;
+    let message = commit_tree_message(message_sources)?;
     let commit = builder.message(message)?.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     println!("{}", id.to_hex());
     Ok(())
 }
 
+pub(crate) enum CommitTreeMessageSource {
+    Message(String),
+    File(PathBuf),
+}
+
 pub(crate) fn commit_tree_message(
-    messages: Vec<String>,
-    message_files: Vec<PathBuf>,
+    message_sources: Vec<CommitTreeMessageSource>,
 ) -> Result<Vec<u8>> {
-    if messages.is_empty() && message_files.is_empty() {
+    if message_sources.is_empty() {
         let mut input = Vec::new();
         io::stdin().read_to_end(&mut input)?;
         return Ok(input);
     }
     let mut parts = Vec::new();
-    for message in messages {
-        let mut message = message.into_bytes();
-        message.push(b'\n');
-        parts.push(message);
-    }
-    for path in message_files {
-        parts.push(read_commit_message_file(&path)?);
+    for source in message_sources {
+        match source {
+            CommitTreeMessageSource::Message(message) => {
+                let mut message = message.into_bytes();
+                message.push(b'\n');
+                parts.push(message);
+            }
+            CommitTreeMessageSource::File(path) => parts.push(read_commit_message_file(&path)?),
+        }
     }
     let mut message = parts.join(b"\n".as_slice());
     if !message.ends_with(b"\n") {
