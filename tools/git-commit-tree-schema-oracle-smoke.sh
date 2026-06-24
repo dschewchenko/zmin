@@ -157,6 +157,59 @@ run_invalid_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_parent_case() {
+  local name="$1"
+  local mode="$2"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_commit="$tmpdir/${name}.git.commit"
+  local zmin_commit="$tmpdir/${name}.zmin.commit"
+  local git_tree
+  local zmin_tree
+  local git_parent
+  local zmin_parent
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+  git_parent="$("$GIT_BIN" -C "$git_work" commit-tree "$git_tree" -m root)"
+  zmin_parent="$("$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" -m root)"
+  test "$git_parent" = "$zmin_parent"
+
+  set +e
+  case "$mode" in
+    attached)
+      "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" "-p$git_parent" -m child >"$git_out" 2>"$git_err"
+      git_exit=$?
+      "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" "-p$zmin_parent" -m child >"$zmin_out" 2>"$zmin_err"
+      zmin_exit=$?
+      ;;
+    message_first)
+      "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" -m child -p "$git_parent" >"$git_out" 2>"$git_err"
+      git_exit=$?
+      "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" -m child -p "$zmin_parent" >"$zmin_out" 2>"$zmin_err"
+      zmin_exit=$?
+      ;;
+  esac
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" cat-file commit "$(cat "$git_out")" >"$git_commit"
+  "$GIT_BIN" -C "$zmin_work" cat-file commit "$(cat "$zmin_out")" >"$zmin_commit"
+  compare_files commit_object "$git_commit" "$zmin_commit"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case commit_tree_positional_tree -m root
 run_case commit_tree_attached_message -minline
 run_case commit_tree_empty_message -m ''
@@ -171,5 +224,7 @@ run_case commit_tree_message_then_file -m inline -F message.txt
 run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
+run_parent_case commit_tree_attached_parent attached
+run_parent_case commit_tree_message_before_parent message_first
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
