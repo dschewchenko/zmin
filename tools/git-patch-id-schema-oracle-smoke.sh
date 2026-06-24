@@ -71,6 +71,8 @@ run_case patch_id_verbatim_repeated 0 --verbatim --verbatim
 run_case patch_id_no_stable_rejected 129 --no-stable
 run_case patch_id_no_unstable_rejected 129 --no-unstable
 run_case patch_id_no_verbatim_rejected 129 --no-verbatim
+run_case patch_id_o_compact_rejected 129 -Ostable
+run_case patch_id_o_separate_rejected 129 -O stable
 run_case patch_id_stable_rejects_value 129 --stable=true
 run_case patch_id_unstable_rejects_value 129 --unstable=true
 run_case patch_id_verbatim_rejects_value 129 --verbatim=true

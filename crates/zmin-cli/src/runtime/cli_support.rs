@@ -904,9 +904,16 @@ fn validate_patch_id_invocation_before_clap(command_args: &[String]) -> Result<(
     if command_args.first().map(String::as_str) != Some("patch-id") {
         return Ok(());
     }
+    const USAGE: &str = "usage: git patch-id [--stable | --unstable | --verbatim]\n\n    --unstable            use the unstable patch-id algorithm\n    --stable              use the stable patch-id algorithm\n    --verbatim            don't strip whitespace from the patch\n\n";
     for arg in command_args.iter().skip(1) {
         if arg == "--" {
             break;
+        }
+        if arg == "-O" || arg.starts_with("-O") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `O'\n{USAGE}"),
+            });
         }
         if let Some(option) = arg.strip_prefix("--").and_then(|value| {
             value
@@ -925,9 +932,7 @@ fn validate_patch_id_invocation_before_clap(command_args: &[String]) -> Result<(
             let option = arg.trim_start_matches("--");
             return Err(CliError::Stderr {
                 code: 129,
-                text: format!(
-                    "error: unknown option `{option}'\nusage: git patch-id [--stable | --unstable | --verbatim]\n\n    --unstable            use the unstable patch-id algorithm\n    --stable              use the stable patch-id algorithm\n    --verbatim            don't strip whitespace from the patch\n\n"
-                ),
+                text: format!("error: unknown option `{option}'\n{USAGE}"),
             });
         }
     }
