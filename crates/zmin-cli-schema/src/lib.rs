@@ -2969,6 +2969,8 @@ pub enum Command {
         marker_size: Option<String>,
         #[arg(long = "no-marker-size", action = ArgAction::Count)]
         no_marker_size: u8,
+        #[arg(long = "diff-algorithm")]
+        diff_algorithm: Option<String>,
         #[arg(short = 'L')]
         labels: Vec<String>,
         current: PathBuf,

@@ -1002,8 +1002,13 @@ fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: option `marker-size' expects an integer value with an optional k/m/g suffix\n"
-                    .into(),
+                .into(),
             });
+        }
+        if let Some(value) = arg.strip_prefix("--diff-algorithm=")
+            && !is_merge_file_diff_algorithm_value(value)
+        {
+            return Err(merge_file_diff_algorithm_error());
         }
         if arg.starts_with("-q=") {
             return Err(CliError::Stderr {
@@ -1034,8 +1039,23 @@ fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result
                     .into(),
             });
         }
+        if window[0] == "--diff-algorithm" && !is_merge_file_diff_algorithm_value(&window[1]) {
+            return Err(merge_file_diff_algorithm_error());
+        }
     }
     Ok(())
+}
+
+fn merge_file_diff_algorithm_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: "error: option diff-algorithm accepts \"myers\", \"minimal\", \"patience\" and \"histogram\"\n"
+            .into(),
+    }
+}
+
+fn is_merge_file_diff_algorithm_value(value: &str) -> bool {
+    matches!(value, "myers" | "minimal" | "patience" | "histogram")
 }
 
 fn is_merge_file_marker_size_value(value: &str) -> bool {

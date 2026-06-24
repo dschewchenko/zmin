@@ -92,3 +92,9 @@ run_case merge_file_marker_size_diff3_conflict merge-file --diff3 --marker-size=
 run_case merge_file_marker_size_no_marker_conflict merge-file --no-marker-size ours.txt base.txt theirs.txt
 run_case merge_file_marker_size_bogus_invalid merge-file --marker-size=bogus ours.txt base.txt theirs.txt
 run_case merge_file_marker_size_missing_invalid merge-file --marker-size ours.txt base.txt theirs.txt
+run_case merge_file_diff_algorithm_myers_conflict merge-file --diff-algorithm myers ours.txt base.txt theirs.txt
+run_case merge_file_diff_algorithm_histogram_conflict merge-file --diff-algorithm=histogram ours.txt base.txt theirs.txt
+run_case merge_file_diff_algorithm_patience_conflict merge-file --diff-algorithm=patience ours.txt base.txt theirs.txt
+run_case merge_file_diff_algorithm_minimal_conflict merge-file --diff-algorithm=minimal ours.txt base.txt theirs.txt
+run_case merge_file_diff_algorithm_bogus_invalid merge-file --diff-algorithm=bogus ours.txt base.txt theirs.txt
+run_case merge_file_diff_algorithm_missing_invalid merge-file --diff-algorithm ours.txt base.txt theirs.txt

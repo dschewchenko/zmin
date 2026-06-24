@@ -517,6 +517,7 @@ pub(crate) fn merge_file_command(
     conflict_style: MergeFileConflictStyle,
     diff3: bool,
     marker_size: Option<String>,
+    diff_algorithm: Option<String>,
     labels: Vec<String>,
     current: PathBuf,
     base: PathBuf,
@@ -529,6 +530,7 @@ pub(crate) fn merge_file_command(
         });
     }
     let marker_len = effective_merge_file_marker_size(marker_size)?;
+    validate_merge_file_diff_algorithm(diff_algorithm.as_deref())?;
     let current_content = fs::read(&current)?;
     let base_content = fs::read(&base)?;
     let other_content = fs::read(&other)?;
@@ -598,6 +600,20 @@ pub(crate) fn merge_file_command(
     } else {
         Err(CliError::Exit(result.conflicts.min(127) as i32))
     }
+}
+
+fn validate_merge_file_diff_algorithm(value: Option<&str>) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if matches!(value, "myers" | "minimal" | "patience" | "histogram") {
+        return Ok(());
+    }
+    Err(CliError::Stderr {
+        code: 129,
+        text: "error: option diff-algorithm accepts \"myers\", \"minimal\", \"patience\" and \"histogram\"\n"
+            .into(),
+    })
 }
 
 fn parse_merge_file_marker_size(value: &str) -> Result<usize> {
