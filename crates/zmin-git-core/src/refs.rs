@@ -24,6 +24,12 @@ pub struct RefStore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefStorageKind {
+    Files,
+    Reftable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PackRefsOptions {
     pub all: bool,
     pub prune: bool,
@@ -45,6 +51,10 @@ impl RefStore {
 
     pub fn git_dir(&self) -> &Path {
         &self.git_dir
+    }
+
+    pub fn storage_kind(&self) -> io::Result<RefStorageKind> {
+        ref_storage_kind_from_config(&self.git_dir.join("config"))
     }
 
     pub fn write_ref(&self, name: &str, id: &ObjectId) -> io::Result<()> {
@@ -720,6 +730,45 @@ fn write_lock_file(lock_path: &Path, bytes: &[u8]) -> io::Result<()> {
     lock.write_all(bytes)
 }
 
+fn ref_storage_kind_from_config(path: &Path) -> io::Result<RefStorageKind> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(RefStorageKind::Files);
+        }
+        Err(error) => return Err(error),
+    };
+    let mut section = String::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) {
+            section = config_section_name(name);
+            continue;
+        }
+        if section.eq_ignore_ascii_case("extensions")
+            && let Some((name, value)) = line.split_once('=')
+            && name.trim().eq_ignore_ascii_case("refStorage")
+        {
+            return match value.trim() {
+                "reftable" => Ok(RefStorageKind::Reftable),
+                "files" | "" => Ok(RefStorageKind::Files),
+                value => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("invalid value for extensions.refStorage: {value}"),
+                )),
+            };
+        }
+    }
+    Ok(RefStorageKind::Files)
+}
+
+fn config_section_name(raw: &str) -> String {
+    raw.split_whitespace().next().unwrap_or(raw).to_owned()
+}
+
 fn lock_path(path: &Path) -> PathBuf {
     let mut value = OsString::from(path.as_os_str());
     value.push(".lock");
@@ -793,6 +842,45 @@ mod tests {
 
         assert_eq!(git(&repo, ["rev-parse", "refs/heads/main"]), id.to_hex());
         assert_eq!(git(&repo, ["rev-parse", "HEAD"]), id.to_hex());
+    }
+
+    #[test]
+    fn storage_kind_defaults_to_files() {
+        let repo = git_init();
+        let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
+
+        assert_eq!(refs.storage_kind().expect("storage kind"), RefStorageKind::Files);
+    }
+
+    #[test]
+    fn storage_kind_reads_reftable_config() {
+        let repo = git_init();
+        std::fs::write(
+            repo.path().join(".git/config"),
+            "[core]\n\trepositoryformatversion = 1\n[extensions]\n\trefStorage = reftable\n",
+        )
+        .expect("write config");
+        let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
+
+        assert_eq!(
+            refs.storage_kind().expect("storage kind"),
+            RefStorageKind::Reftable
+        );
+    }
+
+    #[test]
+    fn storage_kind_rejects_unknown_ref_storage() {
+        let repo = git_init();
+        std::fs::write(
+            repo.path().join(".git/config"),
+            "[extensions]\n\trefStorage = broken\n",
+        )
+        .expect("write config");
+        let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
+
+        let error = refs.storage_kind().expect_err("invalid storage");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
     }
 
     #[test]
