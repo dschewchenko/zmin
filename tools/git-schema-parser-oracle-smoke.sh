@@ -214,6 +214,7 @@ run_in_seed_repos branch_no_color_listing branch --no-color
 run_in_seed_repos branch_no_create_reflog branch --no-create-reflog no_reflog_branch
 run_in_seed_repos branch_create_reflog branch --create-reflog reflog_branch
 run_in_seed_repos branch_no_recurse_submodules branch --no-recurse-submodules no_recurse_branch HEAD
+run_in_seed_repos branch_recurse_submodules_requires_config branch --recurse-submodules recurse_branch HEAD
 run_in_seed_repos branch_positional_name branch plain_branch
 run_in_seed_repos branch_positional_start_point branch from_head HEAD
 run_in_seed_repos branch_verbose_short branch -v

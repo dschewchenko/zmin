@@ -4222,6 +4222,7 @@ struct BranchOptions {
     format: Option<String>,
     no_format: bool,
     no_sort: bool,
+    recurse_submodules: bool,
     no_recurse_submodules: bool,
     contains: Option<String>,
     merged: Option<String>,
@@ -4325,6 +4326,14 @@ fn branch(options: BranchOptions) -> Result<()> {
         return Err(CliError::Fatal {
             code: 129,
             message: "options '--column' and '--verbose' cannot be used together".into(),
+        });
+    }
+    if options.recurse_submodules {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "branch with --recurse-submodules can only be used if submodule.propagateBranches is enabled"
+                    .into(),
         });
     }
     let repo = find_repo()?;
@@ -6589,6 +6598,7 @@ pub(crate) fn branch_command(
     format: Option<String>,
     no_format: bool,
     no_sort: bool,
+    recurse_submodules: bool,
     no_recurse_submodules: bool,
     contains: Option<String>,
     merged: Option<String>,
@@ -6632,6 +6642,7 @@ pub(crate) fn branch_command(
         format,
         no_format,
         no_sort,
+        recurse_submodules,
         no_recurse_submodules,
         contains,
         merged,

@@ -3162,6 +3162,8 @@ pub enum Command {
         no_format: bool,
         #[arg(long = "no-sort", action = ArgAction::SetTrue)]
         no_sort: bool,
+        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
+        recurse_submodules: bool,
         #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
         no_recurse_submodules: bool,
         #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
