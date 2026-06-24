@@ -70,13 +70,13 @@ prepare_case() {
   local name="$2"
   cp -R "$base_seed" "$work"
   case "$name" in
-    add_intent_long|add_intent_short|add_intent_repeated_long)
+    add_intent_long|add_intent_short|add_intent_repeated_long|add_intent_repeated_short)
       printf 'intent\n' >"$work/intent.txt"
       ;;
     add_positional_path)
       printf 'new\n' >"$work/new.txt"
       ;;
-    add_all_long|add_all_repeated_long)
+    add_all_long|add_all_repeated_long|add_all_short|add_all_repeated_short)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
@@ -92,7 +92,7 @@ prepare_case() {
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
       ;;
-    add_update_long|add_update_repeated_long)
+    add_update_long|add_update_repeated_long|add_update_short|add_update_repeated_short)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
@@ -207,9 +207,12 @@ make_inner_repo "$inner_seed"
 run_case add_intent_long add --intent-to-add intent.txt
 run_case add_intent_repeated_long add --intent-to-add --intent-to-add intent.txt
 run_case add_intent_short add -N intent.txt
+run_case add_intent_repeated_short add -N -N intent.txt
 run_case add_positional_path add new.txt
 run_case add_all_long add --all
 run_case add_all_repeated_long add --all --all
+run_case add_all_short add -A
+run_case add_all_repeated_short add -A -A
 run_case add_force_long add --force force.ignored
 run_case add_force_repeated_long add --force --force force.ignored
 run_case add_edit_noop add --edit
@@ -219,6 +222,8 @@ run_case add_edit_short_repeated add -e -e
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
 run_case add_update_long add --update
 run_case add_update_repeated_long add --update --update
+run_case add_update_short add -u
+run_case add_update_repeated_short add -u -u
 run_case add_no_all_empty add --no-all
 run_case add_no_all_path add --no-all .
 run_case add_no_all_repeated_long add --no-all --no-all .

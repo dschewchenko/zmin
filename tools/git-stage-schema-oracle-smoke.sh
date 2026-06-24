@@ -67,7 +67,7 @@ prepare_case() {
   local name="$2"
   cp -R "$base_seed" "$work"
   case "$name" in
-    stage_all_long|stage_all_repeated_long|stage_all_short)
+    stage_all_long|stage_all_repeated_long|stage_all_short|stage_all_repeated_short)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
@@ -114,7 +114,7 @@ prepare_case() {
     stage_no_ignore_missing_long|stage_no_ignore_missing_repeated_long)
       printf 'missing off\n' >"$work/missing-off.txt"
       ;;
-    stage_intent_long|stage_intent_repeated_long|stage_intent_short)
+    stage_intent_long|stage_intent_repeated_long|stage_intent_short|stage_intent_repeated_short)
       printf 'intent\n' >"$work/intent.txt"
       ;;
     stage_no_intent_to_add_long|stage_no_intent_to_add_repeated_long)
@@ -158,7 +158,7 @@ prepare_case() {
     stage_no_sparse_long|stage_no_sparse_repeated_long)
       printf 'sparse off\n' >"$work/sparse-off.txt"
       ;;
-    stage_update_long|stage_update_repeated_long|stage_update_short)
+    stage_update_long|stage_update_repeated_long|stage_update_short|stage_update_repeated_short)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
@@ -230,6 +230,7 @@ make_inner_repo "$inner_seed"
 run_case stage_all_long stage --all
 run_case stage_all_repeated_long stage --all --all
 run_case stage_all_short stage -A
+run_case stage_all_repeated_short stage -A -A
 run_case stage_no_all_empty stage --no-all
 run_case stage_no_all_path stage --no-all .
 run_case stage_no_all_repeated_long stage --no-all --no-all .
@@ -264,6 +265,7 @@ run_case stage_no_ignore_missing_repeated_long stage --no-ignore-missing --no-ig
 run_case stage_intent_long stage --intent-to-add intent.txt
 run_case stage_intent_repeated_long stage --intent-to-add --intent-to-add intent.txt
 run_case stage_intent_short stage -N intent.txt
+run_case stage_intent_repeated_short stage -N -N intent.txt
 run_case stage_no_intent_to_add_long stage --no-intent-to-add full.txt
 run_case stage_no_intent_to_add_repeated_long stage --no-intent-to-add --no-intent-to-add full.txt
 run_case stage_pathspec_file_nul stage --pathspec-from-file=paths.nul --pathspec-file-nul
@@ -287,6 +289,7 @@ run_case stage_no_sparse_repeated_long stage --no-sparse --no-sparse sparse-off.
 run_case stage_update_long stage --update
 run_case stage_update_repeated_long stage --update --update
 run_case stage_update_short stage -u
+run_case stage_update_repeated_short stage -u -u
 run_case stage_no_update_long stage --no-update no-update.txt
 run_case stage_no_update_repeated_long stage --no-update --no-update no-update.txt
 run_case stage_verbose_long stage --verbose verbose.txt
