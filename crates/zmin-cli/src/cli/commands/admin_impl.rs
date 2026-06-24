@@ -554,7 +554,7 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         }
     }
     if let Some(chmod) = options.chmod.as_deref() {
-        update_index_chmod(&mut index, &paths, chmod)?;
+        update_index_chmod(&repo, &mut index, &paths, chmod)?;
     }
     update_index_entry_flags(&repo, &mut index, &paths, &options)?;
     if options.refresh && paths.is_empty() {
@@ -814,7 +814,12 @@ fn update_index_cacheinfo_usage_error() -> CliError {
     }
 }
 
-fn update_index_chmod(index: &mut GitIndex, paths: &[PathBuf], chmod: &str) -> Result<()> {
+fn update_index_chmod(
+    repo: &GitRepo,
+    index: &mut GitIndex,
+    paths: &[PathBuf],
+    chmod: &str,
+) -> Result<()> {
     let executable = match chmod {
         "+x" => true,
         "-x" => false,
@@ -826,7 +831,7 @@ fn update_index_chmod(index: &mut GitIndex, paths: &[PathBuf], chmod: &str) -> R
         }
     };
     for path in paths {
-        let path = normalize_git_path(&path.to_string_lossy())?.into_bytes();
+        let path = path_arg_to_repo_relative(repo, path)?;
         let Some(existing) = find_index_entry(index, &path).cloned() else {
             return Err(CliError::Fatal {
                 code: 128,
@@ -837,11 +842,11 @@ fn update_index_chmod(index: &mut GitIndex, paths: &[PathBuf], chmod: &str) -> R
             });
         };
         let mut entry = existing;
-        entry.mode = if executable {
+        entry.set_mode(if executable {
             IndexMode::Executable
         } else {
             IndexMode::File
-        };
+        });
         index.upsert(entry)?;
     }
     Ok(())

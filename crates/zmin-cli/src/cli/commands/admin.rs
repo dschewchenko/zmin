@@ -26,7 +26,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             paths,
         } => super::admin_commands::update_index_command(
             super::admin_commands::UpdateIndexCommandOptions {
-                add,
+                add: add > 0,
                 remove,
                 force_remove,
                 replace,

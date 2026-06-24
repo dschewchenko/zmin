@@ -755,8 +755,8 @@ pub enum Command {
         tags: Vec<String>,
     },
     UpdateIndex {
-        #[arg(long = "add", action = ArgAction::SetTrue)]
-        add: bool,
+        #[arg(long = "add", action = ArgAction::Count)]
+        add: u8,
         #[arg(long = "remove", action = ArgAction::SetTrue)]
         remove: bool,
         #[arg(long = "force-remove", action = ArgAction::SetTrue)]
