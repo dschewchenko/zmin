@@ -609,6 +609,7 @@ pub(crate) fn status(
             &untracked,
             &ignored,
             &pathspecs,
+            ahead_behind,
             untracked_mode,
             stash_count.unwrap_or(0),
             column_untracked,
@@ -1373,6 +1374,7 @@ fn print_human_status(
     untracked: &[Vec<u8>],
     ignored: &[Vec<u8>],
     pathspecs: &[Vec<u8>],
+    ahead_behind: bool,
     untracked_mode: UntrackedMode,
     stash_count: usize,
     column_untracked: bool,
@@ -1386,7 +1388,7 @@ fn print_human_status(
         println!("No commits yet");
     }
     let mut printed_body = !head_has_commit;
-    if head_has_commit && let Some(lines) = human_status_upstream(repo, &refs)? {
+    if head_has_commit && let Some(lines) = human_status_upstream(repo, &refs, ahead_behind)? {
         for line in lines {
             println!("{line}");
         }
@@ -1590,7 +1592,11 @@ fn human_status_branch_header(refs: &RefStore) -> Result<String> {
     }
 }
 
-fn human_status_upstream(repo: &GitRepo, refs: &RefStore) -> Result<Option<Vec<String>>> {
+fn human_status_upstream(
+    repo: &GitRepo,
+    refs: &RefStore,
+    ahead_behind: bool,
+) -> Result<Option<Vec<String>>> {
     let Some(current) = current_branch_ref(refs)? else {
         return Ok(None);
     };
@@ -1598,10 +1604,25 @@ fn human_status_upstream(repo: &GitRepo, refs: &RefStore) -> Result<Option<Vec<S
     let Some(upstream) = read_branch_upstream(repo, &branch)? else {
         return Ok(None);
     };
+    let mut lines = Vec::new();
+    if !ahead_behind {
+        if upstream_differs_from_head(repo, &upstream.ref_name)? {
+            lines.push(format!(
+                "Your branch and '{}' refer to different commits.",
+                upstream.display
+            ));
+            lines.push("  (use \"git status --ahead-behind\" for details)".to_owned());
+        } else {
+            lines.push(format!(
+                "Your branch is up to date with '{}'.",
+                upstream.display
+            ));
+        }
+        return Ok(Some(lines));
+    }
     let Some((ahead, behind)) = upstream_counts(repo, &upstream.ref_name)? else {
         return Ok(None);
     };
-    let mut lines = Vec::new();
     match (ahead, behind) {
         (0, 0) => lines.push(format!(
             "Your branch is up to date with '{}'.",
@@ -10062,7 +10083,7 @@ fn checkout_existing_with_message(
                 eprintln!("Switched to a new branch '{target}'")
             }
         }
-        if let Some(lines) = human_status_upstream(&repo, &head_refs)? {
+        if let Some(lines) = human_status_upstream(&repo, &head_refs, true)? {
             for line in lines {
                 println!("{line}");
             }

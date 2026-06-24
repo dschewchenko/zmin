@@ -114,3 +114,13 @@ run_case status_no_branch_short_no_long --no-branch --short --no-long
 run_case status_short_branch_no_long --long --no-branch --short
 run_case status_no_branch_long_short --no-branch --long --short
 run_case status_short_branch_no_branch --short --branch --no-branch
+run_case status_show_stash_branch --show-stash --branch
+run_case status_branch_show_stash --branch --show-stash
+run_case status_show_stash_no_branch --show-stash --no-branch
+run_case status_no_branch_show_stash --no-branch --show-stash
+run_case status_branch_show_stash_no_show_stash --branch --show-stash --no-show-stash
+run_case status_branch_no_show_stash_show_stash --branch --no-show-stash --show-stash
+run_case status_short_branch_show_stash --short --branch --show-stash
+run_case status_short_branch_show_stash_no_show_stash --short --branch --show-stash --no-show-stash
+run_case status_branch_ahead_behind_no_ahead_behind --branch --ahead-behind --no-ahead-behind
+run_case status_branch_no_ahead_behind_ahead_behind --branch --no-ahead-behind --ahead-behind

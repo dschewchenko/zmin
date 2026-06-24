@@ -484,6 +484,32 @@ fn status_branch_no_ahead_behind_reports_equal_upstream_like_stock_git() {
 }
 
 #[test]
+fn status_branch_no_ahead_behind_reports_different_commits_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(
+        dir.path(),
+        ["clone", remote.to_str().expect("remote path"), "work"],
+    );
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write fixture");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["push", "-u", "origin", "HEAD"]);
+
+    fs::write(work.join("b.txt"), b"local\n").expect("write local");
+    run_zmin(&work, ["add", "-A"]);
+    run_zmin_with_env(&work, ["commit", "-m", "local"]);
+
+    assert_eq!(
+        run_zmin(&work, ["status", "--branch", "--no-ahead-behind"]),
+        git(&work, ["status", "--branch", "--no-ahead-behind"])
+    );
+}
+
+#[test]
 fn status_show_stash_matches_stock_git() {
     let repo = committed_repo();
     fs::write(repo.path().join("a.txt"), b"stash one\n").expect("modify first stash");
