@@ -549,8 +549,10 @@ pub enum Command {
         revs: Vec<String>,
     },
     Cherry {
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbose: u8,
+        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
+        no_verbose: bool,
         #[arg(
             long = "abbrev",
             num_args = 0..=1,

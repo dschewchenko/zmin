@@ -64,10 +64,22 @@ run_case() {
   zmin_exit=$?
   set -e
 
-  test "$git_exit" = "$zmin_exit"
+  if [ "$git_exit" != "$zmin_exit" ]; then
+    echo "$name exit differs: stock=$git_exit zmin=$zmin_exit" >&2
+    echo "stock stderr:" >&2
+    sed -n '1,20p' "$tmpdir/${name}.git.err" >&2
+    echo "zmin stderr:" >&2
+    sed -n '1,20p' "$tmpdir/${name}.zmin.err" >&2
+    return 1
+  fi
   compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
   compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_case cherry_verbose_short_repeated cherry -v -v upstream topic
 run_case cherry_verbose_long cherry --verbose upstream topic
+run_case cherry_verbose_long_repeated cherry --verbose --verbose upstream topic
+run_case cherry_no_verbose_long cherry --no-verbose upstream topic
+run_case cherry_verbose_long_rejects_value cherry --verbose=true upstream topic
+run_case cherry_verbose_short_rejects_value cherry -v=true upstream topic

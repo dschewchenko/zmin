@@ -70,12 +70,13 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => super::history_commands::show_branch(all, remotes, current, sha1_name, no_name, revs),
         runtime::Command::Cherry {
             verbose,
+            no_verbose,
             abbrev,
             upstream,
             head,
             limit,
         } => super::history_commands::cherry(
-            verbose,
+            verbose > 0 && !no_verbose,
             abbrev,
             upstream.as_deref(),
             head.as_deref(),

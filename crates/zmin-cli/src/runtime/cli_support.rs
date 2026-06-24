@@ -117,6 +117,7 @@ pub(crate) fn parse_cli_invocation(
     validate_fetch_pack_invocation_before_clap(&command_args)?;
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
+    validate_cherry_invocation_before_clap(&command_args)?;
     validate_commit_tree_invocation_before_clap(&command_args)?;
     validate_write_tree_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
@@ -481,6 +482,30 @@ fn validate_hash_object_invocation_before_clap(command_args: &[String]) -> Resul
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: unknown option `write'\nusage: git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n                       [--stdin [--literally]] [--] <file>...\n   or: git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]\n\n    -t <type>             object type\n    -w                    write the object into the object database\n    --[no-]stdin          read the object from stdin\n    --[no-]stdin-paths    read file names from stdin\n    --no-filters          store file as is without filters\n    --filters             opposite of --no-filters\n    --[no-]literally      just hash any random garbage to create corrupt objects for debugging Git\n    --[no-]path <file>    process file as it were from this path\n\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_cherry_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("cherry") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--verbose=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `verbose' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("-v=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: unknown switch `='\nusage: git cherry [-v] [<upstream> [<head> [<limit>]]]\n\n    --[no-]abbrev[=<n>]   use <n> digits to display object names\n    -v, --[no-]verbose    be verbose\n\n".into(),
             });
         }
     }
