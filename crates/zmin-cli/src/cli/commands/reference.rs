@@ -217,7 +217,7 @@ pub(crate) fn dispatch(
             stable,
             unstable,
             verbatim,
-        } => run_patch_id(stable, unstable, verbatim),
+        } => run_patch_id(stable > 0, unstable > 0, verbatim > 0),
         runtime::Command::RevParse {
             short,
             abbrev_ref,

@@ -130,6 +130,7 @@ pub(crate) fn parse_cli_invocation(
     validate_prune_packed_invocation_before_clap(&command_args)?;
     validate_verify_pack_invocation_before_clap(&command_args)?;
     validate_count_objects_invocation_before_clap(&command_args)?;
+    validate_patch_id_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -887,6 +888,40 @@ fn validate_count_objects_invocation_before_clap(command_args: &[String]) -> Res
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: unknown switch `='\nusage: git count-objects [-v] [-H | --human-readable]\n\n    -v, --[no-]verbose    be verbose\n    -H, --[no-]human-readable\n                          print sizes in human readable format\n\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_patch_id_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("patch-id") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if let Some(option) = arg.strip_prefix("--").and_then(|value| {
+            value
+                .strip_suffix("=true")
+                .or_else(|| value.strip_suffix("=false"))
+                .or_else(|| value.strip_suffix('='))
+        }) {
+            if matches!(option, "stable" | "unstable" | "verbatim") {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: format!("error: option `{option}' takes no value\n"),
+                });
+            }
+        }
+        if matches!(arg.as_str(), "--no-stable" | "--no-unstable" | "--no-verbatim") {
+            let option = arg.trim_start_matches("--");
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!(
+                    "error: unknown option `{option}'\nusage: git patch-id [--stable | --unstable | --verbatim]\n\n    --unstable            use the unstable patch-id algorithm\n    --stable              use the stable patch-id algorithm\n    --verbatim            don't strip whitespace from the patch\n\n"
+                ),
             });
         }
     }

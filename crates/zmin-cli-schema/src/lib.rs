@@ -845,12 +845,12 @@ pub enum Command {
         args: Vec<String>,
     },
     PatchId {
-        #[arg(long = "stable", action = ArgAction::SetTrue)]
-        stable: bool,
-        #[arg(long = "unstable", action = ArgAction::SetTrue)]
-        unstable: bool,
-        #[arg(long = "verbatim", action = ArgAction::SetTrue)]
-        verbatim: bool,
+        #[arg(long = "stable", action = ArgAction::Count)]
+        stable: u8,
+        #[arg(long = "unstable", action = ArgAction::Count)]
+        unstable: u8,
+        #[arg(long = "verbatim", action = ArgAction::Count)]
+        verbatim: u8,
     },
     Stripspace {
         #[arg(short = 's', long = "strip-comments", action = ArgAction::SetTrue)]
