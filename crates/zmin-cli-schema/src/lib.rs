@@ -1746,6 +1746,8 @@ pub enum Command {
         staged: u8,
         #[arg(short = 'W', long = "worktree", action = ArgAction::Count)]
         worktree: u8,
+        #[arg(long = "no-overlay", action = ArgAction::Count)]
+        no_overlay: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

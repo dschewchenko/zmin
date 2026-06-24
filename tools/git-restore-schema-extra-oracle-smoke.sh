@@ -80,7 +80,10 @@ run_case() {
 run_case restore_worktree_short -W a.txt
 run_case restore_worktree_short_repeated -W -W a.txt
 run_case restore_worktree_long_repeated --worktree --worktree a.txt
+run_case restore_no_overlay_long --no-overlay a.txt
+run_case restore_no_overlay_repeated --no-overlay --no-overlay a.txt
 run_case restore_source_short -s HEAD~1 -W a.txt
 run_case restore_source_short_repeated -s HEAD~1 -s HEAD~1 -W a.txt
 run_case restore_source_long_repeated --source HEAD~1 --source HEAD~1 --worktree a.txt
+run_case restore_no_overlay_source_worktree --no-overlay --source HEAD~1 --worktree a.txt
 run_case restore_staged_repeated --staged --staged a.txt
