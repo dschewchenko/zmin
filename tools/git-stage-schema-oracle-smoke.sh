@@ -83,7 +83,7 @@ prepare_case() {
       ;;
     stage_chmod_long)
       ;;
-    stage_no_chmod_long)
+    stage_no_chmod_long|stage_no_chmod_repeated_long)
       printf 'mode default\n' >"$work/mode-default.txt"
       ;;
     stage_dry_run_long|stage_dry_run_repeated_long|stage_dry_run_short)
@@ -92,7 +92,7 @@ prepare_case() {
     stage_dry_run_repeated|stage_dry_run_verbose_short|stage_dry_run_verbose_long)
       printf 'new\n' >"$work/new.txt"
       ;;
-    stage_no_dry_run_long)
+    stage_no_dry_run_long|stage_no_dry_run_repeated_long)
       printf 'real\n' >"$work/real.txt"
       ;;
     stage_force_long|stage_force_short)
@@ -101,22 +101,22 @@ prepare_case() {
     stage_force_repeated|stage_force_dry_run)
       printf 'ignored\n' >"$work/force.ignored"
       ;;
-    stage_no_ignore_errors_long|stage_ignore_errors_repeated_long)
+    stage_no_ignore_errors_long|stage_no_ignore_errors_repeated_long|stage_ignore_errors_repeated_long)
       printf 'errors off\n' >"$work/errors-off.txt"
       ;;
     stage_ignore_missing_long|stage_ignore_missing_repeated_long)
       printf 'changed\n' >"$work/tracked.txt"
       ;;
-    stage_no_ignore_missing_long)
+    stage_no_ignore_missing_long|stage_no_ignore_missing_repeated_long)
       printf 'missing off\n' >"$work/missing-off.txt"
       ;;
     stage_intent_long|stage_intent_repeated_long|stage_intent_short)
       printf 'intent\n' >"$work/intent.txt"
       ;;
-    stage_no_intent_to_add_long)
+    stage_no_intent_to_add_long|stage_no_intent_to_add_repeated_long)
       printf 'full\n' >"$work/full.txt"
       ;;
-    stage_no_pathspec_file_nul_long)
+    stage_no_pathspec_file_nul_long|stage_no_pathspec_file_nul_repeated_long)
       printf 'lf\n' >"$work/lf-pathspec.txt"
       ;;
     stage_pathspec_file_nul)
@@ -129,7 +129,7 @@ prepare_case() {
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\ndir/two.txt\n' >"$work/paths.txt"
       ;;
-    stage_no_pathspec_from_file_long)
+    stage_no_pathspec_from_file_long|stage_no_pathspec_from_file_repeated_long)
       printf 'pathspec default\n' >"$work/pathspec-default.txt"
       ;;
     stage_positional_path)
@@ -138,20 +138,20 @@ prepare_case() {
     stage_refresh_long)
       printf 'changed\n' >"$work/tracked.txt"
       ;;
-    stage_no_refresh_long)
+    stage_no_refresh_long|stage_no_refresh_repeated_long)
       printf 'fresh\n' >"$work/fresh.txt"
       ;;
     stage_renormalize_long|stage_renormalize_repeated_long)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       ;;
-    stage_no_renormalize_long)
+    stage_no_renormalize_long|stage_no_renormalize_repeated_long)
       printf 'renormalize off\n' >"$work/renormalize-off.txt"
       ;;
-    stage_sparse_long)
+    stage_sparse_long|stage_sparse_repeated_long)
       printf 'sparse ok\n' >"$work/sparse-ok.txt"
       ;;
-    stage_no_sparse_long)
+    stage_no_sparse_long|stage_no_sparse_repeated_long)
       printf 'sparse off\n' >"$work/sparse-off.txt"
       ;;
     stage_update_long|stage_update_repeated_long|stage_update_short)
@@ -159,7 +159,7 @@ prepare_case() {
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
       ;;
-    stage_no_update_long)
+    stage_no_update_long|stage_no_update_repeated_long)
       printf 'new\n' >"$work/no-update.txt"
       ;;
     stage_verbose_long|stage_verbose_repeated_long|stage_verbose_short)
@@ -168,7 +168,7 @@ prepare_case() {
     stage_verbose_repeated)
       printf 'new\n' >"$work/new.txt"
       ;;
-    stage_no_verbose_long)
+    stage_no_verbose_long|stage_no_verbose_repeated_long)
       printf 'quiet\n' >"$work/quiet.txt"
       ;;
     stage_no_warn_embedded_repo_long)
@@ -233,6 +233,7 @@ run_case stage_ignore_removal_long stage --ignore-removal .
 run_case stage_no_ignore_removal_long stage --no-ignore-removal .
 run_case stage_chmod_long stage --chmod=+x mode.txt
 run_case stage_no_chmod_long stage --no-chmod mode-default.txt
+run_case stage_no_chmod_repeated_long stage --no-chmod --no-chmod mode-default.txt
 run_case stage_dry_run_long stage --dry-run dry.txt
 run_case stage_dry_run_repeated_long stage --dry-run --dry-run dry.txt
 run_case stage_dry_run_short stage -n dry.txt
@@ -240,38 +241,50 @@ run_case stage_dry_run_repeated stage -n -n new.txt
 run_case stage_dry_run_verbose_short stage -n -v new.txt
 run_case stage_dry_run_verbose_long stage --dry-run --verbose new.txt
 run_case stage_no_dry_run_long stage --no-dry-run real.txt
+run_case stage_no_dry_run_repeated_long stage --no-dry-run --no-dry-run real.txt
 run_case stage_force_long stage --force force.ignored
 run_case stage_force_short stage -f force.ignored
 run_case stage_force_repeated stage -f -f force.ignored
 run_case stage_force_dry_run stage --force --dry-run force.ignored
 run_case stage_no_ignore_errors_long stage --no-ignore-errors errors-off.txt
+run_case stage_no_ignore_errors_repeated_long stage --no-ignore-errors --no-ignore-errors errors-off.txt
 run_case stage_ignore_errors_repeated_long stage --ignore-errors --ignore-errors errors-off.txt
 run_case stage_ignore_missing_long stage --dry-run --ignore-missing tracked.txt missing.txt
 run_case stage_ignore_missing_repeated_long stage --dry-run --ignore-missing --ignore-missing tracked.txt missing.txt
 run_case stage_no_ignore_missing_long stage --no-ignore-missing missing-off.txt
+run_case stage_no_ignore_missing_repeated_long stage --no-ignore-missing --no-ignore-missing missing-off.txt
 run_case stage_intent_long stage --intent-to-add intent.txt
 run_case stage_intent_repeated_long stage --intent-to-add --intent-to-add intent.txt
 run_case stage_intent_short stage -N intent.txt
 run_case stage_no_intent_to_add_long stage --no-intent-to-add full.txt
+run_case stage_no_intent_to_add_repeated_long stage --no-intent-to-add --no-intent-to-add full.txt
 run_case stage_pathspec_file_nul stage --pathspec-from-file=paths.nul --pathspec-file-nul
 run_case stage_no_pathspec_file_nul_long stage --no-pathspec-file-nul lf-pathspec.txt
+run_case stage_no_pathspec_file_nul_repeated_long stage --no-pathspec-file-nul --no-pathspec-file-nul lf-pathspec.txt
 run_case stage_pathspec_from_file stage --pathspec-from-file=paths.txt
 run_case stage_no_pathspec_from_file_long stage --no-pathspec-from-file pathspec-default.txt
+run_case stage_no_pathspec_from_file_repeated_long stage --no-pathspec-from-file --no-pathspec-from-file pathspec-default.txt
 run_case stage_positional_path stage new.txt
 run_case stage_refresh_long stage --refresh tracked.txt
 run_case stage_no_refresh_long stage --no-refresh fresh.txt
+run_case stage_no_refresh_repeated_long stage --no-refresh --no-refresh fresh.txt
 run_case stage_renormalize_long stage --renormalize .
 run_case stage_renormalize_repeated_long stage --renormalize --renormalize .
 run_case stage_no_renormalize_long stage --no-renormalize renormalize-off.txt
+run_case stage_no_renormalize_repeated_long stage --no-renormalize --no-renormalize renormalize-off.txt
 run_case stage_sparse_long stage --sparse sparse-ok.txt
+run_case stage_sparse_repeated_long stage --sparse --sparse sparse-ok.txt
 run_case stage_no_sparse_long stage --no-sparse sparse-off.txt
+run_case stage_no_sparse_repeated_long stage --no-sparse --no-sparse sparse-off.txt
 run_case stage_update_long stage --update
 run_case stage_update_repeated_long stage --update --update
 run_case stage_update_short stage -u
 run_case stage_no_update_long stage --no-update no-update.txt
+run_case stage_no_update_repeated_long stage --no-update --no-update no-update.txt
 run_case stage_verbose_long stage --verbose verbose.txt
 run_case stage_verbose_repeated_long stage --verbose --verbose verbose.txt
 run_case stage_verbose_short stage -v verbose.txt
 run_case stage_verbose_repeated stage -v -v new.txt
 run_case stage_no_verbose_long stage --no-verbose quiet.txt
+run_case stage_no_verbose_repeated_long stage --no-verbose --no-verbose quiet.txt
 run_case stage_no_warn_embedded_repo_long stage --no-warn-embedded-repo inner
