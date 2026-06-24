@@ -200,6 +200,7 @@ run_in_seed_repos branch_abbrev_listing branch --abbrev=8
 run_in_seed_repos branch_sort_listing branch --sort=refname
 run_in_seed_repos branch_no_sort_listing branch --no-sort
 run_in_seed_repos branch_column_never_listing branch --column=never
+run_in_seed_repos branch_no_column_listing branch --no-column
 run_in_seed_repos branch_color_never_listing branch --color=never
 run_in_seed_repos branch_no_color_listing branch --no-color
 run_in_seed_repos branch_no_create_reflog branch --no-create-reflog no_reflog_branch

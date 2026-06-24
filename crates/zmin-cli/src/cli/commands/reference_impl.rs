@@ -4199,6 +4199,7 @@ struct BranchOptions {
     abbrev: Option<usize>,
     no_abbrev: bool,
     column: Option<String>,
+    no_column: bool,
     color: Option<String>,
     no_color: bool,
     create_reflog: bool,
@@ -4300,6 +4301,7 @@ fn ls_tree(
 }
 
 fn branch(options: BranchOptions) -> Result<()> {
+    let _no_column = options.no_column;
     let _color = &options.color;
     let _no_color = options.no_color;
     if options.help {
@@ -6554,6 +6556,7 @@ pub(crate) fn branch_command(
     abbrev: Option<usize>,
     no_abbrev: bool,
     column: Option<String>,
+    no_column: bool,
     color: Option<String>,
     no_color: bool,
     create_reflog: bool,
@@ -6591,6 +6594,7 @@ pub(crate) fn branch_command(
         abbrev,
         no_abbrev,
         column,
+        no_column,
         color,
         no_color,
         create_reflog,
