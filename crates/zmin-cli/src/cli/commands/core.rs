@@ -105,9 +105,11 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_index > 0,
             paths,
         ),
-        runtime::Command::CheckMailmap { stdin, identities } => {
-            run_check_mailmap(stdin, identities)
-        }
+        runtime::Command::CheckMailmap {
+            stdin,
+            no_stdin,
+            identities,
+        } => run_check_mailmap(stdin > 0 && !no_stdin, identities),
         runtime::Command::CheckAttr { all, stdin, args } => run_check_attr(all, stdin, args),
         runtime::Command::UnpackObjects {
             dry_run,

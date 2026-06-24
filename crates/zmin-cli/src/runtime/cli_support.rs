@@ -106,6 +106,7 @@ pub(crate) fn parse_cli_invocation(
     let command_args = normalize_log_date_hyphen_value(command_args);
     validate_version_invocation_before_clap(&command_args)?;
     validate_var_invocation_before_clap(&command_args)?;
+    validate_check_mailmap_invocation_before_clap(&command_args)?;
     validate_help_invocation_before_clap(&command_args)?;
     validate_unavailable_foreign_helper_invocation_before_clap(&command_args)?;
     validate_sh_helper_invocation_before_clap(&command_args)?;
@@ -253,6 +254,30 @@ fn validate_var_invocation_before_clap(args: &[String]) -> Result<()> {
         return Err(CliError::Stderr {
             code: 129,
             text: "usage: git var (-l | <variable>)\n".into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_check_mailmap_invocation_before_clap(args: &[String]) -> Result<()> {
+    if args.first().map(String::as_str) != Some("check-mailmap") {
+        return Ok(());
+    }
+    for arg in args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--stdin=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `stdin' takes no value\n".into(),
+            });
+        }
+    }
+    if matches!(args, [_, option] if option == "--no-stdin") {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "no contacts specified".into(),
         });
     }
     Ok(())

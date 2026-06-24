@@ -68,8 +68,41 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_stdin_case() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git"
+  local zmin_work="$tmpdir/${name}.zmin"
+  local input="$tmpdir/${name}.stdin"
+  local git_exit=0
+  local zmin_exit=0
+
+  cp -R "$base_seed" "$git_work"
+  cp -R "$base_seed" "$zmin_work"
+  printf 'Alias Name <alias@example.com>\n' >"$input"
+
+  set +e
+  (cd "$git_work" && "$GIT_BIN" "$@") <"$input" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  (cd "$zmin_work" && "$ZMIN_BIN" "$@") <"$input" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  if [ "$git_exit" != "$zmin_exit" ]; then
+    echo "$name exit differs: stock=$git_exit zmin=$zmin_exit" >&2
+    return 1
+  fi
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 
 run_case check_mailmap_positional check-mailmap 'Alias Name <alias@example.com>'
 run_case check_mailmap_multiple check-mailmap 'Alias Name <alias@example.com>' 'Other <old@example.com>'
+run_stdin_case check_mailmap_stdin_repeated check-mailmap --stdin --stdin
+run_stdin_case check_mailmap_no_stdin_rejected check-mailmap --no-stdin
+run_stdin_case check_mailmap_stdin_rejects_value check-mailmap --stdin=true
+run_stdin_case check_mailmap_stdin_rejects_empty_value check-mailmap --stdin=

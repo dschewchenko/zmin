@@ -300,8 +300,10 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     CheckMailmap {
-        #[arg(long = "stdin", action = ArgAction::SetTrue)]
-        stdin: bool,
+        #[arg(long = "stdin", action = ArgAction::Count)]
+        stdin: u8,
+        #[arg(long = "no-stdin", action = ArgAction::SetTrue)]
+        no_stdin: bool,
         identities: Vec<String>,
     },
     CheckAttr {
