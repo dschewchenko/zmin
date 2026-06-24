@@ -66,3 +66,15 @@ run_case merge_file_repeated_quiet_conflict merge-file -q -q ours.txt base.txt t
 run_case merge_file_no_quiet_conflict merge-file --no-quiet ours.txt base.txt theirs.txt
 run_case merge_file_quiet_short_value_invalid merge-file -q=true ours.txt base.txt theirs.txt
 run_case merge_file_quiet_long_value_invalid merge-file --quiet=true ours.txt base.txt theirs.txt
+run_case merge_file_ours_conflict merge-file --ours ours.txt base.txt theirs.txt
+run_case merge_file_theirs_conflict merge-file --theirs ours.txt base.txt theirs.txt
+run_case merge_file_union_conflict merge-file --union ours.txt base.txt theirs.txt
+run_case merge_file_no_ours_conflict merge-file --no-ours ours.txt base.txt theirs.txt
+run_case merge_file_no_theirs_conflict merge-file --no-theirs ours.txt base.txt theirs.txt
+run_case merge_file_no_union_conflict merge-file --no-union ours.txt base.txt theirs.txt
+run_case merge_file_ours_stdout_conflict merge-file -p --ours ours.txt base.txt theirs.txt
+run_case merge_file_theirs_stdout_conflict merge-file -p --theirs ours.txt base.txt theirs.txt
+run_case merge_file_union_stdout_conflict merge-file -p --union ours.txt base.txt theirs.txt
+run_case merge_file_ours_value_invalid merge-file --ours=true ours.txt base.txt theirs.txt
+run_case merge_file_theirs_value_invalid merge-file --theirs=true ours.txt base.txt theirs.txt
+run_case merge_file_union_value_invalid merge-file --union=true ours.txt base.txt theirs.txt

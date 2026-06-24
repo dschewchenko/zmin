@@ -489,9 +489,32 @@ fn write_worktree_file(repo: &GitRepo, path: &[u8], content: &[u8]) -> Result<()
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum MergeFileConflictStyle {
+    Markers,
+    Ours,
+    Theirs,
+    Union,
+}
+
+impl MergeFileConflictStyle {
+    pub(crate) fn from_flags(ours: bool, theirs: bool, union: bool) -> Self {
+        if union {
+            Self::Union
+        } else if theirs {
+            Self::Theirs
+        } else if ours {
+            Self::Ours
+        } else {
+            Self::Markers
+        }
+    }
+}
+
 pub(crate) fn merge_file_command(
     stdout: bool,
     _quiet: bool,
+    conflict_style: MergeFileConflictStyle,
     labels: Vec<String>,
     current: PathBuf,
     base: PathBuf,
@@ -520,12 +543,30 @@ pub(crate) fn merge_file_command(
             .cloned()
             .unwrap_or_else(|| other.display().to_string()),
     };
-    let result = merge_file_core(
+    let mut result = merge_file_core(
         &current_content,
         &base_content,
         &other_content,
         &merge_labels,
     );
+    if result.conflicts > 0 {
+        match conflict_style {
+            MergeFileConflictStyle::Markers => {}
+            MergeFileConflictStyle::Ours => {
+                result.content = current_content.clone();
+                result.conflicts = 0;
+            }
+            MergeFileConflictStyle::Theirs => {
+                result.content = other_content.clone();
+                result.conflicts = 0;
+            }
+            MergeFileConflictStyle::Union => {
+                result.content =
+                    merge_file_union_content(&current_content, &base_content, &other_content);
+                result.conflicts = 0;
+            }
+        }
+    }
     if stdout {
         io::stdout().write_all(&result.content)?;
     } else {
@@ -535,6 +576,68 @@ pub(crate) fn merge_file_command(
         Ok(())
     } else {
         Err(CliError::Exit(result.conflicts.min(127) as i32))
+    }
+}
+
+fn merge_file_union_content(current: &[u8], ancestor: &[u8], other: &[u8]) -> Vec<u8> {
+    let current_lines = merge_file_split_lines(current);
+    let ancestor_lines = merge_file_split_lines(ancestor);
+    let other_lines = merge_file_split_lines(other);
+    let mut prefix_len = 0usize;
+    while prefix_len < current_lines.len()
+        && prefix_len < ancestor_lines.len()
+        && prefix_len < other_lines.len()
+        && current_lines[prefix_len] == ancestor_lines[prefix_len]
+        && ancestor_lines[prefix_len] == other_lines[prefix_len]
+    {
+        prefix_len += 1;
+    }
+    let mut suffix_len = 0usize;
+    while prefix_len + suffix_len < current_lines.len()
+        && prefix_len + suffix_len < ancestor_lines.len()
+        && prefix_len + suffix_len < other_lines.len()
+        && current_lines[current_lines.len() - suffix_len - 1]
+            == ancestor_lines[ancestor_lines.len() - suffix_len - 1]
+        && ancestor_lines[ancestor_lines.len() - suffix_len - 1]
+            == other_lines[other_lines.len() - suffix_len - 1]
+    {
+        suffix_len += 1;
+    }
+    let mut out = Vec::new();
+    merge_file_append_lines(&mut out, &current_lines[..prefix_len]);
+    merge_file_append_lines(
+        &mut out,
+        &current_lines[prefix_len..current_lines.len() - suffix_len],
+    );
+    merge_file_append_lines(
+        &mut out,
+        &other_lines[prefix_len..other_lines.len() - suffix_len],
+    );
+    merge_file_append_lines(&mut out, &current_lines[current_lines.len() - suffix_len..]);
+    out
+}
+
+fn merge_file_split_lines(bytes: &[u8]) -> Vec<&[u8]> {
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            lines.push(&bytes[start..=index]);
+            start = index + 1;
+        }
+    }
+    if start < bytes.len() {
+        lines.push(&bytes[start..]);
+    }
+    lines
+}
+
+fn merge_file_append_lines(out: &mut Vec<u8>, lines: &[&[u8]]) {
+    for line in lines {
+        out.extend_from_slice(line);
     }
 }
 

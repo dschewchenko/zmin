@@ -2947,6 +2947,18 @@ pub enum Command {
         quiet: u8,
         #[arg(long = "no-quiet", action = ArgAction::Count)]
         no_quiet: u8,
+        #[arg(long = "ours", action = ArgAction::Count)]
+        ours: u8,
+        #[arg(long = "no-ours", action = ArgAction::Count)]
+        no_ours: u8,
+        #[arg(long = "theirs", action = ArgAction::Count)]
+        theirs: u8,
+        #[arg(long = "no-theirs", action = ArgAction::Count)]
+        no_theirs: u8,
+        #[arg(long = "union", action = ArgAction::Count)]
+        union: u8,
+        #[arg(long = "no-union", action = ArgAction::Count)]
+        no_union: u8,
         #[arg(short = 'L')]
         labels: Vec<String>,
         current: PathBuf,
