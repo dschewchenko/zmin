@@ -122,6 +122,46 @@ run_tree_after_first_arg_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_tree_after_two_args_case() {
+  local name="$1"
+  local first_arg="$2"
+  local second_arg="$3"
+  shift 3
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_commit="$tmpdir/${name}.git.commit"
+  local zmin_commit="$tmpdir/${name}.zmin.commit"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree "$first_arg" "$second_arg" "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$first_arg" "$second_arg" "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" cat-file commit "$(cat "$git_out")" >"$git_commit"
+  "$GIT_BIN" -C "$zmin_work" cat-file commit "$(cat "$zmin_out")" >"$zmin_commit"
+  compare_files commit_object "$git_commit" "$zmin_commit"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_stdin_case() {
   local name="$1"
   local input="$2"
@@ -345,6 +385,7 @@ run_stdin_case commit_tree_empty_stdin ''
 run_tree_argument_case commit_tree_abbreviated_tree abbreviated 0 -m root
 run_tree_argument_case commit_tree_blob_tree blob 128 -m root
 run_case commit_tree_attached_message -minline
+run_tree_after_two_args_case commit_tree_message_before_tree -m root
 run_case commit_tree_empty_message -m ''
 run_case commit_tree_empty_message_then_message -m '' -m msg
 run_case commit_tree_message_then_empty_message -m msg -m ''
