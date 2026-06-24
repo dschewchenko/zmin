@@ -1403,6 +1403,14 @@ fn merge_tree_write_tree_once(
         });
     }
     let theirs_commit = commit_cache.read_commit(&theirs_id)?;
+    if merge_tree_uses_theirs_strategy(options) {
+        return Ok(MergeTreeWriteResult {
+            tree: theirs_commit.tree.clone(),
+            conflicted: false,
+            stages: Vec::new(),
+            messages: Vec::new(),
+        });
+    }
     let base_id = if let Some(base) = &options.merge_base {
         resolve_commitish(repo, store, base)?
     } else {
@@ -1469,6 +1477,13 @@ fn merge_tree_uses_ours_strategy(options: &MergeTreeOptions) -> bool {
         .strategy_options
         .iter()
         .any(|option| option == "ours")
+}
+
+fn merge_tree_uses_theirs_strategy(options: &MergeTreeOptions) -> bool {
+    options
+        .strategy_options
+        .iter()
+        .any(|option| option == "theirs")
 }
 
 fn merge_tree_automerge_index(
