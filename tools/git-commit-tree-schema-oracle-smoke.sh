@@ -83,6 +83,45 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_tree_after_first_arg_case() {
+  local name="$1"
+  local first_arg="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_commit="$tmpdir/${name}.git.commit"
+  local zmin_commit="$tmpdir/${name}.zmin.commit"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree "$first_arg" "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$first_arg" "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" cat-file commit "$(cat "$git_out")" >"$git_commit"
+  "$GIT_BIN" -C "$zmin_work" cat-file commit "$(cat "$zmin_out")" >"$zmin_commit"
+  compare_files commit_object "$git_commit" "$zmin_commit"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_stdin_case() {
   local name="$1"
   local input="$2"
@@ -318,6 +357,7 @@ run_case commit_tree_message_then_file -m inline -F message.txt
 run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
+run_tree_after_first_arg_case commit_tree_no_gpg_sign_before_tree --no-gpg-sign -m root
 run_parent_case commit_tree_attached_parent attached
 run_parent_case commit_tree_message_before_parent message_first
 run_parent_case commit_tree_duplicate_parent duplicate
