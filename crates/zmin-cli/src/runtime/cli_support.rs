@@ -114,6 +114,7 @@ pub(crate) fn parse_cli_invocation(
     validate_whatchanged_invocation_before_clap(&command_args)?;
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_add_invocation_before_clap(&command_args)?;
+    validate_status_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
     validate_fetch_pack_invocation_before_clap(&command_args)?;
@@ -170,6 +171,26 @@ fn validate_add_invocation_before_clap(command_args: &[String]) -> Result<()> {
 }
 
 const ADD_USAGE: &str = "usage: git add [<options>] [--] <pathspec>...\n\n    -n, --[no-]dry-run    dry run\n    -v, --[no-]verbose    be verbose\n\n    -i, --[no-]interactive\n                          interactive picking\n    -p, --[no-]patch      select hunks interactively\n    -e, --[no-]edit       edit current diff and apply\n    -f, --[no-]force      allow adding otherwise ignored files\n    -u, --[no-]update     update tracked files\n    --[no-]renormalize    renormalize EOL of tracked files (implies -u)\n    -N, --[no-]intent-to-add\n                          record only the fact that the path will be added later\n    -A, --[no-]all        add changes from all tracked and untracked files\n    --[no-]ignore-removal ignore paths removed in the working tree (same as --no-all)\n    --[no-]refresh        don't add, only refresh the index\n    --[no-]ignore-errors  just skip files which cannot be added because of errors\n    --[no-]ignore-missing check if - even missing - files are ignored in dry run\n    --[no-]sparse         allow updating entries outside of the sparse-checkout cone\n    --[no-]chmod (+|-)x   override the executable bit of the listed files\n    --[no-]pathspec-from-file <file>\n                          read pathspec from file\n    --[no-]pathspec-file-nul\n                          with --pathspec-from-file, pathspec elements are separated with NUL character\n\n";
+
+fn validate_status_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("status") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "-1" {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `1'\n{STATUS_USAGE}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+const STATUS_USAGE: &str = "usage: git status [<options>] [--] [<pathspec>...]\n\n    -v, --[no-]verbose    be verbose\n    -s, --[no-]short      show status concisely\n    -b, --[no-]branch     show branch information\n    --[no-]show-stash     show stash information\n    --[no-]ahead-behind   compute full ahead/behind values\n    --[no-]porcelain[=<version>]\n                          machine-readable output\n    --[no-]long           show status in long format (default)\n    -z, --[no-]null       terminate entries with NUL\n    -u, --[no-]untracked-files[=<mode>]\n                          show untracked files, optional modes: all, normal, no. (Default: all)\n    --[no-]ignored[=<mode>]\n                          show ignored files, optional modes: traditional, matching, no. (Default: traditional)\n    --[no-]ignore-submodules[=<when>]\n                          ignore changes to submodules, optional when: all, dirty, untracked. (Default: all)\n    --[no-]column[=<style>]\n                          list untracked files in columns\n    --no-renames          do not detect renames\n    --renames             opposite of --no-renames\n    -M, --find-renames[=<n>]\n                          detect renames, optionally set similarity index\n\n";
 
 fn normalize_empty_init_template(args: Vec<String>) -> Vec<String> {
     if args.first().map(String::as_str) != Some("init") {
