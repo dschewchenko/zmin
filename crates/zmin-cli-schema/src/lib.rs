@@ -2943,6 +2943,10 @@ pub enum Command {
     MergeFile {
         #[arg(short = 'p', long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(long = "no-quiet", action = ArgAction::Count)]
+        no_quiet: u8,
         #[arg(short = 'L')]
         labels: Vec<String>,
         current: PathBuf,

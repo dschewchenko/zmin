@@ -491,6 +491,7 @@ fn write_worktree_file(repo: &GitRepo, path: &[u8], content: &[u8]) -> Result<()
 
 pub(crate) fn merge_file_command(
     stdout: bool,
+    _quiet: bool,
     labels: Vec<String>,
     current: PathBuf,
     base: PathBuf,

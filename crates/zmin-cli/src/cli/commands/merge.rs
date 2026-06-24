@@ -57,11 +57,20 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }),
         runtime::Command::MergeFile {
             stdout,
+            quiet,
+            no_quiet,
             labels,
             current,
             base,
             other,
-        } => super::merge_commands::merge_file_command(stdout, labels, current, base, other),
+        } => super::merge_commands::merge_file_command(
+            stdout,
+            quiet > 0 && no_quiet == 0,
+            labels,
+            current,
+            base,
+            other,
+        ),
         runtime::Command::MergeOneFile {
             orig_blob,
             our_blob,

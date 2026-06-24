@@ -133,6 +133,7 @@ pub(crate) fn parse_cli_invocation(
     validate_patch_id_invocation_before_clap(&command_args)?;
     validate_stripspace_invocation_before_clap(&command_args)?;
     validate_mailsplit_invocation_before_clap(&command_args)?;
+    validate_merge_file_invocation_before_clap(&command_args)?;
     validate_mktree_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
@@ -980,6 +981,31 @@ fn validate_mailsplit_invocation_before_clap(command_args: &[String]) -> Result<
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!("unknown option: {arg}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("merge-file") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git merge-file [<options>] [-L <name1> [-L <orig> [-L <name2>]]] <file1> <orig-file> <file2>\n\n    -p, --[no-]stdout     send results to standard output\n    --[no-]object-id      use object IDs instead of filenames\n    --[no-]diff3          use a diff3 based merge\n    --[no-]zdiff3         use a zealous diff3 based merge\n    --[no-]ours           for conflicts, use our version\n    --[no-]theirs         for conflicts, use their version\n    --[no-]union          for conflicts, use a union version\n    --diff-algorithm <algorithm>\n                          choose a diff algorithm\n    --[no-]marker-size <n>\n                          for conflicts, use this marker size\n    -q, --[no-]quiet      do not warn about conflicts\n    -L <name>             set labels for file1/orig-file/file2\n\n";
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("-q=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `='\n{USAGE}"),
+            });
+        }
+        if arg.starts_with("--quiet=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `quiet' takes no value\n".into(),
             });
         }
     }

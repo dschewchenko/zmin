@@ -31,6 +31,7 @@ seed_files() {
   printf 'one\nours\nthree\n' >"$repo/ours.txt"
   printf 'one\nbase\nthree\n' >"$repo/base.txt"
   printf 'one\nbase\nthree\n' >"$repo/same-base.txt"
+  printf 'one\ntheirs\nthree\n' >"$repo/theirs.txt"
 }
 
 run_case() {
@@ -54,7 +55,14 @@ run_case() {
   test "$git_exit" = "$zmin_exit"
   compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
   compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  compare_files ours "$git_work/ours.txt" "$zmin_work/ours.txt"
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
 run_case merge_file_stdout_long merge-file --stdout ours.txt base.txt same-base.txt
+run_case merge_file_quiet_conflict merge-file -q ours.txt base.txt theirs.txt
+run_case merge_file_quiet_long_conflict merge-file --quiet ours.txt base.txt theirs.txt
+run_case merge_file_repeated_quiet_conflict merge-file -q -q ours.txt base.txt theirs.txt
+run_case merge_file_no_quiet_conflict merge-file --no-quiet ours.txt base.txt theirs.txt
+run_case merge_file_quiet_short_value_invalid merge-file -q=true ours.txt base.txt theirs.txt
+run_case merge_file_quiet_long_value_invalid merge-file --quiet=true ours.txt base.txt theirs.txt
