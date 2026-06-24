@@ -62,6 +62,26 @@ run_exact() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_invalid() {
+  local name="$1"
+  local stdin_data="$2"
+  shift 2
+  local git_exit=0
+  local zmin_exit=0
+
+  set +e
+  printf '%s' "$stdin_data" | "$GIT_BIN" -C "$repo" merge-tree "$@" >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
+  git_exit=$?
+  printf '%s' "$stdin_data" | "$ZMIN_BIN" -C "$repo" merge-tree "$@" >"$tmpdir/$name.zmin.out" 2>"$tmpdir/$name.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
+  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 repo="$tmpdir/repo"
 make_repo "$repo"
 
@@ -71,8 +91,11 @@ run_exact merge_tree_no_messages "" --write-tree --no-messages "$ours_commit" "$
 run_exact merge_tree_quiet "" --write-tree --quiet "$ours_commit" "$theirs_commit"
 run_exact merge_tree_z "" --write-tree -z "$ours_commit" "$theirs_commit"
 run_exact merge_tree_name_only "" --write-tree --name-only "$ours_commit" "$theirs_commit"
+run_exact merge_tree_name_only_no_messages "" --write-tree --name-only --no-messages "$ours_commit" "$theirs_commit"
 run_exact merge_tree_allow_unrelated "" --write-tree --allow-unrelated-histories "$ours_commit" "$theirs_commit"
 run_exact merge_tree_stdin "$ours_commit $theirs_commit"$'\n' --write-tree --stdin
 run_exact merge_tree_merge_base "" --write-tree --merge-base="$base_commit" "$ours_commit" "$theirs_commit"
+run_exact merge_tree_merge_base_separate "" --write-tree --merge-base "$base_commit" "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option "" --write-tree --strategy-option=ours "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option_short "" --write-tree -X ours "$ours_commit" "$theirs_commit"
+run_invalid merge_tree_strategy_option_short_equals_invalid "" --write-tree -X=ours "$ours_commit" "$theirs_commit"

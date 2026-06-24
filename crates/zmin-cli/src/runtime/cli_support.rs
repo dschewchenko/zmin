@@ -1088,6 +1088,12 @@ fn validate_merge_tree_invocation_before_clap(command_args: &[String]) -> Result
         if arg == "--" {
             break;
         }
+        if arg.starts_with("-X=") {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("unknown strategy option: {arg}"),
+            });
+        }
         if let Some(option) = arg
             .strip_prefix('-')
             .and_then(|value| value.as_bytes().first().copied())
