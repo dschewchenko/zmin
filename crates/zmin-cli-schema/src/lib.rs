@@ -3151,6 +3151,8 @@ pub enum Command {
         heads: bool,
         #[arg(long = "tags", action = ArgAction::SetTrue)]
         tags: bool,
+        #[arg(short = 'd', long = "dereference", action = ArgAction::SetTrue)]
+        dereference: bool,
         #[arg(
             short = 's',
             long = "hash",

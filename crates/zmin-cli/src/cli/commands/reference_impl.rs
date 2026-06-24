@@ -1831,6 +1831,7 @@ pub(crate) fn show_ref(
     head: bool,
     heads: bool,
     tags: bool,
+    dereference: bool,
     hash: Option<usize>,
     abbrev: Option<usize>,
     verify: bool,
@@ -1935,10 +1936,40 @@ pub(crate) fn show_ref(
     if let Some(id) = head_id {
         print_show_ref_row(&id, "HEAD", format)?;
     }
+    let store = if dereference {
+        Some(LooseObjectStore::new(
+            repo.objects_dir.clone(),
+            GitHashAlgorithm::Sha1,
+        ))
+    } else {
+        None
+    };
     for (name, id) in rows {
         print_show_ref_row(&id, &name, format)?;
+        if let Some(store) = &store
+            && let Some(peeled) = peel_show_ref_tag(store, &id)?
+        {
+            print_show_ref_row(&peeled, &format!("{name}^{{}}"), format)?;
+        }
     }
     Ok(())
+}
+
+fn peel_show_ref_tag(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<ObjectId>> {
+    let mut current = id.clone();
+    let mut peeled_any = false;
+    for _ in 0..8 {
+        let object = store.read_object(&current)?;
+        if object.kind != GitObjectKind::Tag {
+            return Ok(peeled_any.then_some(current));
+        }
+        peeled_any = true;
+        current = decode_tag(GitHashAlgorithm::Sha1, &object.content)?.target;
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: "tag nesting is too deep".into(),
+    })
 }
 
 pub(crate) fn for_each_ref(

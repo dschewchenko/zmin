@@ -41,6 +41,7 @@ seed_repo() {
   printf 'one\n' >"$repo/a.txt"
   "$GIT_BIN" -C "$repo" add a.txt
   "$GIT_BIN" -C "$repo" commit -q -m one
+  "$GIT_BIN" -C "$repo" tag -a v1 -m v1
 }
 
 run_case() {
@@ -89,3 +90,5 @@ run_case show_ref_hash_long show-ref --hash
 run_case show_ref_hash_long_value show-ref --hash=12
 run_case show_ref_head_long show-ref --head
 run_case show_ref_branches_alias show-ref --branches
+run_case show_ref_dereference_long show-ref --dereference
+run_case show_ref_dereference_short show-ref -d

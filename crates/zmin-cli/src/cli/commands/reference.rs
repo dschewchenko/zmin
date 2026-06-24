@@ -49,12 +49,24 @@ pub(crate) fn dispatch(
             head,
             heads,
             tags,
+            dereference,
             hash,
             abbrev,
             verify,
             exists,
             refs,
-        } => run_show_ref(quiet, head, heads, tags, hash, abbrev, verify, exists, refs),
+        } => run_show_ref(
+            quiet,
+            head,
+            heads,
+            tags,
+            dereference,
+            hash,
+            abbrev,
+            verify,
+            exists,
+            refs,
+        ),
         runtime::Command::ForEachRef {
             format,
             sort,
@@ -341,6 +353,7 @@ pub(crate) fn run_show_ref(
     head: bool,
     heads: bool,
     tags: bool,
+    dereference: bool,
     hash: Option<usize>,
     abbrev: Option<usize>,
     verify: bool,
@@ -348,7 +361,16 @@ pub(crate) fn run_show_ref(
     refs: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
     super::reference_commands::show_ref(
-        quiet, head, heads, tags, hash, abbrev, verify, exists, refs,
+        quiet,
+        head,
+        heads,
+        tags,
+        dereference,
+        hash,
+        abbrev,
+        verify,
+        exists,
+        refs,
     )
 }
 
