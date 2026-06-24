@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ZMIN_BIN="${ZMIN_BIN:-target/release/zmin}"
+GIT_BIN="${GIT_BIN:-/usr/bin/git}"
+case "$ZMIN_BIN" in
+  /*) ;;
+  *) ZMIN_BIN="$PWD/$ZMIN_BIN" ;;
+esac
+
+export GIT_AUTHOR_NAME=Oracle
+export GIT_AUTHOR_EMAIL=oracle@example.com
+export GIT_AUTHOR_DATE="1700000000 +0000"
+export GIT_COMMITTER_NAME=Oracle
+export GIT_COMMITTER_EMAIL=oracle@example.com
+export GIT_COMMITTER_DATE="1700000000 +0000"
+
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-range-diff-schema-oracle.XXXXXX")"
+cleanup() {
+  rm -rf "$tmpdir"
+}
+trap cleanup EXIT
+
+compare_files() {
+  local label="$1"
+  local left="$2"
+  local right="$3"
+  if ! cmp -s "$left" "$right"; then
+    echo "$label differs" >&2
+    diff -u "$left" "$right" >&2 || true
+    return 1
+  fi
+}
+
+seed_repo() {
+  local repo="$1"
+  "$GIT_BIN" init -q -b main "$repo"
+  "$GIT_BIN" -C "$repo" config user.name Oracle
+  "$GIT_BIN" -C "$repo" config user.email oracle@example.com
+
+  printf 'base\n' >"$repo/base.txt"
+  "$GIT_BIN" -C "$repo" add base.txt
+  "$GIT_BIN" -C "$repo" commit -qm base
+
+  "$GIT_BIN" -C "$repo" checkout -q -b old
+  printf 'one\n' >"$repo/a.txt"
+  "$GIT_BIN" -C "$repo" add a.txt
+  "$GIT_BIN" -C "$repo" commit -qm 'add one'
+  printf 'two\n' >"$repo/b.txt"
+  "$GIT_BIN" -C "$repo" add b.txt
+  "$GIT_BIN" -C "$repo" commit -qm 'add two'
+
+  "$GIT_BIN" -C "$repo" checkout -q main
+  "$GIT_BIN" -C "$repo" checkout -q -b new
+  printf 'one\n' >"$repo/a.txt"
+  "$GIT_BIN" -C "$repo" add a.txt
+  "$GIT_BIN" -C "$repo" commit -qm 'add one'
+  printf 'three\n' >"$repo/c.txt"
+  "$GIT_BIN" -C "$repo" add c.txt
+  "$GIT_BIN" -C "$repo" commit -qm 'add three'
+}
+
+run_case() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  if [ "$git_exit" != "$zmin_exit" ]; then
+    echo "$name exit differs: stock=$git_exit zmin=$zmin_exit" >&2
+    echo "stock stderr:" >&2
+    sed -n '1,20p' "$tmpdir/${name}.git.err" >&2
+    echo "zmin stderr:" >&2
+    sed -n '1,20p' "$tmpdir/${name}.zmin.err" >&2
+    return 1
+  fi
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
+run_case range_diff_no_dual_color_repeated range-diff --no-dual-color --no-dual-color main..old main..new
+run_case range_diff_no_dual_color_rejects_value range-diff --no-dual-color=true main..old main..new
+run_case range_diff_no_dual_color_rejects_empty_value range-diff --no-dual-color= main..old main..new

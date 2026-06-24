@@ -2353,8 +2353,8 @@ pub enum Command {
         args: Vec<String>,
     },
     RangeDiff {
-        #[arg(long = "no-dual-color", action = ArgAction::SetTrue)]
-        no_dual_color: bool,
+        #[arg(long = "no-dual-color", action = ArgAction::Count)]
+        no_dual_color: u8,
         ranges: Vec<String>,
     },
     #[command(disable_help_flag = true)]

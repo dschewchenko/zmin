@@ -12,7 +12,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::RangeDiff {
             no_dual_color,
             ranges,
-        } => run_range_diff(no_dual_color, ranges),
+        } => run_range_diff(no_dual_color > 0, ranges),
         runtime::Command::FilterBranch {
             force,
             msg_filter,
