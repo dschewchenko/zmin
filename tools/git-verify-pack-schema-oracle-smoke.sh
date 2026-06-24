@@ -50,8 +50,12 @@ run_case verify_pack_object_format_sha1 0 --object-format=sha1
 run_case verify_pack_object_format_sha256_invalid 1 --object-format=sha256
 run_case verify_pack_verbose_long 0 --verbose
 run_case verify_pack_stat_only_long 0 --stat-only
+run_case verify_pack_verbose_stat_only 0 --verbose --stat-only
+run_case verify_pack_stat_only_verbose 0 --stat-only --verbose
 run_case verify_pack_verbose_short_repeated 0 -v -v
 run_case verify_pack_stat_only_short_repeated 0 -s -s
+run_case verify_pack_short_verbose_stat_only 0 -v -s
+run_case verify_pack_short_stat_only_verbose 0 -s -v
 run_case verify_pack_no_verbose 0 --no-verbose
 run_case verify_pack_no_stat_only 0 --no-stat-only
 run_case verify_pack_verbose_long_rejects_value 129 --verbose=true

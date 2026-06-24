@@ -205,7 +205,9 @@ run_edit_oracle() {
 
 run_force_oracle replace_force_long --force
 run_force_oracle replace_force_short -f
+run_existing_replace_oracle replace_list_long_no_pattern --list
 run_existing_replace_oracle replace_list_long --list '*'
+run_existing_replace_oracle replace_format_short --format=short
 run_existing_replace_oracle replace_delete_long --delete __REPLACED_OBJECT__
 run_graft_oracle replace_graft_short -g
 run_edit_oracle replace_edit_short -e
