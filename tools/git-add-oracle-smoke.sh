@@ -87,12 +87,12 @@ prepare_case() {
     add_edit_noop|add_edit_short_noop|add_edit_repeated|add_edit_short_repeated)
       printf 'changed\n' >"$work/tracked.txt"
       ;;
-    add_pathspec_file_nul)
+    add_pathspec_file_nul|add_pathspec_file_nul_repeated)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
       ;;
-    add_pathspec_from_file_lf|add_pathspec_from_file_lf_separate)
+    add_pathspec_from_file_lf|add_pathspec_from_file_lf_separate|add_pathspec_from_file_no_nul)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\ndir/two.txt\n' >"$work/paths.lf"
@@ -236,8 +236,10 @@ run_case add_edit_short_noop add -e
 run_case add_edit_repeated add --edit --edit
 run_case add_edit_short_repeated add -e -e
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
+run_case add_pathspec_file_nul_repeated add --pathspec-from-file=paths.nul --pathspec-file-nul --pathspec-file-nul
 run_case add_pathspec_from_file_lf add --pathspec-from-file=paths.lf
 run_case add_pathspec_from_file_lf_separate add --pathspec-from-file paths.lf
+run_case add_pathspec_from_file_no_nul add --pathspec-from-file=paths.lf --no-pathspec-file-nul
 run_case add_update_long add --update
 run_case add_update_repeated_long add --update --update
 run_case add_update_short add -u

@@ -123,12 +123,12 @@ prepare_case() {
     stage_no_pathspec_file_nul_long|stage_no_pathspec_file_nul_repeated_long)
       printf 'lf\n' >"$work/lf-pathspec.txt"
       ;;
-    stage_pathspec_file_nul)
+    stage_pathspec_file_nul|stage_pathspec_file_nul_repeated)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
       ;;
-    stage_pathspec_from_file|stage_pathspec_from_file_separate)
+    stage_pathspec_from_file|stage_pathspec_from_file_separate|stage_pathspec_from_file_no_nul)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\ndir/two.txt\n' >"$work/paths.txt"
@@ -274,10 +274,12 @@ run_case stage_intent_repeated_short stage -N -N intent.txt
 run_case stage_no_intent_to_add_long stage --no-intent-to-add full.txt
 run_case stage_no_intent_to_add_repeated_long stage --no-intent-to-add --no-intent-to-add full.txt
 run_case stage_pathspec_file_nul stage --pathspec-from-file=paths.nul --pathspec-file-nul
+run_case stage_pathspec_file_nul_repeated stage --pathspec-from-file=paths.nul --pathspec-file-nul --pathspec-file-nul
 run_case stage_no_pathspec_file_nul_long stage --no-pathspec-file-nul lf-pathspec.txt
 run_case stage_no_pathspec_file_nul_repeated_long stage --no-pathspec-file-nul --no-pathspec-file-nul lf-pathspec.txt
 run_case stage_pathspec_from_file stage --pathspec-from-file=paths.txt
 run_case stage_pathspec_from_file_separate stage --pathspec-from-file paths.txt
+run_case stage_pathspec_from_file_no_nul stage --pathspec-from-file=paths.txt --no-pathspec-file-nul
 run_case stage_no_pathspec_from_file_long stage --no-pathspec-from-file pathspec-default.txt
 run_case stage_no_pathspec_from_file_repeated_long stage --no-pathspec-from-file --no-pathspec-from-file pathspec-default.txt
 run_case stage_positional_path stage new.txt
