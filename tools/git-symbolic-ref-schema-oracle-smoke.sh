@@ -85,3 +85,5 @@ run_case() {
 run_case symbolic_ref_positional_name symbolic-ref HEAD
 run_case symbolic_ref_positional_target symbolic-ref HEAD refs/heads/plumbing
 run_case symbolic_ref_quiet_long symbolic-ref --quiet HEAD
+run_case symbolic_ref_short_head symbolic-ref --short HEAD
+run_case symbolic_ref_no_recurse_head symbolic-ref --no-recurse HEAD
