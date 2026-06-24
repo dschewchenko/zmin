@@ -204,6 +204,8 @@ run_in_seed_repos branch_no_sort_listing branch --no-sort
 run_in_seed_repos branch_no_verbose_listing branch --no-verbose
 run_in_seed_repos branch_column_never_listing branch --column=never
 run_in_seed_repos branch_no_column_listing branch --no-column
+run_in_seed_repos branch_ignore_case_long_listing branch --ignore-case
+run_in_seed_repos branch_ignore_case_short_listing branch -i
 run_in_seed_repos branch_color_never_listing branch --color=never
 run_in_seed_repos branch_no_color_listing branch --no-color
 run_in_seed_repos branch_no_create_reflog branch --no-create-reflog no_reflog_branch
