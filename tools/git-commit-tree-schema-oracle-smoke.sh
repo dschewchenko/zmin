@@ -409,6 +409,7 @@ run_case commit_tree_message_then_file -m inline -F message.txt
 run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
+run_case commit_tree_repeated_no_gpg_sign --no-gpg-sign --no-gpg-sign -m root
 run_tree_after_first_arg_case commit_tree_no_gpg_sign_before_tree --no-gpg-sign -m root
 run_parent_case commit_tree_attached_parent attached
 run_parent_case commit_tree_message_before_parent message_first

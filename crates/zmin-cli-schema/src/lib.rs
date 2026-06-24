@@ -1502,7 +1502,7 @@ pub enum Command {
         messages: Vec<String>,
         #[arg(short = 'F')]
         message_files: Vec<PathBuf>,
-        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue)]
+        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue, overrides_with = "no_gpg_sign")]
         no_gpg_sign: bool,
     },
     Mktree {
