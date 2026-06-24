@@ -92,5 +92,15 @@ run_case status_branch_long_long --branch --long
 run_case status_verbose_branch_long --verbose --branch
 run_case status_branch_verbose_long --branch --verbose
 run_case status_verbose_short_branch -v -b
+run_case status_verbose_no_branch_long --verbose --no-branch
+run_case status_no_branch_verbose_long --no-branch --verbose
+run_case status_verbose_short_no_branch -v --no-branch
+run_case status_long_no_branch_long --long --no-branch
+run_case status_no_branch_long_long --no-branch --long
+run_case status_branch_no_branch --branch --no-branch
+run_case status_no_branch_branch --no-branch --branch
+run_case status_branch_short_no_branch -b --no-branch
+run_case status_no_branch_branch_short --no-branch -b
 run_case status_short_no_branch --short --no-branch
 run_case status_no_branch_short --no-branch --short
+run_case status_short_branch_no_branch --short --branch --no-branch
