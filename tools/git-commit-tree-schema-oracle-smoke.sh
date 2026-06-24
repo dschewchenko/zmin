@@ -366,6 +366,12 @@ run_parent_case() {
       "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" -m child -p "$zmin_parent" >"$zmin_out" 2>"$zmin_err"
       zmin_exit=$?
       ;;
+    parent_first)
+      "$GIT_BIN" -C "$git_work" commit-tree -p "$git_parent" "$git_tree" -m child >"$git_out" 2>"$git_err"
+      git_exit=$?
+      "$ZMIN_BIN" -C "$zmin_work" commit-tree -p "$zmin_parent" "$zmin_tree" -m child >"$zmin_out" 2>"$zmin_err"
+      zmin_exit=$?
+      ;;
     duplicate)
       "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" -p "$git_parent" -p "$git_parent" -m child >"$git_out" 2>"$git_err"
       git_exit=$?
@@ -406,6 +412,7 @@ run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
 run_tree_after_first_arg_case commit_tree_no_gpg_sign_before_tree --no-gpg-sign -m root
 run_parent_case commit_tree_attached_parent attached
 run_parent_case commit_tree_message_before_parent message_first
+run_parent_case commit_tree_parent_before_tree parent_first
 run_parent_case commit_tree_duplicate_parent duplicate
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
