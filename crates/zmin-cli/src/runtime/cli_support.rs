@@ -128,6 +128,7 @@ pub(crate) fn parse_cli_invocation(
     validate_show_index_invocation_before_clap(&command_args)?;
     validate_update_server_info_invocation_before_clap(&command_args)?;
     validate_prune_packed_invocation_before_clap(&command_args)?;
+    validate_verify_commit_invocation_before_clap(&command_args)?;
     validate_verify_pack_invocation_before_clap(&command_args)?;
     validate_count_objects_invocation_before_clap(&command_args)?;
     validate_patch_id_invocation_before_clap(&command_args)?;
@@ -834,6 +835,25 @@ fn validate_prune_packed_invocation_before_clap(command_args: &[String]) -> Resu
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: unknown switch `='\nusage: git prune-packed [-n | --dry-run] [-q | --quiet]\n\n    -n, --[no-]dry-run    dry run\n    -q, --[no-]quiet      be quiet\n\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_verify_commit_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("verify-commit") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git verify-commit [-v | --verbose] [--raw] <commit>...\n\n    -v, --[no-]verbose    print commit contents\n    --[no-]raw            print raw gpg status output\n\n";
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "-S" || arg.starts_with("-S") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `S'\n{USAGE}"),
             });
         }
     }
