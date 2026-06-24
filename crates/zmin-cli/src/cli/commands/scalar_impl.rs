@@ -591,6 +591,7 @@ fn scalar_clone(options: ScalarCloneOptions) -> Result<()> {
         no_local: false,
         depth: None,
         branch,
+        ref_format: None,
         keep_partial_on_missing_branch: true,
         repository: url,
         directory: Some(clone_directory.clone()),

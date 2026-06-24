@@ -4,6 +4,8 @@ use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
+use crc32fast::Hasher as Crc32Hasher;
+
 use crate::{
     GitHashAlgorithm, GitObjectKind, GitObjectStore, LooseObjectStore, ObjectId, decode_tag,
 };
@@ -14,6 +16,9 @@ const REFTABLE_HEADER_V1_LEN: usize = 24;
 const REFTABLE_HEADER_V2_LEN: usize = 28;
 const REFTABLE_BLOCK_HEADER_LEN: usize = 4;
 const REFTABLE_RESTART_COUNT_LEN: usize = 2;
+const REFTABLE_FOOTER_V1_LEN: usize = 68;
+const REFTABLE_BLOCK_SIZE: usize = 4096;
+const REFTABLE_TABLE_NAME_CAPACITY: usize = 45;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefTarget {
@@ -69,10 +74,36 @@ impl RefStore {
                 "object id algorithm does not match ref store",
             ));
         }
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            let mut refs = self.read_reftable_refs().or_else(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    Ok(BTreeMap::new())
+                } else {
+                    Err(error)
+                }
+            })?;
+            refs.insert(name.to_owned(), RefTarget::Direct(id.clone()));
+            return self.write_reftable_refs(&refs);
+        }
         atomic_write(self.ref_path(name), format!("{}\n", id.to_hex()).as_bytes())
     }
 
     pub fn write_symbolic_ref(&self, name: &str, target: &str) -> io::Result<()> {
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            if name != "HEAD" {
+                validate_ref_name(name)?;
+            }
+            validate_ref_name(target)?;
+            let mut refs = self.read_reftable_refs().or_else(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    Ok(BTreeMap::new())
+                } else {
+                    Err(error)
+                }
+            })?;
+            refs.insert(name.to_owned(), RefTarget::Symbolic(target.to_owned()));
+            return self.write_reftable_refs(&refs);
+        }
         if name == "HEAD" {
             return self.write_head_symbolic(target);
         }
@@ -221,6 +252,27 @@ impl RefStore {
         direct_refs: &[(String, ObjectId)],
         symbolic_refs: &[(String, String)],
     ) -> io::Result<()> {
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            let mut refs = BTreeMap::new();
+            for (name, id) in direct_refs {
+                validate_ref_name(name)?;
+                if id.algorithm() != self.algorithm {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "object id algorithm does not match ref store",
+                    ));
+                }
+                refs.insert(name.clone(), RefTarget::Direct(id.clone()));
+            }
+            for (name, target) in symbolic_refs {
+                if name != "HEAD" {
+                    validate_ref_name(name)?;
+                }
+                validate_ref_name(target)?;
+                refs.insert(name.clone(), RefTarget::Symbolic(target.clone()));
+            }
+            return self.write_reftable_refs(&refs);
+        }
         let mut packed = BTreeMap::new();
         for (name, id) in direct_refs {
             validate_ref_name(name)?;
@@ -288,6 +340,17 @@ impl RefStore {
 
     pub fn write_head_symbolic(&self, target: &str) -> io::Result<()> {
         validate_ref_name(target)?;
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            let mut refs = self.read_reftable_refs().or_else(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    Ok(BTreeMap::new())
+                } else {
+                    Err(error)
+                }
+            })?;
+            refs.insert("HEAD".to_owned(), RefTarget::Symbolic(target.to_owned()));
+            return self.write_reftable_refs(&refs);
+        }
         atomic_write(
             self.git_dir.join("HEAD"),
             format!("ref: {target}\n").as_bytes(),
@@ -300,6 +363,17 @@ impl RefStore {
                 io::ErrorKind::InvalidInput,
                 "object id algorithm does not match ref store",
             ));
+        }
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            let mut refs = self.read_reftable_refs().or_else(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    Ok(BTreeMap::new())
+                } else {
+                    Err(error)
+                }
+            })?;
+            refs.insert("HEAD".to_owned(), RefTarget::Direct(id.clone()));
+            return self.write_reftable_refs(&refs);
         }
         atomic_write(
             self.git_dir.join("HEAD"),
@@ -416,6 +490,10 @@ impl RefStore {
     fn read_reftable_refs(&self) -> io::Result<BTreeMap<String, RefTarget>> {
         read_reftable_stack(&self.git_dir, self.algorithm)
     }
+
+    fn write_reftable_refs(&self, refs: &BTreeMap<String, RefTarget>) -> io::Result<()> {
+        write_reftable_stack(&self.git_dir, self.algorithm, refs)
+    }
 }
 
 fn peel_tag_ref<S: GitObjectStore>(store: &S, id: &ObjectId) -> io::Result<Option<ObjectId>> {
@@ -466,6 +544,142 @@ fn read_reftable_stack(
         }
     }
     Ok(refs)
+}
+
+fn write_reftable_stack(
+    git_dir: &Path,
+    algorithm: GitHashAlgorithm,
+    refs: &BTreeMap<String, RefTarget>,
+) -> io::Result<()> {
+    if algorithm != GitHashAlgorithm::Sha1 {
+        return Err(reftable_invalid("reftable writer currently supports sha1"));
+    }
+    let reftable_dir = git_dir.join("reftable");
+    fs::create_dir_all(&reftable_dir)?;
+    write_reftable_dummy_files(git_dir)?;
+    let update_index = next_reftable_update_index(&reftable_dir)?;
+    let table_name = reftable_table_name(update_index);
+    let table_path = reftable_dir.join(&table_name);
+    let bytes = encode_reftable_v1(update_index, refs)?;
+    atomic_write(table_path, &bytes)?;
+    atomic_write(
+        reftable_dir.join("tables.list"),
+        format!("{table_name}\n").as_bytes(),
+    )
+}
+
+fn write_reftable_dummy_files(git_dir: &Path) -> io::Result<()> {
+    atomic_write(git_dir.join("HEAD"), b"ref: refs/heads/.invalid\n")?;
+    let refs_dir = git_dir.join("refs");
+    fs::create_dir_all(&refs_dir)?;
+    let heads = refs_dir.join("heads");
+    if heads.is_dir() {
+        fs::remove_dir_all(&heads)?;
+    }
+    atomic_write(heads, b"this repository uses reftable\n")
+}
+
+fn next_reftable_update_index(reftable_dir: &Path) -> io::Result<u64> {
+    let tables = match fs::read_to_string(reftable_dir.join("tables.list")) {
+        Ok(tables) => tables,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(1),
+        Err(error) => return Err(error),
+    };
+    Ok(tables
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count() as u64
+        + 1)
+}
+
+fn reftable_table_name(update_index: u64) -> String {
+    let mut name = String::with_capacity(REFTABLE_TABLE_NAME_CAPACITY);
+    name.push_str(&format!(
+        "0x{update_index:012x}-0x{update_index:012x}-zmin.ref"
+    ));
+    name
+}
+
+fn encode_reftable_v1(
+    update_index: u64,
+    refs: &BTreeMap<String, RefTarget>,
+) -> io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    write_reftable_header_v1(&mut out, update_index);
+    let mut block = Vec::new();
+    block.push(b'r');
+    block.extend_from_slice(&[0, 0, 0]);
+    let mut restart_offsets = Vec::new();
+    let mut prior = Vec::new();
+    for (name, target) in refs {
+        if name != "HEAD" {
+            validate_ref_name(name)?;
+        }
+        let offset = REFTABLE_HEADER_V1_LEN + block.len();
+        if restart_offsets.is_empty() {
+            restart_offsets.push(offset);
+        }
+        let name_bytes = name.as_bytes();
+        let prefix_len = common_prefix_len(&prior, name_bytes);
+        let suffix = &name_bytes[prefix_len..];
+        write_reftable_varint(&mut block, prefix_len as u64);
+        let value_type = match target {
+            RefTarget::Direct(_) => 1_u64,
+            RefTarget::Symbolic(_) => 3_u64,
+        };
+        write_reftable_varint(&mut block, ((suffix.len() as u64) << 3) | value_type);
+        block.extend_from_slice(suffix);
+        write_reftable_varint(&mut block, 0);
+        match target {
+            RefTarget::Direct(id) => {
+                if id.algorithm() != GitHashAlgorithm::Sha1 {
+                    return Err(reftable_invalid("reftable writer currently supports sha1"));
+                }
+                block.extend_from_slice(id.as_bytes());
+            }
+            RefTarget::Symbolic(target) => {
+                validate_ref_name(target)?;
+                write_reftable_varint(&mut block, target.len() as u64);
+                block.extend_from_slice(target.as_bytes());
+            }
+        }
+        prior.clear();
+        prior.extend_from_slice(name_bytes);
+    }
+    for offset in restart_offsets {
+        write_u24(&mut block, offset)?;
+    }
+    block.extend_from_slice(&1_u16.to_be_bytes());
+    let block_len = REFTABLE_HEADER_V1_LEN + block.len();
+    write_u24_at(&mut block, 1, block_len)?;
+    if block_len > REFTABLE_BLOCK_SIZE {
+        return Err(reftable_invalid("reftable ref block exceeds block size"));
+    }
+    out.extend_from_slice(&block);
+    write_reftable_footer_v1(&mut out, update_index);
+    Ok(out)
+}
+
+fn write_reftable_header_v1(out: &mut Vec<u8>, update_index: u64) {
+    out.extend_from_slice(b"REFT");
+    out.push(1);
+    out.extend_from_slice(&(REFTABLE_BLOCK_SIZE as u32).to_be_bytes()[1..4]);
+    out.extend_from_slice(&update_index.to_be_bytes());
+    out.extend_from_slice(&update_index.to_be_bytes());
+}
+
+fn write_reftable_footer_v1(out: &mut Vec<u8>, update_index: u64) {
+    let mut footer = Vec::with_capacity(REFTABLE_FOOTER_V1_LEN);
+    write_reftable_header_v1(&mut footer, update_index);
+    footer.extend_from_slice(&0_u64.to_be_bytes());
+    footer.extend_from_slice(&0_u64.to_be_bytes());
+    footer.extend_from_slice(&0_u64.to_be_bytes());
+    footer.extend_from_slice(&0_u64.to_be_bytes());
+    footer.extend_from_slice(&0_u64.to_be_bytes());
+    let mut hasher = Crc32Hasher::new();
+    hasher.update(&footer);
+    footer.extend_from_slice(&hasher.finalize().to_be_bytes());
+    out.extend_from_slice(&footer);
 }
 
 fn read_reftable_file(
@@ -677,6 +891,24 @@ fn read_reftable_varint(bytes: &[u8], cursor: &mut usize) -> io::Result<u64> {
     Ok(value)
 }
 
+fn write_reftable_varint(out: &mut Vec<u8>, value: u64) {
+    let mut parts = vec![(value & 0x7f) as u8];
+    let mut value = value >> 7;
+    while value != 0 {
+        value -= 1;
+        parts.push(((value & 0x7f) as u8) | 0x80);
+        value >>= 7;
+    }
+    out.extend(parts.into_iter().rev());
+}
+
+fn common_prefix_len(left: &[u8], right: &[u8]) -> usize {
+    left.iter()
+        .zip(right)
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
 fn read_u24(bytes: &[u8], offset: usize) -> io::Result<usize> {
     if offset + 3 > bytes.len() {
         return Err(reftable_invalid("truncated uint24"));
@@ -684,6 +916,22 @@ fn read_u24(bytes: &[u8], offset: usize) -> io::Result<usize> {
     Ok(((bytes[offset] as usize) << 16)
         | ((bytes[offset + 1] as usize) << 8)
         | bytes[offset + 2] as usize)
+}
+
+fn write_u24(out: &mut Vec<u8>, value: usize) -> io::Result<()> {
+    if value > 0x00ff_ffff {
+        return Err(reftable_invalid("uint24 value out of range"));
+    }
+    out.extend_from_slice(&(value as u32).to_be_bytes()[1..4]);
+    Ok(())
+}
+
+fn write_u24_at(out: &mut [u8], offset: usize, value: usize) -> io::Result<()> {
+    if value > 0x00ff_ffff || offset + 3 > out.len() {
+        return Err(reftable_invalid("uint24 value out of range"));
+    }
+    out[offset..offset + 3].copy_from_slice(&(value as u32).to_be_bytes()[1..4]);
+    Ok(())
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> io::Result<u64> {
@@ -1278,6 +1526,31 @@ mod tests {
         let actual = refs.resolve("refs/heads/main").expect("resolve main");
 
         assert_eq!(actual.to_hex(), next);
+    }
+
+    #[test]
+    fn writes_reftable_refs_readable_by_stock_git() {
+        let repo = git_init();
+        std::fs::write(
+            repo.path().join(".git/config"),
+            "[core]\n\trepositoryformatversion = 1\n[extensions]\n\trefStorage = reftable\n",
+        )
+        .expect("write config");
+        let store = LooseObjectStore::new(repo.path().join(".git/objects"), GitHashAlgorithm::Sha1);
+        let id = store
+            .write_object(GitObjectKind::Blob, b"reftable target\n")
+            .expect("write object");
+        let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
+
+        refs.write_ref("refs/heads/main", &id).expect("write main");
+        refs.write_head_symbolic("refs/heads/main")
+            .expect("write HEAD");
+
+        assert_eq!(refs.resolve("HEAD").expect("resolve HEAD"), id);
+        assert_eq!(git(&repo, ["rev-parse", "--show-ref-format"]), "reftable");
+        assert_eq!(git(&repo, ["rev-parse", "HEAD"]), id.to_hex());
+        assert!(!repo.path().join(".git/refs/heads/main").exists());
+        assert!(repo.path().join(".git/reftable/tables.list").is_file());
     }
 
     #[test]

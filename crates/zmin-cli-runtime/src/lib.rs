@@ -62,6 +62,7 @@ pub struct CloneOptions {
     pub no_local: bool,
     pub depth: Option<String>,
     pub branch: Option<String>,
+    pub ref_format: Option<String>,
     pub keep_partial_on_missing_branch: bool,
     pub repository: String,
     pub directory: Option<PathBuf>,

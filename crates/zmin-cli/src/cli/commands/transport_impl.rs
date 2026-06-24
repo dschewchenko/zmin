@@ -6860,6 +6860,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         no_local,
         depth,
         branch,
+        ref_format,
         keep_partial_on_missing_branch,
         repository,
         directory,
@@ -6903,6 +6904,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             dissociate,
             depth,
             branch,
+            ref_format: ref_format.clone(),
             keep_partial_on_missing_branch: false,
             worktree_first: plan.mode == CloneModePlan::WorktreeFirst,
             background_fetch,
@@ -6934,6 +6936,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             dissociate,
             depth,
             branch,
+            ref_format: ref_format.clone(),
             keep_partial_on_missing_branch: false,
             worktree_first: plan.mode == CloneModePlan::WorktreeFirst,
             background_fetch,
@@ -6965,6 +6968,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
             dissociate,
             depth,
             branch,
+            ref_format: ref_format.clone(),
             keep_partial_on_missing_branch: false,
             worktree_first: plan.mode == CloneModePlan::WorktreeFirst,
             background_fetch,
@@ -7057,6 +7061,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
+    apply_clone_ref_format(&repo, ref_format.as_deref())?;
     let apply_configs_result = {
         let _trace = phase_trace("clone_local.apply_configs");
         apply_clone_configs(&repo, &configs)
@@ -7191,6 +7196,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         }
     } else if let CloneTarget::Branch { name: branch, .. } = &target {
         destination_refs.write_ref(&format!("refs/heads/{branch}"), &head_id)?;
+        destination_refs.write_head_symbolic(&format!("refs/heads/{branch}"))?;
         set_config_values(
             &repo,
             &[
@@ -7280,6 +7286,7 @@ struct CloneHttpOptions {
     dissociate: bool,
     depth: Option<usize>,
     branch: Option<String>,
+    ref_format: Option<String>,
     keep_partial_on_missing_branch: bool,
     worktree_first: bool,
     background_fetch: bool,
@@ -7457,6 +7464,7 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
     if let Some(template) = options.template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
+    apply_clone_ref_format(&repo, options.ref_format.as_deref())?;
     if let Err(error) = apply_clone_configs(&repo, &options.configs) {
         cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
         return Err(error);
@@ -7615,6 +7623,7 @@ fn clone_dumb_http(options: CloneHttpOptions) -> Result<()> {
         }
     } else if let CloneTarget::Branch { name: branch, .. } = &target {
         destination_refs.write_ref(&format!("refs/heads/{branch}"), &head_id)?;
+        destination_refs.write_head_symbolic(&format!("refs/heads/{branch}"))?;
     } else {
         destination_refs.write_head_direct(&head_id)?;
     }
@@ -8189,6 +8198,7 @@ pub(crate) fn run_clone(input: CloneCommandInput, raw_args: &[String]) -> Result
         no_local: input.no_local,
         depth: input.depth,
         branch: input.branch,
+        ref_format: input.ref_format,
         keep_partial_on_missing_branch: false,
         repository: input.repository,
         directory: input.directory,
@@ -8197,16 +8207,25 @@ pub(crate) fn run_clone(input: CloneCommandInput, raw_args: &[String]) -> Result
 
 fn validate_clone_ref_format(ref_format: Option<&str>) -> Result<()> {
     match ref_format {
-        None | Some("files") => Ok(()),
-        Some("reftable") => Err(CliError::Fatal {
-            code: 128,
-            message: "reftable ref storage is not supported yet".into(),
-        }),
+        None | Some("files") | Some("reftable") => Ok(()),
         Some(value) => Err(CliError::Fatal {
             code: 128,
             message: format!("unknown ref storage format '{value}'"),
         }),
     }
+}
+
+fn apply_clone_ref_format(repo: &GitRepo, ref_format: Option<&str>) -> Result<()> {
+    if ref_format != Some("reftable") {
+        return Ok(());
+    }
+    set_config_values(
+        repo,
+        &[
+            ("core.repositoryformatversion".to_owned(), "1".to_owned()),
+            ("extensions.refStorage".to_owned(), "reftable".to_owned()),
+        ],
+    )
 }
 
 fn local_clone_remote_url(repository: &str) -> Result<String> {
@@ -19207,6 +19226,7 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
         dissociate,
         depth,
         branch,
+        ref_format,
         keep_partial_on_missing_branch: _,
         worktree_first,
         background_fetch,
@@ -19279,6 +19299,7 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
+    apply_clone_ref_format(&repo, ref_format.as_deref())?;
     if let Err(error) = apply_clone_configs(&repo, &configs) {
         cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
         return Err(error);
@@ -19377,6 +19398,7 @@ fn clone_git_daemon(options: CloneHttpOptions) -> Result<()> {
     } = &target
     {
         destination_refs.write_ref(&format!("refs/heads/{branch_name}"), &head_id)?;
+        destination_refs.write_head_symbolic(&format!("refs/heads/{branch_name}"))?;
     } else {
         destination_refs.write_head_direct(&head_id)?;
     }
@@ -19418,6 +19440,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
         dissociate,
         depth,
         branch,
+        ref_format,
         keep_partial_on_missing_branch: _,
         worktree_first,
         background_fetch,
@@ -19487,6 +19510,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
     if let Some(template) = template.as_ref() {
         apply_clone_template(&repo, template)?;
     }
+    apply_clone_ref_format(&repo, ref_format.as_deref())?;
     if let Err(error) = apply_clone_configs(&repo, &configs) {
         cleanup_failed_clone_config(&destination, &repo.git_dir, destination_existed);
         return Err(error);
@@ -19591,6 +19615,7 @@ fn clone_ssh(options: CloneHttpOptions) -> Result<()> {
     } = &target
     {
         destination_refs.write_ref(&format!("refs/heads/{branch_name}"), &head_id)?;
+        destination_refs.write_head_symbolic(&format!("refs/heads/{branch_name}"))?;
     } else {
         destination_refs.write_head_direct(&head_id)?;
     }

@@ -43,8 +43,11 @@ test "$git_exit" = 0
 test "$("$GIT_BIN" -C "$tmpdir/git-reftable" rev-parse --show-ref-format)" = reftable
 test -d "$tmpdir/git-reftable/.git/reftable"
 test ! -e "$tmpdir/git-reftable/.git/refs/heads/main"
-test "$zmin_exit" = 128
-test ! -e "$tmpdir/zmin-reftable"
-grep -F "reftable ref storage is not supported yet" "$tmpdir/zmin.err" >/dev/null
+test "$zmin_exit" = 0
+test "$("$GIT_BIN" -C "$tmpdir/zmin-reftable" rev-parse --show-ref-format)" = reftable
+test -d "$tmpdir/zmin-reftable/.git/reftable"
+test ! -e "$tmpdir/zmin-reftable/.git/refs/heads/main"
+test "$("$GIT_BIN" -C "$tmpdir/zmin-reftable" rev-parse HEAD)" = "$("$GIT_BIN" -C "$tmpdir/git-reftable" rev-parse HEAD)"
+test "$("$ZMIN_BIN" -C "$tmpdir/zmin-reftable" rev-parse HEAD)" = "$("$GIT_BIN" -C "$tmpdir/git-reftable" rev-parse HEAD)"
 
-printf 'clone_ref_format_reftable\tgap\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"
+printf 'clone_ref_format_reftable\texact\tstock_exit=%s\tzmin_exit=%s\n' "$git_exit" "$zmin_exit"

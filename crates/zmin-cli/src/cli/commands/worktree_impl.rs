@@ -5452,6 +5452,7 @@ fn submodule_add(args: &[String]) -> Result<()> {
             no_local: false,
             depth: None,
             branch: options.branch.clone(),
+            ref_format: None,
             keep_partial_on_missing_branch: false,
             repository: options.repository.clone(),
             directory: Some(absolute_submodule_path.clone()),
