@@ -396,6 +396,7 @@ run_tree_argument_case commit_tree_abbreviated_tree abbreviated 0 -m root
 run_tree_argument_case commit_tree_blob_tree blob 128 -m root
 run_case commit_tree_attached_message -minline
 run_tree_after_two_args_case commit_tree_message_before_tree -m root
+run_case commit_tree_equals_message -m=foo
 run_case commit_tree_empty_message -m ''
 run_case commit_tree_empty_message_then_message -m '' -m msg
 run_case commit_tree_message_then_empty_message -m msg -m ''
@@ -422,5 +423,6 @@ run_invalid_case commit_tree_no_gpg_sign_rejects_value 129 --no-gpg-sign=true -m
 run_invalid_case commit_tree_no_gpg_sign_rejects_empty_value 129 --no-gpg-sign= -m root
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
+run_invalid_case commit_tree_message_missing_value_consumes_next_option 128 -m -F message.txt
 run_no_tree_invalid_case commit_tree_missing_tree_argument 128 -m root
 run_invalid_case commit_tree_extra_tree_argument 128 -m root extra
