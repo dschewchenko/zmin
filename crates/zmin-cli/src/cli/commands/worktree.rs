@@ -172,8 +172,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             force,
             dry_run,
             verbose,
+            skip_errors,
             paths,
-        } => run_mv(force, dry_run, verbose, paths),
+        } => run_mv(force, dry_run, verbose, skip_errors, paths),
         runtime::Command::Status {
             porcelain,
             branch,
@@ -349,9 +350,10 @@ pub(crate) fn run_mv(
     force: bool,
     dry_run: bool,
     verbose: bool,
+    skip_errors: bool,
     paths: Vec<PathBuf>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::mv(force, dry_run, verbose, paths)
+    super::worktree_commands::mv(force, dry_run, verbose, skip_errors, paths)
 }
 
 pub(crate) fn run_status(

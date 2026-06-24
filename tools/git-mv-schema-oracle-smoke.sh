@@ -21,6 +21,7 @@ seed_repo() {
   "$GIT_BIN" -C "$repo" config user.name Oracle
   "$GIT_BIN" -C "$repo" config user.email oracle@example.com
   printf 'a\n' >"$repo/a.txt"
+  mkdir "$repo/dst"
   "$GIT_BIN" -C "$repo" add a.txt
   "$GIT_BIN" -C "$repo" commit -qm base
 }
@@ -77,3 +78,4 @@ run_exact mv_dry_run_short -n a.txt b.txt
 run_exact mv_dry_run_long --dry-run a.txt b.txt
 run_exact mv_verbose_short -v a.txt b.txt
 run_exact mv_verbose_long --verbose a.txt b.txt
+run_exact mv_skip_errors_short -k missing.txt a.txt dst

@@ -1413,6 +1413,8 @@ pub enum Command {
         dry_run: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(short = 'k', action = ArgAction::SetTrue)]
+        skip_errors: bool,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

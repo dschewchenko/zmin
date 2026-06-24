@@ -3684,7 +3684,13 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn mv(force: bool, dry_run: bool, verbose: bool, paths: Vec<PathBuf>) -> Result<()> {
+pub(crate) fn mv(
+    force: bool,
+    dry_run: bool,
+    verbose: bool,
+    skip_errors: bool,
+    paths: Vec<PathBuf>,
+) -> Result<()> {
     if paths.len() < 2 {
         return Err(CliError::Message(
             "`mv` requires at least one source and a destination".into(),
@@ -3715,6 +3721,9 @@ pub(crate) fn mv(force: bool, dry_run: bool, verbose: bool, paths: Vec<PathBuf>)
         let target_relative = repo_relative_path(&repo.root, &target_absolute)?;
         let moves = mv_index_moves(&index, &source_relative, &target_relative)?;
         if moves.is_empty() {
+            if skip_errors {
+                continue;
+            }
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!(
