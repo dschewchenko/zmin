@@ -1685,6 +1685,8 @@ fn commit_tree(
         })?;
         if seen_parents.insert(parent.clone()) {
             builder = builder.parent(parent);
+        } else {
+            eprintln!("error: duplicate parent {} ignored", parent.to_hex());
         }
     }
     let message = commit_tree_message(message_sources)?;
