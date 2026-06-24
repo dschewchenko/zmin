@@ -1350,17 +1350,26 @@ fn merge_tree_write_tree_stdin(options: &MergeTreeOptions) -> Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
     let mut out = io::stdout().lock();
-    for line in input.lines().filter(|line| !line.trim().is_empty()) {
+    for line in input.lines() {
         let mut parts = line.split_whitespace();
         let Some(ours) = parts.next() else {
-            continue;
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("malformed input line: '{line}'."),
+            });
         };
         let Some(theirs) = parts.next() else {
             return Err(CliError::Fatal {
-                code: 129,
-                message: "malformed input line".into(),
+                code: 128,
+                message: format!("malformed input line: '{line}'."),
             });
         };
+        if parts.next().is_some() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("malformed input line: '{line}'."),
+            });
+        }
         let result =
             merge_tree_write_tree_once(&repo, &store, &commit_cache, options, ours, theirs)?;
         out.write_all(b"0\0")?;

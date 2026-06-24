@@ -93,7 +93,12 @@ run_exact merge_tree_z "" --write-tree -z "$ours_commit" "$theirs_commit"
 run_exact merge_tree_name_only "" --write-tree --name-only "$ours_commit" "$theirs_commit"
 run_exact merge_tree_name_only_no_messages "" --write-tree --name-only --no-messages "$ours_commit" "$theirs_commit"
 run_exact merge_tree_allow_unrelated "" --write-tree --allow-unrelated-histories "$ours_commit" "$theirs_commit"
+run_exact merge_tree_stdin_empty "" --write-tree --stdin
 run_exact merge_tree_stdin "$ours_commit $theirs_commit"$'\n' --write-tree --stdin
+run_exact merge_tree_stdin_two_lines "$ours_commit $theirs_commit"$'\n'"$ours_commit $theirs_commit"$'\n' --write-tree --stdin
+run_invalid merge_tree_stdin_blank_line_invalid $'\n' --write-tree --stdin
+run_invalid merge_tree_stdin_one_token_invalid "$ours_commit"$'\n' --write-tree --stdin
+run_invalid merge_tree_stdin_extra_token_invalid "$ours_commit $theirs_commit extra"$'\n' --write-tree --stdin
 run_exact merge_tree_merge_base "" --write-tree --merge-base="$base_commit" "$ours_commit" "$theirs_commit"
 run_exact merge_tree_merge_base_separate "" --write-tree --merge-base "$base_commit" "$ours_commit" "$theirs_commit"
 run_exact merge_tree_strategy_option "" --write-tree --strategy-option=ours "$ours_commit" "$theirs_commit"
