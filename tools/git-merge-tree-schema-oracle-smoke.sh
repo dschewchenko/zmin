@@ -37,3 +37,24 @@ theirs_tree="$("$GIT_BIN" -C "$repo" rev-parse HEAD^{tree})"
 cmp -s "$tmpdir/git.out" "$tmpdir/zmin.out"
 cmp -s "$tmpdir/git.err" "$tmpdir/zmin.err"
 printf 'merge_tree_trivial_merge\tok\n'
+
+run_invalid() {
+  local name="$1"
+  shift
+  local git_exit=0
+  local zmin_exit=0
+  set +e
+  "$GIT_BIN" -C "$repo" merge-tree "$@" >"$tmpdir/$name.git.out" 2>"$tmpdir/$name.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$repo" merge-tree "$@" >"$tmpdir/$name.zmin.out" 2>"$tmpdir/$name.zmin.err"
+  zmin_exit=$?
+  set -e
+  test "$git_exit" = "$zmin_exit"
+  cmp -s "$tmpdir/$name.git.out" "$tmpdir/$name.zmin.out"
+  cmp -s "$tmpdir/$name.git.err" "$tmpdir/$name.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
+run_invalid merge_tree_short_m_invalid -m "$base_tree" "$base_tree" "$theirs_tree"
+run_invalid merge_tree_short_p_invalid -p "$base_tree" "$base_tree" "$theirs_tree"
+run_invalid merge_tree_short_F_invalid -F "$base_tree" "$base_tree" "$theirs_tree"

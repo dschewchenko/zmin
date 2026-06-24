@@ -133,6 +133,7 @@ pub(crate) fn parse_cli_invocation(
     validate_patch_id_invocation_before_clap(&command_args)?;
     validate_stripspace_invocation_before_clap(&command_args)?;
     validate_mailsplit_invocation_before_clap(&command_args)?;
+    validate_merge_tree_invocation_before_clap(&command_args)?;
     validate_merge_file_invocation_before_clap(&command_args)?;
     validate_mktree_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
@@ -1076,6 +1077,30 @@ fn is_merge_file_marker_size_value(value: &str) -> bool {
         _ => value,
     };
     !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn validate_merge_tree_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("merge-tree") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git merge-tree [--write-tree] [<options>] <branch1> <branch2>\n   or: git merge-tree [--trivial-merge] <base-tree> <branch1> <branch2>\n\n    --write-tree          do a real merge instead of a trivial merge\n    --trivial-merge       do a trivial merge only\n    --[no-]messages       also show informational/conflict messages\n    --quiet               suppress all output; only exit status wanted\n    -z                    separate paths with the NUL character\n    --name-only           list filenames without modes/oids/stages\n    --allow-unrelated-histories\n                          allow merging unrelated histories\n    --stdin               perform multiple merges, one per line of input\n    --[no-]merge-base <tree-ish>\n                          specify a merge-base for the merge\n    -X, --[no-]strategy-option <option=value>\n                          option for selected merge strategy\n\n";
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if let Some(option) = arg
+            .strip_prefix('-')
+            .and_then(|value| value.as_bytes().first().copied())
+            .map(char::from)
+            .filter(|option| matches!(option, 'm' | 'p' | 'F'))
+        {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `{option}'\n{USAGE}"),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_mktree_invocation_before_clap(command_args: &[String]) -> Result<()> {
