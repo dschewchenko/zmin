@@ -5884,10 +5884,10 @@ pub(crate) fn verify_tag(
             continue;
         }
         let content = object.content.as_slice();
-        if verbose && !raw {
-            io::stdout().write_all(content).map_err(CliError::Io)?;
-        }
         let Some((signature, payload)) = tag_signature_payload(content) else {
+            if verbose {
+                io::stdout().write_all(content).map_err(CliError::Io)?;
+            }
             eprintln!("error: no signature found");
             failed = true;
             continue;
@@ -5989,12 +5989,14 @@ fn verify_gpg_signature(
     drop(child.stdin.take());
     let output = child.wait_with_output()?;
     let _ = fs::remove_file(&signature_path);
-    if raw {
-        io::stderr().write_all(&output.stdout)?;
-    } else if verbose {
+    if verbose {
         io::stdout().write_all(payload)?;
     }
-    io::stderr().write_all(&output.stderr)?;
+    if raw {
+        io::stderr().write_all(&output.stdout)?;
+    } else {
+        io::stderr().write_all(&output.stderr)?;
+    }
     Ok(output.status.success() && gpg_status_is_good(&output.stdout))
 }
 

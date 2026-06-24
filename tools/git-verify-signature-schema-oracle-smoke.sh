@@ -42,5 +42,8 @@ run_oracle() {
 
 run_oracle verify_commit_verbose verify-commit --verbose HEAD
 run_oracle verify_commit_verbose_short verify-commit -v HEAD
+run_oracle verify_commit_raw_unsigned verify-commit --raw HEAD
+run_oracle verify_commit_raw_verbose_unsigned verify-commit --raw --verbose HEAD
+run_oracle verify_commit_raw_verbose_short_unsigned verify-commit --raw -v HEAD
 run_oracle verify_commit_sign_short_rejected verify-commit -S HEAD
 run_oracle verify_commit_sign_compact_rejected verify-commit -Sfoo HEAD
