@@ -1043,10 +1043,20 @@ fn create_merge_file(dir: &std::path::Path, content: &[u8]) -> Result<PathBuf> {
     })
 }
 
-pub(crate) fn show_index() -> Result<()> {
+pub(crate) fn show_index(object_format: Option<&str>) -> Result<()> {
+    let algorithm = match object_format.unwrap_or("sha1") {
+        "sha1" => GitHashAlgorithm::Sha1,
+        "sha256" => GitHashAlgorithm::Sha256,
+        _ => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "Unknown hash algorithm".into(),
+            });
+        }
+    };
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
-    for_each_pack_index_entry(GitHashAlgorithm::Sha1, input, &mut |entry| {
+    for_each_pack_index_entry(algorithm, input, &mut |entry| {
         println!(
             "{} {} ({:08x})",
             entry.offset,

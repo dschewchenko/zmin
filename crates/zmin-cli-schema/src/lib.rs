@@ -269,7 +269,12 @@ pub enum Command {
     UnpackFile {
         object: String,
     },
-    ShowIndex,
+    ShowIndex {
+        #[arg(long = "object-format", action = ArgAction::Append)]
+        object_format: Vec<String>,
+        #[arg(long = "no-object-format", action = ArgAction::SetTrue)]
+        no_object_format: bool,
+    },
     UpdateServerInfo {
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,

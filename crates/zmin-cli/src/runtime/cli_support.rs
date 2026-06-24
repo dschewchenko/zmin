@@ -124,6 +124,7 @@ pub(crate) fn parse_cli_invocation(
     validate_cherry_invocation_before_clap(&command_args)?;
     validate_commit_tree_invocation_before_clap(&command_args)?;
     validate_write_tree_invocation_before_clap(&command_args)?;
+    validate_show_index_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -709,6 +710,24 @@ fn validate_write_tree_invocation_before_clap(command_args: &[String]) -> Result
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: option `prefix' requires a value\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_show_index_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("show-index") {
+        return Ok(());
+    }
+    for (index, arg) in command_args.iter().enumerate().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--object-format" && index + 1 >= command_args.len() {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `object-format' requires a value\n".into(),
             });
         }
     }

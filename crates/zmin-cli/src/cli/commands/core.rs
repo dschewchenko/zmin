@@ -80,7 +80,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             human_readable,
         } => run_count_objects(verbose, human_readable),
         runtime::Command::UnpackFile { object } => run_unpack_file(object),
-        runtime::Command::ShowIndex => run_show_index(),
+        runtime::Command::ShowIndex {
+            object_format,
+            no_object_format: _,
+        } => run_show_index(object_format),
         runtime::Command::UpdateServerInfo { force: _ } => run_update_server_info(),
         runtime::Command::CheckRefFormat {
             allow_onelevel,
@@ -214,8 +217,10 @@ pub(crate) fn run_unpack_file(object: String) -> std::result::Result<(), runtime
     super::core_commands::unpack_file(&object)
 }
 
-pub(crate) fn run_show_index() -> std::result::Result<(), runtime::CliError> {
-    super::core_commands::show_index()
+pub(crate) fn run_show_index(
+    object_format: Vec<String>,
+) -> std::result::Result<(), runtime::CliError> {
+    super::core_commands::show_index(object_format.last().map(String::as_str))
 }
 
 pub(crate) fn run_update_server_info() -> std::result::Result<(), runtime::CliError> {

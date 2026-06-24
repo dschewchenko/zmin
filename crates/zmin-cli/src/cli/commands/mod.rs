@@ -189,7 +189,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::CatFile { .. }
         | crate::runtime::Command::CountObjects { .. }
         | crate::runtime::Command::UnpackFile { .. }
-        | crate::runtime::Command::ShowIndex
+        | crate::runtime::Command::ShowIndex { .. }
         | crate::runtime::Command::UpdateServerInfo { .. }
         | crate::runtime::Command::CheckRefFormat { .. }
         | crate::runtime::Command::CheckIgnore { .. }
