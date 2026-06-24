@@ -416,6 +416,7 @@ run_parent_case commit_tree_attached_parent attached
 run_parent_case commit_tree_message_before_parent message_first
 run_parent_case commit_tree_parent_before_tree parent_first
 run_parent_case commit_tree_duplicate_parent duplicate
+run_invalid_case commit_tree_rejects_date 129 --date '2001-02-03T04:05:06+0000' -m root
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
 run_no_tree_invalid_case commit_tree_missing_tree_argument 128 -m root

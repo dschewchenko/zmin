@@ -511,6 +511,15 @@ fn validate_commit_tree_invocation_before_clap(command_args: &[String]) -> Resul
             continue;
         }
         if arg.starts_with('-') {
+            if arg == "--date" || arg.starts_with("--date=") {
+                let name = arg.strip_prefix("--").unwrap_or(arg);
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: format!(
+                        "error: unknown option `{name}'\nusage: git commit-tree <tree> [(-p <parent>)...]\n   or: git commit-tree [(-p <parent>)...] [-S[<keyid>]] [(-m <message>)...]\n                       [(-F <file>)...] <tree>\n\n    -p <parent>           id of a parent commit object\n    -m <message>          commit message\n    -F <file>             read commit log message from file\n    -S, --[no-]gpg-sign[=<key-id>]\n                          GPG sign commit\n\n"
+                    ),
+                });
+            }
             return Ok(());
         }
         tree_args += 1;
