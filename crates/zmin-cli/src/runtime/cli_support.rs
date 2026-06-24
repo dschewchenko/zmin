@@ -128,6 +128,7 @@ pub(crate) fn parse_cli_invocation(
     validate_show_index_invocation_before_clap(&command_args)?;
     validate_update_server_info_invocation_before_clap(&command_args)?;
     validate_prune_packed_invocation_before_clap(&command_args)?;
+    validate_verify_pack_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -825,6 +826,36 @@ fn validate_prune_packed_invocation_before_clap(command_args: &[String]) -> Resu
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: unknown switch `='\nusage: git prune-packed [-n | --dry-run] [-q | --quiet]\n\n    -n, --[no-]dry-run    dry run\n    -q, --[no-]quiet      be quiet\n\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_verify_pack_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("verify-pack") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--verbose=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `verbose' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("--stat-only=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `stat-only' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("-v=") || arg.starts_with("-s=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: unknown switch `='\nusage: git verify-pack [-v | --verbose] [-s | --stat-only] [--] <pack>.idx...\n\n    -v, --[no-]verbose    verbose\n    -s, --[no-]stat-only  show statistics only\n    --[no-]object-format <hash>\n                          specify the hash algorithm to use\n\n".into(),
             });
         }
     }

@@ -104,10 +104,17 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         ),
         runtime::Command::VerifyPack {
             verbose,
+            no_verbose,
             stat_only,
+            no_stat_only,
             object_format,
             packs,
-        } => super::pack_commands::verify_pack(verbose, stat_only, object_format.as_deref(), packs),
+        } => super::pack_commands::verify_pack(
+            verbose > 0 && no_verbose == 0,
+            stat_only > 0 && no_stat_only == 0,
+            object_format.as_deref(),
+            packs,
+        ),
         runtime::Command::PackRedundant {
             verbose,
             alt_odb,

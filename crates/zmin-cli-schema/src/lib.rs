@@ -704,10 +704,14 @@ pub enum Command {
         objects: Vec<String>,
     },
     VerifyPack {
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
-        #[arg(short = 's', long = "stat-only", action = ArgAction::SetTrue)]
-        stat_only: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbose: u8,
+        #[arg(long = "no-verbose", action = ArgAction::Count)]
+        no_verbose: u8,
+        #[arg(short = 's', long = "stat-only", action = ArgAction::Count)]
+        stat_only: u8,
+        #[arg(long = "no-stat-only", action = ArgAction::Count)]
+        no_stat_only: u8,
         #[arg(long = "object-format")]
         object_format: Option<String>,
         packs: Vec<PathBuf>,
