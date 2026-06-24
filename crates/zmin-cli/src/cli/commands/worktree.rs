@@ -159,8 +159,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             paths,
         } => run_rm(runtime::RmOptions {
             force,
-            dry_run,
-            quiet,
+            dry_run: dry_run > 0,
+            quiet: quiet > 0,
             recursive,
             cached,
             ignore_unmatch,

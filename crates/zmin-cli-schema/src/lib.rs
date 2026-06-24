@@ -1389,10 +1389,10 @@ pub enum Command {
     Rm {
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
-        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
-        dry_run: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
+        dry_run: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
         #[arg(short = 'r', action = ArgAction::SetTrue)]
         recursive: bool,
         #[arg(long = "cached", action = ArgAction::SetTrue)]

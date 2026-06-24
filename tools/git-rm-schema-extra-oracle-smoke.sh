@@ -81,3 +81,8 @@ run_case() {
 
 run_case rm_dry_run_long --dry-run a.txt
 run_case rm_quiet_long --quiet a.txt
+run_case rm_dry_run_repeated -n -n a.txt
+run_case rm_quiet_repeated -q -q a.txt
+run_case rm_dry_run_quiet -n -q a.txt
+run_case rm_cached_dry_run --cached --dry-run a.txt
+run_case rm_ignore_unmatch_dry_run --ignore-unmatch --dry-run missing.txt
