@@ -1627,9 +1627,6 @@ fn write_tree_prefix_index(index: &GitIndex, prefix: &str) -> Result<GitIndex> {
 
 fn normalize_write_tree_prefix(prefix: &str) -> Result<Vec<u8>> {
     let mut prefix = normalize_git_path(prefix)?.into_bytes();
-    while prefix.first() == Some(&b'/') {
-        prefix.remove(0);
-    }
     while prefix.last() == Some(&b'/') {
         prefix.pop();
     }

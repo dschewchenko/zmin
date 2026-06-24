@@ -81,6 +81,7 @@ seed_repo_with_prefix_tree() {
 
 run_prefix_missing_case() {
   local name="$1"
+  local prefix="$2"
   local git_work="$tmpdir/${name}.git.work"
   local zmin_work="$tmpdir/${name}.zmin.work"
   local git_exit=0
@@ -90,9 +91,9 @@ run_prefix_missing_case() {
   seed_repo_with_prefix_tree "$zmin_work"
 
   set +e
-  "$GIT_BIN" -C "$git_work" write-tree --prefix=missing >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  "$GIT_BIN" -C "$git_work" write-tree "--prefix=$prefix" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
   git_exit=$?
-  "$ZMIN_BIN" -C "$zmin_work" write-tree --prefix=missing >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  "$ZMIN_BIN" -C "$zmin_work" write-tree "--prefix=$prefix" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
   zmin_exit=$?
   set -e
 
@@ -104,4 +105,5 @@ run_prefix_missing_case() {
 }
 
 run_case write_tree_missing_ok
-run_prefix_missing_case write_tree_prefix_missing
+run_prefix_missing_case write_tree_prefix_missing missing
+run_prefix_missing_case write_tree_prefix_leading_slash /src
