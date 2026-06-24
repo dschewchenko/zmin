@@ -595,7 +595,23 @@ fn validate_credential_store_invocation_before_clap(command_args: &[String]) -> 
     while index < command_args.len() {
         let arg = command_args[index].as_str();
         if arg == "--file" {
+            if index + 1 >= command_args.len() {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: "error: option `file' requires a value\n".into(),
+                });
+            }
             index += 2;
+            continue;
+        }
+        if arg.starts_with("--no-file=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `no-file' takes no value\n".into(),
+            });
+        }
+        if arg == "--no-file" {
+            index += 1;
             continue;
         }
         if arg.starts_with("--file=") {

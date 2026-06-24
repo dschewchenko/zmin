@@ -5,7 +5,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Credential { operation } => {
             super::credential_commands::credential(&operation)
         }
-        runtime::Command::CredentialStore { file, action } => {
+        runtime::Command::CredentialStore {
+            file,
+            no_file,
+            action,
+        } => {
+            let file = if no_file { None } else { file.last().cloned() };
             super::credential_commands::credential_store(file, &action)
         }
         runtime::Command::CredentialCache {

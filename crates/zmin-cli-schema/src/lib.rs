@@ -426,8 +426,10 @@ pub enum Command {
         operation: String,
     },
     CredentialStore {
-        #[arg(long = "file", value_hint = ValueHint::FilePath)]
-        file: Option<PathBuf>,
+        #[arg(long = "file", value_hint = ValueHint::FilePath, action = ArgAction::Append)]
+        file: Vec<PathBuf>,
+        #[arg(long = "no-file", action = ArgAction::SetTrue)]
+        no_file: bool,
         action: String,
     },
     CredentialCache {
