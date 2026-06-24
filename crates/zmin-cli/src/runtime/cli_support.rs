@@ -115,6 +115,7 @@ pub(crate) fn parse_cli_invocation(
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_add_invocation_before_clap(&command_args)?;
     validate_status_invocation_before_clap(&command_args)?;
+    validate_rm_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
     validate_fetch_pack_invocation_before_clap(&command_args)?;
@@ -191,6 +192,39 @@ fn validate_status_invocation_before_clap(command_args: &[String]) -> Result<()>
 }
 
 const STATUS_USAGE: &str = "usage: git status [<options>] [--] [<pathspec>...]\n\n    -v, --[no-]verbose    be verbose\n    -s, --[no-]short      show status concisely\n    -b, --[no-]branch     show branch information\n    --[no-]show-stash     show stash information\n    --[no-]ahead-behind   compute full ahead/behind values\n    --[no-]porcelain[=<version>]\n                          machine-readable output\n    --[no-]long           show status in long format (default)\n    -z, --[no-]null       terminate entries with NUL\n    -u, --[no-]untracked-files[=<mode>]\n                          show untracked files, optional modes: all, normal, no. (Default: all)\n    --[no-]ignored[=<mode>]\n                          show ignored files, optional modes: traditional, matching, no. (Default: traditional)\n    --[no-]ignore-submodules[=<when>]\n                          ignore changes to submodules, optional when: all, dirty, untracked. (Default: all)\n    --[no-]column[=<style>]\n                          list untracked files in columns\n    --no-renames          do not detect renames\n    --renames             opposite of --no-renames\n    -M, --find-renames[=<n>]\n                          detect renames, optionally set similarity index\n\n";
+
+fn validate_rm_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("rm") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        let message = match arg.as_str() {
+            "-0" => Some("error: unknown switch `0'\n"),
+            "-A" => Some("error: unknown switch `A'\n"),
+            "-a" => Some("error: unknown switch `a'\n"),
+            "-u" => Some("error: unknown switch `u'\n"),
+            "-z" => Some("error: unknown switch `z'\n"),
+            "--name-only" => Some("error: unknown option `name-only'\n"),
+            "--literal-pathspecs" => Some("error: unknown option `literal-pathspecs'\n"),
+            _ if arg.starts_with("--diff-filter") => {
+                Some("error: unknown option `diff-filter=A'\n")
+            }
+            _ => None,
+        };
+        if let Some(message) = message {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("{message}{RM_USAGE}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+const RM_USAGE: &str = "usage: git rm [-f | --force] [-n] [-r] [--cached] [--ignore-unmatch]\n              [--quiet] [--pathspec-from-file=<file> [--pathspec-file-nul]]\n              [--] [<pathspec>...]\n\n    -n, --[no-]dry-run    dry run\n    -q, --[no-]quiet      do not list removed files\n    --[no-]cached         only remove from the index\n    -f, --[no-]force      override the up-to-date check\n    -r                    allow recursive removal\n    --[no-]ignore-unmatch exit with a zero status even if nothing matched\n    --[no-]sparse         allow updating entries outside of the sparse-checkout cone\n    --[no-]pathspec-from-file <file>\n                          read pathspec from file\n    --[no-]pathspec-file-nul\n                          with --pathspec-from-file, pathspec elements are separated with NUL character\n\n";
 
 fn normalize_empty_init_template(args: Vec<String>) -> Vec<String> {
     if args.first().map(String::as_str) != Some("init") {
