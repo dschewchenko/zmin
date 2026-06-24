@@ -168,3 +168,4 @@ run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
+run_invalid_case commit_tree_missing_parent 128 -p missing -m child

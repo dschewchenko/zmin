@@ -1679,7 +1679,10 @@ fn commit_tree(
     let mut builder = CommitBuilder::new(tree, author, committer);
     let mut seen_parents = HashSet::new();
     for parent in parents {
-        let parent = resolve_commitish(&repo, &store, &parent)?;
+        let parent = resolve_commitish(&repo, &store, &parent).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("not a valid object name {parent}"),
+        })?;
         if seen_parents.insert(parent.clone()) {
             builder = builder.parent(parent);
         }
