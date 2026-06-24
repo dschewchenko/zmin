@@ -11,7 +11,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Stripspace {
             strip_comments,
             comment_lines,
-        } => run_stripspace(strip_comments, comment_lines),
+        } => run_stripspace(strip_comments > 0, comment_lines > 0),
         _ => unreachable!("non-text command dispatched to text"),
     }
 }

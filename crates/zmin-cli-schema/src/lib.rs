@@ -853,10 +853,10 @@ pub enum Command {
         verbatim: u8,
     },
     Stripspace {
-        #[arg(short = 's', long = "strip-comments", action = ArgAction::SetTrue)]
-        strip_comments: bool,
-        #[arg(short = 'c', long = "comment-lines", action = ArgAction::SetTrue)]
-        comment_lines: bool,
+        #[arg(short = 's', long = "strip-comments", action = ArgAction::Count)]
+        strip_comments: u8,
+        #[arg(short = 'c', long = "comment-lines", action = ArgAction::Count)]
+        comment_lines: u8,
     },
     Status {
         #[arg(

@@ -131,6 +131,7 @@ pub(crate) fn parse_cli_invocation(
     validate_verify_pack_invocation_before_clap(&command_args)?;
     validate_count_objects_invocation_before_clap(&command_args)?;
     validate_patch_id_invocation_before_clap(&command_args)?;
+    validate_stripspace_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -922,6 +923,43 @@ fn validate_patch_id_invocation_before_clap(command_args: &[String]) -> Result<(
                 text: format!(
                     "error: unknown option `{option}'\nusage: git patch-id [--stable | --unstable | --verbatim]\n\n    --unstable            use the unstable patch-id algorithm\n    --stable              use the stable patch-id algorithm\n    --verbatim            don't strip whitespace from the patch\n\n"
                 ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_stripspace_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("stripspace") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git stripspace [-s | --strip-comments]\n   or: git stripspace [-c | --comment-lines]\n\n    -s, --strip-comments  skip and remove all lines starting with comment character\n    -c, --comment-lines   prepend comment character and space to each line\n\n";
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--strip-comments=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `strip-comments' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("--comment-lines=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `comment-lines' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("-s=") || arg.starts_with("-c=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `='\n{USAGE}"),
+            });
+        }
+        if arg == "--whitespace" {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown option `whitespace'\n{USAGE}"),
             });
         }
     }
