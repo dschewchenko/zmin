@@ -225,8 +225,10 @@ run_prefix_success_case write_tree_prefix_trailing_slash src/
 run_default_success_case write_tree_prefix_empty --prefix=
 run_default_success_case write_tree_missing_ok_then_no_missing_ok --missing-ok --no-missing-ok
 run_default_success_case write_tree_no_missing_ok_then_missing_ok --no-missing-ok --missing-ok
+run_default_success_case write_tree_missing_ok_repeated --missing-ok --missing-ok
 run_default_success_case write_tree_no_prefix_then_prefix --no-prefix --prefix=src
 run_default_success_case write_tree_prefix_then_no_prefix --prefix=src --no-prefix
+run_default_success_case write_tree_no_prefix_repeated --no-prefix --no-prefix
 run_prefix_first_success_case write_tree_repeated_prefix_last_wins src --prefix=src/inner
 run_prefix_success_case write_tree_prefix_double_slash src//inner
 run_prefix_success_case write_tree_prefix_triple_slash src///inner

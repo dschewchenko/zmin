@@ -1522,12 +1522,12 @@ pub enum Command {
     WriteTree {
         #[arg(long = "prefix")]
         prefix: Vec<String>,
-        #[arg(long = "no-prefix", action = ArgAction::SetTrue)]
-        no_prefix: bool,
-        #[arg(long = "missing-ok", action = ArgAction::SetTrue)]
-        missing_ok: bool,
-        #[arg(long = "no-missing-ok", action = ArgAction::SetTrue)]
-        no_missing_ok: bool,
+        #[arg(long = "no-prefix", action = ArgAction::Count)]
+        no_prefix: u8,
+        #[arg(long = "missing-ok", action = ArgAction::Count)]
+        missing_ok: u8,
+        #[arg(long = "no-missing-ok", action = ArgAction::Count)]
+        no_missing_ok: u8,
     },
     CommitTree {
         tree: String,

@@ -78,8 +78,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_missing_ok,
         } => {
             let _no_missing_ok = no_missing_ok;
-            let prefix = effective_write_tree_prefix(prefix, no_prefix);
-            super::commit_commands::write_tree_command_entry(prefix.as_deref(), missing_ok)
+            let prefix = effective_write_tree_prefix(prefix, no_prefix > 0);
+            super::commit_commands::write_tree_command_entry(prefix.as_deref(), missing_ok > 0)
         }
         runtime::Command::CommitTree {
             tree,
