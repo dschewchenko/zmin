@@ -178,6 +178,8 @@ prepare_case() {
     stage_no_warn_embedded_repo_long)
       cp -R "$inner_seed" "$work/inner"
       ;;
+    stage_invalid_short_a|stage_invalid_short_one|stage_invalid_short_two)
+      ;;
   esac
 }
 
@@ -299,3 +301,6 @@ run_case stage_verbose_repeated stage -v -v new.txt
 run_case stage_no_verbose_long stage --no-verbose quiet.txt
 run_case stage_no_verbose_repeated_long stage --no-verbose --no-verbose quiet.txt
 run_case stage_no_warn_embedded_repo_long stage --no-warn-embedded-repo inner
+run_case stage_invalid_short_a stage -a
+run_case stage_invalid_short_one stage -1
+run_case stage_invalid_short_two stage -2

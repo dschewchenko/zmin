@@ -145,7 +145,10 @@ pub(crate) fn parse_cli_invocation(
 }
 
 fn validate_add_invocation_before_clap(command_args: &[String]) -> Result<()> {
-    if command_args.first().map(String::as_str) != Some("add") {
+    if !matches!(
+        command_args.first().map(String::as_str),
+        Some("add" | "stage")
+    ) {
         return Ok(());
     }
     for arg in command_args.iter().skip(1) {
