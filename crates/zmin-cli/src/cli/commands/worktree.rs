@@ -144,7 +144,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             ignore_missing > 0,
             no_warn_embedded_repo > 0,
             edit > 0,
-            chmod,
+            chmod.last().cloned(),
             dry_run > 0,
             pathspec_from_file,
             pathspec_file_nul > 0,

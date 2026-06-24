@@ -1314,7 +1314,7 @@ pub enum Command {
         #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
         edit: u8,
         #[arg(long = "chmod")]
-        chmod: Option<String>,
+        chmod: Vec<String>,
         #[arg(long = "no-chmod", action = ArgAction::Count)]
         no_chmod: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
@@ -1378,7 +1378,7 @@ pub enum Command {
         #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
         edit: u8,
         #[arg(long = "chmod")]
-        chmod: Option<String>,
+        chmod: Vec<String>,
         #[arg(long = "no-chmod", action = ArgAction::Count)]
         no_chmod: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]

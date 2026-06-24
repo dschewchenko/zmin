@@ -157,6 +157,9 @@ prepare_case() {
     add_no_chmod_long|add_no_chmod_repeated_long)
       printf 'mode-default\n' >"$work/mode-default.txt"
       ;;
+    add_chmod_repeated_plus|add_chmod_plus_then_minus|add_chmod_minus_then_plus|add_invalid_chmod_value)
+      printf 'mode\n' >"$work/mode.txt"
+      ;;
     add_sparse_long|add_sparse_repeated_long)
       printf 'sparse-ok\n' >"$work/sparse-ok.txt"
       ;;
@@ -276,6 +279,9 @@ run_case add_no_pathspec_file_nul_long add --no-pathspec-file-nul lf-pathspec.tx
 run_case add_no_pathspec_file_nul_repeated_long add --no-pathspec-file-nul --no-pathspec-file-nul lf-pathspec.txt
 run_case add_no_chmod_long add --no-chmod mode-default.txt
 run_case add_no_chmod_repeated_long add --no-chmod --no-chmod mode-default.txt
+run_case add_chmod_repeated_plus add --chmod=+x --chmod=+x mode.txt
+run_case add_chmod_plus_then_minus add --chmod=+x --chmod=-x mode.txt
+run_case add_chmod_minus_then_plus add --chmod=-x --chmod=+x mode.txt
 run_case add_sparse_long add --sparse sparse-ok.txt
 run_case add_sparse_repeated_long add --sparse --sparse sparse-ok.txt
 run_case add_no_sparse_long add --no-sparse sparse-off.txt
@@ -286,3 +292,4 @@ run_case add_no_warn_embedded_repo_long add --no-warn-embedded-repo inner
 run_case add_invalid_short_a add -a
 run_case add_invalid_short_one add -1
 run_case add_invalid_short_two add -2
+run_case add_invalid_chmod_value add --chmod=bad mode.txt
