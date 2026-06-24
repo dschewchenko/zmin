@@ -435,5 +435,8 @@ run_invalid_case commit_tree_equals_message_file_missing 128 -F=message.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
 run_invalid_case commit_tree_parent_rejects_equals_value 128 -p=missing -m child
 run_invalid_case commit_tree_message_missing_value_consumes_next_option 128 -m -F message.txt
+run_invalid_case commit_tree_message_missing_value 129 -m
+run_invalid_case commit_tree_message_file_missing_value 129 -F
+run_invalid_case commit_tree_parent_missing_value 129 -p
 run_no_tree_invalid_case commit_tree_missing_tree_argument 128 -m root
 run_invalid_case commit_tree_extra_tree_argument 128 -m root extra

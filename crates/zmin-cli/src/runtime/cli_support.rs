@@ -499,6 +499,13 @@ fn validate_commit_tree_invocation_before_clap(command_args: &[String]) -> Resul
             break;
         }
         if matches!(arg, "-m" | "-F" | "-p") {
+            if index + 1 >= command_args.len() {
+                let option = arg.trim_start_matches('-');
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: format!("error: switch `{option}' requires a value\n"),
+                });
+            }
             index += 2;
             continue;
         }
