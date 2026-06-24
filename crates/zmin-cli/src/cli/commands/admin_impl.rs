@@ -824,9 +824,9 @@ fn update_index_chmod(
         "+x" => true,
         "-x" => false,
         _ => {
-            return Err(CliError::Fatal {
+            return Err(CliError::Stderr {
                 code: 129,
-                message: "update-index --chmod expects +x or -x".into(),
+                text: "error: option 'chmod' expects \"+x\" or \"-x\"\n".into(),
             });
         }
     };

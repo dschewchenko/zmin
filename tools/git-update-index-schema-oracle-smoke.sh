@@ -125,6 +125,47 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_invalid_case() {
+  local name="$1"
+  local seed_kind="$2"
+  shift 2
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_index="$tmpdir/${name}.git.index"
+  local zmin_index="$tmpdir/${name}.zmin.index"
+  local git_status="$tmpdir/${name}.git.status"
+  local zmin_status="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  "seed_${seed_kind}_repo" "$seed"
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" ls-files --stage >"$git_index"
+  "$GIT_BIN" -C "$zmin_work" ls-files --stage >"$zmin_index"
+  compare_files index "$git_index" "$zmin_index"
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
+  compare_files worktree_status "$git_status" "$zmin_status"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_stdin_case() {
   local name="$1"
   local input="$2"
@@ -294,6 +335,7 @@ run_case update_index_remove_repeated tracked update-index --remove --remove a.t
 run_case update_index_force_remove_repeated tracked update-index --force-remove --force-remove a.txt
 run_case update_index_chmod_plus_x tracked update-index --chmod=+x a.txt
 run_case update_index_chmod_minus_x executable update-index --chmod=-x a.txt
+run_invalid_case update_index_chmod_invalid_value tracked update-index --chmod=bogus a.txt
 run_stdin_case update_index_stdin 'a.txt\n' update-index --stdin
 run_stdin_case update_index_z_stdin 'a.txt\0' update-index -z --stdin
 run_stdin_case update_index_z_repeated_stdin 'a.txt\0' update-index -z -z --stdin
