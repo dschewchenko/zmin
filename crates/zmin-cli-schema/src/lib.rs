@@ -276,8 +276,10 @@ pub enum Command {
         no_object_format: bool,
     },
     UpdateServerInfo {
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
+        #[arg(short = 'f', long = "force", action = ArgAction::Count)]
+        force: u8,
+        #[arg(long = "no-force", action = ArgAction::Count)]
+        no_force: u8,
     },
     CheckRefFormat {
         #[arg(long = "allow-onelevel", action = ArgAction::SetTrue)]

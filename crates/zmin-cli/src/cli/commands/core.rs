@@ -84,7 +84,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             object_format,
             no_object_format: _,
         } => run_show_index(object_format),
-        runtime::Command::UpdateServerInfo { force: _ } => run_update_server_info(),
+        runtime::Command::UpdateServerInfo {
+            force: _,
+            no_force: _,
+        } => run_update_server_info(),
         runtime::Command::CheckRefFormat {
             allow_onelevel,
             normalize,

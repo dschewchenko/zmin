@@ -44,6 +44,15 @@ make_source_repo() {
   "$GIT_BIN" -C "$repo" tag lightweight
 }
 
+make_bare_repo_from_source() {
+  local source="$1"
+  local repo="$2"
+  "$GIT_BIN" init -q --bare "$repo"
+  "$GIT_BIN" -C "$source" remote add "target-$(basename "$repo")" "$repo"
+  "$GIT_BIN" -C "$source" push -q "target-$(basename "$repo")" main feature lightweight
+  "$GIT_BIN" -C "$repo" symbolic-ref HEAD refs/heads/main
+}
+
 run_case() {
   local name="$1"
   shift
@@ -54,8 +63,8 @@ run_case() {
   local zmin_exit=0
 
   make_source_repo "$source"
-  "$GIT_BIN" clone -q --bare "$source" "$git_repo"
-  "$GIT_BIN" clone -q --bare "$source" "$zmin_repo"
+  make_bare_repo_from_source "$source" "$git_repo"
+  make_bare_repo_from_source "$source" "$zmin_repo"
   "$GIT_BIN" -C "$git_repo" repack -adq
   "$GIT_BIN" -C "$zmin_repo" repack -adq
 
@@ -75,3 +84,10 @@ run_case() {
 }
 
 run_case update_server_info_force_long --force
+run_case update_server_info_force_short -f
+run_case update_server_info_force_long_repeated --force --force
+run_case update_server_info_force_short_repeated -f -f
+run_case update_server_info_no_force --no-force
+run_case update_server_info_force_long_rejects_value --force=true
+run_case update_server_info_force_short_rejects_value -f=true
+run_case update_server_info_no_force_rejects_value --no-force=true

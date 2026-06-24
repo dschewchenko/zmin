@@ -126,6 +126,7 @@ pub(crate) fn parse_cli_invocation(
     validate_commit_tree_invocation_before_clap(&command_args)?;
     validate_write_tree_invocation_before_clap(&command_args)?;
     validate_show_index_invocation_before_clap(&command_args)?;
+    validate_update_server_info_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -763,6 +764,36 @@ fn validate_show_index_invocation_before_clap(command_args: &[String]) -> Result
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: option `object-format' requires a value\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_update_server_info_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("update-server-info") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with("--force=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `force' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("--no-force=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `no-force' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("-f=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: unknown switch `='\nusage: git update-server-info [-f | --force]\n\n    -f, --[no-]force      update the info files from scratch\n\n".into(),
             });
         }
     }
