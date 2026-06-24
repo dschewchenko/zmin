@@ -197,8 +197,11 @@ run_in_seed_repos show_ref_quiet_verify_long show-ref --quiet --verify refs/head
 run_in_seed_repos show_ref_exists_existing show-ref --exists refs/heads/main
 run_in_seed_repos branch_no_abbrev_listing branch --no-abbrev
 run_in_seed_repos branch_abbrev_listing branch --abbrev=8
+run_in_seed_repos branch_quiet_long_listing branch --quiet
+run_in_seed_repos branch_quiet_short_listing branch -q
 run_in_seed_repos branch_sort_listing branch --sort=refname
 run_in_seed_repos branch_no_sort_listing branch --no-sort
+run_in_seed_repos branch_no_verbose_listing branch --no-verbose
 run_in_seed_repos branch_column_never_listing branch --column=never
 run_in_seed_repos branch_no_column_listing branch --no-column
 run_in_seed_repos branch_color_never_listing branch --color=never

@@ -3102,8 +3102,12 @@ pub enum Command {
         list: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbose: u8,
+        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
+        no_verbose: bool,
         #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
         abbrev: Option<usize>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]

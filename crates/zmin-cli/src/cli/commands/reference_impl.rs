@@ -4195,7 +4195,9 @@ struct BranchOptions {
     all: bool,
     list: bool,
     force: bool,
+    quiet: bool,
     verbose: u8,
+    no_verbose: bool,
     abbrev: Option<usize>,
     no_abbrev: bool,
     column: Option<String>,
@@ -4301,6 +4303,8 @@ fn ls_tree(
 }
 
 fn branch(options: BranchOptions) -> Result<()> {
+    let _quiet = options.quiet;
+    let _no_verbose = options.no_verbose;
     let _no_column = options.no_column;
     let _color = &options.color;
     let _no_color = options.no_color;
@@ -6552,7 +6556,9 @@ pub(crate) fn branch_command(
     all: bool,
     list: bool,
     force: bool,
+    quiet: bool,
     verbose: u8,
+    no_verbose: bool,
     abbrev: Option<usize>,
     no_abbrev: bool,
     column: Option<String>,
@@ -6590,7 +6596,9 @@ pub(crate) fn branch_command(
         all,
         list,
         force,
+        quiet,
         verbose,
+        no_verbose,
         abbrev,
         no_abbrev,
         column,
