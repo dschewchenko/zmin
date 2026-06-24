@@ -157,6 +157,61 @@ run_invalid_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_tree_argument_case() {
+  local name="$1"
+  local mode="$2"
+  local expected_exit="$3"
+  shift 3
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_commit="$tmpdir/${name}.git.commit"
+  local zmin_commit="$tmpdir/${name}.zmin.commit"
+  local git_tree
+  local zmin_tree
+  local git_arg
+  local zmin_arg
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+  case "$mode" in
+    abbreviated)
+      git_arg="${git_tree:0:8}"
+      zmin_arg="${zmin_tree:0:8}"
+      ;;
+    blob)
+      git_arg="$("$GIT_BIN" -C "$git_work" hash-object -w a.txt)"
+      zmin_arg="$("$GIT_BIN" -C "$zmin_work" hash-object -w a.txt)"
+      ;;
+  esac
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree "$git_arg" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_arg" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  if test "$expected_exit" = 0; then
+    "$GIT_BIN" -C "$git_work" cat-file commit "$(cat "$git_out")" >"$git_commit"
+    "$GIT_BIN" -C "$zmin_work" cat-file commit "$(cat "$zmin_out")" >"$zmin_commit"
+    compare_files commit_object "$git_commit" "$zmin_commit"
+  fi
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_parent_case() {
   local name="$1"
   local mode="$2"
@@ -217,6 +272,9 @@ run_parent_case() {
 }
 
 run_case commit_tree_positional_tree -m root
+run_stdin_case commit_tree_empty_stdin ''
+run_tree_argument_case commit_tree_abbreviated_tree abbreviated 0 -m root
+run_tree_argument_case commit_tree_blob_tree blob 128 -m root
 run_case commit_tree_attached_message -minline
 run_case commit_tree_empty_message -m ''
 run_case commit_tree_empty_message_then_message -m '' -m msg
