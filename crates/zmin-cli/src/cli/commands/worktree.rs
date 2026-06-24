@@ -286,7 +286,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             staged,
             worktree,
             paths,
-        } => run_restore(source, staged, worktree, paths),
+        } => run_restore(source.into_iter().next_back(), staged > 0, worktree > 0, paths),
         runtime::Command::Clean { args } => run_clean(args),
         runtime::Command::Reset {
             soft,

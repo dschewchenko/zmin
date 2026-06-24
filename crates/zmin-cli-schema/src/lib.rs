@@ -1711,11 +1711,11 @@ pub enum Command {
     },
     Restore {
         #[arg(short = 's', long = "source")]
-        source: Option<String>,
-        #[arg(long = "staged", action = ArgAction::SetTrue)]
-        staged: bool,
-        #[arg(short = 'W', long = "worktree", action = ArgAction::SetTrue)]
-        worktree: bool,
+        source: Vec<String>,
+        #[arg(long = "staged", action = ArgAction::Count)]
+        staged: u8,
+        #[arg(short = 'W', long = "worktree", action = ArgAction::Count)]
+        worktree: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
