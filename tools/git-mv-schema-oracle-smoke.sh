@@ -91,3 +91,5 @@ run_exact mv_verbose_long --verbose a.txt b.txt
 run_exact mv_skip_errors_short -k missing.txt a.txt dst
 run_exact mv_dry_run_verbose_short -n -v a.txt b.txt
 run_exact mv_force_dry_run_short --tracked-destination -f -n a.txt b.txt
+run_exact mv_dry_run_verbose_long --dry-run --verbose a.txt b.txt
+run_exact mv_force_dry_run_long --tracked-destination --force --dry-run a.txt b.txt
