@@ -4469,7 +4469,11 @@ fn annotate_name_rev_stdin(
     Ok(())
 }
 
-pub(crate) fn range_diff(_no_dual_color: bool, ranges: Vec<String>) -> Result<()> {
+pub(crate) fn range_diff(
+    _no_dual_color: bool,
+    no_no_dual_color: bool,
+    ranges: Vec<String>,
+) -> Result<()> {
     let ranges = match ranges.as_slice() {
         [old, new] => [old.clone(), new.clone()],
         [base, old, new] => [format!("{base}..{old}"), format!("{base}..{new}")],
@@ -4503,20 +4507,28 @@ pub(crate) fn range_diff(_no_dual_color: bool, ranges: Vec<String>) -> Result<()
             .and_then(VecDeque::pop_front);
         if let Some(new_idx) = matched {
             matched_new.insert(new_idx);
-            println!(
-                "{}:  {} = {}:  {} {}",
-                old_idx + 1,
-                short_object_id_len(&old_entry.id, abbrev_len),
-                new_idx + 1,
-                short_object_id_len(&new[new_idx].id, abbrev_len),
-                old_entry.subject
+            print_range_diff_line(
+                no_no_dual_color,
+                "33",
+                &format!(
+                    "{}:  {} = {}:  {} {}",
+                    old_idx + 1,
+                    short_object_id_len(&old_entry.id, abbrev_len),
+                    new_idx + 1,
+                    short_object_id_len(&new[new_idx].id, abbrev_len),
+                    old_entry.subject
+                ),
             );
         } else {
-            println!(
-                "{}:  {} < -:  ------- {}",
-                old_idx + 1,
-                short_object_id_len(&old_entry.id, abbrev_len),
-                old_entry.subject
+            print_range_diff_line(
+                no_no_dual_color,
+                "31",
+                &format!(
+                    "{}:  {} < -:  ------- {}",
+                    old_idx + 1,
+                    short_object_id_len(&old_entry.id, abbrev_len),
+                    old_entry.subject
+                ),
             );
         }
     }
@@ -4524,14 +4536,26 @@ pub(crate) fn range_diff(_no_dual_color: bool, ranges: Vec<String>) -> Result<()
         if matched_new.contains(&new_idx) {
             continue;
         }
-        println!(
-            "-:  ------- > {}:  {} {}",
-            new_idx + 1,
-            short_object_id_len(&new_entry.id, abbrev_len),
-            new_entry.subject
+        print_range_diff_line(
+            no_no_dual_color,
+            "32",
+            &format!(
+                "-:  ------- > {}:  {} {}",
+                new_idx + 1,
+                short_object_id_len(&new_entry.id, abbrev_len),
+                new_entry.subject
+            ),
         );
     }
     Ok(())
+}
+
+fn print_range_diff_line(color: bool, code: &str, line: &str) {
+    if color {
+        println!("\x1b[{code}m{line}\x1b[m");
+    } else {
+        println!("{line}");
+    }
 }
 
 fn range_diff_commits(

@@ -11,8 +11,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::History { command } => run_history(command),
         runtime::Command::RangeDiff {
             no_dual_color,
+            no_no_dual_color,
             ranges,
-        } => run_range_diff(no_dual_color > 0, ranges),
+        } => run_range_diff(no_dual_color > 0, no_no_dual_color, ranges),
         runtime::Command::FilterBranch {
             force,
             msg_filter,
@@ -397,7 +398,8 @@ pub(crate) fn run_history(
 
 pub(crate) fn run_range_diff(
     no_dual_color: bool,
+    no_no_dual_color: bool,
     ranges: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::history_commands::range_diff(no_dual_color, ranges)
+    super::history_commands::range_diff(no_dual_color, no_no_dual_color, ranges)
 }

@@ -94,3 +94,4 @@ run_case() {
 run_case range_diff_no_dual_color_repeated range-diff --no-dual-color --no-dual-color main..old main..new
 run_case range_diff_no_dual_color_rejects_value range-diff --no-dual-color=true main..old main..new
 run_case range_diff_no_dual_color_rejects_empty_value range-diff --no-dual-color= main..old main..new
+run_case range_diff_no_no_dual_color range-diff --no-no-dual-color main..old main..new
