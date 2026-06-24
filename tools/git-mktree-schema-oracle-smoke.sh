@@ -97,6 +97,8 @@ run_case mktree_z_batch_nul_input --nul-input -z --batch
 run_case mktree_no_missing_missing_allows_missing_blob --missing-input --no-missing --missing
 run_case mktree_no_batch --no-batch
 run_case mktree_no_missing --no-missing
+run_case mktree_no_batch_repeated --no-batch --no-batch
+run_case mktree_no_missing_repeated --no-missing --no-missing
 run_case mktree_no_z_rejected --no-z
 run_case mktree_z_rejects_value -z=true
 run_case mktree_batch_rejects_value --batch=true
