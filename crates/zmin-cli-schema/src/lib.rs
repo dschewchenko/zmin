@@ -757,12 +757,12 @@ pub enum Command {
     UpdateIndex {
         #[arg(long = "add", action = ArgAction::Count)]
         add: u8,
-        #[arg(long = "remove", action = ArgAction::SetTrue)]
-        remove: bool,
-        #[arg(long = "force-remove", action = ArgAction::SetTrue)]
-        force_remove: bool,
-        #[arg(long = "replace", action = ArgAction::SetTrue)]
-        replace: bool,
+        #[arg(long = "remove", action = ArgAction::Count)]
+        remove: u8,
+        #[arg(long = "force-remove", action = ArgAction::Count)]
+        force_remove: u8,
+        #[arg(long = "replace", action = ArgAction::Count)]
+        replace: u8,
         #[arg(long = "refresh", action = ArgAction::Count)]
         refresh: u8,
         #[arg(long = "really-refresh", action = ArgAction::Count)]
@@ -773,18 +773,18 @@ pub enum Command {
         index_info_mode: bool,
         #[arg(long = "chmod")]
         chmod: Option<String>,
-        #[arg(long = "assume-unchanged", action = ArgAction::SetTrue)]
-        assume_unchanged: bool,
-        #[arg(long = "no-assume-unchanged", action = ArgAction::SetTrue)]
-        no_assume_unchanged: bool,
+        #[arg(long = "assume-unchanged", action = ArgAction::Count)]
+        assume_unchanged: u8,
+        #[arg(long = "no-assume-unchanged", action = ArgAction::Count)]
+        no_assume_unchanged: u8,
         #[arg(long = "skip-worktree", action = ArgAction::Count)]
         skip_worktree: u8,
-        #[arg(long = "no-skip-worktree", action = ArgAction::SetTrue)]
-        no_skip_worktree: bool,
+        #[arg(long = "no-skip-worktree", action = ArgAction::Count)]
+        no_skip_worktree: u8,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        nul_terminated: bool,
+        #[arg(short = 'z', action = ArgAction::Count)]
+        nul_terminated: u8,
         paths: Vec<PathBuf>,
     },
     Bugreport {

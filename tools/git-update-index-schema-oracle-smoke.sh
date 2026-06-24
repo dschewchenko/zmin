@@ -282,17 +282,24 @@ run_case update_index_refresh_repeated tracked_clean update-index --refresh --re
 run_case update_index_really_refresh_repeated tracked_clean update-index --really-refresh --really-refresh
 run_case update_index_assume_unchanged tracked update-index --assume-unchanged a.txt
 run_case update_index_no_assume_unchanged assume_unchanged update-index --no-assume-unchanged a.txt
+run_case update_index_assume_unchanged_repeated tracked update-index --assume-unchanged --assume-unchanged a.txt
+run_case update_index_no_assume_unchanged_repeated assume_unchanged update-index --no-assume-unchanged --no-assume-unchanged a.txt
 run_case update_index_skip_worktree tracked update-index --skip-worktree a.txt
 run_case update_index_no_skip_worktree skip_worktree update-index --no-skip-worktree a.txt
 run_case update_index_skip_worktree_repeated tracked update-index --skip-worktree --skip-worktree a.txt
+run_case update_index_no_skip_worktree_repeated skip_worktree update-index --no-skip-worktree --no-skip-worktree a.txt
 run_case update_index_remove tracked update-index --remove a.txt
 run_case update_index_force_remove tracked update-index --force-remove a.txt
+run_case update_index_remove_repeated tracked update-index --remove --remove a.txt
+run_case update_index_force_remove_repeated tracked update-index --force-remove --force-remove a.txt
 run_case update_index_chmod_plus_x tracked update-index --chmod=+x a.txt
 run_case update_index_chmod_minus_x executable update-index --chmod=-x a.txt
 run_stdin_case update_index_stdin 'a.txt\n' update-index --stdin
 run_stdin_case update_index_z_stdin 'a.txt\0' update-index -z --stdin
+run_stdin_case update_index_z_repeated_stdin 'a.txt\0' update-index -z -z --stdin
 run_cacheinfo_case update_index_cacheinfo_add --add --cacheinfo '100644,__BLOB__,b.txt'
 run_cacheinfo_case update_index_cacheinfo_split --add --cacheinfo 100644 __BLOB__ b.txt
+run_cacheinfo_case update_index_replace_repeated_cacheinfo --replace --replace --cacheinfo '100644,__BLOB__,a.txt'
 run_cacheinfo_case update_index_replace_cacheinfo --replace --cacheinfo '100644,__BLOB__,a.txt'
 run_index_info_case update_index_index_info_blob '100644 blob __BLOB__\tb.txt\n' --index-info
 run_index_info_case update_index_index_info_stage '100644 __BLOB__ 0\tb.txt\n' --index-info
