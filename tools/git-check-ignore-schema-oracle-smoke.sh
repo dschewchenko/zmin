@@ -58,3 +58,5 @@ run_case() {
 }
 
 run_case check_ignore_non_matching_long check-ignore -v --non-matching kept
+run_case check_ignore_verbose_long check-ignore --verbose ignored
+run_case check_ignore_quiet_long check-ignore --quiet ignored
