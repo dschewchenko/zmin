@@ -2971,6 +2971,10 @@ pub enum Command {
         no_marker_size: u8,
         #[arg(long = "diff-algorithm")]
         diff_algorithm: Option<String>,
+        #[arg(long = "object-id", action = ArgAction::Count)]
+        object_id: u8,
+        #[arg(long = "no-object-id", action = ArgAction::Count)]
+        no_object_id: u8,
         #[arg(short = 'L')]
         labels: Vec<String>,
         current: PathBuf,

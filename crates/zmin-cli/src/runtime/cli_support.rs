@@ -1022,6 +1022,18 @@ fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result
                 text: "error: option `quiet' takes no value\n".into(),
             });
         }
+        if arg.starts_with("--object-id=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `object-id' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("--no-object-id=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `no-object-id' takes no value\n".into(),
+            });
+        }
         for option in ["ours", "theirs", "union", "diff3", "zdiff3"] {
             if arg.starts_with(&format!("--{option}=")) {
                 return Err(CliError::Stderr {

@@ -28,10 +28,14 @@ compare_files() {
 seed_files() {
   local repo="$1"
   mkdir "$repo"
+  "$GIT_BIN" -C "$repo" init -q -b main
   printf 'one\nours\nthree\n' >"$repo/ours.txt"
   printf 'one\nbase\nthree\n' >"$repo/base.txt"
   printf 'one\nbase\nthree\n' >"$repo/same-base.txt"
   printf 'one\ntheirs\nthree\n' >"$repo/theirs.txt"
+  "$GIT_BIN" -C "$repo" hash-object -w ours.txt >/dev/null
+  "$GIT_BIN" -C "$repo" hash-object -w base.txt >/dev/null
+  "$GIT_BIN" -C "$repo" hash-object -w theirs.txt >/dev/null
 }
 
 run_case() {
@@ -98,3 +102,9 @@ run_case merge_file_diff_algorithm_patience_conflict merge-file --diff-algorithm
 run_case merge_file_diff_algorithm_minimal_conflict merge-file --diff-algorithm=minimal ours.txt base.txt theirs.txt
 run_case merge_file_diff_algorithm_bogus_invalid merge-file --diff-algorithm=bogus ours.txt base.txt theirs.txt
 run_case merge_file_diff_algorithm_missing_invalid merge-file --diff-algorithm ours.txt base.txt theirs.txt
+run_case merge_file_object_id_conflict merge-file --object-id e7881154c61d5627ecf7fa43e0cca0aa40ce9006 ed61fcea92607a5d5bb4610d9bd5b3f11802db1a 42b8e7ae1e2844a32bba4efa973528fbf7907b9b
+run_case merge_file_object_id_stdout_conflict merge-file -p --object-id e7881154c61d5627ecf7fa43e0cca0aa40ce9006 ed61fcea92607a5d5bb4610d9bd5b3f11802db1a 42b8e7ae1e2844a32bba4efa973528fbf7907b9b
+run_case merge_file_object_id_ours merge-file --object-id --ours e7881154c61d5627ecf7fa43e0cca0aa40ce9006 ed61fcea92607a5d5bb4610d9bd5b3f11802db1a 42b8e7ae1e2844a32bba4efa973528fbf7907b9b
+run_case merge_file_object_id_bogus_invalid merge-file --object-id bogus ed61fcea92607a5d5bb4610d9bd5b3f11802db1a 42b8e7ae1e2844a32bba4efa973528fbf7907b9b
+run_case merge_file_object_id_value_invalid merge-file --object-id=true e7881154c61d5627ecf7fa43e0cca0aa40ce9006 ed61fcea92607a5d5bb4610d9bd5b3f11802db1a 42b8e7ae1e2844a32bba4efa973528fbf7907b9b
+run_case merge_file_no_object_id_value_invalid merge-file --no-object-id=true e7881154c61d5627ecf7fa43e0cca0aa40ce9006 ed61fcea92607a5d5bb4610d9bd5b3f11802db1a 42b8e7ae1e2844a32bba4efa973528fbf7907b9b

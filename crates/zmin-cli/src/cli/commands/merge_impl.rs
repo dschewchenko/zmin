@@ -518,6 +518,7 @@ pub(crate) fn merge_file_command(
     diff3: bool,
     marker_size: Option<String>,
     diff_algorithm: Option<String>,
+    object_id: bool,
     labels: Vec<String>,
     current: PathBuf,
     base: PathBuf,
@@ -531,9 +532,11 @@ pub(crate) fn merge_file_command(
     }
     let marker_len = effective_merge_file_marker_size(marker_size)?;
     validate_merge_file_diff_algorithm(diff_algorithm.as_deref())?;
-    let current_content = fs::read(&current)?;
-    let base_content = fs::read(&base)?;
-    let other_content = fs::read(&other)?;
+    let (current_content, base_content, other_content) = if object_id {
+        read_merge_file_object_inputs(&current, &base, &other)?
+    } else {
+        (fs::read(&current)?, fs::read(&base)?, fs::read(&other)?)
+    };
     let merge_labels = MergeFileLabels {
         current: labels
             .first()
@@ -590,7 +593,12 @@ pub(crate) fn merge_file_command(
             }
         }
     }
-    if stdout {
+    if object_id && !stdout {
+        let repo = find_repo()?;
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let id = store.write_object(GitObjectKind::Blob, &result.content)?;
+        println!("{}", id.to_hex());
+    } else if stdout || object_id {
         io::stdout().write_all(&result.content)?;
     } else {
         fs::write(&current, &result.content)?;
@@ -600,6 +608,38 @@ pub(crate) fn merge_file_command(
     } else {
         Err(CliError::Exit(result.conflicts.min(127) as i32))
     }
+}
+
+fn read_merge_file_object_inputs(
+    current: &Path,
+    base: &Path,
+    other: &Path,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    Ok((
+        read_merge_file_blob_object(&store, &current.to_string_lossy())?,
+        read_merge_file_blob_object(&store, &base.to_string_lossy())?,
+        read_merge_file_blob_object(&store, &other.to_string_lossy())?,
+    ))
+}
+
+fn read_merge_file_blob_object(store: &LooseObjectStore, value: &str) -> Result<Vec<u8>> {
+    let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, value).map_err(|_| CliError::Stderr {
+        code: 255,
+        text: format!("error: object '{value}' does not exist\n"),
+    })?;
+    let object = store.read_object(&id).map_err(|_| CliError::Stderr {
+        code: 255,
+        text: format!("error: object '{value}' does not exist\n"),
+    })?;
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Stderr {
+            code: 255,
+            text: format!("error: object '{value}' is not a blob\n"),
+        });
+    }
+    Ok(object.content)
 }
 
 fn validate_merge_file_diff_algorithm(value: Option<&str>) -> Result<()> {
