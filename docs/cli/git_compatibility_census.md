@@ -42,6 +42,7 @@ python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-compat-
 | File | Purpose |
 | --- | --- |
 | `docs/cli/census/summary.tsv` | top-level counts for source layers and buckets |
+| `docs/cli/census/command_progress.tsv` | per-command progress counts plus seed-coverage and verified-row percentages |
 | `docs/cli/census/all_items.tsv` | union of generated census rows |
 | `docs/cli/census/verified_behavior.tsv` | exact verified behavior rows safe to skip unless code or evidence changes |
 | `docs/cli/census/invalid_input_parity.tsv` | exact invalid-input rows where stock Git and Zmin rejections match |

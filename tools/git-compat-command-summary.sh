@@ -135,14 +135,16 @@ awk -F'\t' -v format="$format" '
       printf "behavior_rows_open\t%d\t%d\twritten rows not implemented or not matching yet\n", open_total + 0, rows_total + 0
       printf "invalid_input_rows\t%d\t%d\trows where stock Git rejects the input\n", invalid_total + 0, rows_total + 0
       print ""
-      print "command\tdoc_option_pairs\tcomplete_doc_option_pairs\trepresented_doc_option_pairs\tbehavior_rows_written\twritten_rows_matching_stock_git\tpartial\topen\tinvalid_input\tcomplete_matrix"
+      print "command\tdoc_option_pairs\tcomplete_doc_option_pairs\trepresented_doc_option_pairs\trepresented_doc_option_pairs_pct\tbehavior_rows_written\twritten_rows_matching_stock_git\twritten_rows_matching_stock_git_pct_of_written\tpartial\topen\tinvalid_input\tcomplete_matrix"
       for (i = 1; i <= command_order_count; i++) {
         command = command_order[i]
         if (!(command in commands_with_matrix)) continue
-        printf "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
+        represented_pct = option_seed[command] > 0 ? (represented[command] + 0) * 100 / option_seed[command] : 0
+        verified_pct = matrix_rows[command] > 0 ? (matrix_closed[command] + 0) * 100 / matrix_rows[command] : 0
+        printf "%s\t%d\t%d\t%d\t%.1f\t%d\t%d\t%.1f\t%d\t%d\t%d\t%s\n",
           command, option_seed[command] + 0, complete_options[command] + 0,
-          represented[command] + 0,
-          matrix_rows[command] + 0, matrix_closed[command] + 0,
+          represented[command] + 0, represented_pct,
+          matrix_rows[command] + 0, matrix_closed[command] + 0, verified_pct,
           matrix_partial[command] + 0, matrix_open[command] + 0,
           matrix_invalid[command] + 0, (command in complete ? "yes" : "no")
       }
@@ -159,15 +161,17 @@ awk -F'\t' -v format="$format" '
       printf "| Open rows | `%d/%d` | written rows not implemented or not matching yet |\n", open_total + 0, rows_total + 0
       printf "| Invalid input rows | `%d/%d` | rows where stock Git rejects the input |\n", invalid_total + 0, rows_total + 0
       print ""
-      print "| Command | Git doc option pairs | Complete doc option pairs | Represented doc option pairs | Behavior rows written | Written rows matching stock Git | Partial | Open | Invalid input | Complete matrix |"
-      print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
+      print "| Command | Git doc option pairs | Complete doc option pairs | Represented doc option pairs | Represented doc option pairs % | Behavior rows written | Written rows matching stock Git | Verified written rows % | Partial | Open | Invalid input | Complete matrix |"
+      print "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |"
       for (i = 1; i <= command_order_count; i++) {
         command = command_order[i]
         if (!(command in commands_with_matrix)) continue
-        printf "| `%s` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | `%d` | %s |\n",
+        represented_pct = option_seed[command] > 0 ? (represented[command] + 0) * 100 / option_seed[command] : 0
+        verified_pct = matrix_rows[command] > 0 ? (matrix_closed[command] + 0) * 100 / matrix_rows[command] : 0
+        printf "| `%s` | `%d` | `%d` | `%d` | `%.1f%%` | `%d` | `%d` | `%.1f%%` | `%d` | `%d` | `%d` | %s |\n",
           command, option_seed[command] + 0, complete_options[command] + 0,
-          represented[command] + 0,
-          matrix_rows[command] + 0, matrix_closed[command] + 0,
+          represented[command] + 0, represented_pct,
+          matrix_rows[command] + 0, matrix_closed[command] + 0, verified_pct,
           matrix_partial[command] + 0, matrix_open[command] + 0,
           matrix_invalid[command] + 0, (command in complete ? "yes" : "no")
       }
