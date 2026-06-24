@@ -79,6 +79,8 @@ run_case() {
 run_case count_objects_verbose_long --verbose
 run_case count_objects_human_long --human-readable
 run_case count_objects_verbose_human_long --verbose --human-readable
+run_case count_objects_verbose_long_repeated --verbose --verbose
+run_case count_objects_human_long_repeated --human-readable --human-readable
 run_case count_objects_verbose_short_repeated -v -v
 run_case count_objects_human_short_repeated -H -H
 run_case count_objects_no_verbose --no-verbose
