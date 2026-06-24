@@ -80,13 +80,20 @@ run_case() {
 run_case restore_worktree_short -W a.txt
 run_case restore_worktree_short_repeated -W -W a.txt
 run_case restore_worktree_long_repeated --worktree --worktree a.txt
+run_case restore_worktree_no_staged --worktree --no-staged a.txt
+run_case restore_worktree_short_no_staged -W --no-staged a.txt
 run_case restore_no_overlay_long --no-overlay a.txt
 run_case restore_no_overlay_repeated --no-overlay --no-overlay a.txt
 run_case restore_staged_short -S a.txt
 run_case restore_staged_short_repeated -S -S a.txt
+run_case restore_staged_worktree --staged --worktree a.txt
+run_case restore_staged_short_worktree_short -S -W a.txt
+run_case restore_worktree_staged --worktree --staged a.txt
+run_case restore_worktree_short_staged_short -W -S a.txt
 run_case restore_staged_short_no_staged -S --no-staged a.txt
 run_case restore_no_staged_staged_short --no-staged -S a.txt
 run_case restore_staged_short_no_worktree -S --no-worktree a.txt
+run_case restore_no_worktree_staged_short --no-worktree -S a.txt
 run_case restore_no_staged --no-staged a.txt
 run_case restore_staged_no_staged --staged --no-staged a.txt
 run_case restore_no_staged_staged --no-staged --staged a.txt
@@ -94,6 +101,9 @@ run_case restore_no_worktree --no-worktree a.txt
 run_case restore_worktree_no_worktree --worktree --no-worktree a.txt
 run_case restore_no_worktree_worktree --no-worktree --worktree a.txt
 run_case restore_no_staged_worktree --no-staged --worktree a.txt
+run_case restore_no_staged_worktree_short --no-staged -W a.txt
+run_case restore_staged_short_worktree -S --worktree a.txt
+run_case restore_worktree_short_staged -W --staged a.txt
 run_case restore_staged_no_worktree --staged --no-worktree a.txt
 run_case restore_source_short -s HEAD~1 -W a.txt
 run_case restore_source_short_repeated -s HEAD~1 -s HEAD~1 -W a.txt
