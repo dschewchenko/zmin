@@ -187,6 +187,19 @@ fn validate_status_invocation_before_clap(command_args: &[String]) -> Result<()>
                 text: format!("error: unknown switch `1'\n{STATUS_USAGE}"),
             });
         }
+        let message = match arg.as_str() {
+            "--merge" => Some("error: unknown option `merge'\n"),
+            _ if arg.starts_with("--summary-limit=") => {
+                Some("error: unknown option `summary-limit=1'\n")
+            }
+            _ => None,
+        };
+        if let Some(message) = message {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("{message}{STATUS_USAGE}"),
+            });
+        }
     }
     Ok(())
 }

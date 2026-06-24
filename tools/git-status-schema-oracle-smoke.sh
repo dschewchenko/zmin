@@ -77,3 +77,5 @@ run_case() {
 }
 
 run_case status_invalid_short_one status -1
+run_case status_invalid_merge status --merge
+run_case status_invalid_summary_limit status --summary-limit=1
