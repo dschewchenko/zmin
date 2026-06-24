@@ -3110,6 +3110,10 @@ pub enum Command {
         no_abbrev: bool,
         #[arg(long = "column", num_args = 0..=1, require_equals = true, default_missing_value = "column")]
         column: Option<String>,
+        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
+        color: Option<String>,
+        #[arg(long = "no-color", action = ArgAction::SetTrue)]
+        no_color: bool,
         #[arg(long = "create-reflog", overrides_with = "no_create_reflog", action = ArgAction::SetTrue)]
         create_reflog: bool,
         #[arg(long = "no-create-reflog", overrides_with = "create_reflog", action = ArgAction::SetTrue)]

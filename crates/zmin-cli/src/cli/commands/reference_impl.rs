@@ -4199,6 +4199,8 @@ struct BranchOptions {
     abbrev: Option<usize>,
     no_abbrev: bool,
     column: Option<String>,
+    color: Option<String>,
+    no_color: bool,
     create_reflog: bool,
     show_current: bool,
     edit_description: bool,
@@ -4298,6 +4300,8 @@ fn ls_tree(
 }
 
 fn branch(options: BranchOptions) -> Result<()> {
+    let _color = &options.color;
+    let _no_color = options.no_color;
     if options.help {
         if options.long_help {
             return render_git_manual_page("git-branch");
@@ -6550,6 +6554,8 @@ pub(crate) fn branch_command(
     abbrev: Option<usize>,
     no_abbrev: bool,
     column: Option<String>,
+    color: Option<String>,
+    no_color: bool,
     create_reflog: bool,
     show_current: bool,
     edit_description: bool,
@@ -6585,6 +6591,8 @@ pub(crate) fn branch_command(
         abbrev,
         no_abbrev,
         column,
+        color,
+        no_color,
         create_reflog,
         show_current,
         edit_description,
