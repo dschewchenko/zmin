@@ -93,9 +93,36 @@ run_exact() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_invalid() {
+  local name="$1"
+  local stdin_text="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git"
+  local zmin_work="$tmpdir/${name}.zmin"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_conflict_repo "$git_work"
+  cp -R "$git_work" "$zmin_work"
+
+  set +e
+  printf '%b' "$stdin_text" | "$GIT_BIN" -C "$git_work" mergetool "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  printf '%b' "$stdin_text" | "$ZMIN_BIN" -C "$zmin_work" mergetool "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_exact mergetool_tool_short "" -t zmintest --no-prompt f.txt
 run_exact mergetool_no_prompt_short "" --tool=zmintest -y f.txt
 run_exact mergetool_prompt_long "\n" --tool=zmintest --prompt f.txt
 run_exact mergetool_gui_short "" -g --tool=zmintest --no-prompt f.txt
 run_exact mergetool_gui_long "" --gui --tool=zmintest --no-prompt f.txt
 run_exact mergetool_no_gui_long "" --no-gui --tool=zmintest --no-prompt f.txt
+run_invalid mergetool_output_long_invalid "" --output out.txt --tool=zmintest --no-prompt f.txt
+run_invalid mergetool_auto_merge_invalid "" --auto-merge --tool=zmintest --no-prompt f.txt

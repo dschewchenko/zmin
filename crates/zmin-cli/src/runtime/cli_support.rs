@@ -133,6 +133,7 @@ pub(crate) fn parse_cli_invocation(
     validate_patch_id_invocation_before_clap(&command_args)?;
     validate_stripspace_invocation_before_clap(&command_args)?;
     validate_mailsplit_invocation_before_clap(&command_args)?;
+    validate_mergetool_invocation_before_clap(&command_args)?;
     validate_merge_tree_invocation_before_clap(&command_args)?;
     validate_merge_file_invocation_before_clap(&command_args)?;
     validate_mktree_invocation_before_clap(&command_args)?;
@@ -1105,6 +1106,25 @@ fn validate_merge_tree_invocation_before_clap(command_args: &[String]) -> Result
                 text: format!("error: unknown switch `{option}'\n{USAGE}"),
             });
         }
+    }
+    Ok(())
+}
+
+fn validate_mergetool_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("mergetool") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git mergetool [--tool=tool] [--tool-help] [-y|--no-prompt|--prompt] [-g|--gui|--no-gui] [-O<orderfile>] [file to merge] ...\n";
+    if command_args
+        .iter()
+        .skip(1)
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--output" || arg.starts_with("--output=") || arg == "--auto-merge")
+    {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: USAGE.into(),
+        });
     }
     Ok(())
 }
