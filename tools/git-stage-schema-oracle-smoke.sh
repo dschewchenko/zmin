@@ -82,7 +82,7 @@ prepare_case() {
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
       ;;
-    stage_chmod_long)
+    stage_chmod_long|stage_chmod_repeated_plus|stage_chmod_plus_then_minus|stage_chmod_minus_then_plus|stage_invalid_chmod_value)
       ;;
     stage_no_chmod_long|stage_no_chmod_repeated_long)
       printf 'mode default\n' >"$work/mode-default.txt"
@@ -239,6 +239,9 @@ run_case stage_no_all_repeated_long stage --no-all --no-all .
 run_case stage_ignore_removal_long stage --ignore-removal .
 run_case stage_no_ignore_removal_long stage --no-ignore-removal .
 run_case stage_chmod_long stage --chmod=+x mode.txt
+run_case stage_chmod_repeated_plus stage --chmod=+x --chmod=+x mode.txt
+run_case stage_chmod_plus_then_minus stage --chmod=+x --chmod=-x mode.txt
+run_case stage_chmod_minus_then_plus stage --chmod=-x --chmod=+x mode.txt
 run_case stage_no_chmod_long stage --no-chmod mode-default.txt
 run_case stage_no_chmod_repeated_long stage --no-chmod --no-chmod mode-default.txt
 run_case stage_dry_run_long stage --dry-run dry.txt
@@ -304,3 +307,4 @@ run_case stage_no_warn_embedded_repo_long stage --no-warn-embedded-repo inner
 run_case stage_invalid_short_a stage -a
 run_case stage_invalid_short_one stage -1
 run_case stage_invalid_short_two stage -2
+run_case stage_invalid_chmod_value stage --chmod=bad mode.txt
