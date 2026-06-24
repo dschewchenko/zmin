@@ -3189,22 +3189,22 @@ pub enum Command {
     Branch {
         #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
         help: bool,
-        #[arg(short = 'r', long = "remotes", action = ArgAction::SetTrue)]
-        remotes: bool,
-        #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
-        list: bool,
-        #[arg(long = "no-list", action = ArgAction::SetTrue)]
-        no_list: bool,
+        #[arg(short = 'r', long = "remotes", action = ArgAction::Count)]
+        remotes: u8,
+        #[arg(short = 'a', long = "all", action = ArgAction::Count)]
+        all: u8,
+        #[arg(short = 'l', long = "list", action = ArgAction::Count)]
+        list: u8,
+        #[arg(long = "no-list", action = ArgAction::Count)]
+        no_list: u8,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbose: u8,
-        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
-        no_verbose: bool,
+        #[arg(long = "no-verbose", action = ArgAction::Count)]
+        no_verbose: u8,
         #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
         abbrev: Option<usize>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
@@ -3213,20 +3213,20 @@ pub enum Command {
         column: Option<String>,
         #[arg(long = "no-column", action = ArgAction::SetTrue)]
         no_column: bool,
-        #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
-        ignore_case: bool,
+        #[arg(short = 'i', long = "ignore-case", action = ArgAction::Count)]
+        ignore_case: u8,
         #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
         color: Option<String>,
-        #[arg(long = "no-color", action = ArgAction::SetTrue)]
-        no_color: bool,
+        #[arg(long = "no-color", action = ArgAction::Count)]
+        no_color: u8,
         #[arg(long = "create-reflog", overrides_with = "no_create_reflog", action = ArgAction::SetTrue)]
         create_reflog: bool,
         #[arg(long = "no-create-reflog", overrides_with = "create_reflog", action = ArgAction::SetTrue)]
         no_create_reflog: bool,
-        #[arg(long = "show-current", action = ArgAction::SetTrue)]
-        show_current: bool,
-        #[arg(long = "no-show-current", action = ArgAction::SetTrue)]
-        no_show_current: bool,
+        #[arg(long = "show-current", action = ArgAction::Count)]
+        show_current: u8,
+        #[arg(long = "no-show-current", action = ArgAction::Count)]
+        no_show_current: u8,
         #[arg(long = "edit-description", action = ArgAction::SetTrue)]
         edit_description: bool,
         #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]

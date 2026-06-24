@@ -85,8 +85,20 @@ run_case() {
 }
 
 run_case branch_all_long --all
+run_case branch_all_long_repeated --all --all
 run_case branch_all_short -a
+run_case branch_all_short_repeated -a -a
+run_case branch_remotes_long_repeated --remotes --remotes
+run_case branch_remotes_short_repeated -r -r
 run_case branch_list_short -l
+run_case branch_list_long_repeated --list --list
+run_case branch_quiet_long_repeated --quiet --quiet
+run_case branch_quiet_short_repeated -q -q
+run_case branch_show_current_repeated --show-current --show-current
+run_case branch_no_color_repeated --no-color --no-color
+run_case branch_ignore_case_long_repeated --ignore-case --ignore-case
+run_case branch_ignore_case_short_repeated -i -i
+run_case branch_no_verbose_repeated --no-verbose --no-verbose
 run_case branch_delete_long --delete feature
 run_case branch_move_long --move feature moved
 run_case branch_move_short -m feature moved
