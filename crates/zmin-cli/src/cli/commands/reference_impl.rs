@@ -4252,6 +4252,7 @@ struct BranchOptions {
     sort: Vec<String>,
     format: Option<String>,
     no_format: bool,
+    omit_empty: bool,
     no_sort: bool,
     recurse_submodules: bool,
     no_recurse_submodules: bool,
@@ -4856,7 +4857,7 @@ fn branch_list(
     }
     apply_branch_list_sort(repo, &mut entries, &commit_cache, options)?;
     if let Some(format) = options.format.as_deref() {
-        print_branch_list_format(repo, &entries, format, current.as_deref())?;
+        print_branch_list_format(repo, &entries, format, current.as_deref(), options.omit_empty)?;
         return Ok(());
     }
     if let Some(column_mode) = branch_column_mode(repo, options)? {
@@ -4944,6 +4945,7 @@ fn print_branch_list_format(
     entries: &[BranchListEntry],
     format: &str,
     current: Option<&str>,
+    omit_empty: bool,
 ) -> Result<()> {
     let requirements = for_each_ref_requirements(format, &[])?;
     let runtime = CliPrimitiveRuntime::new_default(repo);
@@ -4960,7 +4962,10 @@ fn print_branch_list_format(
             &requirements,
             current,
         )?;
-        println!("{}", render_for_each_ref_row(format, &row)?);
+        let rendered = render_for_each_ref_row(format, &row)?;
+        if !omit_empty || !rendered.is_empty() {
+            println!("{rendered}");
+        }
     }
     Ok(())
 }
@@ -6681,6 +6686,7 @@ pub(crate) fn branch_command(
     sort: Vec<String>,
     format: Option<String>,
     no_format: bool,
+    omit_empty: bool,
     no_sort: bool,
     recurse_submodules: bool,
     no_recurse_submodules: bool,
@@ -6727,6 +6733,7 @@ pub(crate) fn branch_command(
         sort,
         format,
         no_format,
+        omit_empty,
         no_sort,
         recurse_submodules,
         no_recurse_submodules,

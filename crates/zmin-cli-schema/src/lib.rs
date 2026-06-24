@@ -3263,6 +3263,8 @@ pub enum Command {
         format: Option<String>,
         #[arg(long = "no-format", action = ArgAction::SetTrue)]
         no_format: bool,
+        #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
+        omit_empty: bool,
         #[arg(long = "no-sort", action = ArgAction::SetTrue)]
         no_sort: bool,
         #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
