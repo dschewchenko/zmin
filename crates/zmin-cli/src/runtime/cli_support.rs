@@ -1032,6 +1032,18 @@ fn validate_count_objects_invocation_before_clap(command_args: &[String]) -> Res
                 text: "error: option `human-readable' takes no value\n".into(),
             });
         }
+        if arg.starts_with("--no-verbose=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `no-verbose' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("--no-human-readable=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `no-human-readable' takes no value\n".into(),
+            });
+        }
         if arg.starts_with("-v=") || arg.starts_with("-H=") {
             return Err(CliError::Stderr {
                 code: 129,
