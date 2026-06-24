@@ -1500,6 +1500,10 @@ pub enum Command {
         parents: Vec<String>,
         #[arg(short = 'm')]
         messages: Vec<String>,
+        #[arg(short = 'F')]
+        message_files: Vec<PathBuf>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue)]
+        no_gpg_sign: bool,
     },
     Mktree {
         #[arg(short = 'z', action = ArgAction::SetTrue)]

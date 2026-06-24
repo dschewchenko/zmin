@@ -55,8 +55,10 @@ pub(crate) fn commit_tree_command(
     tree: &str,
     parents: Vec<String>,
     messages: Vec<String>,
+    message_files: Vec<PathBuf>,
+    no_gpg_sign: bool,
 ) -> Result<()> {
-    commit_tree(tree, parents, messages)
+    commit_tree(tree, parents, messages, message_files, no_gpg_sign)
 }
 
 pub(crate) fn mktree_command(nul_terminated: bool, missing: bool, batch: bool) -> Result<()> {
@@ -1653,7 +1655,14 @@ fn normalize_write_tree_prefix(prefix: &str) -> Result<(Vec<u8>, String)> {
     Ok((match_prefix, prefix.to_owned()))
 }
 
-fn commit_tree(tree: &str, parents: Vec<String>, messages: Vec<String>) -> Result<()> {
+fn commit_tree(
+    tree: &str,
+    parents: Vec<String>,
+    messages: Vec<String>,
+    message_files: Vec<PathBuf>,
+    no_gpg_sign: bool,
+) -> Result<()> {
+    let _no_gpg_sign = no_gpg_sign;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let tree = resolve_objectish(&repo, tree).map_err(|_| CliError::Fatal {
@@ -1677,21 +1686,35 @@ fn commit_tree(tree: &str, parents: Vec<String>, messages: Vec<String>) -> Resul
             builder = builder.parent(parent);
         }
     }
-    let message = commit_tree_message(messages)?;
+    let message = commit_tree_message(messages, message_files)?;
     let commit = builder.message(message)?.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     println!("{}", id.to_hex());
     Ok(())
 }
 
-pub(crate) fn commit_tree_message(messages: Vec<String>) -> Result<Vec<u8>> {
-    if messages.is_empty() {
+pub(crate) fn commit_tree_message(
+    messages: Vec<String>,
+    message_files: Vec<PathBuf>,
+) -> Result<Vec<u8>> {
+    if messages.is_empty() && message_files.is_empty() {
         let mut input = Vec::new();
         io::stdin().read_to_end(&mut input)?;
         return Ok(input);
     }
-    let mut message = messages.join("\n\n").into_bytes();
-    message.push(b'\n');
+    let mut parts = Vec::new();
+    for message in messages {
+        let mut message = message.into_bytes();
+        message.push(b'\n');
+        parts.push(message);
+    }
+    for path in message_files {
+        parts.push(read_commit_message_file(&path)?);
+    }
+    let mut message = parts.join(b"\n".as_slice());
+    if !message.ends_with(b"\n") {
+        message.push(b'\n');
+    }
     Ok(message)
 }
 

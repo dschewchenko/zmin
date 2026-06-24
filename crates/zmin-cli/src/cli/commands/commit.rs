@@ -85,7 +85,15 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             tree,
             parents,
             messages,
-        } => super::commit_commands::commit_tree_command(&tree, parents, messages),
+            message_files,
+            no_gpg_sign,
+        } => super::commit_commands::commit_tree_command(
+            &tree,
+            parents,
+            messages,
+            message_files,
+            no_gpg_sign,
+        ),
         runtime::Command::Mktree {
             nul_terminated,
             missing,

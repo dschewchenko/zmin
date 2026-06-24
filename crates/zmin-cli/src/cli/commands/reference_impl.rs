@@ -6397,7 +6397,7 @@ fn tag(options: TagOptions) -> Result<()> {
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
         let target_object = store.read_object(&id)?;
         let tagger = signature_from_identity(&repo, "GIT_COMMITTER")?;
-        let message = commit_tree_message(options.messages)?;
+        let message = commit_tree_message(options.messages, Vec::new())?;
         let tag = TagBuilder::new(id, target_object.kind, name, tagger)?
             .message(message)?
             .encode()?;

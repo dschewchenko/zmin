@@ -45,6 +45,7 @@ seed_repo() {
 
 run_case() {
   local name="$1"
+  shift
   local git_work="$tmpdir/${name}.git.work"
   local zmin_work="$tmpdir/${name}.zmin.work"
   local git_out="$tmpdir/${name}.git.out"
@@ -60,14 +61,16 @@ run_case() {
 
   seed_repo "$GIT_BIN" "$git_work"
   seed_repo "$ZMIN_BIN" "$zmin_work"
+  printf 'file message\n' >"$git_work/message.txt"
+  printf 'file message\n' >"$zmin_work/message.txt"
   git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
   zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
   test "$git_tree" = "$zmin_tree"
 
   set +e
-  "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" -m root >"$git_out" 2>"$git_err"
+  "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" "$@" >"$git_out" 2>"$git_err"
   git_exit=$?
-  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" -m root >"$zmin_out" 2>"$zmin_err"
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
   zmin_exit=$?
   set -e
 
@@ -80,4 +83,6 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_case commit_tree_positional_tree
+run_case commit_tree_positional_tree -m root
+run_case commit_tree_message_file -F message.txt
+run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
