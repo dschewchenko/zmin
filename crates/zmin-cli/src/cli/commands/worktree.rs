@@ -179,6 +179,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             dry_run,
             verbose,
             skip_errors,
+            sparse: _,
             paths,
         } => run_mv(force > 0, dry_run > 0, verbose > 0, skip_errors > 0, paths),
         runtime::Command::Status {

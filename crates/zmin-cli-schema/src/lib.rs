@@ -1429,6 +1429,8 @@ pub enum Command {
         verbose: u8,
         #[arg(short = 'k', action = ArgAction::Count)]
         skip_errors: u8,
+        #[arg(long = "sparse", action = ArgAction::Count)]
+        sparse: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

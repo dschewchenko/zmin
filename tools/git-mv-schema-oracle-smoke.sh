@@ -93,6 +93,8 @@ run_exact mv_verbose_short_repeated -v -v a.txt b.txt
 run_exact mv_verbose_long --verbose a.txt b.txt
 run_exact mv_verbose_long_repeated --verbose --verbose a.txt b.txt
 run_exact mv_skip_errors_short -k missing.txt a.txt dst
+run_exact mv_sparse_long --sparse a.txt b.txt
+run_exact mv_sparse_long_repeated --sparse --sparse a.txt b.txt
 run_exact mv_dry_run_verbose_short -n -v a.txt b.txt
 run_exact mv_force_dry_run_short --tracked-destination -f -n a.txt b.txt
 run_exact mv_force_short_repeated --tracked-destination -f -f a.txt b.txt
@@ -103,3 +105,4 @@ run_exact mv_skip_errors_dry_run -k -n missing.txt a.txt dst
 run_exact mv_force_verbose_short --tracked-destination -f -v a.txt b.txt
 run_exact mv_force_verbose_long --tracked-destination --force --verbose a.txt b.txt
 run_exact mv_force_verbose_dry_run --tracked-destination -f -v -n a.txt b.txt
+run_exact mv_sparse_dry_run --sparse --dry-run a.txt b.txt
