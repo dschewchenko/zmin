@@ -1399,18 +1399,30 @@ pub enum Command {
     Rm {
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
         force: u8,
+        #[arg(long = "no-force", action = ArgAction::Count)]
+        no_force: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
+        #[arg(long = "no-dry-run", action = ArgAction::Count)]
+        no_dry_run: u8,
         #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
         quiet: u8,
+        #[arg(long = "no-quiet", action = ArgAction::Count)]
+        no_quiet: u8,
         #[arg(short = 'r', action = ArgAction::Count)]
         recursive: u8,
         #[arg(long = "cached", action = ArgAction::Count)]
         cached: u8,
+        #[arg(long = "no-cached", action = ArgAction::Count)]
+        no_cached: u8,
         #[arg(long = "ignore-unmatch", action = ArgAction::Count)]
         ignore_unmatch: u8,
+        #[arg(long = "no-ignore-unmatch", action = ArgAction::Count)]
+        no_ignore_unmatch: u8,
         #[arg(long = "sparse", action = ArgAction::Count)]
         sparse: u8,
+        #[arg(long = "no-sparse", action = ArgAction::Count)]
+        no_sparse: u8,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
         #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
