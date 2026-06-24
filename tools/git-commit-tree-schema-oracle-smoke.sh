@@ -157,6 +157,36 @@ run_invalid_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_no_tree_invalid_case() {
+  local name="$1"
+  local expected_exit="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_tree_argument_case() {
   local name="$1"
   local mode="$2"
@@ -293,4 +323,5 @@ run_parent_case commit_tree_message_before_parent message_first
 run_parent_case commit_tree_duplicate_parent duplicate
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
+run_no_tree_invalid_case commit_tree_missing_tree_argument 128 -m root
 run_invalid_case commit_tree_extra_tree_argument 128 -m root extra
