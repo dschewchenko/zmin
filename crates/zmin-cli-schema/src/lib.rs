@@ -1742,10 +1742,14 @@ pub enum Command {
     Restore {
         #[arg(short = 's', long = "source")]
         source: Vec<String>,
-        #[arg(long = "staged", action = ArgAction::Count)]
+        #[arg(long = "staged", overrides_with = "no_staged", action = ArgAction::Count)]
         staged: u8,
-        #[arg(short = 'W', long = "worktree", action = ArgAction::Count)]
+        #[arg(long = "no-staged", overrides_with = "staged", action = ArgAction::SetTrue)]
+        no_staged: bool,
+        #[arg(short = 'W', long = "worktree", overrides_with = "no_worktree", action = ArgAction::Count)]
         worktree: u8,
+        #[arg(long = "no-worktree", overrides_with = "worktree", action = ArgAction::SetTrue)]
+        no_worktree: bool,
         #[arg(long = "no-overlay", action = ArgAction::Count)]
         no_overlay: u8,
         #[arg(value_hint = ValueHint::AnyPath)]

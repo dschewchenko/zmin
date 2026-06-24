@@ -3970,7 +3970,9 @@ fn checkout_index_inputs(stdin: bool, paths: Vec<PathBuf>) -> Result<Vec<PathBuf
 pub(crate) fn restore(
     source: Option<&str>,
     staged: bool,
+    no_staged: bool,
     worktree: bool,
+    no_worktree: bool,
     paths: Vec<PathBuf>,
 ) -> Result<usize> {
     if paths.is_empty() {
@@ -3980,7 +3982,19 @@ pub(crate) fn restore(
         });
     }
     let restore_index = staged;
-    let restore_worktree = worktree || !staged;
+    let restore_worktree = if worktree {
+        true
+    } else if no_worktree {
+        false
+    } else {
+        !restore_index && !no_staged
+    };
+    if !restore_index && !restore_worktree {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "neither '--staged' or '--worktree' is specified".into(),
+        });
+    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
@@ -9825,9 +9839,9 @@ fn checkout_paths(
 ) -> Result<()> {
     let report_from_index = source.is_none();
     let updated_paths = if source.is_some() {
-        worktree_commands::restore(source, true, true, paths)?
+        worktree_commands::restore(source, true, false, true, false, paths)?
     } else {
-        worktree_commands::restore(None, false, true, paths)?
+        worktree_commands::restore(None, false, false, true, false, paths)?
     };
     if report_updated_paths && report_from_index && updated_paths > 0 {
         let noun = if updated_paths == 1 { "path" } else { "paths" };

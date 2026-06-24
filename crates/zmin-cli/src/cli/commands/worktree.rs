@@ -301,10 +301,19 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Restore {
             source,
             staged,
+            no_staged,
             worktree,
+            no_worktree,
             no_overlay: _,
             paths,
-        } => run_restore(source.into_iter().next_back(), staged > 0, worktree > 0, paths),
+        } => run_restore(
+            source.into_iter().next_back(),
+            staged > 0,
+            no_staged,
+            worktree > 0,
+            no_worktree,
+            paths,
+        ),
         runtime::Command::Clean { args } => run_clean(args),
         runtime::Command::Reset {
             soft,
@@ -433,10 +442,20 @@ pub(crate) fn run_checkout_index(
 pub(crate) fn run_restore(
     source: Option<String>,
     staged: bool,
+    no_staged: bool,
     worktree: bool,
+    no_worktree: bool,
     paths: Vec<PathBuf>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::restore(source.as_deref(), staged, worktree, paths).map(|_| ())
+    super::worktree_commands::restore(
+        source.as_deref(),
+        staged,
+        no_staged,
+        worktree,
+        no_worktree,
+        paths,
+    )
+    .map(|_| ())
 }
 
 pub(crate) fn run_clean(args: Vec<String>) -> std::result::Result<(), runtime::CliError> {
