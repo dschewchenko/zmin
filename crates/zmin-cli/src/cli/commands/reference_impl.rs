@@ -4237,6 +4237,10 @@ struct TagOptions {
     delete: bool,
     verify: bool,
     list: bool,
+    no_column: bool,
+    ignore_case: bool,
+    color: Option<String>,
+    no_color: bool,
     force: bool,
     annotate: bool,
     messages: Vec<String>,
@@ -6242,6 +6246,10 @@ fn branch_missing_upstream_error(upstream: &str) -> String {
 }
 
 fn tag(options: TagOptions) -> Result<()> {
+    let _no_column = options.no_column;
+    let _ignore_case = options.ignore_case;
+    let _color = &options.color;
+    let _no_color = options.no_color;
     let repo = find_repo()?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let has_list_filter = options.contains.is_some()
@@ -6658,6 +6666,10 @@ pub(crate) fn tag_command(
     delete: bool,
     verify: bool,
     list: bool,
+    no_column: bool,
+    ignore_case: bool,
+    color: Option<String>,
+    no_color: bool,
     force: bool,
     annotate: bool,
     messages: Vec<String>,
@@ -6673,6 +6685,10 @@ pub(crate) fn tag_command(
         delete,
         verify,
         list,
+        no_column,
+        ignore_case,
+        color,
+        no_color,
         force,
         annotate,
         messages,

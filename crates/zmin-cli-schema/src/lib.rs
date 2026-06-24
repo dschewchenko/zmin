@@ -3183,6 +3183,14 @@ pub enum Command {
         verify: bool,
         #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
         list: bool,
+        #[arg(long = "no-column", action = ArgAction::SetTrue)]
+        no_column: bool,
+        #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
+        ignore_case: bool,
+        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
+        color: Option<String>,
+        #[arg(long = "no-color", action = ArgAction::SetTrue)]
+        no_color: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(short = 'a', long = "annotate", action = ArgAction::SetTrue)]

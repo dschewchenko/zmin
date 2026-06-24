@@ -83,3 +83,8 @@ run_case() {
 
 run_case tag_annotate_long --annotate v2 -m release
 run_case tag_list_short -l 'v*'
+run_case tag_no_column_long --no-column
+run_case tag_color_never_long --color=never
+run_case tag_no_color_long --no-color
+run_case tag_ignore_case_long --ignore-case
+run_case tag_ignore_case_short -i
