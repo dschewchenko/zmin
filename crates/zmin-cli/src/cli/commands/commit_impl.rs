@@ -1733,11 +1733,7 @@ pub(crate) fn commit_tree_message(
             }
         }
     }
-    let mut message = parts.join(b"\n".as_slice());
-    if !message.is_empty() && !message.ends_with(b"\n") {
-        message.push(b'\n');
-    }
-    Ok(message)
+    Ok(parts.join(b"\n".as_slice()))
 }
 
 fn read_commit_tree_message_file(path: &std::path::Path) -> Result<Vec<u8>> {

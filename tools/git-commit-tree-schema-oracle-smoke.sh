@@ -207,6 +207,46 @@ run_stdin_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_no_newline_message_file_case() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_commit="$tmpdir/${name}.git.commit"
+  local zmin_commit="$tmpdir/${name}.zmin.commit"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  printf 'file no newline' >"$git_work/no-newline.txt"
+  printf 'file no newline' >"$zmin_work/no-newline.txt"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" cat-file commit "$(cat "$git_out")" >"$git_commit"
+  "$GIT_BIN" -C "$zmin_work" cat-file commit "$(cat "$zmin_out")" >"$zmin_commit"
+  compare_files commit_object "$git_commit" "$zmin_commit"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_invalid_case() {
   local name="$1"
   local expected_exit="$2"
@@ -448,11 +488,13 @@ run_case commit_tree_empty_message_then_message -m '' -m msg
 run_case commit_tree_message_then_empty_message -m msg -m ''
 run_case commit_tree_message_file -F message.txt
 run_stdin_case commit_tree_stdin_ignored_with_message_file 'ignored stdin' -F message.txt
+run_no_newline_message_file_case commit_tree_message_file_without_trailing_newline -F no-newline.txt
 run_tree_after_two_args_case commit_tree_message_file_before_tree -F message.txt
 run_case commit_tree_empty_message_file -F /dev/null
 run_case commit_tree_attached_message_file -Fmessage.txt
 run_stdin_case commit_tree_message_file_stdin 'stdin message
 ' -F -
+run_stdin_case commit_tree_message_file_stdin_without_trailing_newline 'stdin no newline' -F -
 run_stdin_case commit_tree_attached_message_file_stdin 'stdin message
 ' -F-
 run_case commit_tree_message_then_file -m inline -F message.txt
