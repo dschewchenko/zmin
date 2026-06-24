@@ -112,3 +112,6 @@ run_gap() {
 
 run_case rev_parse_positional_revs rev-parse HEAD
 run_case rev_parse_quiet_short rev-parse -q --verify missing
+run_case rev_parse_is_inside_work_tree rev-parse --is-inside-work-tree
+run_case rev_parse_is_bare_repository rev-parse --is-bare-repository
+run_case rev_parse_is_shallow_repository rev-parse --is-shallow-repository
