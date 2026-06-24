@@ -480,10 +480,12 @@ pub enum Command {
         precision: Option<usize>,
         #[arg(short = 'f')]
         first: Option<usize>,
-        #[arg(short = 'b', action = ArgAction::SetTrue)]
-        keep_from: bool,
-        #[arg(long = "keep-cr", action = ArgAction::SetTrue)]
-        keep_cr: bool,
+        #[arg(short = 'b', action = ArgAction::Count)]
+        keep_from: u8,
+        #[arg(long = "keep-cr", action = ArgAction::Count)]
+        keep_cr: u8,
+        #[arg(long = "mboxrd", action = ArgAction::Count)]
+        mboxrd: u8,
         #[arg(short = 'o', value_hint = ValueHint::DirPath)]
         output: PathBuf,
         #[arg(value_hint = ValueHint::AnyPath)]

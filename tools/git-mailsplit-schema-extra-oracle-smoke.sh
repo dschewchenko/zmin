@@ -79,3 +79,8 @@ run_case() {
 
 run_case mailsplit_keep_cr_long --keep-cr -oout mbox
 run_case mailsplit_keep_from_short -b -oout mbox
+run_case mailsplit_keep_from_short_repeated -b -b -oout mbox
+run_case mailsplit_keep_cr_long_repeated --keep-cr --keep-cr -oout mbox
+run_case mailsplit_mboxrd_long --mboxrd -oout mbox
+run_case mailsplit_keep_from_rejects_value -b=true -oout mbox
+run_case mailsplit_keep_cr_rejects_value --keep-cr=true -oout mbox

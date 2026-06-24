@@ -34,9 +34,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             first,
             keep_from,
             keep_cr,
+            mboxrd: _,
             output,
             paths,
-        } => super::mail_commands::mailsplit(precision, first, keep_from, keep_cr, output, paths),
+        } => {
+            super::mail_commands::mailsplit(precision, first, keep_from > 0, keep_cr > 0, output, paths)
+        }
         runtime::Command::Mailinfo {
             keep_subject,
             keep_non_patch_brackets,
