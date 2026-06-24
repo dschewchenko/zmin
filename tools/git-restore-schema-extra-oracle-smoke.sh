@@ -97,6 +97,12 @@ run_case restore_no_staged_worktree --no-staged --worktree a.txt
 run_case restore_staged_no_worktree --staged --no-worktree a.txt
 run_case restore_source_short -s HEAD~1 -W a.txt
 run_case restore_source_short_repeated -s HEAD~1 -s HEAD~1 -W a.txt
+run_case restore_source_long_staged --source HEAD~1 --staged a.txt
+run_case restore_source_short_staged -s HEAD~1 --staged a.txt
+run_case restore_source_short_short_staged -s HEAD~1 -S a.txt
+run_case restore_source_long_short_staged --source HEAD~1 -S a.txt
+run_case restore_source_long_staged_no_worktree --source HEAD~1 --staged --no-worktree a.txt
+run_case restore_source_short_short_staged_no_worktree -s HEAD~1 -S --no-worktree a.txt
 run_case restore_source_long_repeated --source HEAD~1 --source HEAD~1 --worktree a.txt
 run_case restore_no_overlay_source_worktree --no-overlay --source HEAD~1 --worktree a.txt
 run_case restore_staged_repeated --staged --staged a.txt

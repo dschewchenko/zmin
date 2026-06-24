@@ -3,11 +3,11 @@ complete_command_matrices	0	151	only commands whose full behavior matrix is fini
 complete_doc_option_pairs	0	4632	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	154	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1342	4632	documented command-option pairs with at least one behavior row
-behavior_rows_written	4232	4232	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	3640	4232	closed written rows only
-behavior_rows_partial	0	4232	written rows with incomplete parity
-behavior_rows_open	21	4232	written rows not implemented or not matching yet
-invalid_input_rows	571	4232	rows where stock Git rejects the input
+behavior_rows_written	4238	4238	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	3646	4238	closed written rows only
+behavior_rows_partial	0	4238	written rows with incomplete parity
+behavior_rows_open	21	4238	written rows not implemented or not matching yet
+invalid_input_rows	571	4238	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	34	0	30	88.2	122	106	86.9	0	0	16	no
@@ -121,7 +121,7 @@ replay	160	0	3	1.9	5	4	80.0	0	0	1	no
 request-pull	1	0	1	100.0	6	5	83.3	0	0	1	no
 rerere	7	0	0	0.0	4	3	75.0	0	0	1	no
 reset	27	0	3	11.1	5	0	0.0	0	0	5	no
-restore	28	0	7	25.0	27	22	81.5	0	0	5	no
+restore	28	0	7	25.0	33	28	84.8	0	0	5	no
 rev-list	165	0	13	7.9	31	31	100.0	0	0	0	no
 rev-parse	72	0	25	34.7	78	71	91.0	0	0	7	no
 revert	27	0	6	22.2	7	5	71.4	0	0	2	no
