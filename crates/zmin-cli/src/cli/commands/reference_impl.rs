@@ -4258,6 +4258,7 @@ struct BranchOptions {
     contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
+    points_at: Option<String>,
     name: Option<String>,
     start_point: Option<String>,
     extra_args: Vec<String>,
@@ -4376,8 +4377,10 @@ fn branch(options: BranchOptions) -> Result<()> {
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let refs = RefStore::new(common_git_dir, GitHashAlgorithm::Sha1);
     validate_branch_autosetuprebase_config(&repo)?;
-    let has_branch_filter =
-        options.contains.is_some() || options.merged.is_some() || options.no_merged.is_some();
+    let has_branch_filter = options.contains.is_some()
+        || options.merged.is_some()
+        || options.no_merged.is_some()
+        || options.points_at.is_some();
     if options.show_current {
         if options.remotes
             || options.all
@@ -5165,6 +5168,7 @@ struct BranchListFilter {
     contains: Option<ObjectId>,
     merged: Option<ObjectId>,
     no_merged: Option<ObjectId>,
+    points_at: Option<ObjectId>,
 }
 
 fn branch_list_filter(
@@ -5196,13 +5200,19 @@ fn branch_list_filter(
             resolve_commitish(repo, store, target).map_err(|_| branch_merged_filter_error(target))
         })
         .transpose()?;
-    if contains.is_none() && merged.is_none() && no_merged.is_none() {
+    let points_at = options
+        .points_at
+        .as_deref()
+        .map(|target| resolve_objectish(repo, target))
+        .transpose()?;
+    if contains.is_none() && merged.is_none() && no_merged.is_none() && points_at.is_none() {
         return Ok(None);
     }
     Ok(Some(BranchListFilter {
         contains,
         merged,
         no_merged,
+        points_at,
     }))
 }
 
@@ -5235,6 +5245,11 @@ fn branch_filter_matches(
     }
     if let Some(target) = &filter.no_merged
         && is_ancestor_commit_cached(commit_cache, branch_id, target)?
+    {
+        return Ok(false);
+    }
+    if let Some(target) = &filter.points_at
+        && branch_id != target
     {
         return Ok(false);
     }
@@ -6648,6 +6663,7 @@ pub(crate) fn branch_command(
     contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
+    points_at: Option<String>,
     name: Option<String>,
     start_point: Option<String>,
     extra_args: Vec<String>,
@@ -6692,6 +6708,7 @@ pub(crate) fn branch_command(
         contains,
         merged,
         no_merged,
+        points_at,
         name,
         start_point,
         extra_args,

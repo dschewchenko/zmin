@@ -3275,6 +3275,8 @@ pub enum Command {
         merged: Option<String>,
         #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
         no_merged: Option<String>,
+        #[arg(long = "points-at")]
+        points_at: Option<String>,
         name: Option<String>,
         start_point: Option<String>,
         extra_args: Vec<String>,
