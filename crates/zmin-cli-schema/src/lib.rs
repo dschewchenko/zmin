@@ -2959,6 +2959,12 @@ pub enum Command {
         union: u8,
         #[arg(long = "no-union", action = ArgAction::Count)]
         no_union: u8,
+        #[arg(long = "diff3", action = ArgAction::Count)]
+        diff3: u8,
+        #[arg(long = "no-diff3", action = ArgAction::Count)]
+        no_diff3: u8,
+        #[arg(long = "zdiff3", action = ArgAction::Count)]
+        zdiff3: u8,
         #[arg(short = 'L')]
         labels: Vec<String>,
         current: PathBuf,

@@ -1008,7 +1008,7 @@ fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result
                 text: "error: option `quiet' takes no value\n".into(),
             });
         }
-        for option in ["ours", "theirs", "union"] {
+        for option in ["ours", "theirs", "union", "diff3", "zdiff3"] {
             if arg.starts_with(&format!("--{option}=")) {
                 return Err(CliError::Stderr {
                     code: 129,

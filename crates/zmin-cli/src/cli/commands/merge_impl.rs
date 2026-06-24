@@ -515,6 +515,7 @@ pub(crate) fn merge_file_command(
     stdout: bool,
     _quiet: bool,
     conflict_style: MergeFileConflictStyle,
+    diff3: bool,
     labels: Vec<String>,
     current: PathBuf,
     base: PathBuf,
@@ -551,7 +552,16 @@ pub(crate) fn merge_file_command(
     );
     if result.conflicts > 0 {
         match conflict_style {
-            MergeFileConflictStyle::Markers => {}
+            MergeFileConflictStyle::Markers => {
+                if diff3 {
+                    result.content = merge_file_diff3_content(
+                        &current_content,
+                        &base_content,
+                        &other_content,
+                        &merge_labels,
+                    );
+                }
+            }
             MergeFileConflictStyle::Ours => {
                 result.content = current_content.clone();
                 result.conflicts = 0;
@@ -579,10 +589,64 @@ pub(crate) fn merge_file_command(
     }
 }
 
+fn merge_file_diff3_content(
+    current: &[u8],
+    ancestor: &[u8],
+    other: &[u8],
+    labels: &MergeFileLabels,
+) -> Vec<u8> {
+    let current_lines = merge_file_split_lines(current);
+    let ancestor_lines = merge_file_split_lines(ancestor);
+    let other_lines = merge_file_split_lines(other);
+    let (prefix_len, suffix_len) =
+        merge_file_common_edges(&current_lines, &ancestor_lines, &other_lines);
+    let mut out = Vec::new();
+    merge_file_append_lines(&mut out, &current_lines[..prefix_len]);
+    out.extend_from_slice(format!("<<<<<<< {}\n", labels.current).as_bytes());
+    merge_file_append_lines(
+        &mut out,
+        &current_lines[prefix_len..current_lines.len() - suffix_len],
+    );
+    out.extend_from_slice(format!("||||||| {}\n", labels.ancestor).as_bytes());
+    merge_file_append_lines(
+        &mut out,
+        &ancestor_lines[prefix_len..ancestor_lines.len() - suffix_len],
+    );
+    out.extend_from_slice(b"=======\n");
+    merge_file_append_lines(
+        &mut out,
+        &other_lines[prefix_len..other_lines.len() - suffix_len],
+    );
+    out.extend_from_slice(format!(">>>>>>> {}\n", labels.other).as_bytes());
+    merge_file_append_lines(&mut out, &current_lines[current_lines.len() - suffix_len..]);
+    out
+}
+
 fn merge_file_union_content(current: &[u8], ancestor: &[u8], other: &[u8]) -> Vec<u8> {
     let current_lines = merge_file_split_lines(current);
     let ancestor_lines = merge_file_split_lines(ancestor);
     let other_lines = merge_file_split_lines(other);
+    let (prefix_len, suffix_len) =
+        merge_file_common_edges(&current_lines, &ancestor_lines, &other_lines);
+    let mut out = Vec::new();
+    merge_file_append_lines(&mut out, &current_lines[..prefix_len]);
+    merge_file_append_lines(
+        &mut out,
+        &current_lines[prefix_len..current_lines.len() - suffix_len],
+    );
+    merge_file_append_lines(
+        &mut out,
+        &other_lines[prefix_len..other_lines.len() - suffix_len],
+    );
+    merge_file_append_lines(&mut out, &current_lines[current_lines.len() - suffix_len..]);
+    out
+}
+
+fn merge_file_common_edges<'a>(
+    current_lines: &[&'a [u8]],
+    ancestor_lines: &[&'a [u8]],
+    other_lines: &[&'a [u8]],
+) -> (usize, usize) {
     let mut prefix_len = 0usize;
     while prefix_len < current_lines.len()
         && prefix_len < ancestor_lines.len()
@@ -603,18 +667,7 @@ fn merge_file_union_content(current: &[u8], ancestor: &[u8], other: &[u8]) -> Ve
     {
         suffix_len += 1;
     }
-    let mut out = Vec::new();
-    merge_file_append_lines(&mut out, &current_lines[..prefix_len]);
-    merge_file_append_lines(
-        &mut out,
-        &current_lines[prefix_len..current_lines.len() - suffix_len],
-    );
-    merge_file_append_lines(
-        &mut out,
-        &other_lines[prefix_len..other_lines.len() - suffix_len],
-    );
-    merge_file_append_lines(&mut out, &current_lines[current_lines.len() - suffix_len..]);
-    out
+    (prefix_len, suffix_len)
 }
 
 fn merge_file_split_lines(bytes: &[u8]) -> Vec<&[u8]> {

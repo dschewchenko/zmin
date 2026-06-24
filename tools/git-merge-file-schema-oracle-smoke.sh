@@ -78,3 +78,10 @@ run_case merge_file_union_stdout_conflict merge-file -p --union ours.txt base.tx
 run_case merge_file_ours_value_invalid merge-file --ours=true ours.txt base.txt theirs.txt
 run_case merge_file_theirs_value_invalid merge-file --theirs=true ours.txt base.txt theirs.txt
 run_case merge_file_union_value_invalid merge-file --union=true ours.txt base.txt theirs.txt
+run_case merge_file_diff3_conflict merge-file --diff3 ours.txt base.txt theirs.txt
+run_case merge_file_zdiff3_conflict merge-file --zdiff3 ours.txt base.txt theirs.txt
+run_case merge_file_no_diff3_conflict merge-file --no-diff3 ours.txt base.txt theirs.txt
+run_case merge_file_diff3_stdout_conflict merge-file -p --diff3 ours.txt base.txt theirs.txt
+run_case merge_file_zdiff3_stdout_conflict merge-file -p --zdiff3 ours.txt base.txt theirs.txt
+run_case merge_file_diff3_value_invalid merge-file --diff3=true ours.txt base.txt theirs.txt
+run_case merge_file_zdiff3_value_invalid merge-file --zdiff3=true ours.txt base.txt theirs.txt
