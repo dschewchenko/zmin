@@ -128,7 +128,7 @@ prepare_case() {
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
       ;;
-    stage_pathspec_from_file)
+    stage_pathspec_from_file|stage_pathspec_from_file_separate)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\ndir/two.txt\n' >"$work/paths.txt"
@@ -139,7 +139,7 @@ prepare_case() {
     stage_positional_path)
       printf 'new\n' >"$work/new.txt"
       ;;
-    stage_refresh_long)
+    stage_refresh_long|stage_refresh_repeated_long)
       printf 'changed\n' >"$work/tracked.txt"
       ;;
     stage_no_refresh_long|stage_no_refresh_repeated_long)
@@ -277,10 +277,12 @@ run_case stage_pathspec_file_nul stage --pathspec-from-file=paths.nul --pathspec
 run_case stage_no_pathspec_file_nul_long stage --no-pathspec-file-nul lf-pathspec.txt
 run_case stage_no_pathspec_file_nul_repeated_long stage --no-pathspec-file-nul --no-pathspec-file-nul lf-pathspec.txt
 run_case stage_pathspec_from_file stage --pathspec-from-file=paths.txt
+run_case stage_pathspec_from_file_separate stage --pathspec-from-file paths.txt
 run_case stage_no_pathspec_from_file_long stage --no-pathspec-from-file pathspec-default.txt
 run_case stage_no_pathspec_from_file_repeated_long stage --no-pathspec-from-file --no-pathspec-from-file pathspec-default.txt
 run_case stage_positional_path stage new.txt
 run_case stage_refresh_long stage --refresh tracked.txt
+run_case stage_refresh_repeated_long stage --refresh --refresh tracked.txt
 run_case stage_no_refresh_long stage --no-refresh fresh.txt
 run_case stage_no_refresh_repeated_long stage --no-refresh --no-refresh fresh.txt
 run_case stage_renormalize_long stage --renormalize .
