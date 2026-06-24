@@ -1711,17 +1711,28 @@ pub(crate) fn commit_tree_message(
     for source in message_sources {
         match source {
             CommitTreeMessageSource::Message(message) => {
+                if message.is_empty() {
+                    if !parts.is_empty() {
+                        parts.push(Vec::new());
+                    }
+                    continue;
+                }
                 let mut message = message.into_bytes();
                 message.push(b'\n');
                 parts.push(message);
             }
             CommitTreeMessageSource::File(path) => {
-                parts.push(read_commit_tree_message_file(&path)?)
+                let message = read_commit_tree_message_file(&path)?;
+                if !message.is_empty() {
+                    parts.push(message);
+                } else if !parts.is_empty() {
+                    parts.push(message);
+                }
             }
         }
     }
     let mut message = parts.join(b"\n".as_slice());
-    if !message.ends_with(b"\n") {
+    if !message.is_empty() && !message.ends_with(b"\n") {
         message.push(b'\n');
     }
     Ok(message)
