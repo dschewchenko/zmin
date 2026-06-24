@@ -516,6 +516,7 @@ pub(crate) fn merge_file_command(
     _quiet: bool,
     conflict_style: MergeFileConflictStyle,
     diff3: bool,
+    marker_size: Option<String>,
     labels: Vec<String>,
     current: PathBuf,
     base: PathBuf,
@@ -527,6 +528,7 @@ pub(crate) fn merge_file_command(
             message: "merge-file accepts at most three -L labels".into(),
         });
     }
+    let marker_len = effective_merge_file_marker_size(marker_size)?;
     let current_content = fs::read(&current)?;
     let base_content = fs::read(&base)?;
     let other_content = fs::read(&other)?;
@@ -559,6 +561,15 @@ pub(crate) fn merge_file_command(
                         &base_content,
                         &other_content,
                         &merge_labels,
+                        marker_len.unwrap_or(7),
+                    );
+                } else if let Some(marker_len) = marker_len {
+                    result.content = merge_file_marker_content(
+                        &current_content,
+                        &base_content,
+                        &other_content,
+                        &merge_labels,
+                        marker_len,
                     );
                 }
             }
@@ -589,11 +600,67 @@ pub(crate) fn merge_file_command(
     }
 }
 
+fn parse_merge_file_marker_size(value: &str) -> Result<usize> {
+    let Some(marker_len) = parse_scaled_usize(value) else {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: option `marker-size' expects an integer value with an optional k/m/g suffix\n"
+                .into(),
+        });
+    };
+    Ok(if marker_len == 0 { 7 } else { marker_len })
+}
+
+fn effective_merge_file_marker_size(parsed: Option<String>) -> Result<Option<usize>> {
+    let raw_args: Vec<String> = std::env::args().skip_while(|arg| arg != "merge-file").collect();
+    let mut effective = parsed;
+    let mut index = 0usize;
+    while index < raw_args.len() {
+        match raw_args[index].as_str() {
+            "--marker-size" => {
+                if let Some(value) = raw_args.get(index + 1) {
+                    effective = Some(value.clone());
+                    index += 2;
+                    continue;
+                }
+            }
+            "--no-marker-size" => {
+                effective = None;
+                index += 1;
+                continue;
+            }
+            arg => {
+                if let Some(value) = arg.strip_prefix("--marker-size=") {
+                    effective = Some(value.to_owned());
+                }
+            }
+        }
+        index += 1;
+    }
+    effective
+        .map(|value| parse_merge_file_marker_size(&value))
+        .transpose()
+}
+
+fn parse_scaled_usize(value: &str) -> Option<usize> {
+    let (digits, multiplier) = match value.as_bytes().last().copied() {
+        Some(b'k' | b'K') => (&value[..value.len() - 1], 1024usize),
+        Some(b'm' | b'M') => (&value[..value.len() - 1], 1024usize.checked_mul(1024)?),
+        Some(b'g' | b'G') => (&value[..value.len() - 1], 1024usize.checked_mul(1024)?.checked_mul(1024)?),
+        _ => (value, 1usize),
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<usize>().ok()?.checked_mul(multiplier)
+}
+
 fn merge_file_diff3_content(
     current: &[u8],
     ancestor: &[u8],
     other: &[u8],
     labels: &MergeFileLabels,
+    marker_len: usize,
 ) -> Vec<u8> {
     let current_lines = merge_file_split_lines(current);
     let ancestor_lines = merge_file_split_lines(ancestor);
@@ -602,24 +669,62 @@ fn merge_file_diff3_content(
         merge_file_common_edges(&current_lines, &ancestor_lines, &other_lines);
     let mut out = Vec::new();
     merge_file_append_lines(&mut out, &current_lines[..prefix_len]);
-    out.extend_from_slice(format!("<<<<<<< {}\n", labels.current).as_bytes());
+    merge_file_append_marker(&mut out, b'<', marker_len, Some(&labels.current));
     merge_file_append_lines(
         &mut out,
         &current_lines[prefix_len..current_lines.len() - suffix_len],
     );
-    out.extend_from_slice(format!("||||||| {}\n", labels.ancestor).as_bytes());
+    merge_file_append_marker(&mut out, b'|', marker_len, Some(&labels.ancestor));
     merge_file_append_lines(
         &mut out,
         &ancestor_lines[prefix_len..ancestor_lines.len() - suffix_len],
     );
-    out.extend_from_slice(b"=======\n");
+    merge_file_append_marker(&mut out, b'=', marker_len, None);
     merge_file_append_lines(
         &mut out,
         &other_lines[prefix_len..other_lines.len() - suffix_len],
     );
-    out.extend_from_slice(format!(">>>>>>> {}\n", labels.other).as_bytes());
+    merge_file_append_marker(&mut out, b'>', marker_len, Some(&labels.other));
     merge_file_append_lines(&mut out, &current_lines[current_lines.len() - suffix_len..]);
     out
+}
+
+fn merge_file_marker_content(
+    current: &[u8],
+    ancestor: &[u8],
+    other: &[u8],
+    labels: &MergeFileLabels,
+    marker_len: usize,
+) -> Vec<u8> {
+    let current_lines = merge_file_split_lines(current);
+    let ancestor_lines = merge_file_split_lines(ancestor);
+    let other_lines = merge_file_split_lines(other);
+    let (prefix_len, suffix_len) =
+        merge_file_common_edges(&current_lines, &ancestor_lines, &other_lines);
+    let mut out = Vec::new();
+    merge_file_append_lines(&mut out, &current_lines[..prefix_len]);
+    merge_file_append_marker(&mut out, b'<', marker_len, Some(&labels.current));
+    merge_file_append_lines(
+        &mut out,
+        &current_lines[prefix_len..current_lines.len() - suffix_len],
+    );
+    merge_file_append_marker(&mut out, b'=', marker_len, None);
+    merge_file_append_lines(
+        &mut out,
+        &other_lines[prefix_len..other_lines.len() - suffix_len],
+    );
+    merge_file_append_marker(&mut out, b'>', marker_len, Some(&labels.other));
+    merge_file_append_lines(&mut out, &current_lines[current_lines.len() - suffix_len..]);
+    out
+}
+
+fn merge_file_append_marker(out: &mut Vec<u8>, byte: u8, len: usize, label: Option<&str>) {
+    out.extend(std::iter::repeat_n(byte, len));
+    if let Some(label) = label {
+        out.push(b' ');
+        out.extend_from_slice(label.as_bytes());
+    }
+    out.push(b'\n');
 }
 
 fn merge_file_union_content(current: &[u8], ancestor: &[u8], other: &[u8]) -> Vec<u8> {

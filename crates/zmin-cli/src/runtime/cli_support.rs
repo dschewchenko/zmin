@@ -996,6 +996,15 @@ fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result
         if arg == "--" {
             break;
         }
+        if let Some(value) = arg.strip_prefix("--marker-size=")
+            && !is_merge_file_marker_size_value(value)
+        {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `marker-size' expects an integer value with an optional k/m/g suffix\n"
+                    .into(),
+            });
+        }
         if arg.starts_with("-q=") {
             return Err(CliError::Stderr {
                 code: 129,
@@ -1017,7 +1026,24 @@ fn validate_merge_file_invocation_before_clap(command_args: &[String]) -> Result
             }
         }
     }
+    for window in command_args.windows(2) {
+        if window[0] == "--marker-size" && !is_merge_file_marker_size_value(&window[1]) {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `marker-size' expects an integer value with an optional k/m/g suffix\n"
+                    .into(),
+            });
+        }
+    }
     Ok(())
+}
+
+fn is_merge_file_marker_size_value(value: &str) -> bool {
+    let digits = match value.as_bytes().last().copied() {
+        Some(b'k' | b'K' | b'm' | b'M' | b'g' | b'G') => &value[..value.len() - 1],
+        _ => value,
+    };
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn validate_mktree_invocation_before_clap(command_args: &[String]) -> Result<()> {

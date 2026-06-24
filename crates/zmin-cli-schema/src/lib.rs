@@ -2965,6 +2965,10 @@ pub enum Command {
         no_diff3: u8,
         #[arg(long = "zdiff3", action = ArgAction::Count)]
         zdiff3: u8,
+        #[arg(long = "marker-size")]
+        marker_size: Option<String>,
+        #[arg(long = "no-marker-size", action = ArgAction::Count)]
+        no_marker_size: u8,
         #[arg(short = 'L')]
         labels: Vec<String>,
         current: PathBuf,

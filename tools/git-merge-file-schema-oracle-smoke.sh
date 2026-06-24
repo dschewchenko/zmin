@@ -85,3 +85,10 @@ run_case merge_file_diff3_stdout_conflict merge-file -p --diff3 ours.txt base.tx
 run_case merge_file_zdiff3_stdout_conflict merge-file -p --zdiff3 ours.txt base.txt theirs.txt
 run_case merge_file_diff3_value_invalid merge-file --diff3=true ours.txt base.txt theirs.txt
 run_case merge_file_zdiff3_value_invalid merge-file --zdiff3=true ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_conflict merge-file --marker-size 3 ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_equals_conflict merge-file --marker-size=3 ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_stdout_conflict merge-file -p --marker-size=3 ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_diff3_conflict merge-file --diff3 --marker-size=3 ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_no_marker_conflict merge-file --no-marker-size ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_bogus_invalid merge-file --marker-size=bogus ours.txt base.txt theirs.txt
+run_case merge_file_marker_size_missing_invalid merge-file --marker-size ours.txt base.txt theirs.txt
