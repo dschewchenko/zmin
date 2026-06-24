@@ -107,3 +107,7 @@ run_prefix_missing_case() {
 run_case write_tree_missing_ok
 run_prefix_missing_case write_tree_prefix_missing missing
 run_prefix_missing_case write_tree_prefix_leading_slash /src
+run_prefix_missing_case write_tree_prefix_dot_slash ./src
+run_prefix_missing_case write_tree_prefix_dot_component src/.
+run_prefix_missing_case write_tree_prefix_parent_component src/../src
+run_prefix_missing_case write_tree_prefix_missing_trailing_slash nosuch/

@@ -1601,7 +1601,7 @@ fn write_tree_validate_index_objects(store: &LooseObjectStore, index: &GitIndex)
 }
 
 fn write_tree_prefix_index(index: &GitIndex, prefix: &str) -> Result<GitIndex> {
-    let prefix = normalize_write_tree_prefix(prefix)?;
+    let (prefix, display_prefix) = normalize_write_tree_prefix(prefix)?;
     let entries = index
         .entries()
         .iter()
@@ -1616,24 +1616,29 @@ fn write_tree_prefix_index(index: &GitIndex, prefix: &str) -> Result<GitIndex> {
         })
         .collect::<Vec<_>>();
     if entries.is_empty() {
-        let prefix = String::from_utf8_lossy(prefix.strip_suffix(b"/").unwrap_or(&prefix));
         return Err(CliError::Fatal {
             code: 128,
-            message: format!("git-write-tree: prefix {prefix} not found"),
+            message: format!("git-write-tree: prefix {display_prefix} not found"),
         });
     }
     GitIndex::from_entries(entries).map_err(CliError::Io)
 }
 
-fn normalize_write_tree_prefix(prefix: &str) -> Result<Vec<u8>> {
-    let mut prefix = normalize_git_path(prefix)?.into_bytes();
-    while prefix.last() == Some(&b'/') {
-        prefix.pop();
+fn normalize_write_tree_prefix(prefix: &str) -> Result<(Vec<u8>, String)> {
+    if prefix.contains('\0') {
+        return Err(CliError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid git tree path",
+        )));
     }
-    if !prefix.is_empty() {
-        prefix.push(b'/');
+    let mut match_prefix = prefix.as_bytes().to_vec();
+    while match_prefix.last() == Some(&b'/') {
+        match_prefix.pop();
     }
-    Ok(prefix)
+    if !match_prefix.is_empty() {
+        match_prefix.push(b'/');
+    }
+    Ok((match_prefix, prefix.to_owned()))
 }
 
 fn commit_tree(tree: &str, parents: Vec<String>, messages: Vec<String>) -> Result<()> {
