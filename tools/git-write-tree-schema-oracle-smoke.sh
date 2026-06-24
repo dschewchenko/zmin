@@ -69,4 +69,39 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+seed_repo_with_prefix_tree() {
+  local repo="$1"
+  mkdir "$repo"
+  "$GIT_BIN" -C "$repo" init -q
+  mkdir "$repo/src"
+  printf 'root\n' >"$repo/root.txt"
+  printf 'src\n' >"$repo/src/a.txt"
+  "$GIT_BIN" -C "$repo" add root.txt src/a.txt
+}
+
+run_prefix_missing_case() {
+  local name="$1"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo_with_prefix_tree "$git_work"
+  seed_repo_with_prefix_tree "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" write-tree --prefix=missing >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" write-tree --prefix=missing >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = 128
+  test "$zmin_exit" = 128
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case write_tree_missing_ok
+run_prefix_missing_case write_tree_prefix_missing

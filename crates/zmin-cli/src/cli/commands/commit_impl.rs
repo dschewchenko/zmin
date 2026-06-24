@@ -1615,6 +1615,13 @@ fn write_tree_prefix_index(index: &GitIndex, prefix: &str) -> Result<GitIndex> {
             Some(entry)
         })
         .collect::<Vec<_>>();
+    if entries.is_empty() {
+        let prefix = String::from_utf8_lossy(prefix.strip_suffix(b"/").unwrap_or(&prefix));
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("git-write-tree: prefix {prefix} not found"),
+        });
+    }
     GitIndex::from_entries(entries).map_err(CliError::Io)
 }
 
