@@ -502,6 +502,12 @@ fn validate_commit_tree_invocation_before_clap(command_args: &[String]) -> Resul
             index += 2;
             continue;
         }
+        if arg.starts_with("--no-gpg-sign=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `no-gpg-sign' takes no value\n".into(),
+            });
+        }
         if arg.starts_with("-m") && arg.len() > 2
             || arg.starts_with("-F") && arg.len() > 2
             || arg.starts_with("-p") && arg.len() > 2
