@@ -202,6 +202,9 @@ run_in_seed_repos branch_quiet_short_listing branch -q
 run_in_seed_repos branch_sort_listing branch --sort=refname
 run_in_seed_repos branch_no_sort_listing branch --no-sort
 run_in_seed_repos branch_no_verbose_listing branch --no-verbose
+run_in_seed_repos branch_no_format_listing branch --no-format
+run_in_seed_repos branch_no_show_current_listing branch --no-show-current
+run_in_seed_repos branch_no_list_listing branch --no-list
 run_in_seed_repos branch_column_never_listing branch --column=never
 run_in_seed_repos branch_no_column_listing branch --no-column
 run_in_seed_repos branch_ignore_case_long_listing branch --ignore-case

@@ -3100,6 +3100,8 @@ pub enum Command {
         all: bool,
         #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
         list: bool,
+        #[arg(long = "no-list", action = ArgAction::SetTrue)]
+        no_list: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
@@ -3128,6 +3130,8 @@ pub enum Command {
         no_create_reflog: bool,
         #[arg(long = "show-current", action = ArgAction::SetTrue)]
         show_current: bool,
+        #[arg(long = "no-show-current", action = ArgAction::SetTrue)]
+        no_show_current: bool,
         #[arg(long = "edit-description", action = ArgAction::SetTrue)]
         edit_description: bool,
         #[arg(short = 'd', long = "delete", action = ArgAction::SetTrue)]
@@ -3154,6 +3158,8 @@ pub enum Command {
         sort: Vec<String>,
         #[arg(long = "format")]
         format: Option<String>,
+        #[arg(long = "no-format", action = ArgAction::SetTrue)]
+        no_format: bool,
         #[arg(long = "no-sort", action = ArgAction::SetTrue)]
         no_sort: bool,
         #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
