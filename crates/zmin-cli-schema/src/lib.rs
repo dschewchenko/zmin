@@ -876,6 +876,8 @@ pub enum Command {
         porcelain: Option<String>,
         #[arg(short = 'b', long = "branch", action = ArgAction::SetTrue)]
         branch: bool,
+        #[arg(long = "no-branch", overrides_with = "branch", action = ArgAction::SetTrue)]
+        no_branch: bool,
         #[arg(long = "ahead-behind", overrides_with = "no_ahead_behind", action = ArgAction::SetTrue)]
         ahead_behind: bool,
         #[arg(long = "no-ahead-behind", overrides_with = "ahead_behind", action = ArgAction::SetTrue)]

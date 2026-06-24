@@ -1120,17 +1120,21 @@ fn status_submodule_state(
 }
 
 fn print_status_verbose_diff(verbose: u8, paths: Vec<PathBuf>) -> Result<()> {
-    if verbose > 0 {
-        println!();
-    }
     match verbose {
         0 => Ok(()),
-        1 => super::diff_commands::diff(DiffOptions {
-            cached: true,
-            paths,
-            ..DiffOptions::default()
-        }),
+        1 => {
+            if paths.is_empty() {
+                return Ok(());
+            }
+            println!();
+            super::diff_commands::diff(DiffOptions {
+                cached: true,
+                paths,
+                ..DiffOptions::default()
+            })
+        }
         _ => {
+            println!();
             println!("Changes to be committed:");
             super::diff_commands::diff(DiffOptions {
                 cached: true,
@@ -9890,13 +9894,12 @@ fn checkout_new_branch(
     } else {
         format!("branch: Created from {start}")
     };
-    let reset_current_branch_old_id = if reset_existing
-        && current_branch_ref(&refs)?.as_deref() == Some(ref_name.as_str())
-    {
-        Some(refs.resolve(&ref_name)?)
-    } else {
-        None
-    };
+    let reset_current_branch_old_id =
+        if reset_existing && current_branch_ref(&refs)?.as_deref() == Some(ref_name.as_str()) {
+            Some(refs.resolve(&ref_name)?)
+        } else {
+            None
+        };
     if create_reflog || checkout_branch_reflog_enabled(&repo)? {
         write_ref_with_reflog(&repo, &refs, &ref_name, &id, &branch_reflog_message)?;
     } else {

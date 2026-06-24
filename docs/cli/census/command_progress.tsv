@@ -3,11 +3,11 @@ complete_command_matrices	0	151	only commands whose full behavior matrix is fini
 complete_doc_option_pairs	0	4632	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	154	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1342	4632	documented command-option pairs with at least one behavior row
-behavior_rows_written	4318	4318	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	3707	4318	closed written rows only
-behavior_rows_partial	0	4318	written rows with incomplete parity
-behavior_rows_open	21	4318	written rows not implemented or not matching yet
-invalid_input_rows	590	4318	rows where stock Git rejects the input
+behavior_rows_written	4328	4328	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	3717	4328	closed written rows only
+behavior_rows_partial	0	4328	written rows with incomplete parity
+behavior_rows_open	21	4328	written rows not implemented or not matching yet
+invalid_input_rows	590	4328	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	34	0	30	88.2	122	106	86.9	0	0	16	no
@@ -139,7 +139,7 @@ show-ref	14	0	13	92.9	26	23	88.5	0	0	3	no
 sparse-checkout	11	0	0	0.0	9	4	44.4	0	0	5	no
 stage	0	0	0	0.0	84	80	95.2	0	0	4	no
 stash	30	0	0	0.0	208	191	91.8	0	0	17	no
-status	26	0	26	100.0	139	126	90.6	0	0	13	no
+status	26	0	26	100.0	149	136	91.3	0	0	13	no
 stripspace	5	0	5	100.0	14	9	64.3	0	0	5	no
 submodule	35	0	0	0.0	8	1	12.5	0	0	7	no
 svn	95	0	0	0.0	1	1	100.0	0	0	0	no

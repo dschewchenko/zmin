@@ -195,6 +195,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Status {
             porcelain,
             branch,
+            no_branch,
             ahead_behind: _,
             no_ahead_behind,
             show_stash,
@@ -234,7 +235,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             }
             run_status(
                 porcelain,
-                branch,
+                branch && !no_branch,
                 !no_ahead_behind,
                 show_stash && !no_show_stash,
                 if no_verbose { 0 } else { verbose },
