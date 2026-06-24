@@ -3745,7 +3745,14 @@ pub(crate) fn mv(
                 ),
             });
         }
+        let overwrites_tracked_destination = find_index_entry(&index, &target_relative).is_some();
         ensure_mv_destination_available(&index, &target_relative, force)?;
+        if force && verbose && overwrites_tracked_destination {
+            eprintln!(
+                "warning: overwriting '{}'",
+                String::from_utf8_lossy(&target_relative)
+            );
+        }
         if dry_run {
             println!(
                 "Checking rename of '{}' to '{}'",
