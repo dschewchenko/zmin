@@ -96,3 +96,6 @@ run_exact() {
 run_exact mergetool_tool_short "" -t zmintest --no-prompt f.txt
 run_exact mergetool_no_prompt_short "" --tool=zmintest -y f.txt
 run_exact mergetool_prompt_long "\n" --tool=zmintest --prompt f.txt
+run_exact mergetool_gui_short "" -g --tool=zmintest --no-prompt f.txt
+run_exact mergetool_gui_long "" --gui --tool=zmintest --no-prompt f.txt
+run_exact mergetool_no_gui_long "" --no-gui --tool=zmintest --no-prompt f.txt

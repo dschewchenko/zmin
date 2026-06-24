@@ -26,6 +26,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             tool,
             no_prompt,
             prompt,
+            gui: _,
+            no_gui: _,
             paths,
         } => super::merge_commands::mergetool(tool.as_deref(), no_prompt, prompt, paths),
         runtime::Command::MergeTree {

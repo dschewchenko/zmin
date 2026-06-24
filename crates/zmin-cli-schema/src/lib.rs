@@ -2912,6 +2912,10 @@ pub enum Command {
         no_prompt: bool,
         #[arg(long = "prompt", action = ArgAction::SetTrue)]
         prompt: bool,
+        #[arg(short = 'g', long = "gui", action = ArgAction::SetTrue)]
+        gui: bool,
+        #[arg(long = "no-gui", action = ArgAction::SetTrue)]
+        no_gui: bool,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
