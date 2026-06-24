@@ -57,4 +57,8 @@ run_case() {
 }
 
 run_case fast_export_all --all
+run_case fast_export_all_repeated --all --all
+run_case fast_export_no_all_rejected --no-all HEAD
+run_case fast_export_all_rejects_value --all=true
+run_case fast_export_all_rejects_empty_value --all=
 run_case fast_export_head HEAD

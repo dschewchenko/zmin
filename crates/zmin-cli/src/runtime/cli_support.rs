@@ -118,6 +118,7 @@ pub(crate) fn parse_cli_invocation(
     validate_fetch_pack_invocation_before_clap(&command_args)?;
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
+    validate_fast_export_invocation_before_clap(&command_args)?;
     validate_credential_store_invocation_before_clap(&command_args)?;
     validate_cherry_invocation_before_clap(&command_args)?;
     validate_commit_tree_invocation_before_clap(&command_args)?;
@@ -514,6 +515,24 @@ fn validate_hash_object_invocation_before_clap(command_args: &[String]) -> Resul
             return Err(CliError::Stderr {
                 code: 129,
                 text: "error: unknown option `write'\nusage: git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n                       [--stdin [--literally]] [--] <file>...\n   or: git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]\n\n    -t <type>             object type\n    -w                    write the object into the object database\n    --[no-]stdin          read the object from stdin\n    --[no-]stdin-paths    read file names from stdin\n    --no-filters          store file as is without filters\n    --filters             opposite of --no-filters\n    --[no-]literally      just hash any random garbage to create corrupt objects for debugging Git\n    --[no-]path <file>    process file as it were from this path\n\n".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_fast_export_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("fast-export") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--no-all" || arg.starts_with("--all=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "usage: git fast-export [<rev-list-opts>]\n\n    --[no-]progress <n>   show progress after <n> objects\n    --[no-]signed-tags <mode>\n                          select handling of signed tags\n    --[no-]signed-commits <mode>\n                          select handling of signed commits\n    --[no-]tag-of-filtered-object <mode>\n                          select handling of tags that tag filtered objects\n    --[no-]reencode <mode>\n                          select handling of commit messages in an alternate encoding\n    --[no-]export-marks <file>\n                          dump marks to this file\n    --[no-]import-marks <file>\n                          import marks from this file\n    --[no-]import-marks-if-exists <file>\n                          import marks from this file if it exists\n    --[no-]fake-missing-tagger\n                          fake a tagger when tags lack one\n    --[no-]full-tree      output full tree for each commit\n    --[no-]use-done-feature\n                          use the done feature to terminate the stream\n    --no-data             skip output of blob data\n    --data                opposite of --no-data\n    --[no-]refspec <refspec>\n                          apply refspec to exported refs\n    --[no-]anonymize      anonymize output\n    --anonymize-map <from:to>\n                          convert <from> to <to> in anonymized output\n    --[no-]reference-excluded-parents\n                          reference parents which are not in fast-export stream by object id\n    --[no-]show-original-ids\n                          show original object ids of blobs/commits\n    --[no-]mark-tags      label tags with mark ids\n\n".into(),
             });
         }
     }

@@ -2560,8 +2560,8 @@ pub enum Command {
         keep_non_patch: bool,
     },
     FastExport {
-        #[arg(long = "all", action = ArgAction::SetTrue)]
-        all: bool,
+        #[arg(long = "all", action = ArgAction::Count)]
+        all: u8,
         refs: Vec<String>,
     },
     FastImport {

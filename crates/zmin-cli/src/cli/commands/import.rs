@@ -16,7 +16,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             keep_non_patch,
         ),
         runtime::Command::FastExport { all, refs } => {
-            super::import_commands::fast_export(all, refs)
+            super::import_commands::fast_export(all > 0, refs)
         }
         runtime::Command::FastImport { date_format } => {
             super::import_commands::fast_import(date_format.as_deref())
