@@ -656,7 +656,7 @@ pub(crate) fn merge_index(
     one_shot: bool,
     quiet: bool,
     merge_program: &str,
-    all: bool,
+    all: u8,
     paths: Vec<String>,
 ) -> Result<()> {
     if merge_program != "git-merge-one-file" && merge_program != "merge-one-file" {
@@ -665,13 +665,13 @@ pub(crate) fn merge_index(
             message: "merge-index currently supports git-merge-one-file only".into(),
         });
     }
-    if !all && paths.is_empty() {
+    if all == 0 && paths.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
             message: "merge-index requires -a or at least one path".into(),
         });
     }
-    if !all {
+    if all == 0 {
         for path in &paths {
             let _ = normalize_git_path(path)?;
         }
@@ -681,39 +681,41 @@ pub(crate) fn merge_index(
     let index = read_repo_index(&repo)?;
     let selected = merge_index_unmerged_paths(&index);
     let mut failed = false;
-    for path in selected {
-        let (base, ours, theirs) = merge_index_stages(&index, &path);
-        let path_text = String::from_utf8_lossy(&path);
-        let result = merge_one_file_impl(
-            &base
-                .as_ref()
-                .map(|entry| entry.id.to_hex())
-                .unwrap_or_default(),
-            &ours
-                .as_ref()
-                .map(|entry| entry.id.to_hex())
-                .unwrap_or_default(),
-            &theirs
-                .as_ref()
-                .map(|entry| entry.id.to_hex())
-                .unwrap_or_default(),
-            &path_text,
-            base.as_ref()
-                .map(|entry| index_mode_octal(entry.mode))
-                .unwrap_or(""),
-            ours.as_ref()
-                .map(|entry| index_mode_octal(entry.mode))
-                .unwrap_or(""),
-            theirs
-                .as_ref()
-                .map(|entry| index_mode_octal(entry.mode))
-                .unwrap_or(""),
-            quiet,
-        );
-        if let Err(error) = result {
-            failed = true;
-            if !one_shot {
-                return Err(error);
+    for _ in 0..all {
+        for path in &selected {
+            let (base, ours, theirs) = merge_index_stages(&index, path);
+            let path_text = String::from_utf8_lossy(path);
+            let result = merge_one_file_impl(
+                &base
+                    .as_ref()
+                    .map(|entry| entry.id.to_hex())
+                    .unwrap_or_default(),
+                &ours
+                    .as_ref()
+                    .map(|entry| entry.id.to_hex())
+                    .unwrap_or_default(),
+                &theirs
+                    .as_ref()
+                    .map(|entry| entry.id.to_hex())
+                    .unwrap_or_default(),
+                &path_text,
+                base.as_ref()
+                    .map(|entry| index_mode_octal(entry.mode))
+                    .unwrap_or(""),
+                ours.as_ref()
+                    .map(|entry| index_mode_octal(entry.mode))
+                    .unwrap_or(""),
+                theirs
+                    .as_ref()
+                    .map(|entry| index_mode_octal(entry.mode))
+                    .unwrap_or(""),
+                quiet,
+            );
+            if let Err(error) = result {
+                failed = true;
+                if !one_shot {
+                    return Err(error);
+                }
             }
         }
     }

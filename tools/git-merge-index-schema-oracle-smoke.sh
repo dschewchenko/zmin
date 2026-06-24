@@ -139,3 +139,5 @@ run_gap() {
 run_exact merge_index_one_shot_path -o git-merge-one-file file.txt
 run_exact merge_index_quiet_path -q git-merge-one-file file.txt
 run_exact merge_index_explicit_path git-merge-one-file file.txt
+run_exact merge_index_repeated_all_after_program git-merge-one-file -a -a
+run_exact merge_index_one_shot_quiet_path -o -q git-merge-one-file file.txt

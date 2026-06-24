@@ -2964,8 +2964,8 @@ pub enum Command {
         #[arg(short = 'q', action = ArgAction::SetTrue)]
         quiet: bool,
         merge_program: String,
-        #[arg(short = 'a', action = ArgAction::SetTrue)]
-        all: bool,
+        #[arg(short = 'a', action = ArgAction::Count)]
+        all: u8,
         paths: Vec<String>,
     },
     UpdateRef {
