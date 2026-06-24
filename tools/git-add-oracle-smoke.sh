@@ -58,7 +58,7 @@ prepare_case() {
   local name="$2"
   cp -R "$base_seed" "$work"
   case "$name" in
-    add_intent_long|add_intent_short)
+    add_intent_long|add_intent_short|add_intent_repeated_long)
       printf 'intent\n' >"$work/intent.txt"
       ;;
     add_positional_path)
@@ -84,7 +84,7 @@ prepare_case() {
       ;;
     add_no_all_empty)
       ;;
-    add_no_all_path|add_ignore_removal_long)
+    add_no_all_path|add_no_all_repeated_long|add_ignore_removal_long)
       printf 'new\n' >"$work/new.txt"
       rm "$work/tracked.txt"
       ;;
@@ -92,7 +92,7 @@ prepare_case() {
       printf 'new\n' >"$work/new.txt"
       rm "$work/tracked.txt"
       ;;
-    add_renormalize_long|add_no_renormalize_long)
+    add_renormalize_long|add_renormalize_repeated_long|add_no_renormalize_long)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       ;;
@@ -102,7 +102,7 @@ prepare_case() {
     add_no_dry_run_long)
       printf 'real\n' >"$work/real.txt"
       ;;
-    add_verbose_long|add_verbose_short)
+    add_verbose_long|add_verbose_repeated_long|add_verbose_short)
       printf 'verbose\n' >"$work/verbose.txt"
       ;;
     add_no_verbose_long)
@@ -117,7 +117,7 @@ prepare_case() {
     add_no_refresh_long)
       printf 'fresh\n' >"$work/fresh.txt"
       ;;
-    add_no_ignore_errors_long)
+    add_no_ignore_errors_long|add_ignore_errors_repeated_long)
       printf 'errors-off\n' >"$work/errors-off.txt"
       ;;
     add_no_ignore_missing_long)
@@ -191,6 +191,7 @@ base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
 
 run_case add_intent_long add --intent-to-add intent.txt
+run_case add_intent_repeated_long add --intent-to-add --intent-to-add intent.txt
 run_case add_intent_short add -N intent.txt
 run_case add_positional_path add new.txt
 run_case add_all_long add --all
@@ -202,21 +203,26 @@ run_case add_update_long add --update
 run_case add_update_repeated_long add --update --update
 run_case add_no_all_empty add --no-all
 run_case add_no_all_path add --no-all .
+run_case add_no_all_repeated_long add --no-all --no-all .
 run_case add_ignore_removal_long add --ignore-removal .
 run_case add_no_ignore_removal_long add --no-ignore-removal .
 run_case add_renormalize_long add --renormalize .
+run_case add_renormalize_repeated_long add --renormalize --renormalize .
 run_case add_no_renormalize_long add --no-renormalize .
 run_case add_dry_run_short add -n dry.txt
 run_case add_dry_run_repeated_long add --dry-run --dry-run dry.txt
 run_case add_no_dry_run_long add --no-dry-run real.txt
 run_case add_verbose_long add --verbose verbose.txt
+run_case add_verbose_repeated_long add --verbose --verbose verbose.txt
 run_case add_verbose_short add -v verbose.txt
 run_case add_no_verbose_long add --no-verbose quiet.txt
 run_case add_no_update_long add --no-update new.txt
 run_case add_no_intent_to_add_long add --no-intent-to-add full.txt
 run_case add_no_refresh_long add --no-refresh fresh.txt
 run_case add_no_ignore_errors_long add --no-ignore-errors errors-off.txt
+run_case add_ignore_errors_repeated_long add --ignore-errors --ignore-errors errors-off.txt
 run_case add_no_ignore_missing_long add --no-ignore-missing missing-off.txt
+run_case add_ignore_missing_repeated_long add --ignore-missing --ignore-missing --dry-run missing.txt
 run_case add_no_pathspec_file_nul_long add --no-pathspec-file-nul lf-pathspec.txt
 run_case add_no_chmod_long add --no-chmod mode-default.txt
 run_case add_sparse_long add --sparse sparse-ok.txt

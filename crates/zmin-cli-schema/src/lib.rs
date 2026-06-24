@@ -1271,8 +1271,8 @@ pub enum Command {
     Add {
         #[arg(short = 'A', long = "all", action = ArgAction::Count)]
         all: u8,
-        #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
-        ignore_removal: bool,
+        #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::Count)]
+        ignore_removal: u8,
         #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
         no_ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
@@ -1281,12 +1281,12 @@ pub enum Command {
         update: u8,
         #[arg(long = "no-update", action = ArgAction::SetTrue)]
         no_update: bool,
-        #[arg(long = "renormalize", action = ArgAction::SetTrue)]
-        renormalize: bool,
+        #[arg(long = "renormalize", action = ArgAction::Count)]
+        renormalize: u8,
         #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
         no_renormalize: bool,
-        #[arg(short = 'N', long = "intent-to-add", action = ArgAction::SetTrue)]
-        intent_to_add: bool,
+        #[arg(short = 'N', long = "intent-to-add", action = ArgAction::Count)]
+        intent_to_add: u8,
         #[arg(long = "no-intent-to-add", action = ArgAction::SetTrue)]
         no_intent_to_add: bool,
         #[arg(long = "refresh", action = ArgAction::SetTrue)]
@@ -1297,12 +1297,12 @@ pub enum Command {
         verbose: u8,
         #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
         no_verbose: bool,
-        #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
-        ignore_errors: bool,
+        #[arg(long = "ignore-errors", action = ArgAction::Count)]
+        ignore_errors: u8,
         #[arg(long = "no-ignore-errors", action = ArgAction::SetTrue)]
         no_ignore_errors: bool,
-        #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
-        ignore_missing: bool,
+        #[arg(long = "ignore-missing", action = ArgAction::Count)]
+        ignore_missing: u8,
         #[arg(long = "no-ignore-missing", action = ArgAction::SetTrue)]
         no_ignore_missing: bool,
         #[arg(long = "sparse", action = ArgAction::SetTrue)]
@@ -1333,8 +1333,8 @@ pub enum Command {
     Stage {
         #[arg(short = 'A', long = "all", action = ArgAction::Count)]
         all: u8,
-        #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
-        ignore_removal: bool,
+        #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::Count)]
+        ignore_removal: u8,
         #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
         no_ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
@@ -1343,12 +1343,12 @@ pub enum Command {
         update: u8,
         #[arg(long = "no-update", action = ArgAction::SetTrue)]
         no_update: bool,
-        #[arg(long = "renormalize", action = ArgAction::SetTrue)]
-        renormalize: bool,
+        #[arg(long = "renormalize", action = ArgAction::Count)]
+        renormalize: u8,
         #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
         no_renormalize: bool,
-        #[arg(short = 'N', long = "intent-to-add", action = ArgAction::SetTrue)]
-        intent_to_add: bool,
+        #[arg(short = 'N', long = "intent-to-add", action = ArgAction::Count)]
+        intent_to_add: u8,
         #[arg(long = "no-intent-to-add", action = ArgAction::SetTrue)]
         no_intent_to_add: bool,
         #[arg(long = "refresh", action = ArgAction::SetTrue)]
@@ -1359,12 +1359,12 @@ pub enum Command {
         verbose: u8,
         #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
         no_verbose: bool,
-        #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
-        ignore_errors: bool,
+        #[arg(long = "ignore-errors", action = ArgAction::Count)]
+        ignore_errors: u8,
         #[arg(long = "no-ignore-errors", action = ArgAction::SetTrue)]
         no_ignore_errors: bool,
-        #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
-        ignore_missing: bool,
+        #[arg(long = "ignore-missing", action = ArgAction::Count)]
+        ignore_missing: u8,
         #[arg(long = "no-ignore-missing", action = ArgAction::SetTrue)]
         no_ignore_missing: bool,
         #[arg(long = "sparse", action = ArgAction::SetTrue)]
