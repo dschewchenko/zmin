@@ -85,3 +85,6 @@ run_case() {
 
 run_case show_ref_positional_refs show-ref refs/heads/main
 run_case show_ref_hash_short show-ref -s
+run_case show_ref_hash_long show-ref --hash
+run_case show_ref_hash_long_value show-ref --hash=12
+run_case show_ref_head_long show-ref --head
