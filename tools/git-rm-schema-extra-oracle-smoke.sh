@@ -31,7 +31,9 @@ init_repo() {
   "$GIT_BIN" -C "$repo" config user.email a@example.com
   "$GIT_BIN" -C "$repo" config user.name A
   printf 'base\n' >"$repo/a.txt"
-  "$GIT_BIN" -C "$repo" add a.txt
+  mkdir "$repo/dir"
+  printf 'dir\n' >"$repo/dir/d.txt"
+  "$GIT_BIN" -C "$repo" add a.txt dir/d.txt
   "$GIT_BIN" -C "$repo" commit -q -m base
 }
 
@@ -46,6 +48,11 @@ snapshot_repo() {
   else
     printf 'missing\n' >"${out_prefix}.a_exists"
     : >"${out_prefix}.a_content"
+  fi
+  if test -f "$repo/dir/d.txt"; then
+    printf 'present\n' >"${out_prefix}.dir_d_exists"
+  else
+    printf 'missing\n' >"${out_prefix}.dir_d_exists"
   fi
 }
 
@@ -76,6 +83,7 @@ run_case() {
   compare_files ls-files "$tmpdir/${name}.git.ls_files" "$tmpdir/${name}.zmin.ls_files"
   compare_files worktree-exists "$tmpdir/${name}.git.a_exists" "$tmpdir/${name}.zmin.a_exists"
   compare_files worktree-content "$tmpdir/${name}.git.a_content" "$tmpdir/${name}.zmin.a_content"
+  compare_files dir-worktree-exists "$tmpdir/${name}.git.dir_d_exists" "$tmpdir/${name}.zmin.dir_d_exists"
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
@@ -86,3 +94,8 @@ run_case rm_quiet_repeated -q -q a.txt
 run_case rm_dry_run_quiet -n -q a.txt
 run_case rm_cached_dry_run --cached --dry-run a.txt
 run_case rm_ignore_unmatch_dry_run --ignore-unmatch --dry-run missing.txt
+run_case rm_force_repeated -f -f a.txt
+run_case rm_recursive_repeated -r -r dir
+run_case rm_cached_quiet --cached --quiet a.txt
+run_case rm_force_cached --force --cached a.txt
+run_case rm_ignore_unmatch_quiet --ignore-unmatch --quiet missing.txt

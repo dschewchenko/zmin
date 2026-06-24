@@ -158,10 +158,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             pathspec_file_nul,
             paths,
         } => run_rm(runtime::RmOptions {
-            force,
+            force: force > 0,
             dry_run: dry_run > 0,
             quiet: quiet > 0,
-            recursive,
+            recursive: recursive > 0,
             cached,
             ignore_unmatch,
             pathspec_from_file,

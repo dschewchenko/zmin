@@ -1387,14 +1387,14 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     Rm {
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
+        #[arg(short = 'f', long = "force", action = ArgAction::Count)]
+        force: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
         #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
         quiet: u8,
-        #[arg(short = 'r', action = ArgAction::SetTrue)]
-        recursive: bool,
+        #[arg(short = 'r', action = ArgAction::Count)]
+        recursive: u8,
         #[arg(long = "cached", action = ArgAction::SetTrue)]
         cached: bool,
         #[arg(long = "ignore-unmatch", action = ArgAction::SetTrue)]
