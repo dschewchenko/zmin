@@ -70,6 +70,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }),
         runtime::Command::Add {
             all,
+            ignore_removal: _,
             force,
             update,
             intent_to_add,
@@ -85,6 +86,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }
         | runtime::Command::Stage {
             all,
+            ignore_removal: _,
             force,
             update,
             intent_to_add,

@@ -75,6 +75,12 @@ prepare_case() {
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
       ;;
+    add_no_all_empty)
+      ;;
+    add_no_all_path)
+      printf 'new\n' >"$work/new.txt"
+      rm "$work/tracked.txt"
+      ;;
     add_dry_run_short)
       printf 'dry\n' >"$work/dry.txt"
       ;;
@@ -132,6 +138,8 @@ run_case add_all_long add --all
 run_case add_force_long add --force force.ignored
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
 run_case add_update_long add --update
+run_case add_no_all_empty add --no-all
+run_case add_no_all_path add --no-all .
 run_case add_dry_run_short add -n dry.txt
 run_case add_verbose_long add --verbose verbose.txt
 run_case add_verbose_short add -v verbose.txt

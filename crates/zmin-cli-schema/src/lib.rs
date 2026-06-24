@@ -1238,6 +1238,8 @@ pub enum Command {
     Add {
         #[arg(short = 'A', long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
+        ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
@@ -1266,6 +1268,8 @@ pub enum Command {
     Stage {
         #[arg(short = 'A', long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
+        ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
