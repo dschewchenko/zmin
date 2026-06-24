@@ -607,6 +607,23 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
         for row in matrices
         if row["zmin_status"] in {"open", "partial"}
     ]
+    exact_open_oracle_gaps = [
+        {
+            **row,
+            "item_kind": "exact_open_local_oracle_unavailable",
+            "next_action": "rerun on an environment with the missing stock Git command/tool, or keep open without claiming compatibility",
+        }
+        for row in open_exact
+        if any(
+            marker in f"{row['evidence_source']} {row['notes']}".lower()
+            for marker in [
+                "lacks",
+                "unavailable",
+                "oracle unavailable",
+                "does not dispatch",
+            ]
+        )
+    ]
 
     implemented_unverified = []
     for (command, option), arg_refs in sorted(zmin_options.items()):
@@ -823,6 +840,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     summary_counter["verified_rows"] = len(verified)
     summary_counter["invalid_input_rows"] = len(invalid_input)
     summary_counter["open_or_partial_matrix_rows"] = len(open_exact)
+    summary_counter["exact_open_local_oracle_unavailable_rows"] = len(exact_open_oracle_gaps)
     summary_counter["implemented_but_unverified_rows"] = len(implemented_unverified)
     summary_counter["remaining_to_fix_or_verify_rows"] = len(remaining)
     summary_counter["extension_or_deferred_rows"] = len(extension_deferred)
@@ -849,6 +867,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
             ("verified_rows", summary_counter["verified_rows"], "closed exact behavior rows"),
             ("invalid_input_rows", summary_counter["invalid_input_rows"], "stock-compatible rejection rows"),
             ("open_or_partial_matrix_rows", summary_counter["open_or_partial_matrix_rows"], "exact rows still open or partial"),
+            ("exact_open_local_oracle_unavailable_rows", summary_counter["exact_open_local_oracle_unavailable_rows"], "exact open rows blocked by missing local stock Git oracle command/tool"),
             ("implemented_but_unverified_rows", summary_counter["implemented_but_unverified_rows"], "schema args without exact matrix evidence"),
             ("remaining_to_fix_or_verify_rows", summary_counter["remaining_to_fix_or_verify_rows"], "doc-option expansion, exact opens and unclassified guards"),
             ("extension_or_deferred_rows", summary_counter["extension_or_deferred_rows"], "Zmin-only or deferred/non-Git scope items"),
@@ -863,6 +882,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
         "summary": summary_rows,
         "verified_behavior": verified,
         "invalid_input_parity": invalid_input,
+        "exact_open_oracle_gaps": exact_open_oracle_gaps,
         "implemented_but_unverified": implemented_unverified,
         "remaining_to_fix_or_verify": remaining,
         "zmin_extension_or_deferred": extension_deferred,
@@ -892,6 +912,7 @@ def main() -> int:
     for name in [
         "verified_behavior",
         "invalid_input_parity",
+        "exact_open_oracle_gaps",
         "implemented_but_unverified",
         "remaining_to_fix_or_verify",
         "zmin_extension_or_deferred",

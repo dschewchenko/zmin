@@ -45,6 +45,7 @@ python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-compat-
 | `docs/cli/census/all_items.tsv` | union of generated census rows |
 | `docs/cli/census/verified_behavior.tsv` | exact verified behavior rows safe to skip unless code or evidence changes |
 | `docs/cli/census/invalid_input_parity.tsv` | exact invalid-input rows where stock Git and Zmin rejections match |
+| `docs/cli/census/exact_open_oracle_gaps.tsv` | exact open rows blocked by a missing local stock-Git oracle command/tool |
 | `docs/cli/census/implemented_but_unverified.tsv` | Zmin schema surfaces with parser/handler presence but no exact stock-Git row evidence |
 | `docs/cli/census/remaining_to_fix_or_verify.tsv` | command/doc-option expansion, exact open rows and unclassified hard-fail guards |
 | `docs/cli/census/zmin_extension_or_deferred.tsv` | Zmin-only additions and deferred/non-Git-2.47.1 evidence |
