@@ -84,7 +84,7 @@ prepare_case() {
     add_force_long|add_force_repeated_long)
       printf 'ignored\n' >"$work/force.ignored"
       ;;
-    add_edit_noop|add_edit_short_noop)
+    add_edit_noop|add_edit_short_noop|add_edit_repeated|add_edit_short_repeated)
       printf 'changed\n' >"$work/tracked.txt"
       ;;
     add_pathspec_file_nul)
@@ -214,6 +214,8 @@ run_case add_force_long add --force force.ignored
 run_case add_force_repeated_long add --force --force force.ignored
 run_case add_edit_noop add --edit
 run_case add_edit_short_noop add -e
+run_case add_edit_repeated add --edit --edit
+run_case add_edit_short_repeated add -e -e
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
 run_case add_update_long add --update
 run_case add_update_repeated_long add --update --update
