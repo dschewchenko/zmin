@@ -57,3 +57,5 @@ run_case var_list_compact_repeated var -ll
 run_case var_list_rejects_value var -l=true
 run_case var_list_rejects_empty_value var -l=
 run_case var_no_list_rejected var --no-list
+run_case var_nofork_rejected var --nofork
+run_case var_i_rejected var -i

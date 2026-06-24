@@ -262,7 +262,7 @@ fn validate_var_invocation_before_clap(args: &[String]) -> Result<()> {
     if args.first().map(String::as_str) != Some("var") {
         return Ok(());
     }
-    let invalid_list_usage = matches!(args, [_, option] if option == "--list" || option == "--no-list")
+    let invalid_list_usage = matches!(args, [_, option] if matches!(option.as_str(), "--list" | "--no-list" | "--nofork" | "-i"))
         || matches!(args, [_, option] if option == "-l=true" || option == "-l=" || option == "-ll")
         || matches!(args, [_, first, second] if first == "-l" && second == "-l");
     if invalid_list_usage {
