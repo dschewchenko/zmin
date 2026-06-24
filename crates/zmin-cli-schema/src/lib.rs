@@ -1273,60 +1273,60 @@ pub enum Command {
         all: u8,
         #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::Count)]
         ignore_removal: u8,
-        #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
-        no_ignore_removal: bool,
+        #[arg(long = "no-ignore-removal", action = ArgAction::Count)]
+        no_ignore_removal: u8,
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
         force: u8,
         #[arg(short = 'u', long = "update", action = ArgAction::Count)]
         update: u8,
-        #[arg(long = "no-update", action = ArgAction::SetTrue)]
-        no_update: bool,
+        #[arg(long = "no-update", action = ArgAction::Count)]
+        no_update: u8,
         #[arg(long = "renormalize", action = ArgAction::Count)]
         renormalize: u8,
-        #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
-        no_renormalize: bool,
+        #[arg(long = "no-renormalize", action = ArgAction::Count)]
+        no_renormalize: u8,
         #[arg(short = 'N', long = "intent-to-add", action = ArgAction::Count)]
         intent_to_add: u8,
-        #[arg(long = "no-intent-to-add", action = ArgAction::SetTrue)]
-        no_intent_to_add: bool,
-        #[arg(long = "refresh", action = ArgAction::SetTrue)]
-        refresh: bool,
-        #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
-        no_refresh: bool,
+        #[arg(long = "no-intent-to-add", action = ArgAction::Count)]
+        no_intent_to_add: u8,
+        #[arg(long = "refresh", action = ArgAction::Count)]
+        refresh: u8,
+        #[arg(long = "no-refresh", action = ArgAction::Count)]
+        no_refresh: u8,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbose: u8,
-        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
-        no_verbose: bool,
+        #[arg(long = "no-verbose", action = ArgAction::Count)]
+        no_verbose: u8,
         #[arg(long = "ignore-errors", action = ArgAction::Count)]
         ignore_errors: u8,
-        #[arg(long = "no-ignore-errors", action = ArgAction::SetTrue)]
-        no_ignore_errors: bool,
+        #[arg(long = "no-ignore-errors", action = ArgAction::Count)]
+        no_ignore_errors: u8,
         #[arg(long = "ignore-missing", action = ArgAction::Count)]
         ignore_missing: u8,
-        #[arg(long = "no-ignore-missing", action = ArgAction::SetTrue)]
-        no_ignore_missing: bool,
-        #[arg(long = "sparse", action = ArgAction::SetTrue)]
-        sparse: bool,
-        #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
-        no_sparse: bool,
-        #[arg(long = "no-warn-embedded-repo", action = ArgAction::SetTrue)]
-        no_warn_embedded_repo: bool,
+        #[arg(long = "no-ignore-missing", action = ArgAction::Count)]
+        no_ignore_missing: u8,
+        #[arg(long = "sparse", action = ArgAction::Count)]
+        sparse: u8,
+        #[arg(long = "no-sparse", action = ArgAction::Count)]
+        no_sparse: u8,
+        #[arg(long = "no-warn-embedded-repo", action = ArgAction::Count)]
+        no_warn_embedded_repo: u8,
         #[arg(long = "chmod")]
         chmod: Option<String>,
-        #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
-        no_chmod: bool,
+        #[arg(long = "no-chmod", action = ArgAction::Count)]
+        no_chmod: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
-        #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
-        no_dry_run: bool,
+        #[arg(long = "no-dry-run", action = ArgAction::Count)]
+        no_dry_run: u8,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
-        #[arg(long = "no-pathspec-from-file", action = ArgAction::SetTrue)]
-        no_pathspec_from_file: bool,
-        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
-        pathspec_file_nul: bool,
-        #[arg(long = "no-pathspec-file-nul", action = ArgAction::SetTrue)]
-        no_pathspec_file_nul: bool,
+        #[arg(long = "no-pathspec-from-file", action = ArgAction::Count)]
+        no_pathspec_from_file: u8,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
+        pathspec_file_nul: u8,
+        #[arg(long = "no-pathspec-file-nul", action = ArgAction::Count)]
+        no_pathspec_file_nul: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
@@ -1335,60 +1335,60 @@ pub enum Command {
         all: u8,
         #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::Count)]
         ignore_removal: u8,
-        #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
-        no_ignore_removal: bool,
+        #[arg(long = "no-ignore-removal", action = ArgAction::Count)]
+        no_ignore_removal: u8,
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
         force: u8,
         #[arg(short = 'u', long = "update", action = ArgAction::Count)]
         update: u8,
-        #[arg(long = "no-update", action = ArgAction::SetTrue)]
-        no_update: bool,
+        #[arg(long = "no-update", action = ArgAction::Count)]
+        no_update: u8,
         #[arg(long = "renormalize", action = ArgAction::Count)]
         renormalize: u8,
-        #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
-        no_renormalize: bool,
+        #[arg(long = "no-renormalize", action = ArgAction::Count)]
+        no_renormalize: u8,
         #[arg(short = 'N', long = "intent-to-add", action = ArgAction::Count)]
         intent_to_add: u8,
-        #[arg(long = "no-intent-to-add", action = ArgAction::SetTrue)]
-        no_intent_to_add: bool,
-        #[arg(long = "refresh", action = ArgAction::SetTrue)]
-        refresh: bool,
-        #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
-        no_refresh: bool,
+        #[arg(long = "no-intent-to-add", action = ArgAction::Count)]
+        no_intent_to_add: u8,
+        #[arg(long = "refresh", action = ArgAction::Count)]
+        refresh: u8,
+        #[arg(long = "no-refresh", action = ArgAction::Count)]
+        no_refresh: u8,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbose: u8,
-        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
-        no_verbose: bool,
+        #[arg(long = "no-verbose", action = ArgAction::Count)]
+        no_verbose: u8,
         #[arg(long = "ignore-errors", action = ArgAction::Count)]
         ignore_errors: u8,
-        #[arg(long = "no-ignore-errors", action = ArgAction::SetTrue)]
-        no_ignore_errors: bool,
+        #[arg(long = "no-ignore-errors", action = ArgAction::Count)]
+        no_ignore_errors: u8,
         #[arg(long = "ignore-missing", action = ArgAction::Count)]
         ignore_missing: u8,
-        #[arg(long = "no-ignore-missing", action = ArgAction::SetTrue)]
-        no_ignore_missing: bool,
-        #[arg(long = "sparse", action = ArgAction::SetTrue)]
-        sparse: bool,
-        #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
-        no_sparse: bool,
-        #[arg(long = "no-warn-embedded-repo", action = ArgAction::SetTrue)]
-        no_warn_embedded_repo: bool,
+        #[arg(long = "no-ignore-missing", action = ArgAction::Count)]
+        no_ignore_missing: u8,
+        #[arg(long = "sparse", action = ArgAction::Count)]
+        sparse: u8,
+        #[arg(long = "no-sparse", action = ArgAction::Count)]
+        no_sparse: u8,
+        #[arg(long = "no-warn-embedded-repo", action = ArgAction::Count)]
+        no_warn_embedded_repo: u8,
         #[arg(long = "chmod")]
         chmod: Option<String>,
-        #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
-        no_chmod: bool,
+        #[arg(long = "no-chmod", action = ArgAction::Count)]
+        no_chmod: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
-        #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
-        no_dry_run: bool,
+        #[arg(long = "no-dry-run", action = ArgAction::Count)]
+        no_dry_run: u8,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
-        #[arg(long = "no-pathspec-from-file", action = ArgAction::SetTrue)]
-        no_pathspec_from_file: bool,
-        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
-        pathspec_file_nul: bool,
-        #[arg(long = "no-pathspec-file-nul", action = ArgAction::SetTrue)]
-        no_pathspec_file_nul: bool,
+        #[arg(long = "no-pathspec-from-file", action = ArgAction::Count)]
+        no_pathspec_from_file: u8,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
+        pathspec_file_nul: u8,
+        #[arg(long = "no-pathspec-file-nul", action = ArgAction::Count)]
+        no_pathspec_file_nul: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

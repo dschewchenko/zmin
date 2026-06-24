@@ -99,43 +99,43 @@ prepare_case() {
     add_dry_run_short|add_dry_run_repeated_long)
       printf 'dry\n' >"$work/dry.txt"
       ;;
-    add_no_dry_run_long)
+    add_no_dry_run_long|add_no_dry_run_repeated_long)
       printf 'real\n' >"$work/real.txt"
       ;;
     add_verbose_long|add_verbose_repeated_long|add_verbose_short)
       printf 'verbose\n' >"$work/verbose.txt"
       ;;
-    add_no_verbose_long)
+    add_no_verbose_long|add_no_verbose_repeated_long)
       printf 'quiet\n' >"$work/quiet.txt"
       ;;
-    add_no_update_long)
+    add_no_update_long|add_no_update_repeated_long)
       printf 'new\n' >"$work/new.txt"
       ;;
-    add_no_intent_to_add_long)
+    add_no_intent_to_add_long|add_no_intent_to_add_repeated_long)
       printf 'full\n' >"$work/full.txt"
       ;;
-    add_no_refresh_long)
+    add_no_refresh_long|add_no_refresh_repeated_long)
       printf 'fresh\n' >"$work/fresh.txt"
       ;;
-    add_no_ignore_errors_long|add_ignore_errors_repeated_long)
+    add_no_ignore_errors_long|add_no_ignore_errors_repeated_long|add_ignore_errors_repeated_long)
       printf 'errors-off\n' >"$work/errors-off.txt"
       ;;
-    add_no_ignore_missing_long)
+    add_no_ignore_missing_long|add_no_ignore_missing_repeated_long)
       printf 'missing-off\n' >"$work/missing-off.txt"
       ;;
-    add_no_pathspec_file_nul_long)
+    add_no_pathspec_file_nul_long|add_no_pathspec_file_nul_repeated_long)
       printf 'lf-pathspec\n' >"$work/lf-pathspec.txt"
       ;;
-    add_no_chmod_long)
+    add_no_chmod_long|add_no_chmod_repeated_long)
       printf 'mode-default\n' >"$work/mode-default.txt"
       ;;
-    add_sparse_long)
+    add_sparse_long|add_sparse_repeated_long)
       printf 'sparse-ok\n' >"$work/sparse-ok.txt"
       ;;
-    add_no_sparse_long)
+    add_no_sparse_long|add_no_sparse_repeated_long)
       printf 'sparse-off\n' >"$work/sparse-off.txt"
       ;;
-    add_no_pathspec_from_file_long)
+    add_no_pathspec_from_file_long|add_no_pathspec_from_file_repeated_long)
       printf 'pathspec-default\n' >"$work/pathspec-default.txt"
       ;;
     add_no_warn_embedded_repo_long)
@@ -212,20 +212,32 @@ run_case add_no_renormalize_long add --no-renormalize .
 run_case add_dry_run_short add -n dry.txt
 run_case add_dry_run_repeated_long add --dry-run --dry-run dry.txt
 run_case add_no_dry_run_long add --no-dry-run real.txt
+run_case add_no_dry_run_repeated_long add --no-dry-run --no-dry-run real.txt
 run_case add_verbose_long add --verbose verbose.txt
 run_case add_verbose_repeated_long add --verbose --verbose verbose.txt
 run_case add_verbose_short add -v verbose.txt
 run_case add_no_verbose_long add --no-verbose quiet.txt
+run_case add_no_verbose_repeated_long add --no-verbose --no-verbose quiet.txt
 run_case add_no_update_long add --no-update new.txt
+run_case add_no_update_repeated_long add --no-update --no-update new.txt
 run_case add_no_intent_to_add_long add --no-intent-to-add full.txt
+run_case add_no_intent_to_add_repeated_long add --no-intent-to-add --no-intent-to-add full.txt
 run_case add_no_refresh_long add --no-refresh fresh.txt
+run_case add_no_refresh_repeated_long add --no-refresh --no-refresh fresh.txt
 run_case add_no_ignore_errors_long add --no-ignore-errors errors-off.txt
+run_case add_no_ignore_errors_repeated_long add --no-ignore-errors --no-ignore-errors errors-off.txt
 run_case add_ignore_errors_repeated_long add --ignore-errors --ignore-errors errors-off.txt
 run_case add_no_ignore_missing_long add --no-ignore-missing missing-off.txt
+run_case add_no_ignore_missing_repeated_long add --no-ignore-missing --no-ignore-missing missing-off.txt
 run_case add_ignore_missing_repeated_long add --ignore-missing --ignore-missing --dry-run missing.txt
 run_case add_no_pathspec_file_nul_long add --no-pathspec-file-nul lf-pathspec.txt
+run_case add_no_pathspec_file_nul_repeated_long add --no-pathspec-file-nul --no-pathspec-file-nul lf-pathspec.txt
 run_case add_no_chmod_long add --no-chmod mode-default.txt
+run_case add_no_chmod_repeated_long add --no-chmod --no-chmod mode-default.txt
 run_case add_sparse_long add --sparse sparse-ok.txt
+run_case add_sparse_repeated_long add --sparse --sparse sparse-ok.txt
 run_case add_no_sparse_long add --no-sparse sparse-off.txt
+run_case add_no_sparse_repeated_long add --no-sparse --no-sparse sparse-off.txt
 run_case add_no_pathspec_from_file_long add --no-pathspec-from-file pathspec-default.txt
+run_case add_no_pathspec_from_file_repeated_long add --no-pathspec-from-file --no-pathspec-from-file pathspec-default.txt
 run_case add_no_warn_embedded_repo_long add --no-warn-embedded-repo inner
