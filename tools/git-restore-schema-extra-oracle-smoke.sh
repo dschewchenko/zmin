@@ -94,6 +94,14 @@ run_case restore_staged_short_no_staged -S --no-staged a.txt
 run_case restore_no_staged_staged_short --no-staged -S a.txt
 run_case restore_staged_short_no_worktree -S --no-worktree a.txt
 run_case restore_no_worktree_staged_short --no-worktree -S a.txt
+run_case restore_staged_long_rejects_true --staged=true a.txt
+run_case restore_staged_short_rejects_true -S=true a.txt
+run_case restore_worktree_long_rejects_true --worktree=true a.txt
+run_case restore_worktree_short_rejects_true -W=true a.txt
+run_case restore_no_staged_rejects_true --no-staged=true a.txt
+run_case restore_no_staged_rejects_false --no-staged=false a.txt
+run_case restore_no_worktree_rejects_true --no-worktree=true a.txt
+run_case restore_no_worktree_rejects_false --no-worktree=false a.txt
 run_case restore_no_staged --no-staged a.txt
 run_case restore_staged_no_staged --staged --no-staged a.txt
 run_case restore_no_staged_staged --no-staged --staged a.txt
@@ -130,6 +138,8 @@ run_case restore_source_equals_no_overlay --source=HEAD~1 --no-overlay --worktre
 run_case restore_source_attached_worktree -sHEAD~1 -W a.txt
 run_case restore_source_attached_staged -sHEAD~1 -S a.txt
 run_case restore_source_missing_equals --source= --staged a.txt
+run_case restore_source_equals_staged_true --source=HEAD~1 --staged=true a.txt
+run_case restore_source_equals_worktree_true --source=HEAD~1 --worktree=true a.txt
 run_case restore_source_bad_long --source nope --staged a.txt
 run_case restore_source_bad_short -s nope -S a.txt
 run_case restore_source_bad_equals --source=nope --staged a.txt

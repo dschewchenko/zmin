@@ -115,6 +115,7 @@ pub(crate) fn parse_cli_invocation(
     validate_scalar_invocation_before_clap(&command_args)?;
     validate_add_invocation_before_clap(&command_args)?;
     validate_status_invocation_before_clap(&command_args)?;
+    validate_restore_invocation_before_clap(&command_args)?;
     validate_rm_invocation_before_clap(&command_args)?;
     validate_branch_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
@@ -206,6 +207,39 @@ fn validate_status_invocation_before_clap(command_args: &[String]) -> Result<()>
 }
 
 const STATUS_USAGE: &str = "usage: git status [<options>] [--] [<pathspec>...]\n\n    -v, --[no-]verbose    be verbose\n    -s, --[no-]short      show status concisely\n    -b, --[no-]branch     show branch information\n    --[no-]show-stash     show stash information\n    --[no-]ahead-behind   compute full ahead/behind values\n    --[no-]porcelain[=<version>]\n                          machine-readable output\n    --[no-]long           show status in long format (default)\n    -z, --[no-]null       terminate entries with NUL\n    -u, --[no-]untracked-files[=<mode>]\n                          show untracked files, optional modes: all, normal, no. (Default: all)\n    --[no-]ignored[=<mode>]\n                          show ignored files, optional modes: traditional, matching, no. (Default: traditional)\n    --[no-]ignore-submodules[=<when>]\n                          ignore changes to submodules, optional when: all, dirty, untracked. (Default: all)\n    --[no-]column[=<style>]\n                          list untracked files in columns\n    --no-renames          do not detect renames\n    --renames             opposite of --no-renames\n    -M, --find-renames[=<n>]\n                          detect renames, optionally set similarity index\n\n";
+
+fn validate_restore_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("restore") {
+        return Ok(());
+    }
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        let no_value_option = match arg.as_str() {
+            _ if arg.starts_with("--staged=") => Some("staged"),
+            _ if arg.starts_with("--worktree=") => Some("worktree"),
+            _ if arg.starts_with("--no-staged=") => Some("no-staged"),
+            _ if arg.starts_with("--no-worktree=") => Some("no-worktree"),
+            _ => None,
+        };
+        if let Some(option) = no_value_option {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: option `{option}' takes no value\n"),
+            });
+        }
+        if arg.starts_with("-S=") || arg.starts_with("-W=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `='\n{RESTORE_USAGE}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+const RESTORE_USAGE: &str = "usage: git restore [<options>] [--source=<branch>] <file>...\n\n    -s, --[no-]source <tree-ish>\n                          which tree-ish to checkout from\n    -S, --[no-]staged     restore the index\n    -W, --[no-]worktree   restore the working tree (default)\n    --[no-]ignore-unmerged\n                          ignore unmerged entries\n    --[no-]overlay        use overlay mode\n    -q, --[no-]quiet      suppress progress reporting\n    --[no-]recurse-submodules[=<checkout>]\n                          control recursive updating of submodules\n    --[no-]progress       force progress reporting\n    -m, --[no-]merge      perform a 3-way merge with the new branch\n    --[no-]conflict <style>\n                          conflict style (merge, diff3, or zdiff3)\n    -2, --ours            checkout our version for unmerged files\n    -3, --theirs          checkout their version for unmerged files\n    -p, --[no-]patch      select hunks interactively\n    --[no-]ignore-skip-worktree-bits\n                          do not limit pathspecs to sparse entries only\n    --[no-]pathspec-from-file <file>\n                          read pathspec from file\n    --[no-]pathspec-file-nul\n                          with --pathspec-from-file, pathspec elements are separated with NUL character\n\n";
 
 fn validate_rm_invocation_before_clap(command_args: &[String]) -> Result<()> {
     if command_args.first().map(String::as_str) != Some("rm") {
