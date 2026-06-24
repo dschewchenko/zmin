@@ -114,6 +114,13 @@ run_case restore_source_bad_long --source nope --staged a.txt
 run_case restore_source_bad_short -s nope -S a.txt
 run_case restore_source_bad_equals --source=nope --staged a.txt
 run_case restore_source_bad_attached -snope -S a.txt
+run_case restore_source_long_staged_repeated --source HEAD~1 --source HEAD~1 --staged a.txt
+run_case restore_source_short_staged_repeated -s HEAD~1 -s HEAD~1 --staged a.txt
+run_case restore_source_mixed_staged_repeated --source HEAD~1 -s HEAD~1 --staged a.txt
+run_case restore_source_mixed_short_staged_repeated --source HEAD~1 -s HEAD~1 -S a.txt
+run_case restore_source_equals_long_staged_repeated --source=HEAD~1 --source HEAD~1 --staged a.txt
+run_case restore_source_equals_short_staged_repeated --source=HEAD~1 -s HEAD~1 -S a.txt
+run_case restore_source_attached_short_staged_repeated -sHEAD~1 -s HEAD~1 -S a.txt
 run_case restore_source_long_repeated --source HEAD~1 --source HEAD~1 --worktree a.txt
 run_case restore_no_overlay_source_worktree --no-overlay --source HEAD~1 --worktree a.txt
 run_case restore_staged_repeated --staged --staged a.txt
