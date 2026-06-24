@@ -85,6 +85,10 @@ run_case count_objects_verbose_short_repeated -v -v
 run_case count_objects_human_short_repeated -H -H
 run_case count_objects_no_verbose --no-verbose
 run_case count_objects_no_human --no-human-readable
+run_case count_objects_verbose_short_no_verbose -v --no-verbose
+run_case count_objects_human_short_no_human -H --no-human-readable
+run_case count_objects_verbose_human_no_human --verbose --human-readable --no-human-readable
+run_case count_objects_human_verbose_no_verbose --human-readable --verbose --no-verbose
 run_case count_objects_verbose_long_rejects_value --verbose=true
 run_case count_objects_verbose_short_rejects_value -v=true
 run_case count_objects_human_long_rejects_value --human-readable=true
