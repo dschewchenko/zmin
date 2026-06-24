@@ -92,6 +92,11 @@ prepare_case() {
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
       ;;
+    add_pathspec_from_file_lf|add_pathspec_from_file_lf_separate)
+      printf 'changed\n' >"$work/tracked.txt"
+      printf 'two\n' >"$work/dir/two.txt"
+      printf 'tracked.txt\ndir/two.txt\n' >"$work/paths.lf"
+      ;;
     add_update_long|add_update_repeated_long|add_update_short|add_update_repeated_short)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
@@ -113,6 +118,9 @@ prepare_case() {
       ;;
     add_dry_run_short|add_dry_run_repeated_long)
       printf 'dry\n' >"$work/dry.txt"
+      ;;
+    add_dry_run_long)
+      printf 'dry-long\n' >"$work/dry-long.txt"
       ;;
     add_no_dry_run_long|add_no_dry_run_repeated_long)
       printf 'real\n' >"$work/real.txt"
@@ -137,6 +145,11 @@ prepare_case() {
       ;;
     add_no_ignore_missing_long|add_no_ignore_missing_repeated_long)
       printf 'missing-off\n' >"$work/missing-off.txt"
+      ;;
+    add_ignore_missing_long)
+      ;;
+    add_refresh_long|add_refresh_repeated_long)
+      printf 'refreshed\n' >"$work/tracked.txt"
       ;;
     add_no_pathspec_file_nul_long|add_no_pathspec_file_nul_repeated_long)
       printf 'lf-pathspec\n' >"$work/lf-pathspec.txt"
@@ -220,6 +233,8 @@ run_case add_edit_short_noop add -e
 run_case add_edit_repeated add --edit --edit
 run_case add_edit_short_repeated add -e -e
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
+run_case add_pathspec_from_file_lf add --pathspec-from-file=paths.lf
+run_case add_pathspec_from_file_lf_separate add --pathspec-from-file paths.lf
 run_case add_update_long add --update
 run_case add_update_repeated_long add --update --update
 run_case add_update_short add -u
@@ -233,6 +248,7 @@ run_case add_renormalize_long add --renormalize .
 run_case add_renormalize_repeated_long add --renormalize --renormalize .
 run_case add_no_renormalize_long add --no-renormalize .
 run_case add_dry_run_short add -n dry.txt
+run_case add_dry_run_long add --dry-run dry-long.txt
 run_case add_dry_run_repeated_long add --dry-run --dry-run dry.txt
 run_case add_no_dry_run_long add --no-dry-run real.txt
 run_case add_no_dry_run_repeated_long add --no-dry-run --no-dry-run real.txt
@@ -252,7 +268,10 @@ run_case add_no_ignore_errors_repeated_long add --no-ignore-errors --no-ignore-e
 run_case add_ignore_errors_repeated_long add --ignore-errors --ignore-errors errors-off.txt
 run_case add_no_ignore_missing_long add --no-ignore-missing missing-off.txt
 run_case add_no_ignore_missing_repeated_long add --no-ignore-missing --no-ignore-missing missing-off.txt
+run_case add_ignore_missing_long add --ignore-missing --dry-run missing.txt
 run_case add_ignore_missing_repeated_long add --ignore-missing --ignore-missing --dry-run missing.txt
+run_case add_refresh_long add --refresh tracked.txt
+run_case add_refresh_repeated_long add --refresh --refresh tracked.txt
 run_case add_no_pathspec_file_nul_long add --no-pathspec-file-nul lf-pathspec.txt
 run_case add_no_pathspec_file_nul_repeated_long add --no-pathspec-file-nul --no-pathspec-file-nul lf-pathspec.txt
 run_case add_no_chmod_long add --no-chmod mode-default.txt
