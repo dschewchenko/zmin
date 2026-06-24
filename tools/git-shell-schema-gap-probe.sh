@@ -44,3 +44,6 @@ make_bare_repo "$repo"
 
 run_exact shell_inline_upload_pack_gap -c "git-upload-pack $repo"
 run_exact shell_split_upload_pack_gap -c git-upload-pack "$repo"
+run_exact shell_missing_c_value -c
+run_exact shell_repeated_c_missing_value -c -c "git-upload-pack $repo"
+run_exact shell_no_c_rejected --no-c

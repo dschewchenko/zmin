@@ -317,6 +317,15 @@ fn validate_unavailable_foreign_helper_invocation_before_clap(args: &[String]) -
 }
 
 fn validate_sh_helper_invocation_before_clap(args: &[String]) -> Result<()> {
+    if args.first().map(String::as_str) == Some("shell")
+        && (matches!(args, [_, option] if option == "-c" || option == "--no-c")
+            || matches!(args, [_, first, second, ..] if first == "-c" && second == "-c"))
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "Run with no arguments or with -c cmd".into(),
+        });
+    }
     let Some(command @ ("sh-i18n" | "sh-setup")) = args.first().map(String::as_str) else {
         return Ok(());
     };
