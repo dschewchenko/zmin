@@ -1531,12 +1531,16 @@ pub enum Command {
         no_gpg_sign: bool,
     },
     Mktree {
-        #[arg(short = 'z', action = ArgAction::SetTrue)]
-        nul_terminated: bool,
-        #[arg(long = "missing", action = ArgAction::SetTrue)]
-        missing: bool,
-        #[arg(long = "batch", action = ArgAction::SetTrue)]
-        batch: bool,
+        #[arg(short = 'z', action = ArgAction::Count)]
+        nul_terminated: u8,
+        #[arg(long = "missing", action = ArgAction::Count)]
+        missing: u8,
+        #[arg(long = "no-missing", action = ArgAction::Count)]
+        no_missing: u8,
+        #[arg(long = "batch", action = ArgAction::Count)]
+        batch: u8,
+        #[arg(long = "no-batch", action = ArgAction::Count)]
+        no_batch: u8,
     },
     Mktag {
         #[arg(long = "strict", action = ArgAction::SetTrue)]

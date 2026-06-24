@@ -96,8 +96,14 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Mktree {
             nul_terminated,
             missing,
+            no_missing,
             batch,
-        } => super::commit_commands::mktree_command(nul_terminated, missing, batch),
+            no_batch,
+        } => super::commit_commands::mktree_command(
+            nul_terminated > 0,
+            missing > 0 && no_missing == 0,
+            batch > 0 && no_batch == 0,
+        ),
         _ => unreachable!("non-commit command dispatched to commit"),
     }
 }

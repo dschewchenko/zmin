@@ -133,6 +133,7 @@ pub(crate) fn parse_cli_invocation(
     validate_patch_id_invocation_before_clap(&command_args)?;
     validate_stripspace_invocation_before_clap(&command_args)?;
     validate_mailsplit_invocation_before_clap(&command_args)?;
+    validate_mktree_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -979,6 +980,43 @@ fn validate_mailsplit_invocation_before_clap(command_args: &[String]) -> Result<
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!("unknown option: {arg}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_mktree_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("mktree") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git mktree [-z] [--missing] [--batch]\n\n    -z                    input is NUL terminated\n    --[no-]missing        allow missing objects\n    --[no-]batch          allow creation of more than one tree\n\n";
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--no-z" {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown option `no-z'\n{USAGE}"),
+            });
+        }
+        if arg.starts_with("-z=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `='\n{USAGE}"),
+            });
+        }
+        if arg.starts_with("--batch=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `batch' takes no value\n".into(),
+            });
+        }
+        if arg.starts_with("--missing=") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `missing' takes no value\n".into(),
             });
         }
     }

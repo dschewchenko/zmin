@@ -27,6 +27,7 @@ compare_files() {
 
 run_case() {
   local name="$1"
+  shift
   local git_work="$tmpdir/${name}.git.work"
   local zmin_work="$tmpdir/${name}.zmin.work"
   local input="$tmpdir/${name}.in"
@@ -39,26 +40,50 @@ run_case() {
   local git_exit=0
   local zmin_exit=0
   local missing_oid="1111111111111111111111111111111111111111"
+  local object_oid
 
   mkdir "$git_work" "$zmin_work"
   "$GIT_BIN" -C "$git_work" init -q
   "$GIT_BIN" -C "$zmin_work" init -q
-  printf '100644 blob %s\tmissing.txt\n' "$missing_oid" >"$input"
+  if [ "${1:-}" = "--missing-input" ]; then
+    shift
+    printf '100644 blob %s\tmissing.txt\n' "$missing_oid" >"$input"
+  elif [ "${1:-}" = "--nul-input" ]; then
+    shift
+    object_oid="$(printf 'blob\n' | "$GIT_BIN" -C "$git_work" hash-object -w --stdin)"
+    printf 'blob\n' | "$GIT_BIN" -C "$zmin_work" hash-object -w --stdin >/dev/null
+    printf '100644 blob %s\tfile.txt\0' "$object_oid" >"$input"
+  else
+    object_oid="$(printf 'blob\n' | "$GIT_BIN" -C "$git_work" hash-object -w --stdin)"
+    printf 'blob\n' | "$GIT_BIN" -C "$zmin_work" hash-object -w --stdin >/dev/null
+    printf '100644 blob %s\tfile.txt\n' "$object_oid" >"$input"
+  fi
 
   set +e
-  "$GIT_BIN" -C "$git_work" mktree --missing <"$input" >"$git_out" 2>"$git_err"
+  "$GIT_BIN" -C "$git_work" mktree "$@" <"$input" >"$git_out" 2>"$git_err"
   git_exit=$?
-  "$ZMIN_BIN" -C "$zmin_work" mktree --missing <"$input" >"$zmin_out" 2>"$zmin_err"
+  "$ZMIN_BIN" -C "$zmin_work" mktree "$@" <"$input" >"$zmin_out" 2>"$zmin_err"
   zmin_exit=$?
   set -e
 
   test "$git_exit" = "$zmin_exit"
   compare_files stdout "$git_out" "$zmin_out"
   compare_files stderr "$git_err" "$zmin_err"
-  "$GIT_BIN" -C "$git_work" cat-file -t "$(cat "$git_out")" >"$git_tree_type"
-  "$GIT_BIN" -C "$zmin_work" cat-file -t "$(cat "$zmin_out")" >"$zmin_tree_type"
-  compare_files tree_type "$git_tree_type" "$zmin_tree_type"
+  if [ "$git_exit" = 0 ]; then
+    "$GIT_BIN" -C "$git_work" cat-file -t "$(cat "$git_out")" >"$git_tree_type"
+    "$GIT_BIN" -C "$zmin_work" cat-file -t "$(cat "$zmin_out")" >"$zmin_tree_type"
+    compare_files tree_type "$git_tree_type" "$zmin_tree_type"
+  fi
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
-run_case mktree_missing_allows_missing_blob
+run_case mktree_missing_allows_missing_blob --missing-input --missing
+run_case mktree_z_repeated --nul-input -z -z
+run_case mktree_batch_repeated --batch --batch
+run_case mktree_missing_repeated --missing-input --missing --missing
+run_case mktree_no_batch --no-batch
+run_case mktree_no_missing --no-missing
+run_case mktree_no_z_rejected --no-z
+run_case mktree_z_rejects_value -z=true
+run_case mktree_batch_rejects_value --batch=true
+run_case mktree_missing_rejects_value --missing=true
