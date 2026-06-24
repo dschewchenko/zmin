@@ -10,6 +10,10 @@ use crate::{
 
 const PACKED_REFS_IO_BUFFER_CAPACITY: usize = 64 * 1024;
 const PACKED_REF_LINE_INITIAL_CAPACITY: usize = 128;
+const REFTABLE_HEADER_V1_LEN: usize = 24;
+const REFTABLE_HEADER_V2_LEN: usize = 28;
+const REFTABLE_BLOCK_HEADER_LEN: usize = 4;
+const REFTABLE_RESTART_COUNT_LEN: usize = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefTarget {
@@ -101,6 +105,11 @@ impl RefStore {
 
     pub fn read_ref(&self, name: &str) -> io::Result<RefTarget> {
         validate_ref_name(name)?;
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            return self
+                .read_reftable_ref(name)?
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "ref not found"));
+        }
         match fs::read_to_string(self.ref_path(name)) {
             Ok(raw) => parse_ref_target(self.algorithm, raw.trim_end_matches('\n')),
             Err(err) if err.kind() == io::ErrorKind::NotFound => self
@@ -125,6 +134,13 @@ impl RefStore {
         F: FnMut(&str) -> std::result::Result<(), E>,
     {
         validate_ref_prefix(prefix).map_err(E::from)?;
+        if self.storage_kind().map_err(E::from)? == RefStorageKind::Reftable {
+            let refs = self.read_reftable_refs().map_err(E::from)?;
+            for name in refs.keys().filter(|name| name.starts_with(prefix)) {
+                on_ref(name)?;
+            }
+            return Ok(());
+        }
         let mut refs = BTreeSet::new();
         collect_loose_refs(&self.git_dir, prefix, &mut refs).map_err(E::from)?;
         self.for_each_packed_ref(|_, name| {
@@ -292,6 +308,11 @@ impl RefStore {
     }
 
     pub fn read_head(&self) -> io::Result<RefTarget> {
+        if self.storage_kind()? == RefStorageKind::Reftable
+            && let Some(target) = self.read_reftable_ref("HEAD")?
+        {
+            return Ok(target);
+        }
         let raw = fs::read_to_string(self.git_dir.join("HEAD"))?;
         parse_ref_target(self.algorithm, raw.trim_end_matches('\n'))
     }
@@ -357,6 +378,17 @@ impl RefStore {
 
     fn resolved_refs(&self, prefix: &str) -> io::Result<BTreeMap<String, ObjectId>> {
         validate_ref_prefix(prefix)?;
+        if self.storage_kind()? == RefStorageKind::Reftable {
+            let mut refs = BTreeMap::new();
+            for name in self
+                .read_reftable_refs()?
+                .keys()
+                .filter(|name| name.starts_with(prefix))
+            {
+                refs.insert(name.clone(), self.resolve(name)?);
+            }
+            return Ok(refs);
+        }
         let mut refs = BTreeMap::new();
         self.for_each_packed_ref(|id, name| {
             if name.starts_with(prefix) {
@@ -375,6 +407,14 @@ impl RefStore {
         let mut refs = BTreeSet::new();
         collect_loose_refs(&self.git_dir, prefix, &mut refs)?;
         Ok(refs.into_iter().collect())
+    }
+
+    fn read_reftable_ref(&self, name: &str) -> io::Result<Option<RefTarget>> {
+        Ok(self.read_reftable_refs()?.remove(name))
+    }
+
+    fn read_reftable_refs(&self) -> io::Result<BTreeMap<String, RefTarget>> {
+        read_reftable_stack(&self.git_dir, self.algorithm)
     }
 }
 
@@ -407,6 +447,258 @@ fn parse_ref_target(algorithm: GitHashAlgorithm, value: &str) -> io::Result<RefT
         return Ok(RefTarget::Symbolic(target.to_string()));
     }
     ObjectId::from_hex(algorithm, value).map(RefTarget::Direct)
+}
+
+fn read_reftable_stack(
+    git_dir: &Path,
+    algorithm: GitHashAlgorithm,
+) -> io::Result<BTreeMap<String, RefTarget>> {
+    let reftable_dir = git_dir.join("reftable");
+    let tables = fs::read_to_string(reftable_dir.join("tables.list"))?;
+    let mut refs = BTreeMap::new();
+    for table in tables.lines().rev() {
+        let table = table.trim();
+        if table.is_empty() {
+            continue;
+        }
+        for (name, target) in read_reftable_file(&reftable_dir.join(table), algorithm)? {
+            refs.entry(name).or_insert(target);
+        }
+    }
+    Ok(refs)
+}
+
+fn read_reftable_file(
+    path: &Path,
+    algorithm: GitHashAlgorithm,
+) -> io::Result<BTreeMap<String, RefTarget>> {
+    let bytes = fs::read(path)?;
+    let header = parse_reftable_header(&bytes, algorithm)?;
+    let mut refs = BTreeMap::new();
+    let mut block_start = header.header_len;
+    while block_start + REFTABLE_BLOCK_HEADER_LEN <= bytes.len() {
+        if &bytes[block_start..block_start + 4] == b"REFT" {
+            break;
+        }
+        let block_type = bytes[block_start];
+        if block_type != b'r' {
+            break;
+        }
+        if block_type == 0 {
+            break;
+        }
+        let block_len = read_u24(&bytes, block_start + 1)?;
+        if block_len == 0 {
+            break;
+        }
+        let block_end = if block_start == header.header_len {
+            block_len
+        } else {
+            block_start
+                .checked_add(block_len)
+                .ok_or_else(|| reftable_invalid("reftable block length overflow"))?
+        };
+        if block_end > bytes.len() || block_end <= block_start + REFTABLE_BLOCK_HEADER_LEN {
+            return Err(reftable_invalid("invalid reftable block length"));
+        }
+        parse_reftable_ref_block(
+            &bytes,
+            block_start,
+            block_end,
+            header.min_update_index,
+            algorithm,
+            &mut refs,
+        )?;
+        block_start = if header.block_size != 0 && block_start != header.header_len {
+            let next = block_start
+                .checked_add(header.block_size)
+                .ok_or_else(|| reftable_invalid("reftable block offset overflow"))?;
+            if next <= block_start { block_end } else { next }
+        } else {
+            block_end
+        };
+    }
+    Ok(refs)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ReftableHeader {
+    header_len: usize,
+    block_size: usize,
+    min_update_index: u64,
+}
+
+fn parse_reftable_header(bytes: &[u8], algorithm: GitHashAlgorithm) -> io::Result<ReftableHeader> {
+    if bytes.len() < REFTABLE_HEADER_V1_LEN || &bytes[0..4] != b"REFT" {
+        return Err(reftable_invalid("invalid reftable header"));
+    }
+    let version = bytes[4];
+    let block_size = read_u24(bytes, 5)?;
+    let min_update_index = read_u64(bytes, 8)?;
+    match version {
+        1 => {
+            if algorithm != GitHashAlgorithm::Sha1 {
+                return Err(reftable_invalid("reftable v1 requires sha1"));
+            }
+            Ok(ReftableHeader {
+                header_len: REFTABLE_HEADER_V1_LEN,
+                block_size,
+                min_update_index,
+            })
+        }
+        2 => {
+            if bytes.len() < REFTABLE_HEADER_V2_LEN {
+                return Err(reftable_invalid("truncated reftable v2 header"));
+            }
+            let hash_id = &bytes[24..28];
+            let expected = match algorithm {
+                GitHashAlgorithm::Sha1 => b"sha1".as_slice(),
+                GitHashAlgorithm::Sha256 => b"s256".as_slice(),
+            };
+            if hash_id != expected {
+                return Err(reftable_invalid("reftable hash id mismatch"));
+            }
+            Ok(ReftableHeader {
+                header_len: REFTABLE_HEADER_V2_LEN,
+                block_size,
+                min_update_index,
+            })
+        }
+        _ => Err(reftable_invalid("unsupported reftable version")),
+    }
+}
+
+fn parse_reftable_ref_block(
+    bytes: &[u8],
+    block_start: usize,
+    block_end: usize,
+    min_update_index: u64,
+    algorithm: GitHashAlgorithm,
+    refs: &mut BTreeMap<String, RefTarget>,
+) -> io::Result<()> {
+    let restart_count_offset = block_end
+        .checked_sub(REFTABLE_RESTART_COUNT_LEN)
+        .ok_or_else(|| reftable_invalid("truncated reftable restart count"))?;
+    let restart_count =
+        u16::from_be_bytes([bytes[restart_count_offset], bytes[restart_count_offset + 1]]) as usize;
+    let record_end = restart_count_offset
+        .checked_sub(
+            restart_count
+                .checked_mul(3)
+                .ok_or_else(|| reftable_invalid("reftable restart table length overflow"))?,
+        )
+        .ok_or_else(|| reftable_invalid("truncated reftable restart table"))?;
+    let mut cursor = block_start + REFTABLE_BLOCK_HEADER_LEN;
+    let mut prior_name = Vec::new();
+    while cursor < record_end {
+        let prefix_len = read_reftable_varint(bytes, &mut cursor)?;
+        let suffix_and_type = read_reftable_varint(bytes, &mut cursor)?;
+        let suffix_len = (suffix_and_type >> 3) as usize;
+        let value_type = (suffix_and_type & 0x7) as u8;
+        if prefix_len as usize > prior_name.len() || cursor + suffix_len > record_end {
+            return Err(reftable_invalid("invalid reftable ref name"));
+        }
+        let mut name = prior_name[..prefix_len as usize].to_vec();
+        name.extend_from_slice(&bytes[cursor..cursor + suffix_len]);
+        cursor += suffix_len;
+        let _update_index = min_update_index
+            .checked_add(read_reftable_varint(bytes, &mut cursor)?)
+            .ok_or_else(|| reftable_invalid("reftable update index overflow"))?;
+        let name = String::from_utf8(name).map_err(|_| reftable_invalid("non-utf8 ref name"))?;
+        let target = match value_type {
+            0 => None,
+            1 | 2 => {
+                let id = read_reftable_object_id(bytes, &mut cursor, algorithm, record_end)?;
+                if value_type == 2 {
+                    let _peeled =
+                        read_reftable_object_id(bytes, &mut cursor, algorithm, record_end)?;
+                }
+                Some(RefTarget::Direct(id))
+            }
+            3 => {
+                let target_len = read_reftable_varint(bytes, &mut cursor)? as usize;
+                if cursor + target_len > record_end {
+                    return Err(reftable_invalid("truncated symbolic reftable ref"));
+                }
+                let target = String::from_utf8(bytes[cursor..cursor + target_len].to_vec())
+                    .map_err(|_| reftable_invalid("non-utf8 symbolic reftable ref"))?;
+                cursor += target_len;
+                Some(RefTarget::Symbolic(target))
+            }
+            _ => return Err(reftable_invalid("unsupported reftable ref value type")),
+        };
+        prior_name = name.as_bytes().to_vec();
+        if name == "HEAD" || validate_ref_name(&name).is_ok() {
+            if let Some(target) = target {
+                refs.insert(name, target);
+            } else {
+                refs.remove(&name);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_reftable_object_id(
+    bytes: &[u8],
+    cursor: &mut usize,
+    algorithm: GitHashAlgorithm,
+    record_end: usize,
+) -> io::Result<ObjectId> {
+    let len = match algorithm {
+        GitHashAlgorithm::Sha1 => 20,
+        GitHashAlgorithm::Sha256 => 32,
+    };
+    if *cursor + len > record_end {
+        return Err(reftable_invalid("truncated reftable object id"));
+    }
+    let id = ObjectId::new(algorithm, &bytes[*cursor..*cursor + len]);
+    *cursor += len;
+    Ok(id)
+}
+
+fn read_reftable_varint(bytes: &[u8], cursor: &mut usize) -> io::Result<u64> {
+    if *cursor >= bytes.len() {
+        return Err(reftable_invalid("truncated reftable varint"));
+    }
+    let mut value = (bytes[*cursor] & 0x7f) as u64;
+    while bytes[*cursor] & 0x80 != 0 {
+        *cursor += 1;
+        if *cursor >= bytes.len() {
+            return Err(reftable_invalid("truncated reftable varint"));
+        }
+        value = value
+            .checked_add(1)
+            .and_then(|value| value.checked_shl(7))
+            .map(|value| value | (bytes[*cursor] & 0x7f) as u64)
+            .ok_or_else(|| reftable_invalid("reftable varint overflow"))?;
+    }
+    *cursor += 1;
+    Ok(value)
+}
+
+fn read_u24(bytes: &[u8], offset: usize) -> io::Result<usize> {
+    if offset + 3 > bytes.len() {
+        return Err(reftable_invalid("truncated uint24"));
+    }
+    Ok(((bytes[offset] as usize) << 16)
+        | ((bytes[offset + 1] as usize) << 8)
+        | bytes[offset + 2] as usize)
+}
+
+fn read_u64(bytes: &[u8], offset: usize) -> io::Result<u64> {
+    if offset + 8 > bytes.len() {
+        return Err(reftable_invalid("truncated uint64"));
+    }
+    Ok(u64::from_be_bytes(
+        bytes[offset..offset + 8]
+            .try_into()
+            .expect("slice length checked"),
+    ))
+}
+
+fn reftable_invalid(message: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
 pub fn check_ref_format(name: &str, allow_onelevel: bool) -> bool {
@@ -744,7 +1036,10 @@ fn ref_storage_kind_from_config(path: &Path) -> io::Result<RefStorageKind> {
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        if let Some(name) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) {
+        if let Some(name) = line
+            .strip_prefix('[')
+            .and_then(|line| line.strip_suffix(']'))
+        {
             section = config_section_name(name);
             continue;
         }
@@ -849,7 +1144,10 @@ mod tests {
         let repo = git_init();
         let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
 
-        assert_eq!(refs.storage_kind().expect("storage kind"), RefStorageKind::Files);
+        assert_eq!(
+            refs.storage_kind().expect("storage kind"),
+            RefStorageKind::Files
+        );
     }
 
     #[test]
@@ -936,6 +1234,50 @@ mod tests {
 
         assert_eq!(actual.to_hex(), expected);
         assert!(names.contains(&"refs/heads/feature".to_owned()));
+    }
+
+    #[test]
+    fn reads_refs_from_stock_reftable_repo() {
+        let repo = git_init_reftable();
+        std::fs::write(repo.path().join("README.md"), b"reftable ref\n").expect("write file");
+        git_env(&repo, ["add", "README.md"]);
+        git_env(&repo, ["commit", "-m", "initial"]);
+        git(&repo, ["branch", "feature"]);
+        let expected_head = git(&repo, ["rev-parse", "HEAD"]);
+        let expected_feature = git(&repo, ["rev-parse", "refs/heads/feature"]);
+        assert_eq!(git(&repo, ["rev-parse", "--show-ref-format"]), "reftable");
+
+        let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
+        let actual_head = refs.resolve("HEAD").expect("resolve HEAD");
+        let actual_feature = refs.resolve("refs/heads/feature").expect("resolve feature");
+        let names = refs.list_refs("refs/heads/").expect("list heads");
+
+        assert_eq!(actual_head.to_hex(), expected_head);
+        assert_eq!(actual_feature.to_hex(), expected_feature);
+        assert_eq!(
+            refs.read_head().expect("read HEAD"),
+            RefTarget::Symbolic("refs/heads/main".to_owned())
+        );
+        assert!(names.contains(&"refs/heads/main".to_owned()));
+        assert!(names.contains(&"refs/heads/feature".to_owned()));
+    }
+
+    #[test]
+    fn reftable_stack_prefers_newest_table() {
+        let repo = git_init_reftable();
+        std::fs::write(repo.path().join("README.md"), b"base\n").expect("write file");
+        git_env(&repo, ["add", "README.md"]);
+        git_env(&repo, ["commit", "-m", "base"]);
+        let base = git(&repo, ["rev-parse", "HEAD"]);
+        std::fs::write(repo.path().join("README.md"), b"next\n").expect("write file");
+        git_env(&repo, ["commit", "-am", "next"]);
+        let next = git(&repo, ["rev-parse", "HEAD"]);
+        assert_ne!(base, next);
+
+        let refs = RefStore::new(repo.path().join(".git"), GitHashAlgorithm::Sha1);
+        let actual = refs.resolve("refs/heads/main").expect("resolve main");
+
+        assert_eq!(actual.to_hex(), next);
     }
 
     #[test]
@@ -1306,7 +1648,7 @@ mod tests {
 
     fn git_init() -> TempDir {
         let repo = TempDir::new().expect("temp repo");
-        let output = Command::new("git")
+        let output = Command::new("/usr/bin/git")
             .arg("init")
             .arg("--quiet")
             .current_dir(repo.path())
@@ -1320,8 +1662,25 @@ mod tests {
         repo
     }
 
+    fn git_init_reftable() -> TempDir {
+        let repo = TempDir::new().expect("temp repo");
+        let output = Command::new("/usr/bin/git")
+            .arg("init")
+            .arg("--quiet")
+            .arg("--ref-format=reftable")
+            .current_dir(repo.path())
+            .output()
+            .expect("run git init reftable");
+        assert!(
+            output.status.success(),
+            "git init reftable failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        repo
+    }
+
     fn git<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new("git")
+        let output = Command::new("/usr/bin/git")
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(repo.path())
@@ -1339,7 +1698,7 @@ mod tests {
     }
 
     fn git_expect_failure<const N: usize>(repo: &TempDir, args: [&str; N]) -> String {
-        let output = Command::new("git")
+        let output = Command::new("/usr/bin/git")
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(repo.path())
@@ -1357,7 +1716,7 @@ mod tests {
     }
 
     fn git_env<const N: usize>(repo: &TempDir, args: [&str; N]) {
-        let output = Command::new("git")
+        let output = Command::new("/usr/bin/git")
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(repo.path())
