@@ -4256,6 +4256,7 @@ struct BranchOptions {
     recurse_submodules: bool,
     no_recurse_submodules: bool,
     contains: Option<String>,
+    no_contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
     points_at: Option<String>,
@@ -4378,6 +4379,7 @@ fn branch(options: BranchOptions) -> Result<()> {
     let refs = RefStore::new(common_git_dir, GitHashAlgorithm::Sha1);
     validate_branch_autosetuprebase_config(&repo)?;
     let has_branch_filter = options.contains.is_some()
+        || options.no_contains.is_some()
         || options.merged.is_some()
         || options.no_merged.is_some()
         || options.points_at.is_some();
@@ -5166,6 +5168,7 @@ fn branch_pattern_matches(ref_name: &str, patterns: &[String], remote: bool) -> 
 #[derive(Debug, Clone)]
 struct BranchListFilter {
     contains: Option<ObjectId>,
+    no_contains: Option<ObjectId>,
     merged: Option<ObjectId>,
     no_merged: Option<ObjectId>,
     points_at: Option<ObjectId>,
@@ -5178,6 +5181,16 @@ fn branch_list_filter(
 ) -> Result<Option<BranchListFilter>> {
     let contains = options
         .contains
+        .as_deref()
+        .map(|target| {
+            resolve_commitish(repo, store, target).map_err(|_| CliError::Stderr {
+                code: 129,
+                text: format!("error: malformed object name {target}\n"),
+            })
+        })
+        .transpose()?;
+    let no_contains = options
+        .no_contains
         .as_deref()
         .map(|target| {
             resolve_commitish(repo, store, target).map_err(|_| CliError::Stderr {
@@ -5205,11 +5218,17 @@ fn branch_list_filter(
         .as_deref()
         .map(|target| resolve_objectish(repo, target))
         .transpose()?;
-    if contains.is_none() && merged.is_none() && no_merged.is_none() && points_at.is_none() {
+    if contains.is_none()
+        && no_contains.is_none()
+        && merged.is_none()
+        && no_merged.is_none()
+        && points_at.is_none()
+    {
         return Ok(None);
     }
     Ok(Some(BranchListFilter {
         contains,
+        no_contains,
         merged,
         no_merged,
         points_at,
@@ -5235,6 +5254,11 @@ fn branch_filter_matches(
     };
     if let Some(target) = &filter.contains
         && !is_ancestor_commit_cached(commit_cache, target, branch_id)?
+    {
+        return Ok(false);
+    }
+    if let Some(target) = &filter.no_contains
+        && is_ancestor_commit_cached(commit_cache, target, branch_id)?
     {
         return Ok(false);
     }
@@ -6661,6 +6685,7 @@ pub(crate) fn branch_command(
     recurse_submodules: bool,
     no_recurse_submodules: bool,
     contains: Option<String>,
+    no_contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
     points_at: Option<String>,
@@ -6706,6 +6731,7 @@ pub(crate) fn branch_command(
         recurse_submodules,
         no_recurse_submodules,
         contains,
+        no_contains,
         merged,
         no_merged,
         points_at,

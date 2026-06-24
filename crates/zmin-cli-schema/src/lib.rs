@@ -3271,6 +3271,8 @@ pub enum Command {
         no_recurse_submodules: bool,
         #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
         contains: Option<String>,
+        #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
+        no_contains: Option<String>,
         #[arg(long = "merged", num_args = 0..=1, default_missing_value = "HEAD")]
         merged: Option<String>,
         #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]

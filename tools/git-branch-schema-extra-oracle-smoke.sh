@@ -104,3 +104,4 @@ run_case branch_move_long --move feature moved
 run_case branch_move_short -m feature moved
 run_case branch_copy_short -c feature copied
 run_case branch_points_at_head --points-at HEAD
+run_case branch_no_contains_head --no-contains HEAD
