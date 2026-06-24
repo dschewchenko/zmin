@@ -132,9 +132,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_pathspec_file_nul: _,
             paths,
         } => run_add(
-            all || no_ignore_removal,
+            all > 0 || no_ignore_removal,
             force > 0,
-            update || renormalize,
+            update > 0 || renormalize,
             intent_to_add,
             refresh,
             verbose > 0,

@@ -1269,16 +1269,16 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     Add {
-        #[arg(short = 'A', long = "all", action = ArgAction::SetTrue)]
-        all: bool,
+        #[arg(short = 'A', long = "all", action = ArgAction::Count)]
+        all: u8,
         #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
         ignore_removal: bool,
         #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
         no_ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
         force: u8,
-        #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
-        update: bool,
+        #[arg(short = 'u', long = "update", action = ArgAction::Count)]
+        update: u8,
         #[arg(long = "no-update", action = ArgAction::SetTrue)]
         no_update: bool,
         #[arg(long = "renormalize", action = ArgAction::SetTrue)]
@@ -1331,16 +1331,16 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     Stage {
-        #[arg(short = 'A', long = "all", action = ArgAction::SetTrue)]
-        all: bool,
+        #[arg(short = 'A', long = "all", action = ArgAction::Count)]
+        all: u8,
         #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
         ignore_removal: bool,
         #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
         no_ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
         force: u8,
-        #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
-        update: bool,
+        #[arg(short = 'u', long = "update", action = ArgAction::Count)]
+        update: u8,
         #[arg(long = "no-update", action = ArgAction::SetTrue)]
         no_update: bool,
         #[arg(long = "renormalize", action = ArgAction::SetTrue)]

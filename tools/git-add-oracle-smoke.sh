@@ -8,6 +8,13 @@ case "$ZMIN_BIN" in
   *) ZMIN_BIN="$PWD/$ZMIN_BIN" ;;
 esac
 
+export GIT_AUTHOR_NAME=Oracle
+export GIT_AUTHOR_EMAIL=oracle@example.com
+export GIT_AUTHOR_DATE="1700000000 +0000"
+export GIT_COMMITTER_NAME=Oracle
+export GIT_COMMITTER_EMAIL=oracle@example.com
+export GIT_COMMITTER_DATE="1700000000 +0000"
+
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-add-oracle.XXXXXX")"
 cleanup() {
   rm -rf "$tmpdir"
@@ -57,12 +64,12 @@ prepare_case() {
     add_positional_path)
       printf 'new\n' >"$work/new.txt"
       ;;
-    add_all_long)
+    add_all_long|add_all_repeated_long)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
       ;;
-    add_force_long)
+    add_force_long|add_force_repeated_long)
       printf 'ignored\n' >"$work/force.ignored"
       ;;
     add_pathspec_file_nul)
@@ -70,7 +77,7 @@ prepare_case() {
       printf 'two\n' >"$work/dir/two.txt"
       printf 'tracked.txt\0dir/two.txt\0' >"$work/paths.nul"
       ;;
-    add_update_long)
+    add_update_long|add_update_repeated_long)
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       rm "$work/dir/one.txt"
@@ -89,7 +96,7 @@ prepare_case() {
       printf 'changed\n' >"$work/tracked.txt"
       printf 'new\n' >"$work/new.txt"
       ;;
-    add_dry_run_short)
+    add_dry_run_short|add_dry_run_repeated_long)
       printf 'dry\n' >"$work/dry.txt"
       ;;
     add_no_dry_run_long)
@@ -187,9 +194,12 @@ run_case add_intent_long add --intent-to-add intent.txt
 run_case add_intent_short add -N intent.txt
 run_case add_positional_path add new.txt
 run_case add_all_long add --all
+run_case add_all_repeated_long add --all --all
 run_case add_force_long add --force force.ignored
+run_case add_force_repeated_long add --force --force force.ignored
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
 run_case add_update_long add --update
+run_case add_update_repeated_long add --update --update
 run_case add_no_all_empty add --no-all
 run_case add_no_all_path add --no-all .
 run_case add_ignore_removal_long add --ignore-removal .
@@ -197,6 +207,7 @@ run_case add_no_ignore_removal_long add --no-ignore-removal .
 run_case add_renormalize_long add --renormalize .
 run_case add_no_renormalize_long add --no-renormalize .
 run_case add_dry_run_short add -n dry.txt
+run_case add_dry_run_repeated_long add --dry-run --dry-run dry.txt
 run_case add_no_dry_run_long add --no-dry-run real.txt
 run_case add_verbose_long add --verbose verbose.txt
 run_case add_verbose_short add -v verbose.txt
