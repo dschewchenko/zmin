@@ -1539,13 +1539,13 @@ pub enum Command {
     Mktree {
         #[arg(short = 'z', action = ArgAction::Count)]
         nul_terminated: u8,
-        #[arg(long = "missing", action = ArgAction::Count)]
+        #[arg(long = "missing", overrides_with = "no_missing", action = ArgAction::Count)]
         missing: u8,
-        #[arg(long = "no-missing", action = ArgAction::Count)]
+        #[arg(long = "no-missing", overrides_with = "missing", action = ArgAction::Count)]
         no_missing: u8,
-        #[arg(long = "batch", action = ArgAction::Count)]
+        #[arg(long = "batch", overrides_with = "no_batch", action = ArgAction::Count)]
         batch: u8,
-        #[arg(long = "no-batch", action = ArgAction::Count)]
+        #[arg(long = "no-batch", overrides_with = "batch", action = ArgAction::Count)]
         no_batch: u8,
     },
     Mktag {

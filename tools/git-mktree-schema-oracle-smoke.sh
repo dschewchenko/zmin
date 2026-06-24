@@ -94,6 +94,7 @@ run_case mktree_batch_missing_allows_missing_blob --missing-input --batch --miss
 run_case mktree_z_missing_allows_missing_blob --missing-nul-input -z --missing
 run_case mktree_batch_z_nul_input --nul-input --batch -z
 run_case mktree_z_batch_nul_input --nul-input -z --batch
+run_case mktree_no_missing_missing_allows_missing_blob --missing-input --no-missing --missing
 run_case mktree_no_batch --no-batch
 run_case mktree_no_missing --no-missing
 run_case mktree_no_z_rejected --no-z
@@ -101,6 +102,7 @@ run_case mktree_z_rejects_value -z=true
 run_case mktree_batch_rejects_value --batch=true
 run_case mktree_missing_rejects_value --missing=true
 run_case mktree_batch_no_batch --batch --no-batch
+run_case mktree_batch_no_batch_batch --batch --no-batch --batch
 run_case mktree_empty_input --empty-input
 run_case mktree_missing_no_missing_rejects_missing_blob --missing-input --missing --no-missing
 run_case mktree_bad_record_rejected --bad-input
