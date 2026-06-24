@@ -1423,14 +1423,22 @@ pub enum Command {
     Mv {
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
         force: u8,
+        #[arg(long = "no-force", action = ArgAction::Count)]
+        no_force: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
+        #[arg(long = "no-dry-run", action = ArgAction::Count)]
+        no_dry_run: u8,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbose: u8,
+        #[arg(long = "no-verbose", action = ArgAction::Count)]
+        no_verbose: u8,
         #[arg(short = 'k', action = ArgAction::Count)]
         skip_errors: u8,
         #[arg(long = "sparse", action = ArgAction::Count)]
         sparse: u8,
+        #[arg(long = "no-sparse", action = ArgAction::Count)]
+        no_sparse: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
