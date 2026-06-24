@@ -1240,6 +1240,8 @@ pub enum Command {
         all: bool,
         #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
         ignore_removal: bool,
+        #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
+        no_ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
@@ -1270,6 +1272,8 @@ pub enum Command {
         all: bool,
         #[arg(long = "no-all", alias = "ignore-removal", action = ArgAction::SetTrue)]
         ignore_removal: bool,
+        #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
+        no_ignore_removal: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]

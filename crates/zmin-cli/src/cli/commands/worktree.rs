@@ -71,6 +71,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Add {
             all,
             ignore_removal: _,
+            no_ignore_removal,
             force,
             update,
             intent_to_add,
@@ -87,6 +88,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         | runtime::Command::Stage {
             all,
             ignore_removal: _,
+            no_ignore_removal,
             force,
             update,
             intent_to_add,
@@ -100,7 +102,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             pathspec_file_nul,
             paths,
         } => run_add(
-            all,
+            all || no_ignore_removal,
             force,
             update,
             intent_to_add,

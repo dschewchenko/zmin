@@ -81,6 +81,10 @@ prepare_case() {
       printf 'new\n' >"$work/new.txt"
       rm "$work/tracked.txt"
       ;;
+    add_no_ignore_removal_long)
+      printf 'new\n' >"$work/new.txt"
+      rm "$work/tracked.txt"
+      ;;
     add_dry_run_short)
       printf 'dry\n' >"$work/dry.txt"
       ;;
@@ -141,6 +145,7 @@ run_case add_update_long add --update
 run_case add_no_all_empty add --no-all
 run_case add_no_all_path add --no-all .
 run_case add_ignore_removal_long add --ignore-removal .
+run_case add_no_ignore_removal_long add --no-ignore-removal .
 run_case add_dry_run_short add -n dry.txt
 run_case add_verbose_long add --verbose verbose.txt
 run_case add_verbose_short add -v verbose.txt
