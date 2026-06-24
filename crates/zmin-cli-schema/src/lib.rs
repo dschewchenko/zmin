@@ -1409,6 +1409,8 @@ pub enum Command {
         cached: u8,
         #[arg(long = "ignore-unmatch", action = ArgAction::Count)]
         ignore_unmatch: u8,
+        #[arg(long = "sparse", action = ArgAction::Count)]
+        sparse: u8,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
         #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
@@ -3658,6 +3660,7 @@ pub struct RmOptions {
     pub recursive: bool,
     pub cached: bool,
     pub ignore_unmatch: bool,
+    pub sparse: bool,
     pub pathspec_from_file: Option<PathBuf>,
     pub pathspec_file_nul: bool,
     pub paths: Vec<PathBuf>,

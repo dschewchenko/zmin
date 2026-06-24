@@ -96,3 +96,4 @@ run_case rm_invalid_short_z rm -z tracked.txt
 run_case rm_invalid_diff_filter rm --diff-filter=A tracked.txt
 run_case rm_invalid_name_only rm --name-only tracked.txt
 run_case rm_invalid_literal_pathspecs rm --literal-pathspecs tracked.txt
+run_case rm_sparse_normal_repo rm --sparse tracked.txt

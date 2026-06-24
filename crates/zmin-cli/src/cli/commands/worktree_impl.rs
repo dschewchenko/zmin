@@ -3616,6 +3616,7 @@ fn explicit_ignored_add_error(paths: &[Vec<u8>]) -> CliError {
 }
 
 pub(crate) fn rm(options: RmOptions) -> Result<()> {
+    let _sparse = options.sparse;
     let mut paths = options.paths;
     if let Some(pathspec_file) = options.pathspec_from_file {
         let loaded = read_pathspec_file(&pathspec_file, options.pathspec_file_nul)?;
