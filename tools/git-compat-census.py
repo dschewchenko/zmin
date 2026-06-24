@@ -753,7 +753,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
                     "evidence_kind": "source_scan",
                     "source_detail": guard["text"],
                     "next_action": "classify as Git-supported gap, invalid-input parity, deferral or Zmin-only extension before adding rows",
-                    "notes": "",
+                    "notes": "unclassified guard mapping",
                 }
             )
 
