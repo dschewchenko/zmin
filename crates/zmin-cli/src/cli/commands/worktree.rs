@@ -168,7 +168,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             pathspec_file_nul,
             paths,
         }),
-        runtime::Command::Mv { force, paths } => run_mv(force, paths),
+        runtime::Command::Mv {
+            force,
+            dry_run,
+            verbose,
+            paths,
+        } => run_mv(force, dry_run, verbose, paths),
         runtime::Command::Status {
             porcelain,
             branch,
@@ -342,9 +347,11 @@ pub(crate) fn run_rm(options: runtime::RmOptions) -> std::result::Result<(), run
 
 pub(crate) fn run_mv(
     force: bool,
+    dry_run: bool,
+    verbose: bool,
     paths: Vec<PathBuf>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::mv(force, paths)
+    super::worktree_commands::mv(force, dry_run, verbose, paths)
 }
 
 pub(crate) fn run_status(

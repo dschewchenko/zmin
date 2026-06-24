@@ -1409,6 +1409,10 @@ pub enum Command {
     Mv {
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
+        verbose: bool,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

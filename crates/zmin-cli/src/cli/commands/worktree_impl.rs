@@ -3684,7 +3684,7 @@ pub(crate) fn rm(options: RmOptions) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn mv(force: bool, paths: Vec<PathBuf>) -> Result<()> {
+pub(crate) fn mv(force: bool, dry_run: bool, verbose: bool, paths: Vec<PathBuf>) -> Result<()> {
     if paths.len() < 2 {
         return Err(CliError::Message(
             "`mv` requires at least one source and a destination".into(),
@@ -3725,11 +3725,25 @@ pub(crate) fn mv(force: bool, paths: Vec<PathBuf>) -> Result<()> {
             });
         }
         ensure_mv_destination_available(&index, &target_relative, force)?;
-        rename_worktree_path(&source_absolute, &target_absolute, force)?;
-        apply_index_moves(&mut index, moves)?;
+        if dry_run {
+            println!(
+                "Checking rename of '{}' to '{}'",
+                source.display(),
+                destination.display()
+            );
+        }
+        if dry_run || verbose {
+            println!("Renaming {} to {}", source.display(), destination.display());
+        }
+        if !dry_run {
+            rename_worktree_path(&source_absolute, &target_absolute, force)?;
+            apply_index_moves(&mut index, moves)?;
+        }
     }
 
-    index.write_to_path(&repo.index_path)?;
+    if !dry_run {
+        index.write_to_path(&repo.index_path)?;
+    }
     Ok(())
 }
 
