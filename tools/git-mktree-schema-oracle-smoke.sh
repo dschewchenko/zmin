@@ -48,6 +48,12 @@ run_case() {
   if [ "${1:-}" = "--missing-input" ]; then
     shift
     printf '100644 blob %s\tmissing.txt\n' "$missing_oid" >"$input"
+  elif [ "${1:-}" = "--empty-input" ]; then
+    shift
+    : >"$input"
+  elif [ "${1:-}" = "--bad-input" ]; then
+    shift
+    printf 'bad-record\n' >"$input"
   elif [ "${1:-}" = "--nul-input" ]; then
     shift
     object_oid="$(printf 'blob\n' | "$GIT_BIN" -C "$git_work" hash-object -w --stdin)"
@@ -87,3 +93,7 @@ run_case mktree_no_z_rejected --no-z
 run_case mktree_z_rejects_value -z=true
 run_case mktree_batch_rejects_value --batch=true
 run_case mktree_missing_rejects_value --missing=true
+run_case mktree_batch_no_batch --batch --no-batch
+run_case mktree_empty_input --empty-input
+run_case mktree_missing_no_missing_rejects_missing_blob --missing-input --missing --no-missing
+run_case mktree_bad_record_rejected --bad-input

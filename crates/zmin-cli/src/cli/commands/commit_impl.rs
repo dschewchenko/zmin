@@ -1811,7 +1811,7 @@ pub(crate) fn parse_mktree_entry(
 ) -> Result<TreeEntry> {
     let (header, name) = record.split_once('\t').ok_or_else(|| CliError::Fatal {
         code: 128,
-        message: "input format error: expected '<mode> <type> <sha1>\\t<path>'".into(),
+        message: format!("input format error: {record}"),
     })?;
     let mut parts = header.split_whitespace();
     let mode = parts.next().ok_or_else(|| CliError::Fatal {
@@ -1836,7 +1836,10 @@ pub(crate) fn parse_mktree_entry(
     let object_kind = tree_entry_kind(tree_mode);
     let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, id)?;
     if !missing && tree_mode != TreeMode::Gitlink {
-        let object = store.read_object(&id)?;
+        let object = store.read_object(&id).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("entry '{name}' object {id} is unavailable"),
+        })?;
         if object.kind != object_kind {
             return Err(CliError::Fatal {
                 code: 128,
