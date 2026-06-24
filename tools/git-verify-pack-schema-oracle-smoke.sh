@@ -26,6 +26,8 @@ idx="$(find "$repo/.git/objects/pack" -name '*.idx' | head -1)"
 
 run_case() {
   local name="$1"
+  local expected_exit="$2"
+  shift
   shift
   local git_exit=0
   local zmin_exit=0
@@ -38,12 +40,13 @@ run_case() {
   set -e
 
   printf '%s\tstock_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
-  test "$git_exit" = 0
-  test "$zmin_exit" = 0
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
   cmp -s "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
   cmp -s "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
 }
 
-run_case verify_pack_object_format_sha1 --object-format=sha1
-run_case verify_pack_verbose_long --verbose
-run_case verify_pack_stat_only_long --stat-only
+run_case verify_pack_object_format_sha1 0 --object-format=sha1
+run_case verify_pack_object_format_sha256_invalid 1 --object-format=sha256
+run_case verify_pack_verbose_long 0 --verbose
+run_case verify_pack_stat_only_long 0 --stat-only

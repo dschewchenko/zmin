@@ -5421,12 +5421,16 @@ pub(crate) fn verify_pack(
     object_format: Option<&str>,
     packs: Vec<PathBuf>,
 ) -> Result<()> {
-    if object_format.is_some_and(|format| format != "sha1") {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "only sha1 pack verification is supported".into(),
-        });
-    }
+    let algorithm = match object_format.unwrap_or("sha1") {
+        "sha1" => GitHashAlgorithm::Sha1,
+        "sha256" => GitHashAlgorithm::Sha256,
+        _ => {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "unsupported object format".into(),
+            });
+        }
+    };
     if packs.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
@@ -5434,22 +5438,27 @@ pub(crate) fn verify_pack(
         });
     }
     for idx_path in packs {
-        verify_pack_one(&idx_path, verbose, stat_only)?;
+        verify_pack_one(algorithm, &idx_path, verbose, stat_only)?;
     }
     Ok(())
 }
 
-fn verify_pack_one(idx_path: &std::path::Path, verbose: bool, stat_only: bool) -> Result<()> {
-    validate_pack_index_file(GitHashAlgorithm::Sha1, idx_path)
-        .map_err(|error| verify_pack_index_error(idx_path, error))?;
+fn verify_pack_one(
+    algorithm: GitHashAlgorithm,
+    idx_path: &std::path::Path,
+    verbose: bool,
+    stat_only: bool,
+) -> Result<()> {
+    validate_pack_index_file(algorithm, idx_path)
+        .map_err(|error| verify_pack_index_error(algorithm, idx_path, error))?;
     let pack_path = idx_path.with_extension("pack");
     let verified = zmin_git_core::verify_pack_file_matches_index(
-        GitHashAlgorithm::Sha1,
+        algorithm,
         &pack_path,
         idx_path,
         verbose,
     )
-    .map_err(verify_pack_integrity_error)?;
+    .map_err(|error| verify_pack_integrity_error(idx_path, error))?;
     if !verbose && !stat_only {
         return Ok(());
     }
@@ -5477,12 +5486,22 @@ fn verify_pack_one(idx_path: &std::path::Path, verbose: bool, stat_only: bool) -
     Ok(())
 }
 
-fn verify_pack_integrity_error(error: io::Error) -> CliError {
+fn verify_pack_integrity_error(idx_path: &std::path::Path, error: io::Error) -> CliError {
     if error.kind() == io::ErrorKind::InvalidData {
         if let Some(version) = unsupported_pack_file_version(&error) {
             return CliError::Fatal {
                 code: 1,
                 message: format!("pack version {version} unsupported"),
+            };
+        }
+        if error.to_string() == "wrong index v2 file size" {
+            return CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "error: wrong index v2 file size in {}\nfatal: Cannot open existing pack idx file for '{}'\n",
+                    idx_path.display(),
+                    idx_path.display()
+                ),
             };
         }
         CliError::Fatal {
@@ -5494,13 +5513,27 @@ fn verify_pack_integrity_error(error: io::Error) -> CliError {
     }
 }
 
-fn verify_pack_index_error(idx_path: &std::path::Path, error: io::Error) -> CliError {
+fn verify_pack_index_error(
+    algorithm: GitHashAlgorithm,
+    idx_path: &std::path::Path,
+    error: io::Error,
+) -> CliError {
     if error.kind() == io::ErrorKind::InvalidData {
         if let Some(version) = unsupported_pack_index_version(&error) {
             return CliError::Stderr {
                 code: 1,
                 text: format!(
                     "error: index file {} is version {version} and is not supported by this binary (try upgrading GIT to a newer version)\nfatal: Cannot open existing pack idx file for '{}'\n",
+                    idx_path.display(),
+                    idx_path.display()
+                ),
+            };
+        }
+        if algorithm == GitHashAlgorithm::Sha256 || error.to_string() == "wrong index v2 file size" {
+            return CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "error: wrong index v2 file size in {}\nfatal: Cannot open existing pack idx file for '{}'\n",
                     idx_path.display(),
                     idx_path.display()
                 ),
