@@ -1487,8 +1487,12 @@ pub enum Command {
     WriteTree {
         #[arg(long = "prefix")]
         prefix: Option<String>,
+        #[arg(long = "no-prefix", action = ArgAction::SetTrue)]
+        no_prefix: bool,
         #[arg(long = "missing-ok", action = ArgAction::SetTrue)]
         missing_ok: bool,
+        #[arg(long = "no-missing-ok", action = ArgAction::SetTrue)]
+        no_missing_ok: bool,
     },
     CommitTree {
         tree: String,

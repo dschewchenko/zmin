@@ -71,7 +71,14 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             messages,
         ),
         runtime::Command::Gui { args } => super::commit_commands::gui_command(args),
-        runtime::Command::WriteTree { prefix, missing_ok } => {
+        runtime::Command::WriteTree {
+            prefix,
+            no_prefix,
+            missing_ok,
+            no_missing_ok,
+        } => {
+            let _no_prefix = no_prefix;
+            let _no_missing_ok = no_missing_ok;
             super::commit_commands::write_tree_command_entry(prefix.as_deref(), missing_ok)
         }
         runtime::Command::CommitTree {
