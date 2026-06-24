@@ -8062,6 +8062,7 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
                 false,
                 false,
                 false,
+                false,
                 None,
                 false,
                 None,

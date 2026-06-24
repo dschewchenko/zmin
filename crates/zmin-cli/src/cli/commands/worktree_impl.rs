@@ -3032,6 +3032,7 @@ pub(crate) fn add(
     verbose: bool,
     ignore_errors: bool,
     ignore_missing: bool,
+    edit: bool,
     chmod: Option<String>,
     dry_run: bool,
     pathspec_from_file: Option<PathBuf>,
@@ -3047,6 +3048,7 @@ pub(crate) fn add(
         verbose,
         ignore_errors,
         ignore_missing,
+        edit,
         false,
         chmod,
         dry_run,
@@ -3066,6 +3068,7 @@ pub(crate) fn add_with_embedded_repo_warning(
     ignore_errors: bool,
     ignore_missing: bool,
     no_warn_embedded_repo: bool,
+    edit: bool,
     chmod: Option<String>,
     dry_run: bool,
     pathspec_from_file: Option<PathBuf>,
@@ -3073,6 +3076,7 @@ pub(crate) fn add_with_embedded_repo_warning(
     mut paths: Vec<PathBuf>,
 ) -> Result<()> {
     let _trace = phase_trace("add.total");
+    let update = update || edit;
     if all && update {
         return Err(CliError::Fatal {
             code: 128,

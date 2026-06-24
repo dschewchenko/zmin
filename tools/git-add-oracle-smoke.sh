@@ -14,6 +14,7 @@ export GIT_AUTHOR_DATE="1700000000 +0000"
 export GIT_COMMITTER_NAME=Oracle
 export GIT_COMMITTER_EMAIL=oracle@example.com
 export GIT_COMMITTER_DATE="1700000000 +0000"
+export GIT_EDITOR=:
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-add-oracle.XXXXXX")"
 cleanup() {
@@ -53,6 +54,17 @@ make_seed_repo() {
   "$GIT_BIN" -C "$repo" commit -qm "base"
 }
 
+make_inner_repo() {
+  local repo="$1"
+  mkdir "$repo"
+  "$GIT_BIN" -C "$repo" init -q
+  "$GIT_BIN" -C "$repo" config user.name "Inner"
+  "$GIT_BIN" -C "$repo" config user.email "inner@example.com"
+  printf 'inner\n' >"$repo/file.txt"
+  "$GIT_BIN" -C "$repo" add file.txt
+  "$GIT_BIN" -C "$repo" commit -qm "inner"
+}
+
 prepare_case() {
   local work="$1"
   local name="$2"
@@ -71,6 +83,9 @@ prepare_case() {
       ;;
     add_force_long|add_force_repeated_long)
       printf 'ignored\n' >"$work/force.ignored"
+      ;;
+    add_edit_noop|add_edit_short_noop)
+      printf 'changed\n' >"$work/tracked.txt"
       ;;
     add_pathspec_file_nul)
       printf 'changed\n' >"$work/tracked.txt"
@@ -139,12 +154,7 @@ prepare_case() {
       printf 'pathspec-default\n' >"$work/pathspec-default.txt"
       ;;
     add_no_warn_embedded_repo_long)
-      "$GIT_BIN" -C "$work" init -q inner
-      "$GIT_BIN" -C "$work/inner" config user.name "Inner"
-      "$GIT_BIN" -C "$work/inner" config user.email "inner@example.com"
-      printf 'inner\n' >"$work/inner/file.txt"
-      "$GIT_BIN" -C "$work/inner" add file.txt
-      "$GIT_BIN" -C "$work/inner" commit -qm "inner"
+      cp -R "$inner_seed" "$work/inner"
       ;;
   esac
 }
@@ -189,6 +199,8 @@ run_case() {
 
 base_seed="$tmpdir/base"
 make_seed_repo "$base_seed"
+inner_seed="$tmpdir/inner-seed"
+make_inner_repo "$inner_seed"
 
 run_case add_intent_long add --intent-to-add intent.txt
 run_case add_intent_repeated_long add --intent-to-add --intent-to-add intent.txt
@@ -198,6 +210,8 @@ run_case add_all_long add --all
 run_case add_all_repeated_long add --all --all
 run_case add_force_long add --force force.ignored
 run_case add_force_repeated_long add --force --force force.ignored
+run_case add_edit_noop add --edit
+run_case add_edit_short_noop add -e
 run_case add_pathspec_file_nul add --pathspec-from-file=paths.nul --pathspec-file-nul
 run_case add_update_long add --update
 run_case add_update_repeated_long add --update --update

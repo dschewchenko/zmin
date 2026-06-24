@@ -3,6 +3,7 @@ set -euo pipefail
 
 ZMIN_BIN="${ZMIN_BIN:-target/release/zmin}"
 GIT_BIN="${GIT_BIN:-/usr/bin/git}"
+export GIT_EDITOR=:
 case "$ZMIN_BIN" in
   /*) ;;
   *) ZMIN_BIN="$PWD/$ZMIN_BIN" ;;
@@ -100,6 +101,9 @@ prepare_case() {
       ;;
     stage_force_repeated|stage_force_dry_run)
       printf 'ignored\n' >"$work/force.ignored"
+      ;;
+    stage_edit_noop|stage_edit_short_noop)
+      printf 'changed\n' >"$work/tracked.txt"
       ;;
     stage_no_ignore_errors_long|stage_no_ignore_errors_repeated_long|stage_ignore_errors_repeated_long)
       printf 'errors off\n' >"$work/errors-off.txt"
@@ -246,6 +250,8 @@ run_case stage_force_long stage --force force.ignored
 run_case stage_force_short stage -f force.ignored
 run_case stage_force_repeated stage -f -f force.ignored
 run_case stage_force_dry_run stage --force --dry-run force.ignored
+run_case stage_edit_noop stage --edit
+run_case stage_edit_short_noop stage -e
 run_case stage_no_ignore_errors_long stage --no-ignore-errors errors-off.txt
 run_case stage_no_ignore_errors_repeated_long stage --no-ignore-errors --no-ignore-errors errors-off.txt
 run_case stage_ignore_errors_repeated_long stage --ignore-errors --ignore-errors errors-off.txt
