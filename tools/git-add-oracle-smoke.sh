@@ -131,6 +131,14 @@ prepare_case() {
     add_no_pathspec_from_file_long)
       printf 'pathspec-default\n' >"$work/pathspec-default.txt"
       ;;
+    add_no_warn_embedded_repo_long)
+      "$GIT_BIN" -C "$work" init -q inner
+      "$GIT_BIN" -C "$work/inner" config user.name "Inner"
+      "$GIT_BIN" -C "$work/inner" config user.email "inner@example.com"
+      printf 'inner\n' >"$work/inner/file.txt"
+      "$GIT_BIN" -C "$work/inner" add file.txt
+      "$GIT_BIN" -C "$work/inner" commit -qm "inner"
+      ;;
   esac
 }
 
@@ -203,3 +211,4 @@ run_case add_no_chmod_long add --no-chmod mode-default.txt
 run_case add_sparse_long add --sparse sparse-ok.txt
 run_case add_no_sparse_long add --no-sparse sparse-off.txt
 run_case add_no_pathspec_from_file_long add --no-pathspec-from-file pathspec-default.txt
+run_case add_no_warn_embedded_repo_long add --no-warn-embedded-repo inner

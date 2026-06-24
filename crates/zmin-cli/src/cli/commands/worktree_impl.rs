@@ -3036,6 +3036,40 @@ pub(crate) fn add(
     dry_run: bool,
     pathspec_from_file: Option<PathBuf>,
     pathspec_file_nul: bool,
+    paths: Vec<PathBuf>,
+) -> Result<()> {
+    add_with_embedded_repo_warning(
+        all,
+        force,
+        update,
+        intent_to_add,
+        refresh,
+        verbose,
+        ignore_errors,
+        ignore_missing,
+        false,
+        chmod,
+        dry_run,
+        pathspec_from_file,
+        pathspec_file_nul,
+        paths,
+    )
+}
+
+pub(crate) fn add_with_embedded_repo_warning(
+    all: bool,
+    force: bool,
+    update: bool,
+    intent_to_add: bool,
+    refresh: bool,
+    verbose: bool,
+    ignore_errors: bool,
+    ignore_missing: bool,
+    no_warn_embedded_repo: bool,
+    chmod: Option<String>,
+    dry_run: bool,
+    pathspec_from_file: Option<PathBuf>,
+    pathspec_file_nul: bool,
     mut paths: Vec<PathBuf>,
 ) -> Result<()> {
     let _trace = phase_trace("add.total");
@@ -3274,7 +3308,9 @@ pub(crate) fn add(
                 } else {
                     None
                 };
-                warn_add_embedded_repo(&repo, &index, &file, &mut embedded_repo_hint_printed)?;
+                if !no_warn_embedded_repo {
+                    warn_add_embedded_repo(&repo, &index, &file, &mut embedded_repo_hint_printed)?;
+                }
                 let stage_result = if intent_to_add {
                     stage_intent_to_add_file(&repo, &store, &mut index, &file)
                 } else if stage_files_trace.enabled() {

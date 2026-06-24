@@ -1276,6 +1276,8 @@ pub enum Command {
         sparse: bool,
         #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
         no_sparse: bool,
+        #[arg(long = "no-warn-embedded-repo", action = ArgAction::SetTrue)]
+        no_warn_embedded_repo: bool,
         #[arg(long = "chmod")]
         chmod: Option<String>,
         #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
@@ -1336,6 +1338,8 @@ pub enum Command {
         sparse: bool,
         #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
         no_sparse: bool,
+        #[arg(long = "no-warn-embedded-repo", action = ArgAction::SetTrue)]
+        no_warn_embedded_repo: bool,
         #[arg(long = "chmod")]
         chmod: Option<String>,
         #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
