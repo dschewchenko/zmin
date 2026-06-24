@@ -243,7 +243,13 @@ fn validate_version_invocation_before_clap(args: &[String]) -> Result<()> {
 }
 
 fn validate_var_invocation_before_clap(args: &[String]) -> Result<()> {
-    if matches!(args, [command, option] if command == "var" && option == "--list") {
+    if args.first().map(String::as_str) != Some("var") {
+        return Ok(());
+    }
+    let invalid_list_usage = matches!(args, [_, option] if option == "--list" || option == "--no-list")
+        || matches!(args, [_, option] if option == "-l=true" || option == "-l=" || option == "-ll")
+        || matches!(args, [_, first, second] if first == "-l" && second == "-l");
+    if invalid_list_usage {
         return Err(CliError::Stderr {
             code: 129,
             text: "usage: git var (-l | <variable>)\n".into(),
