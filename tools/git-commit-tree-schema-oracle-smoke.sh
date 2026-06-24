@@ -185,6 +185,8 @@ run_stdin_case() {
 
   seed_repo "$GIT_BIN" "$git_work"
   seed_repo "$ZMIN_BIN" "$zmin_work"
+  printf 'file message\n' >"$git_work/message.txt"
+  printf 'file message\n' >"$zmin_work/message.txt"
   git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
   zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
   test "$git_tree" = "$zmin_tree"
@@ -434,15 +436,18 @@ run_parent_case() {
 run_case commit_tree_positional_tree -m root
 run_case commit_tree_tree_then_delimiter --
 run_stdin_case commit_tree_empty_stdin ''
+run_stdin_case commit_tree_stdin_message 'stdin body'
 run_tree_argument_case commit_tree_abbreviated_tree abbreviated 0 -m root
 run_tree_argument_case commit_tree_blob_tree blob 128 -m root
 run_case commit_tree_attached_message -minline
 run_tree_after_two_args_case commit_tree_message_before_tree -m root
 run_case commit_tree_equals_message -m=foo
 run_case commit_tree_empty_message -m ''
+run_stdin_case commit_tree_stdin_ignored_with_message 'ignored stdin' -m inline
 run_case commit_tree_empty_message_then_message -m '' -m msg
 run_case commit_tree_message_then_empty_message -m msg -m ''
 run_case commit_tree_message_file -F message.txt
+run_stdin_case commit_tree_stdin_ignored_with_message_file 'ignored stdin' -F message.txt
 run_tree_after_two_args_case commit_tree_message_file_before_tree -F message.txt
 run_case commit_tree_empty_message_file -F /dev/null
 run_case commit_tree_attached_message_file -Fmessage.txt
