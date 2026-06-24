@@ -83,14 +83,24 @@ run_case count_objects_verbose_long_repeated --verbose --verbose
 run_case count_objects_human_long_repeated --human-readable --human-readable
 run_case count_objects_verbose_short_repeated -v -v
 run_case count_objects_human_short_repeated -H -H
+run_case count_objects_verbose_long_short --verbose -v
+run_case count_objects_verbose_short_long -v --verbose
+run_case count_objects_human_long_short --human-readable -H
+run_case count_objects_human_short_long -H --human-readable
 run_case count_objects_no_verbose --no-verbose
 run_case count_objects_no_human --no-human-readable
+run_case count_objects_no_verbose_repeated --no-verbose --no-verbose
+run_case count_objects_no_human_repeated --no-human-readable --no-human-readable
 run_case count_objects_verbose_short_no_verbose -v --no-verbose
 run_case count_objects_human_short_no_human -H --no-human-readable
 run_case count_objects_verbose_human_no_human --verbose --human-readable --no-human-readable
 run_case count_objects_human_verbose_no_verbose --human-readable --verbose --no-verbose
 run_case count_objects_no_verbose_verbose --no-verbose --verbose
 run_case count_objects_no_human_human --no-human-readable --human-readable
+run_case count_objects_verbose_no_verbose_verbose --verbose --no-verbose --verbose
+run_case count_objects_human_no_human_human --human-readable --no-human-readable --human-readable
+run_case count_objects_verbose_short_human_long -v --human-readable
+run_case count_objects_verbose_long_human_short --verbose -H
 run_case count_objects_verbose_long_rejects_value --verbose=true
 run_case count_objects_verbose_short_rejects_value -v=true
 run_case count_objects_human_long_rejects_value --human-readable=true
