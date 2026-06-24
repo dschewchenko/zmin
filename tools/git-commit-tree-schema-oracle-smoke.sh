@@ -500,6 +500,9 @@ run_stdin_case commit_tree_attached_message_file_stdin 'stdin message
 run_case commit_tree_message_then_file -m inline -F message.txt
 run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
+run_no_newline_message_file_case commit_tree_no_newline_file_then_message -F no-newline.txt -m inline
+run_no_newline_message_file_case commit_tree_message_then_no_newline_file -m inline -F no-newline.txt
+run_no_newline_message_file_case commit_tree_multiple_no_newline_files -F no-newline.txt -F no-newline.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
 run_case commit_tree_repeated_no_gpg_sign --no-gpg-sign --no-gpg-sign -m root
 run_tree_after_first_arg_case commit_tree_no_gpg_sign_before_tree --no-gpg-sign -m root
