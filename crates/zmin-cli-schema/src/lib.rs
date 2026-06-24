@@ -1246,6 +1246,10 @@ pub enum Command {
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
         update: bool,
+        #[arg(long = "renormalize", action = ArgAction::SetTrue)]
+        renormalize: bool,
+        #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
+        no_renormalize: bool,
         #[arg(short = 'N', long = "intent-to-add", action = ArgAction::SetTrue)]
         intent_to_add: bool,
         #[arg(long = "refresh", action = ArgAction::SetTrue)]
@@ -1278,6 +1282,10 @@ pub enum Command {
         force: bool,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
         update: bool,
+        #[arg(long = "renormalize", action = ArgAction::SetTrue)]
+        renormalize: bool,
+        #[arg(long = "no-renormalize", action = ArgAction::SetTrue)]
+        no_renormalize: bool,
         #[arg(short = 'N', long = "intent-to-add", action = ArgAction::SetTrue)]
         intent_to_add: bool,
         #[arg(long = "refresh", action = ArgAction::SetTrue)]
