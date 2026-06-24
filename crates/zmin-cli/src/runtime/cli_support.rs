@@ -508,6 +508,12 @@ fn validate_commit_tree_invocation_before_clap(command_args: &[String]) -> Resul
                 text: "error: option `no-gpg-sign' takes no value\n".into(),
             });
         }
+        if let Some(parent) = arg.strip_prefix("-p=") {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("not a valid object name ={parent}"),
+            });
+        }
         if arg.starts_with("-m") && arg.len() > 2
             || arg.starts_with("-F") && arg.len() > 2
             || arg.starts_with("-p") && arg.len() > 2

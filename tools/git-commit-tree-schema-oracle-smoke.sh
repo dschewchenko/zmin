@@ -372,6 +372,12 @@ run_parent_case() {
       "$ZMIN_BIN" -C "$zmin_work" commit-tree -p "$zmin_parent" "$zmin_tree" -m child >"$zmin_out" 2>"$zmin_err"
       zmin_exit=$?
       ;;
+    equals_message)
+      "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" -p "$git_parent" -m=child >"$git_out" 2>"$git_err"
+      git_exit=$?
+      "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" -p "$zmin_parent" -m=child >"$zmin_out" 2>"$zmin_err"
+      zmin_exit=$?
+      ;;
     duplicate)
       "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" -p "$git_parent" -p "$git_parent" -m child >"$git_out" 2>"$git_err"
       git_exit=$?
@@ -406,6 +412,8 @@ run_case commit_tree_empty_message_file -F /dev/null
 run_case commit_tree_attached_message_file -Fmessage.txt
 run_stdin_case commit_tree_message_file_stdin 'stdin message
 ' -F -
+run_stdin_case commit_tree_attached_message_file_stdin 'stdin message
+' -F-
 run_case commit_tree_message_then_file -m inline -F message.txt
 run_case commit_tree_file_then_message -F message.txt -m inline
 run_case commit_tree_multiple_message_files -F message.txt -F message.txt
@@ -416,13 +424,16 @@ run_tree_after_two_args_case commit_tree_repeated_no_gpg_sign_before_tree --no-g
 run_parent_case commit_tree_attached_parent attached
 run_parent_case commit_tree_message_before_parent message_first
 run_parent_case commit_tree_parent_before_tree parent_first
+run_parent_case commit_tree_parent_with_equals_message equals_message
 run_parent_case commit_tree_duplicate_parent duplicate
 run_invalid_case commit_tree_rejects_date 129 --date '2001-02-03T04:05:06+0000' -m root
 run_invalid_case commit_tree_rejects_attached_date 129 --date=2001-02-03T04:05:06+0000 -m root
 run_invalid_case commit_tree_no_gpg_sign_rejects_value 129 --no-gpg-sign=true -m root
 run_invalid_case commit_tree_no_gpg_sign_rejects_empty_value 129 --no-gpg-sign= -m root
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt
+run_invalid_case commit_tree_equals_message_file_missing 128 -F=message.txt
 run_invalid_case commit_tree_missing_parent 128 -p missing -m child
+run_invalid_case commit_tree_parent_rejects_equals_value 128 -p=missing -m child
 run_invalid_case commit_tree_message_missing_value_consumes_next_option 128 -m -F message.txt
 run_no_tree_invalid_case commit_tree_missing_tree_argument 128 -m root
 run_invalid_case commit_tree_extra_tree_argument 128 -m root extra
