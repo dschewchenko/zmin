@@ -89,10 +89,16 @@ prepare_case() {
     stage_dry_run_long|stage_dry_run_short)
       printf 'dry\n' >"$work/dry.txt"
       ;;
+    stage_dry_run_repeated|stage_dry_run_verbose_short|stage_dry_run_verbose_long)
+      printf 'new\n' >"$work/new.txt"
+      ;;
     stage_no_dry_run_long)
       printf 'real\n' >"$work/real.txt"
       ;;
     stage_force_long|stage_force_short)
+      printf 'ignored\n' >"$work/force.ignored"
+      ;;
+    stage_force_repeated|stage_force_dry_run)
       printf 'ignored\n' >"$work/force.ignored"
       ;;
     stage_no_ignore_errors_long)
@@ -159,6 +165,9 @@ prepare_case() {
     stage_verbose_long|stage_verbose_short)
       printf 'verbose\n' >"$work/verbose.txt"
       ;;
+    stage_verbose_repeated)
+      printf 'new\n' >"$work/new.txt"
+      ;;
     stage_no_verbose_long)
       printf 'quiet\n' >"$work/quiet.txt"
       ;;
@@ -224,9 +233,14 @@ run_case stage_chmod_long stage --chmod=+x mode.txt
 run_case stage_no_chmod_long stage --no-chmod mode-default.txt
 run_case stage_dry_run_long stage --dry-run dry.txt
 run_case stage_dry_run_short stage -n dry.txt
+run_case stage_dry_run_repeated stage -n -n new.txt
+run_case stage_dry_run_verbose_short stage -n -v new.txt
+run_case stage_dry_run_verbose_long stage --dry-run --verbose new.txt
 run_case stage_no_dry_run_long stage --no-dry-run real.txt
 run_case stage_force_long stage --force force.ignored
 run_case stage_force_short stage -f force.ignored
+run_case stage_force_repeated stage -f -f force.ignored
+run_case stage_force_dry_run stage --force --dry-run force.ignored
 run_case stage_no_ignore_errors_long stage --no-ignore-errors errors-off.txt
 run_case stage_ignore_missing_long stage --dry-run --ignore-missing tracked.txt missing.txt
 run_case stage_no_ignore_missing_long stage --no-ignore-missing missing-off.txt
@@ -249,5 +263,6 @@ run_case stage_update_short stage -u
 run_case stage_no_update_long stage --no-update no-update.txt
 run_case stage_verbose_long stage --verbose verbose.txt
 run_case stage_verbose_short stage -v verbose.txt
+run_case stage_verbose_repeated stage -v -v new.txt
 run_case stage_no_verbose_long stage --no-verbose quiet.txt
 run_case stage_no_warn_embedded_repo_long stage --no-warn-embedded-repo inner

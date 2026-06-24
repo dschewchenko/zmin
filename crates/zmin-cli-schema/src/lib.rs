@@ -1269,8 +1269,8 @@ pub enum Command {
         ignore_removal: bool,
         #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
         no_ignore_removal: bool,
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
+        #[arg(short = 'f', long = "force", action = ArgAction::Count)]
+        force: u8,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
         update: bool,
         #[arg(long = "no-update", action = ArgAction::SetTrue)]
@@ -1287,8 +1287,8 @@ pub enum Command {
         refresh: bool,
         #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
         no_refresh: bool,
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbose: u8,
         #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
         no_verbose: bool,
         #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
@@ -1309,8 +1309,8 @@ pub enum Command {
         chmod: Option<String>,
         #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
         no_chmod: bool,
-        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
-        dry_run: bool,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
+        dry_run: u8,
         #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
         no_dry_run: bool,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
@@ -1331,8 +1331,8 @@ pub enum Command {
         ignore_removal: bool,
         #[arg(long = "no-ignore-removal", action = ArgAction::SetTrue)]
         no_ignore_removal: bool,
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
+        #[arg(short = 'f', long = "force", action = ArgAction::Count)]
+        force: u8,
         #[arg(short = 'u', long = "update", action = ArgAction::SetTrue)]
         update: bool,
         #[arg(long = "no-update", action = ArgAction::SetTrue)]
@@ -1349,8 +1349,8 @@ pub enum Command {
         refresh: bool,
         #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
         no_refresh: bool,
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbose: u8,
         #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
         no_verbose: bool,
         #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
@@ -1371,8 +1371,8 @@ pub enum Command {
         chmod: Option<String>,
         #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
         no_chmod: bool,
-        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
-        dry_run: bool,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
+        dry_run: u8,
         #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
         no_dry_run: bool,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
