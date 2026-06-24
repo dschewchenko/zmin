@@ -3719,9 +3719,21 @@ pub(crate) fn mv(
         let target_absolute =
             mv_target_path(&source_absolute, &destination_absolute, multiple_sources)?;
         let target_relative = repo_relative_path(&repo.root, &target_absolute)?;
+        let target_display = if multiple_sources {
+            PathBuf::from(String::from_utf8_lossy(&target_relative).as_ref())
+        } else {
+            destination.clone()
+        };
         let moves = mv_index_moves(&index, &source_relative, &target_relative)?;
         if moves.is_empty() {
             if skip_errors {
+                if dry_run {
+                    println!(
+                        "Checking rename of '{}' to '{}'",
+                        source.display(),
+                        target_display.display()
+                    );
+                }
                 continue;
             }
             return Err(CliError::Fatal {
@@ -3738,11 +3750,11 @@ pub(crate) fn mv(
             println!(
                 "Checking rename of '{}' to '{}'",
                 source.display(),
-                destination.display()
+                target_display.display()
             );
         }
         if dry_run || verbose {
-            println!("Renaming {} to {}", source.display(), destination.display());
+            println!("Renaming {} to {}", source.display(), target_display.display());
         }
         if !dry_run {
             rename_worktree_path(&source_absolute, &target_absolute, force)?;
