@@ -110,6 +110,27 @@ prepare_case() {
     add_no_refresh_long)
       printf 'fresh\n' >"$work/fresh.txt"
       ;;
+    add_no_ignore_errors_long)
+      printf 'errors-off\n' >"$work/errors-off.txt"
+      ;;
+    add_no_ignore_missing_long)
+      printf 'missing-off\n' >"$work/missing-off.txt"
+      ;;
+    add_no_pathspec_file_nul_long)
+      printf 'lf-pathspec\n' >"$work/lf-pathspec.txt"
+      ;;
+    add_no_chmod_long)
+      printf 'mode-default\n' >"$work/mode-default.txt"
+      ;;
+    add_sparse_long)
+      printf 'sparse-ok\n' >"$work/sparse-ok.txt"
+      ;;
+    add_no_sparse_long)
+      printf 'sparse-off\n' >"$work/sparse-off.txt"
+      ;;
+    add_no_pathspec_from_file_long)
+      printf 'pathspec-default\n' >"$work/pathspec-default.txt"
+      ;;
   esac
 }
 
@@ -175,3 +196,10 @@ run_case add_no_verbose_long add --no-verbose quiet.txt
 run_case add_no_update_long add --no-update new.txt
 run_case add_no_intent_to_add_long add --no-intent-to-add full.txt
 run_case add_no_refresh_long add --no-refresh fresh.txt
+run_case add_no_ignore_errors_long add --no-ignore-errors errors-off.txt
+run_case add_no_ignore_missing_long add --no-ignore-missing missing-off.txt
+run_case add_no_pathspec_file_nul_long add --no-pathspec-file-nul lf-pathspec.txt
+run_case add_no_chmod_long add --no-chmod mode-default.txt
+run_case add_sparse_long add --sparse sparse-ok.txt
+run_case add_no_sparse_long add --no-sparse sparse-off.txt
+run_case add_no_pathspec_from_file_long add --no-pathspec-from-file pathspec-default.txt

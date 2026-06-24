@@ -1266,18 +1266,32 @@ pub enum Command {
         no_verbose: bool,
         #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
         ignore_errors: bool,
+        #[arg(long = "no-ignore-errors", action = ArgAction::SetTrue)]
+        no_ignore_errors: bool,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
         ignore_missing: bool,
+        #[arg(long = "no-ignore-missing", action = ArgAction::SetTrue)]
+        no_ignore_missing: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
+        no_sparse: bool,
         #[arg(long = "chmod")]
         chmod: Option<String>,
+        #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
+        no_chmod: bool,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
         #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
         no_dry_run: bool,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
+        #[arg(long = "no-pathspec-from-file", action = ArgAction::SetTrue)]
+        no_pathspec_from_file: bool,
         #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
         pathspec_file_nul: bool,
+        #[arg(long = "no-pathspec-file-nul", action = ArgAction::SetTrue)]
+        no_pathspec_file_nul: bool,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
@@ -1312,18 +1326,32 @@ pub enum Command {
         no_verbose: bool,
         #[arg(long = "ignore-errors", action = ArgAction::SetTrue)]
         ignore_errors: bool,
+        #[arg(long = "no-ignore-errors", action = ArgAction::SetTrue)]
+        no_ignore_errors: bool,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
         ignore_missing: bool,
+        #[arg(long = "no-ignore-missing", action = ArgAction::SetTrue)]
+        no_ignore_missing: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
+        no_sparse: bool,
         #[arg(long = "chmod")]
         chmod: Option<String>,
+        #[arg(long = "no-chmod", action = ArgAction::SetTrue)]
+        no_chmod: bool,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
         #[arg(long = "no-dry-run", action = ArgAction::SetTrue)]
         no_dry_run: bool,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
+        #[arg(long = "no-pathspec-from-file", action = ArgAction::SetTrue)]
+        no_pathspec_from_file: bool,
         #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
         pathspec_file_nul: bool,
+        #[arg(long = "no-pathspec-file-nul", action = ArgAction::SetTrue)]
+        no_pathspec_file_nul: bool,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
