@@ -601,6 +601,10 @@ The latest open guard classification is `transport_impl.rs`
 environment creates a reftable clone and reports `reftable` from
 `rev-parse --show-ref-format`; Zmin currently exits `128` before destination
 creation. This is now an open Git-supported behavior row, not invalid input.
+The adjacent `refs.rs` parser guards `unsupported reftable version` and
+`unsupported reftable ref value type` are also classified under the same open
+reftable storage gap until Zmin has a real reftable writer/reader and oracle
+coverage for valid and invalid reftable table variants.
 
 The latest closed transport slice is `clone --reference-if-able` for dumb HTTP
 sources. Zmin now accepts
