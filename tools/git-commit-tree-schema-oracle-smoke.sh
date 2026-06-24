@@ -411,6 +411,7 @@ run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
 run_case commit_tree_repeated_no_gpg_sign --no-gpg-sign --no-gpg-sign -m root
 run_tree_after_first_arg_case commit_tree_no_gpg_sign_before_tree --no-gpg-sign -m root
+run_tree_after_two_args_case commit_tree_repeated_no_gpg_sign_before_tree --no-gpg-sign --no-gpg-sign -m root
 run_parent_case commit_tree_attached_parent attached
 run_parent_case commit_tree_message_before_parent message_first
 run_parent_case commit_tree_parent_before_tree parent_first
