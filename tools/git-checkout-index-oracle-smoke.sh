@@ -85,5 +85,6 @@ make_seed_repo "$base_seed"
 
 run_case checkout_index_all_long "README.md docs/guide.md" -- checkout-index --all
 run_case checkout_index_force_long "README.md" -- checkout-index --force README.md
+run_case checkout_index_force_short "README.md" -- checkout-index -f README.md
 run_case checkout_index_quiet_long "README.md" -- checkout-index --quiet README.md
 run_case checkout_index_quiet_short "docs/guide.md" -- checkout-index -q docs/guide.md
