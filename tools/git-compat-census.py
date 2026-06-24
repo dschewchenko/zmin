@@ -705,6 +705,10 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
             next_action = "expand remaining values, negations, repeated forms, combinations, states, transports and platforms for this documented option"
             bucket = "not implemented / broken / open"
             kind = "doc_option_expansion_required"
+        elif statuses["open"] or statuses["partial"]:
+            next_action = "fix implementation or evidence for the existing exact rows, then rerun stock-Git parity before expanding this documented option"
+            bucket = "not implemented / broken / open"
+            kind = "doc_option_exact_rows_open"
         elif schema_refs:
             next_action = "write exact stock-Git rows for the implemented parser/handler surface"
             bucket = "implemented but unverified"
