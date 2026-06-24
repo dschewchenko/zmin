@@ -191,9 +191,40 @@ run_default_success_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_default_invalid_case() {
+  local name="$1"
+  local expected_exit="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo_with_prefix_tree "$git_work"
+  seed_repo_with_prefix_tree "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" write-tree "$@" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" write-tree "$@" >"$tmpdir/${name}.zmin.out" 2>"$tmpdir/${name}.zmin.err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
+  compare_files stdout "$tmpdir/${name}.git.out" "$tmpdir/${name}.zmin.out"
+  compare_files stderr "$tmpdir/${name}.git.err" "$tmpdir/${name}.zmin.err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case write_tree_missing_ok
 run_default_success_case write_tree_no_missing_ok --no-missing-ok
 run_default_success_case write_tree_no_prefix --no-prefix
+run_default_success_case write_tree_prefix_space_value --prefix src
+run_prefix_success_case write_tree_prefix_trailing_slash src/
+run_default_success_case write_tree_prefix_empty --prefix=
+run_default_success_case write_tree_missing_ok_then_no_missing_ok --missing-ok --no-missing-ok
+run_default_success_case write_tree_no_missing_ok_then_missing_ok --no-missing-ok --missing-ok
 run_prefix_success_case write_tree_prefix_double_slash src//inner
 run_prefix_success_case write_tree_prefix_triple_slash src///inner
 run_prefix_success_case write_tree_missing_ok_prefix src --missing-ok
@@ -204,3 +235,7 @@ run_prefix_missing_case write_tree_prefix_dot_slash ./src
 run_prefix_missing_case write_tree_prefix_dot_component src/.
 run_prefix_missing_case write_tree_prefix_parent_component src/../src
 run_prefix_missing_case write_tree_prefix_missing_trailing_slash nosuch/
+run_default_invalid_case write_tree_prefix_missing_value 129 --prefix
+run_default_invalid_case write_tree_missing_ok_rejects_value 129 --missing-ok=true
+run_default_invalid_case write_tree_no_missing_ok_rejects_value 129 --no-missing-ok=true
+run_default_invalid_case write_tree_no_prefix_rejects_value 129 --no-prefix=true

@@ -118,6 +118,7 @@ pub(crate) fn parse_cli_invocation(
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
     validate_commit_tree_invocation_before_clap(&command_args)?;
+    validate_write_tree_invocation_before_clap(&command_args)?;
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
@@ -549,6 +550,37 @@ fn validate_commit_tree_invocation_before_clap(command_args: &[String]) -> Resul
             code: 128,
             message: "must give exactly one tree".into(),
         });
+    }
+    Ok(())
+}
+
+fn validate_write_tree_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("write-tree") {
+        return Ok(());
+    }
+    for (index, arg) in command_args.iter().enumerate().skip(1) {
+        if matches!(arg.as_str(), "--missing-ok" | "--no-missing-ok" | "--no-prefix") {
+            continue;
+        }
+        if let Some(option) = arg.strip_prefix("--").and_then(|value| {
+            value
+                .strip_suffix("=true")
+                .or_else(|| value.strip_suffix("=false"))
+                .or_else(|| value.strip_suffix('='))
+        }) {
+            if matches!(option, "missing-ok" | "no-missing-ok" | "no-prefix") {
+                return Err(CliError::Stderr {
+                    code: 129,
+                    text: format!("error: option `{option}' takes no value\n"),
+                });
+            }
+        }
+        if arg == "--prefix" && index + 1 >= command_args.len() {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: "error: option `prefix' requires a value\n".into(),
+            });
+        }
     }
     Ok(())
 }
