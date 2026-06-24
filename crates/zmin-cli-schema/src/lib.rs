@@ -781,8 +781,8 @@ pub enum Command {
         skip_worktree: u8,
         #[arg(long = "no-skip-worktree", action = ArgAction::Count)]
         no_skip_worktree: u8,
-        #[arg(long = "stdin", action = ArgAction::SetTrue)]
-        stdin: bool,
+        #[arg(long = "stdin", action = ArgAction::Count)]
+        stdin: u8,
         #[arg(short = 'z', action = ArgAction::Count)]
         nul_terminated: u8,
         paths: Vec<PathBuf>,

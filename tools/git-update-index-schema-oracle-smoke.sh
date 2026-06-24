@@ -339,6 +339,7 @@ run_invalid_case update_index_chmod_invalid_value tracked update-index --chmod=b
 run_stdin_case update_index_stdin 'a.txt\n' update-index --stdin
 run_stdin_case update_index_z_stdin 'a.txt\0' update-index -z --stdin
 run_stdin_case update_index_z_repeated_stdin 'a.txt\0' update-index -z -z --stdin
+run_invalid_case update_index_stdin_repeated tracked update-index --stdin --stdin
 run_cacheinfo_case update_index_cacheinfo_add --add --cacheinfo '100644,__BLOB__,b.txt'
 run_cacheinfo_case update_index_cacheinfo_split --add --cacheinfo 100644 __BLOB__ b.txt
 run_cacheinfo_case update_index_replace_repeated_cacheinfo --replace --replace --cacheinfo '100644,__BLOB__,a.txt'

@@ -24,7 +24,13 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             stdin,
             nul_terminated,
             paths,
-        } => super::admin_commands::update_index_command(
+        } => super::admin_commands::update_index_command({
+            if stdin > 1 {
+                return Err(runtime::CliError::Stderr {
+                    code: 129,
+                    text: "error: option 'stdin' must be the last argument\n".into(),
+                });
+            }
             super::admin_commands::UpdateIndexCommandOptions {
                 add: add > 0,
                 remove: remove > 0,
@@ -38,11 +44,11 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 no_assume_unchanged: no_assume_unchanged > 0,
                 skip_worktree: skip_worktree > 0,
                 no_skip_worktree: no_skip_worktree > 0,
-                stdin,
+                stdin: stdin > 0,
                 nul_terminated: nul_terminated > 0,
                 paths,
-            },
-        ),
+            }
+        }),
         runtime::Command::Bugreport {
             output_directory,
             suffix,
