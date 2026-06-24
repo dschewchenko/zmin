@@ -311,6 +311,10 @@ pub enum Command {
         paths: Vec<PathBuf>,
     },
     CheckMailmap {
+        #[arg(long = "mailmap-file", value_hint = ValueHint::FilePath)]
+        mailmap_file: Option<PathBuf>,
+        #[arg(long = "mailmap-blob")]
+        mailmap_blob: Option<String>,
         #[arg(long = "stdin", action = ArgAction::Count)]
         stdin: u8,
         #[arg(long = "no-stdin", action = ArgAction::SetTrue)]

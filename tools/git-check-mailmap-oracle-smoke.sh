@@ -33,6 +33,13 @@ make_seed_repo() {
 Proper Name <proper@example.com> Alias Name <alias@example.com>
 <canonical@example.com> <old@example.com>
 EOF
+  cat >"$repo/alt.mailmap" <<'EOF'
+Alt Name <alt@example.com> Alt Alias <alt-alias@example.com>
+EOF
+  cat >"$repo/blob.mailmap" <<'EOF'
+Blob Name <blob@example.com> Blob Alias <blob-alias@example.com>
+EOF
+  "$GIT_BIN" -C "$repo" hash-object -w blob.mailmap >"$repo/blob.oid"
 }
 
 run_case() {
@@ -102,6 +109,9 @@ make_seed_repo "$base_seed"
 
 run_case check_mailmap_positional check-mailmap 'Alias Name <alias@example.com>'
 run_case check_mailmap_multiple check-mailmap 'Alias Name <alias@example.com>' 'Other <old@example.com>'
+run_case check_mailmap_mailmap_file check-mailmap --mailmap-file alt.mailmap 'Alt Alias <alt-alias@example.com>'
+blob_oid="$(cat "$base_seed/blob.oid")"
+run_case check_mailmap_mailmap_blob check-mailmap --mailmap-blob "$blob_oid" 'Blob Alias <blob-alias@example.com>'
 run_stdin_case check_mailmap_stdin_repeated check-mailmap --stdin --stdin
 run_stdin_case check_mailmap_no_stdin_rejected check-mailmap --no-stdin
 run_stdin_case check_mailmap_stdin_rejects_value check-mailmap --stdin=true

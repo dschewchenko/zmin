@@ -117,10 +117,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             paths,
         ),
         runtime::Command::CheckMailmap {
+            mailmap_file,
+            mailmap_blob,
             stdin,
             no_stdin,
             identities,
-        } => run_check_mailmap(stdin > 0 && !no_stdin, identities),
+        } => run_check_mailmap(mailmap_file, mailmap_blob, stdin > 0 && !no_stdin, identities),
         runtime::Command::CheckAttr { all, stdin, args } => run_check_attr(all, stdin, args),
         runtime::Command::UnpackObjects {
             dry_run,
@@ -262,10 +264,12 @@ pub(crate) fn run_check_ignore(
 }
 
 pub(crate) fn run_check_mailmap(
+    mailmap_file: Option<PathBuf>,
+    mailmap_blob: Option<String>,
     stdin: bool,
     identities: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::core_commands::check_mailmap(stdin, identities)
+    super::core_commands::check_mailmap(mailmap_file, mailmap_blob, stdin, identities)
 }
 
 pub(crate) fn run_check_attr(

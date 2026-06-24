@@ -1844,7 +1844,12 @@ struct MailmapEntry {
     old_email: String,
 }
 
-pub(crate) fn check_mailmap(stdin: bool, identities: Vec<String>) -> Result<()> {
+pub(crate) fn check_mailmap(
+    mailmap_file: Option<PathBuf>,
+    mailmap_blob: Option<String>,
+    stdin: bool,
+    identities: Vec<String>,
+) -> Result<()> {
     if stdin && !identities.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
@@ -1852,7 +1857,7 @@ pub(crate) fn check_mailmap(stdin: bool, identities: Vec<String>) -> Result<()> 
         });
     }
     let repo = find_repo()?;
-    let entries = read_mailmap(&repo)?;
+    let entries = read_mailmap(&repo, mailmap_file, mailmap_blob.as_deref())?;
     if stdin {
         let stdin = io::stdin();
         let mut stdin = io::BufReader::new(stdin.lock());
@@ -1887,12 +1892,35 @@ fn check_mailmap_input(entries: &[MailmapEntry], input: &str) {
     println!("{} <{}>", mapped.name, mapped.email);
 }
 
-fn read_mailmap(repo: &GitRepo) -> Result<Vec<MailmapEntry>> {
-    let path = repo.root.join(".mailmap");
-    let raw = match fs::read_to_string(path) {
+fn read_mailmap(
+    repo: &GitRepo,
+    mailmap_file: Option<PathBuf>,
+    mailmap_blob: Option<&str>,
+) -> Result<Vec<MailmapEntry>> {
+    let raw = if let Some(blob) = mailmap_blob {
+        let id = resolve_objectish(repo, blob).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("bad object name {blob}"),
+        })?;
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let object = store.read_object(&id).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("unable to read mailmap object {}", id.to_hex()),
+        })?;
+        if object.kind != GitObjectKind::Blob {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("mailmap object {} is not a blob", id.to_hex()),
+            });
+        }
+        String::from_utf8_lossy(&object.content).into_owned()
+    } else {
+        let path = mailmap_file.unwrap_or_else(|| repo.root.join(".mailmap"));
+        match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(CliError::Io(error)),
+        }
     };
     Ok(raw
         .lines()
