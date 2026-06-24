@@ -1401,14 +1401,14 @@ pub enum Command {
         quiet: u8,
         #[arg(short = 'r', action = ArgAction::Count)]
         recursive: u8,
-        #[arg(long = "cached", action = ArgAction::SetTrue)]
-        cached: bool,
-        #[arg(long = "ignore-unmatch", action = ArgAction::SetTrue)]
-        ignore_unmatch: bool,
+        #[arg(long = "cached", action = ArgAction::Count)]
+        cached: u8,
+        #[arg(long = "ignore-unmatch", action = ArgAction::Count)]
+        ignore_unmatch: u8,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
-        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
-        pathspec_file_nul: bool,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
+        pathspec_file_nul: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

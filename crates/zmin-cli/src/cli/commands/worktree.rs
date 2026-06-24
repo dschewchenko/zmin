@@ -162,10 +162,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             dry_run: dry_run > 0,
             quiet: quiet > 0,
             recursive: recursive > 0,
-            cached,
-            ignore_unmatch,
+            cached: cached > 0,
+            ignore_unmatch: ignore_unmatch > 0,
             pathspec_from_file,
-            pathspec_file_nul,
+            pathspec_file_nul: pathspec_file_nul > 0,
             paths,
         }),
         runtime::Command::Mv {

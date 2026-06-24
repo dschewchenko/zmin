@@ -88,13 +88,18 @@ run_case() {
 }
 
 run_case rm_dry_run_long --dry-run a.txt
+run_case rm_dry_run_long_repeated --dry-run --dry-run a.txt
 run_case rm_quiet_long --quiet a.txt
+run_case rm_quiet_long_repeated --quiet --quiet a.txt
 run_case rm_dry_run_repeated -n -n a.txt
 run_case rm_quiet_repeated -q -q a.txt
 run_case rm_dry_run_quiet -n -q a.txt
 run_case rm_cached_dry_run --cached --dry-run a.txt
+run_case rm_cached_repeated --cached --cached a.txt
 run_case rm_ignore_unmatch_dry_run --ignore-unmatch --dry-run missing.txt
+run_case rm_ignore_unmatch_repeated --ignore-unmatch --ignore-unmatch missing.txt
 run_case rm_force_repeated -f -f a.txt
+run_case rm_force_long_repeated --force --force a.txt
 run_case rm_recursive_repeated -r -r dir
 run_case rm_cached_quiet --cached --quiet a.txt
 run_case rm_force_cached --force --cached a.txt
