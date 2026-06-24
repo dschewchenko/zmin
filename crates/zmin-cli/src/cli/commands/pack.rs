@@ -135,7 +135,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => {
             super::pack_commands::verify_tag(verbose, raw, format.as_deref(), tags)
         }
-        runtime::Command::Mktag { strict: _ } => super::pack_commands::mktag_command(),
+        runtime::Command::Mktag {
+            strict: _,
+            no_strict: _,
+        } => super::pack_commands::mktag_command(),
         runtime::Command::CommitGraph { command } => {
             super::pack_commands::commit_graph_command(command)
         }

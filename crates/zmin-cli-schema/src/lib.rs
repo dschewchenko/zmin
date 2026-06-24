@@ -1545,6 +1545,8 @@ pub enum Command {
     Mktag {
         #[arg(long = "strict", action = ArgAction::SetTrue)]
         strict: bool,
+        #[arg(long = "no-strict", action = ArgAction::SetTrue)]
+        no_strict: bool,
     },
     PackRefs {
         #[arg(long = "all", action = ArgAction::SetTrue)]
