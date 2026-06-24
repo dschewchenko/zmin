@@ -110,6 +110,10 @@ run_case restore_source_equals_no_overlay --source=HEAD~1 --no-overlay --worktre
 run_case restore_source_attached_worktree -sHEAD~1 -W a.txt
 run_case restore_source_attached_staged -sHEAD~1 -S a.txt
 run_case restore_source_missing_equals --source= --staged a.txt
+run_case restore_source_bad_long --source nope --staged a.txt
+run_case restore_source_bad_short -s nope -S a.txt
+run_case restore_source_bad_equals --source=nope --staged a.txt
+run_case restore_source_bad_attached -snope -S a.txt
 run_case restore_source_long_repeated --source HEAD~1 --source HEAD~1 --worktree a.txt
 run_case restore_no_overlay_source_worktree --no-overlay --source HEAD~1 --worktree a.txt
 run_case restore_staged_repeated --staged --staged a.txt
