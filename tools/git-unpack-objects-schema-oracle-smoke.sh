@@ -84,3 +84,6 @@ make_pack
 run_case unpack_objects_dry_run_short -n
 run_case unpack_objects_quiet_short -q
 run_case unpack_objects_dry_run_quiet -n -q
+run_case unpack_objects_strict_long --strict
+run_case unpack_objects_recover_short -r
+run_case unpack_objects_strict_recover --strict -r

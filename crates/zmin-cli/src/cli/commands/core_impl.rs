@@ -2056,7 +2056,7 @@ fn check_attr_path(
 
 pub(crate) fn unpack_objects(
     dry_run: bool,
-    quiet: bool,
+    _quiet: bool,
     _recover: bool,
     _strict: bool,
 ) -> Result<()> {
@@ -2083,17 +2083,14 @@ pub(crate) fn unpack_objects(
         let _ = fs::remove_file(&temp_pack);
         return Err(error);
     }
-    let stats = match unpack_pack_file_to_loose(&store, GitHashAlgorithm::Sha1, &temp_pack) {
-        Ok(stats) => stats,
+    match unpack_pack_file_to_loose(&store, GitHashAlgorithm::Sha1, &temp_pack) {
+        Ok(_) => {}
         Err(error) => {
             let _ = fs::remove_file(&temp_pack);
             return Err(CliError::Io(error));
         }
     };
     let _ = fs::remove_file(&temp_pack);
-    if !quiet {
-        eprintln!("Unpacked {} objects.", stats.objects);
-    }
     Ok(())
 }
 
