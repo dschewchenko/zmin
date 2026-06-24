@@ -325,6 +325,41 @@ run_tree_argument_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_delimiter_before_tree_invalid_case() {
+  local name="$1"
+  local expected_exit="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$GIT_BIN" "$git_work"
+  seed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" commit-tree -- "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" commit-tree -- "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_parent_case() {
   local name="$1"
   local mode="$2"
@@ -397,6 +432,7 @@ run_parent_case() {
 }
 
 run_case commit_tree_positional_tree -m root
+run_case commit_tree_tree_then_delimiter --
 run_stdin_case commit_tree_empty_stdin ''
 run_tree_argument_case commit_tree_abbreviated_tree abbreviated 0 -m root
 run_tree_argument_case commit_tree_blob_tree blob 128 -m root
@@ -439,4 +475,7 @@ run_invalid_case commit_tree_message_missing_value 129 -m
 run_invalid_case commit_tree_message_file_missing_value 129 -F
 run_invalid_case commit_tree_parent_missing_value 129 -p
 run_no_tree_invalid_case commit_tree_missing_tree_argument 128 -m root
+run_no_tree_invalid_case commit_tree_delimiter_then_option_is_tree 128 -- -m root
+run_delimiter_before_tree_invalid_case commit_tree_delimiter_before_tree_rejects_extra 128 -m root
+run_invalid_case commit_tree_tree_then_delimiter_rejects_extra 128 -- -m root
 run_invalid_case commit_tree_extra_tree_argument 128 -m root extra
