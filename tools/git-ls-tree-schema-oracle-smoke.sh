@@ -80,3 +80,6 @@ run_case() {
 
 run_case ls_tree_positional_treeish ls-tree HEAD
 run_case ls_tree_positional_path ls-tree HEAD src/main.rs
+run_case ls_tree_recursive_short ls-tree -r HEAD
+run_case ls_tree_recursive_tree_entries ls-tree -r -t HEAD
+run_case ls_tree_name_only_long ls-tree --name-only HEAD
