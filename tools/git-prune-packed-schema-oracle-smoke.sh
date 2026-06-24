@@ -91,3 +91,11 @@ run_case() {
 run_case prune_packed_quiet_long prune-packed --quiet
 run_case prune_packed_quiet_short prune-packed -q
 run_case prune_packed_dry_run_long prune-packed --dry-run
+run_case prune_packed_dry_run_short_repeated prune-packed -n -n
+run_case prune_packed_quiet_short_repeated prune-packed -q -q
+run_case prune_packed_no_dry_run prune-packed --no-dry-run
+run_case prune_packed_no_quiet prune-packed --no-quiet
+run_case prune_packed_dry_run_long_rejects_value prune-packed --dry-run=true
+run_case prune_packed_dry_run_short_rejects_value prune-packed -n=true
+run_case prune_packed_quiet_long_rejects_value prune-packed --quiet=true
+run_case prune_packed_quiet_short_rejects_value prune-packed -q=true

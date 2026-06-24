@@ -23,8 +23,16 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 tasks,
             },
         ),
-        runtime::Command::PrunePacked { dry_run, quiet } => {
-            super::maintenance_commands::prune_packed_command(dry_run, quiet)
+        runtime::Command::PrunePacked {
+            dry_run,
+            no_dry_run,
+            quiet,
+            no_quiet,
+        } => {
+            super::maintenance_commands::prune_packed_command(
+                dry_run > 0 && no_dry_run == 0,
+                quiet > 0 && no_quiet == 0,
+            )
         }
         runtime::Command::Repack {
             all,

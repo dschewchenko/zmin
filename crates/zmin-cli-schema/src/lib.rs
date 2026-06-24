@@ -1541,10 +1541,14 @@ pub enum Command {
         no_prune: bool,
     },
     PrunePacked {
-        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
-        dry_run: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
+        dry_run: u8,
+        #[arg(long = "no-dry-run", action = ArgAction::Count)]
+        no_dry_run: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(long = "no-quiet", action = ArgAction::Count)]
+        no_quiet: u8,
     },
     Repack {
         #[arg(short = 'a', action = ArgAction::SetTrue)]
