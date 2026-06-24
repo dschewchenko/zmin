@@ -3251,6 +3251,8 @@ pub enum Command {
         force_copy: bool,
         #[arg(short = 'u', long = "set-upstream-to")]
         set_upstream_to: Option<String>,
+        #[arg(long = "set-upstream", action = ArgAction::SetTrue)]
+        set_upstream: bool,
         #[arg(long = "unset-upstream", action = ArgAction::SetTrue)]
         unset_upstream: bool,
         #[arg(short = 't', long = "track", num_args = 0..=1, require_equals = true, default_missing_value = "direct")]

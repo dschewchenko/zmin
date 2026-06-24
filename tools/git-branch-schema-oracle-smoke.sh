@@ -48,6 +48,7 @@ make_seed_repo() {
   printf 'tracked\n' >"$repo/tracked.txt"
   "$GIT_BIN" -C "$repo" add tracked.txt
   "$GIT_BIN" -C "$repo" commit -qm "base"
+  "$GIT_BIN" -C "$repo" branch feature
 }
 
 run_case() {
@@ -90,3 +91,4 @@ run_case() {
 
 run_case branch_invalid_rebase_merges branch --rebase-merges
 run_case branch_invalid_short_b branch -b
+run_case branch_invalid_set_upstream branch --set-upstream feature HEAD

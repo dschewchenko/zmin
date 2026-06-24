@@ -4246,6 +4246,7 @@ struct BranchOptions {
     copy_branch: bool,
     force_copy: bool,
     set_upstream_to: Option<String>,
+    set_upstream: bool,
     unset_upstream: bool,
     track: Option<String>,
     no_track: bool,
@@ -4371,6 +4372,14 @@ fn branch(options: BranchOptions) -> Result<()> {
             code: 128,
             message:
                 "branch with --recurse-submodules can only be used if submodule.propagateBranches is enabled"
+                    .into(),
+        });
+    }
+    if options.set_upstream {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "the '--set-upstream' option is no longer supported. Please use '--track' or '--set-upstream-to' instead"
                     .into(),
         });
     }
@@ -6680,6 +6689,7 @@ pub(crate) fn branch_command(
     copy_branch: bool,
     force_copy: bool,
     set_upstream_to: Option<String>,
+    set_upstream: bool,
     unset_upstream: bool,
     track: Option<String>,
     no_track: bool,
@@ -6727,6 +6737,7 @@ pub(crate) fn branch_command(
         copy_branch,
         force_copy,
         set_upstream_to,
+        set_upstream,
         unset_upstream,
         track,
         no_track,
