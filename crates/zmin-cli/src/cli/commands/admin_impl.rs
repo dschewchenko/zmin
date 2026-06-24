@@ -808,9 +808,9 @@ fn update_index_index_info_error() -> CliError {
 }
 
 fn update_index_cacheinfo_usage_error() -> CliError {
-    CliError::Fatal {
+    CliError::Stderr {
         code: 129,
-        message: "update-index --cacheinfo expects <mode>,<object>,<path>".into(),
+        text: "error: option 'cacheinfo' expects <mode>,<sha1>,<path>\n".into(),
     }
 }
 

@@ -31,6 +31,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                     text: "error: option 'stdin' must be the last argument\n".into(),
                 });
             }
+            if index_info_mode > 1 {
+                return Err(runtime::CliError::Stderr {
+                    code: 129,
+                    text: "error: option 'index-info' must be the last argument\n".into(),
+                });
+            }
             super::admin_commands::UpdateIndexCommandOptions {
                 add: add > 0,
                 remove: remove > 0,
@@ -38,7 +44,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 replace: replace > 0,
                 refresh: refresh > 0 || really_refresh > 0,
                 cacheinfo,
-                index_info: index_info_mode,
+                index_info: index_info_mode > 0,
                 chmod,
                 assume_unchanged: assume_unchanged > 0,
                 no_assume_unchanged: no_assume_unchanged > 0,

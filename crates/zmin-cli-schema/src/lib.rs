@@ -769,8 +769,8 @@ pub enum Command {
         really_refresh: u8,
         #[arg(long = "cacheinfo")]
         cacheinfo: Vec<String>,
-        #[arg(long = "index-info", action = ArgAction::SetTrue)]
-        index_info_mode: bool,
+        #[arg(long = "index-info", action = ArgAction::Count)]
+        index_info_mode: u8,
         #[arg(long = "chmod")]
         chmod: Option<String>,
         #[arg(long = "assume-unchanged", action = ArgAction::Count)]
