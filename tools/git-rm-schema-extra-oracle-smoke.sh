@@ -33,6 +33,8 @@ init_repo() {
   printf 'base\n' >"$repo/a.txt"
   mkdir "$repo/dir"
   printf 'dir\n' >"$repo/dir/d.txt"
+  printf 'a.txt\ndir/d.txt\n' >"$repo/paths.lf"
+  printf 'a.txt\0dir/d.txt\0' >"$repo/paths.nul"
   "$GIT_BIN" -C "$repo" add a.txt dir/d.txt
   "$GIT_BIN" -C "$repo" commit -q -m base
 }
@@ -104,3 +106,7 @@ run_case rm_recursive_repeated -r -r dir
 run_case rm_cached_quiet --cached --quiet a.txt
 run_case rm_force_cached --force --cached a.txt
 run_case rm_ignore_unmatch_quiet --ignore-unmatch --quiet missing.txt
+run_case rm_pathspec_from_file_lf --cached --pathspec-from-file=paths.lf
+run_case rm_pathspec_from_file_lf_separate --cached --pathspec-from-file paths.lf
+run_case rm_pathspec_file_nul_repeated --cached --pathspec-from-file=paths.nul --pathspec-file-nul --pathspec-file-nul
+run_case rm_pathspec_from_file_no_nul --cached --pathspec-from-file=paths.lf --no-pathspec-file-nul

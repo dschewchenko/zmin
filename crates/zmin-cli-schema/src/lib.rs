@@ -1415,6 +1415,8 @@ pub enum Command {
         pathspec_from_file: Option<PathBuf>,
         #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
         pathspec_file_nul: u8,
+        #[arg(long = "no-pathspec-file-nul", action = ArgAction::Count)]
+        no_pathspec_file_nul: u8,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

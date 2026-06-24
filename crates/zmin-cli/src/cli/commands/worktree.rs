@@ -160,6 +160,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             sparse,
             pathspec_from_file,
             pathspec_file_nul,
+            no_pathspec_file_nul: _,
             paths,
         } => run_rm(runtime::RmOptions {
             force: force > 0,
