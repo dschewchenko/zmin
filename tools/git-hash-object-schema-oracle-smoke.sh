@@ -65,6 +65,40 @@ run_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_stdin_case() {
+  local name="$1"
+  local stdin_payload="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_status="$tmpdir/${name}.git.status"
+  local zmin_status="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  seed_repo "$zmin_work"
+
+  set +e
+  printf '%b' "$stdin_payload" | "$GIT_BIN" -C "$git_work" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  printf '%b' "$stdin_payload" | "$ZMIN_BIN" -C "$zmin_work" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
+  compare_files worktree_status "$git_status" "$zmin_status"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_gap() {
   local name="$1"
   shift
@@ -97,5 +131,7 @@ run_gap() {
 }
 
 run_case hash_object_short_type_blob hash-object -t blob a.txt
+run_case hash_object_write_short hash-object -w a.txt
+run_stdin_case hash_object_stdin 'stdin\n' hash-object --stdin
 run_case hash_object_long_type_rejected hash-object --type blob a.txt
 run_case hash_object_long_write_rejected hash-object --write a.txt
