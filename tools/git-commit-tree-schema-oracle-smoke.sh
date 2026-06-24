@@ -85,4 +85,6 @@ run_case() {
 
 run_case commit_tree_positional_tree -m root
 run_case commit_tree_message_file -F message.txt
+run_case commit_tree_message_then_file -m inline -F message.txt
+run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
