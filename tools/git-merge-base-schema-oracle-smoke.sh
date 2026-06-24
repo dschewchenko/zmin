@@ -87,3 +87,6 @@ run_case() {
 }
 
 run_case merge_base_positional_commits merge-base main side
+run_case merge_base_is_ancestor_true merge-base --is-ancestor main main
+run_case merge_base_is_ancestor_false merge-base --is-ancestor main side
+run_case merge_base_octopus merge-base --octopus main side
