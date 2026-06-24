@@ -111,6 +111,16 @@ run_case restore_source_long_staged --source HEAD~1 --staged a.txt
 run_case restore_source_short_staged -s HEAD~1 --staged a.txt
 run_case restore_source_short_short_staged -s HEAD~1 -S a.txt
 run_case restore_source_long_short_staged --source HEAD~1 -S a.txt
+run_case restore_staged_source_long --staged --source HEAD~1 a.txt
+run_case restore_staged_short_source_long -S --source HEAD~1 a.txt
+run_case restore_worktree_source_long --worktree --source HEAD~1 a.txt
+run_case restore_worktree_short_source_long -W --source HEAD~1 a.txt
+run_case restore_source_long_worktree_staged --source HEAD~1 --worktree --staged a.txt
+run_case restore_source_long_worktree_short_staged_short --source HEAD~1 -W -S a.txt
+run_case restore_source_short_worktree_staged -s HEAD~1 --worktree --staged a.txt
+run_case restore_source_short_worktree_short_staged_short -s HEAD~1 -W -S a.txt
+run_case restore_staged_source_short --staged -s HEAD~1 a.txt
+run_case restore_worktree_source_short --worktree -s HEAD~1 a.txt
 run_case restore_source_long_staged_no_worktree --source HEAD~1 --staged --no-worktree a.txt
 run_case restore_source_short_short_staged_no_worktree -s HEAD~1 -S --no-worktree a.txt
 run_case restore_source_equals_staged --source=HEAD~1 --staged a.txt
