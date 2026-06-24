@@ -763,6 +763,8 @@ pub enum Command {
         force_remove: u8,
         #[arg(long = "replace", action = ArgAction::Count)]
         replace: u8,
+        #[arg(long = "again", action = ArgAction::Count)]
+        again: u8,
         #[arg(long = "refresh", action = ArgAction::Count)]
         refresh: u8,
         #[arg(long = "really-refresh", action = ArgAction::Count)]

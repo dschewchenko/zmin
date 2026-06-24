@@ -71,6 +71,14 @@ seed_executable_repo() {
   "$GIT_BIN" -C "$repo" update-index --chmod=+x a.txt
 }
 
+seed_again_repo() {
+  local repo="$1"
+  seed_tracked_repo "$repo"
+  printf 'two\n' >"$repo/a.txt"
+  "$GIT_BIN" -C "$repo" add a.txt
+  printf 'three\n' >"$repo/a.txt"
+}
+
 run_case() {
   local name="$1"
   local seed_kind="$2"
@@ -314,6 +322,50 @@ run_index_info_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_again_case() {
+  local name="$1"
+  local seed="$tmpdir/${name}.seed"
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_index="$tmpdir/${name}.git.index"
+  local zmin_index="$tmpdir/${name}.zmin.index"
+  local git_flags="$tmpdir/${name}.git.flags"
+  local zmin_flags="$tmpdir/${name}.zmin.flags"
+  local git_status="$tmpdir/${name}.git.status"
+  local zmin_status="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_again_repo "$seed"
+  cp -R "$seed" "$git_work"
+  cp -R "$seed" "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work" update-index --again >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work" update-index --again >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" ls-files --stage >"$git_index"
+  "$GIT_BIN" -C "$zmin_work" ls-files --stage >"$zmin_index"
+  compare_files index "$git_index" "$zmin_index"
+  "$GIT_BIN" -C "$git_work" ls-files -v >"$git_flags"
+  "$GIT_BIN" -C "$zmin_work" ls-files -v >"$zmin_flags"
+  compare_files index_flags "$git_flags" "$zmin_flags"
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
+  compare_files worktree_status "$git_status" "$zmin_status"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case update_index_add_path empty update-index --add a.txt
 run_case update_index_add_repeated empty update-index --add --add a.txt
 run_case update_index_positional_path tracked update-index a.txt
@@ -333,6 +385,7 @@ run_case update_index_remove tracked update-index --remove a.txt
 run_case update_index_force_remove tracked update-index --force-remove a.txt
 run_case update_index_remove_repeated tracked update-index --remove --remove a.txt
 run_case update_index_force_remove_repeated tracked update-index --force-remove --force-remove a.txt
+run_again_case update_index_again_staged_difference
 run_case update_index_chmod_plus_x tracked update-index --chmod=+x a.txt
 run_case update_index_chmod_minus_x executable update-index --chmod=-x a.txt
 run_invalid_case update_index_chmod_invalid_value tracked update-index --chmod=bogus a.txt

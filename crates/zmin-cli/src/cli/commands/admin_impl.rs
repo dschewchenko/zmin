@@ -44,6 +44,7 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) remove: bool,
     pub(crate) force_remove: bool,
     pub(crate) replace: bool,
+    pub(crate) again: bool,
     pub(crate) refresh: bool,
     pub(crate) cacheinfo: Vec<String>,
     pub(crate) index_info: bool,
@@ -527,7 +528,9 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     if options.index_info {
         update_index_index_info(&store, &mut index)?;
     }
-    let paths = if options.index_info {
+    let paths = if options.again {
+        update_index_again_paths(&repo, &store, &index)?
+    } else if options.index_info {
         options.paths.clone()
     } else {
         update_index_paths(&options, &repo)?
@@ -625,10 +628,39 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
         && !options.remove
         && !options.force_remove
         && !options.replace
+        && !options.again
         && !options.refresh
         && options.cacheinfo.is_empty()
         && !options.index_info
         && options.chmod.is_none()
+}
+
+fn update_index_again_paths(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+) -> Result<Vec<PathBuf>> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let commit_id = refs.resolve("HEAD")?;
+    let commit = CommitObjectCache::new(store).read_commit(&commit_id)?;
+    let head_index = TreeObjectCache::new(store).read_tree_to_index(&commit.tree)?;
+    let head_entries = head_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| (entry.path.as_slice(), entry))
+        .collect::<BTreeMap<_, _>>();
+    Ok(index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .filter(|entry| {
+            head_entries
+                .get(entry.path.as_slice())
+                .is_none_or(|head| head.id != entry.id || head.mode != entry.mode)
+        })
+        .map(|entry| PathBuf::from(String::from_utf8_lossy(&entry.path).to_string()))
+        .collect())
 }
 
 fn update_index_path(
@@ -938,6 +970,7 @@ fn update_index_refresh_tracked(
                 remove: true,
                 force_remove: false,
                 replace: false,
+                again: false,
                 refresh: true,
                 cacheinfo: Vec::new(),
                 index_info: false,
