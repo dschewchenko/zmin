@@ -12,6 +12,17 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option tail promotion for the remaining represented helper-free `ls-files`
+surface. The selected rows do not add new behavior evidence; they promote
+eleven additional exact stock-Git `ls-files` option families into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, closing every
+currently represented documented option except the still-unrepresented
+`--no-empty-directory` seed. Expected delta is `+0` matrix rows, `+11`
+complete documented option pairs, `+0` complete command matrices, `+0`
+verified rows, `+0` invalid-input rows, and `-11` remaining checklist rows.
+Rust behavior changes are not expected. Actual delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the supported `ls-files` selector, exclude, and
 output family. The selected rows do not add new behavior evidence; they
 promote twenty-seven existing exact stock-Git `ls-files` option families into

@@ -343,19 +343,19 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code doc-option promotion cluster, `ls-files` now adds
-another `27` durable reviewed-complete documented option pairs without
-changing Rust behavior. The next best helper-free follow-up should move to the
-remaining `ls-files` tail or another dense census-backed cluster unless a
-larger zero-code promotion overtakes it on throughput.
+After the latest zero-code doc-option tail promotion, `ls-files` now adds
+another `11` durable reviewed-complete documented option pairs without
+changing Rust behavior and is up to `38/39` documented options complete. The
+next best helper-free follow-up should either close the final unrepresented
+`ls-files` seed or move to another dense census-backed cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the supported `ls-files` selector, exclude, and output
-family. The existing exact stock-Git evidence already closed twenty-seven
-helper-free `ls-files` option families, so this slice only promotes those
-documented option pairs into
+tail promotion for the remaining represented helper-free `ls-files` surface.
+The existing exact stock-Git evidence already closed eleven more `ls-files`
+option families on top of the earlier selector/exclude/output cluster, so this
+slice only promotes those documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
@@ -366,9 +366,9 @@ and `git diff --check`.
 
 Current census counts are `5331` matrix rows, `4623` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `81/151` complete command
-matrices, `497/3175` complete documented option pairs, and `2704`
+matrices, `508/3175` complete documented option pairs, and `2693`
 remaining checklist rows. `ls-files` now reads `39` documented option pairs
-with `27` reviewed complete, `38` represented documented option pairs, and
+with `38` reviewed complete, `38` represented documented option pairs, and
 `158/158` classified written rows with `0` open.
 
 ### No-Skip Rule
@@ -1180,10 +1180,10 @@ Largest raw clusters:
 ## 2026-06-25 Census Snapshot
 
 Current durable census after the zero-code `ls-files`
-reviewed-complete doc-option promotion cluster:
+reviewed-complete doc-option tail promotion:
 
 - complete command matrices: `81 / 151`
-- complete documented command-option pairs: `497 / 3175`
+- complete documented command-option pairs: `508 / 3175`
 - matrix rows: `5331`
 - verified rows: `4623`
 - invalid-input rows: `679`
@@ -1191,8 +1191,8 @@ reviewed-complete doc-option promotion cluster:
 
 Latest completed batch:
 
-- `ls-files` now has twenty-seven documented option pairs promoted into the
-  reviewed-complete doc-option census list.
+- `ls-files` now has eleven additional documented option pairs promoted into
+  the reviewed-complete doc-option census list.
 - The closed subgroup adds no new behavior rows; it only makes already closed
   option-family evidence durable in the reviewed doc-option source list.
 - Focused verification was
@@ -1202,10 +1202,10 @@ Latest completed batch:
 
 Latest in-progress family follow-up:
 
-- `ls-files` now has `27/39` documented option pairs reviewed complete with
+- `ls-files` now has `38/39` documented option pairs reviewed complete with
   `38/39` represented documented option pairs and `0` open rows.
-- The next best helper-free follow-up should move to another dense
-  census-backed family or zero-code command/doc-option promotion cluster.
+- The next best helper-free follow-up should either close the final
+  `--no-empty-directory` seed or move to another dense census-backed family.
 
 Latest zero-code closure:
 
