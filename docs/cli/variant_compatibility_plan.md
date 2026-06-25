@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1332/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
+`82/151 complete command matrices / 1333/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,36 +343,36 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `range-diff --no-dual-color` doc-option promotion,
-`range-diff` adds another `1` durable reviewed-complete documented option pair
-without changing Rust behavior and is up to `1/6` documented options complete
-with `1/6` represented documented option pairs and `8/8` classified rows.
-The next best helper-free follow-up should move to another dense census-backed
-represented family, with `fast-import --date-format` now the cleanest
-promotion-only candidate.
+After the latest zero-code `fast-import --date-format` doc-option promotion,
+`fast-import` adds another `1` durable reviewed-complete documented option
+pair without changing Rust behavior and is up to `1/19` documented options
+complete with `1/19` represented documented option pairs and `11/11`
+classified rows. The next best helper-free follow-up should move to another
+dense census-backed represented family, with `multi-pack-index --object-dir`
+now the cleanest promotion-only candidate.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
 promotion cluster for the represented helper-free
-`range-diff --no-dual-color` surface. The existing exact stock-Git evidence
-already closed the represented `range-diff` no-dual-color family across
-explicit, repeated, negated, and invalid attached-value lanes, so this slice
-only promotes that documented option pair into
+`fast-import --date-format` surface. The existing exact stock-Git evidence
+already closed the represented `fast-import` date-format family across
+`rfc2822`, `now`, and invalid value lanes, so this slice only promotes that
+documented option pair into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(range-diff|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1332/3175` complete documented option pairs, and `1869`
-remaining checklist rows. `range-diff` now reads `6` documented option
+matrices, `1333/3175` complete documented option pairs, and `1868`
+remaining checklist rows. `fast-import` now reads `19` documented option
 pairs with `1` reviewed complete, `1` represented documented option pairs,
-and `8/8` classified written rows with `0` open.
+and `11/11` classified written rows with `0` open.
 
 ### No-Skip Rule
 
