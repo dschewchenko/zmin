@@ -63,8 +63,8 @@ closed with stock-Git evidence.
    represented option pairs or written-row pass rates.
 6. Keep Zmin-only features in `docs/cli/zmin_extensions_inventory.md`, outside
    the Git `2.47.1` compatibility denominator.
-7. Commit and push each completed slice before starting a different command,
-   option class or extension.
+7. Commit each completed slice locally before starting a different command,
+   option class or extension. Push only on explicit request.
 
 ## Resume Procedure
 
@@ -133,8 +133,8 @@ awk -F '\t' 'NR==1{for(i=1;i<=NF;i++) h[$i]=i; next} { total++; c[$h["inventory_
 tools/git-matrix-row-delta-audit.sh 9275ac4d HEAD
 ```
 
-The current frozen focused-oracle backlog is `961` functions: `705`
-represented or classified and `256` `missing_or_unclassified`. Treat
+The current frozen focused-oracle backlog is `969` functions: `778`
+represented or classified and `191` `missing_or_unclassified`. Treat
 `docs/cli/existing_oracle_test_inventory.tsv` as the complete current list to
 walk. A docs-only row import from that list must reduce
 `missing_or_unclassified` by the declared evidence-function count. If behavior

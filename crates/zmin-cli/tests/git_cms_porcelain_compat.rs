@@ -13,16 +13,10 @@ fn cms_changes_and_save_compose_existing_git_operations() {
     configure_identity(repo.path());
 
     assert_eq!(run_zmin(repo.path(), ["changes"]), "No changes.");
-    assert_eq!(
-        run_zmin(repo.path(), ["save", "empty"]),
-        "Nothing to save."
-    );
+    assert_eq!(run_zmin(repo.path(), ["save", "empty"]), "Nothing to save.");
 
     write_file(repo.path(), "page.md", "hello\n");
-    assert_eq!(
-        run_zmin(repo.path(), ["changes"]),
-        "Changes:\nnew: page.md"
-    );
+    assert_eq!(run_zmin(repo.path(), ["changes"]), "Changes:\nnew: page.md");
 
     assert_eq!(
         run_zmin(repo.path(), ["save", "updated home page"]),

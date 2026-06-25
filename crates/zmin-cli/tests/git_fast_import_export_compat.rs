@@ -3,8 +3,8 @@ mod common;
 use std::fs;
 
 use common::{
-    configure_identity, git, git_init, git_with_env, git_with_stdin, run_zmin,
-    run_zmin_with_stdin, write_file,
+    configure_identity, git, git_init, git_with_env, git_with_stdin, run_zmin, run_zmin_with_stdin,
+    write_file,
 };
 
 #[test]

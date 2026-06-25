@@ -634,8 +634,17 @@ pub(crate) fn fast_forward_to_cached(
     {
         let _trace = phase_trace("fast_forward.ancestry");
         if let Some(current_id) = &current_id
-            && !is_ancestor_commit_cached(commit_cache, current_id, &target_id)?
+            && !is_ancestor_commit_with_repo_cached(repo, commit_cache, current_id, &target_id)?
         {
+            if _ff_only
+                && best_merge_base_with_repo_cached(repo, commit_cache, current_id, &target_id)?
+                    .is_none()
+            {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "refusing to merge unrelated histories".into(),
+                });
+            }
             return Err(CliError::Fatal {
                 code: 128,
                 message: "Not possible to fast-forward, aborting.".into(),

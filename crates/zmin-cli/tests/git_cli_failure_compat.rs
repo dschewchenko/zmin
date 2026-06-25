@@ -79,12 +79,7 @@ fn invalid_option_combinations_match_stock_git_failures() {
         )
     );
     assert_eq!(
-        command_output(
-            zmin_bin(),
-            repo.path(),
-            &["reset", "--", "missing"],
-            "zmin"
-        ),
+        command_output(zmin_bin(), repo.path(), &["reset", "--", "missing"], "zmin"),
         command_output("git", repo.path(), &["reset", "--", "missing"], "git")
     );
     assert_eq!(
@@ -120,12 +115,7 @@ fn invalid_option_combinations_match_stock_git_failures() {
         command_output("git", repo.path(), &["log", "--format=%Q"], "git")
     );
     assert_eq!(
-        command_output(
-            zmin_bin(),
-            repo.path(),
-            &["log", "--since", "bad"],
-            "zmin"
-        ),
+        command_output(zmin_bin(), repo.path(), &["log", "--since", "bad"], "zmin"),
         command_output("git", repo.path(), &["log", "--since", "bad"], "git")
     );
     assert_eq!(

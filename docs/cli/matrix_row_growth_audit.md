@@ -11,6 +11,191 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the `git_foreign_scm_compat.rs` `p4 submit` follow-up is a
+zero-row closure slice. The selected row already existed in
+`docs/cli/matrices/p4_v2_47.tsv`; the work closes it by matching stock Git's
+fake-Perforce submit sync/apply/import/rebase stdout flow, exit status `0`,
+empty stderr, opened edit/add/delete operations and remote-ref advance.
+Expected delta is `+0` matrix rows, `+1` verified row, `-1` open row, `0`
+invalid-input rows and `-1` remaining checklist row. Actual delta matched.
+
+As of 2026-06-25 the next `git_maintenance_compat.rs` follow-up is a small
+local parser-plus-evidence `prune` batch. The selected rows add exact
+documented `--dry-run`, `--verbose`, `-v`, `--progress` and `--no-progress`
+parity for `--expire=now <object>` loose-object pruning behavior. Expected
+delta is `+5` matrix rows, `+5` verified rows, `0` invalid-input rows and `0`
+remaining checklist rows. Rust behavior changes are not expected. Actual delta
+matched.
+
+As of 2026-06-25 the next `git_ref_resolution_compat.rs` follow-up is a
+one-row local parser-plus-evidence `name-rev` batch. The selected row adds
+exact documented `--no-undefined` parity for an unreferenced dangling commit,
+including stock Git's partial stdout prefix and fatal stderr. Expected delta
+is `+1` matrix row, `+1` verified row, `0` invalid-input rows and `-1`
+remaining checklist row. Actual delta matched except the current census total
+for `remaining_to_fix_or_verify_rows` stayed flat because the regenerated
+backlog still contains broader doc-option expansion rows for `name-rev`.
+
+As of 2026-06-25 the next `git_object_plumbing_compat.rs` follow-up is a
+small `hash-object` parser-plus-evidence batch. The selected rows add exact
+documented `--path=<file> --stdin`, `--stdin-paths`, `--stdin-paths
+--no-filters`, `--literally --stdin`, and the exact invalid combinations
+`--no-filters --stdin --path=<file>`, `--stdin-paths --path=<file>`, and
+`--stdin --stdin-paths`. Expected delta is `+7` matrix rows, `+4` verified
+rows, `+3` invalid-input rows and `-4` remaining checklist rows. Actual delta
+matched except the current census total for `remaining_to_fix_or_verify_rows`
+stayed flat because the regenerated backlog still contains broader
+documented-option expansion rows for `hash-object`.
+
+As of 2026-06-25 the next `git_mail_tools_compat.rs` follow-up is a one-row
+`mailinfo` parser-plus-evidence batch. The selected row adds exact documented
+`--no-scissors` parity for the common patch-mail input shape already covered by
+the focused stock oracle. Expected delta is `+1` matrix row, `+1` verified
+row, `0` invalid-input rows and `-1` remaining checklist row. Actual delta
+matched except the current census total for `remaining_to_fix_or_verify_rows`
+stayed flat because the regenerated backlog still contains broader
+documented-option expansion rows for `mailinfo`.
+
+As of 2026-06-25 the `git_text_tools_compat.rs` follow-up is a local
+parser-plus-evidence slice for `git column`. The selected rows add the
+documented `--command`, `--indent` and `--nl` option surfaces, exact
+`--raw-mode=0` parity, and the documented no-toggle plus empty-value forms
+`--no-command`, `--no-mode`, bare `--mode`, `--mode=`, `--no-width`,
+`--no-indent`, `--no-nl`, `--no-padding`, `--width=` and `--padding=`.
+Expected delta is `+14` matrix rows, `+12` verified rows, `+2` invalid-input
+rows and `0` oracle `missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the same `git_text_tools_compat.rs` slice was extended again
+for focused `raw-mode` parity. The selected rows add exact `--raw-mode=1`,
+`--raw-mode=17`, invalid `--raw-mode=bogus`, `--raw-mode` / `--mode`
+last-one-wins order, and raw-mode-plain interactions that ignore explicit
+`--padding`, `--indent` and `--nl`. Expected delta is `+10` matrix rows, `+9`
+verified rows, `+1` invalid-input row and `0` oracle
+`missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the same `git_text_tools_compat.rs` slice was extended once
+more for focused `--command` parity. The selected rows add exact
+`column.status=column,dense`, `column,nodense` and `row,dense` command-mode
+config behavior plus invalid first-argument failures for `--command status`,
+`--width=20 --command=status` and `--command=status --no-command`. Expected
+delta is `+6` matrix rows, `+3` verified rows, `+3` invalid-input rows and
+`0` oracle `missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the same `git_text_tools_compat.rs` slice was extended yet
+again for the next exact `--command` evidence group. The selected rows add
+repository `column.status=dense`, `nodense` and `row,nodense` behavior through
+`git column --command=status`, plus explicit empty `--command=` combined with
+`--mode=column --width=20`. Expected delta is `+4` matrix rows, `+4`
+verified rows, `0` invalid-input rows and `0` oracle
+`missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the same `git_text_tools_compat.rs` slice was extended one
+more time to close the remaining local `--command` evidence subgroup. The
+selected rows add post-command `--mode` and `--raw-mode` overrides, explicit
+empty `--command=` with width/raw-mode/no-command forms, and explicit
+`--no-command` with mode/raw-mode forms. Expected delta is `+16` matrix rows,
+`+15` verified rows, `+1` invalid-input row and `0` oracle
+`missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the `git_object_plumbing_compat.rs` batch is a census-first
+evidence-import slice for already-implemented object-plumbing surfaces. The
+selected rows make exact promisor-backed `cat-file` hydration, stage-object
+revision and diff forms, and attribute-driven `add` / `checkout` behavior
+explicit in the matrices. Expected delta is `+11` matrix rows, `+11` verified
+rows, `0` invalid-input rows and `-4` oracle `missing_or_unclassified`
+functions. Rust behavior changes are not expected. Actual delta matched.
+
+As of 2026-06-25 the `git_clone_compat.rs` follow-up is a zero-row
+extension-evidence slice. The selected row shape already exists in
+`docs/cli/zmin_extensions_inventory.md` for Zmin-only `clone --instant`; the
+work only adds the exact local-repository fetch/pull canonical-operations test
+to that extension row. Expected delta is `0` matrix rows, `0` verified rows,
+`0` invalid-input rows and `-1` oracle `missing_or_unclassified` function.
+Rust behavior changes are not expected. Actual delta matched.
+
+As of 2026-06-25 the `git_cli_failure_compat.rs` follow-up is a small
+invalid-input evidence-import slice. The selected rows make exact `commit`
+failure shapes explicit for conflicting `--squash` plus `--fixup`, and an
+invalid `--cleanup` mode. Expected delta is `+2` matrix rows, `0` verified
+rows, `+2` invalid-input rows and `-1` oracle `missing_or_unclassified`
+function. Rust behavior changes are not expected. Actual delta matched.
+
+As of 2026-06-25 the `compatibility_command.rs` follow-up is a zero-row
+deferral-classification slice. The selected test validates the generated
+compatibility report acceptance gate, not an exact Git behavior row, so it
+belongs in `docs/cli/oracle_test_deferrals.md` rather than in any Git
+compatibility matrix. Expected delta is `0` matrix rows, `0` verified rows,
+`0` invalid-input rows and `-1` oracle `missing_or_unclassified` function.
+Rust behavior changes are not expected. Actual delta matched.
+
+As of 2026-06-25 the `git_fast_import_export_compat.rs` batch is a behavior-row
+evidence-import slice for existing import/export interoperability surfaces. The
+selected rows make exact fast-export stream reimport, stock fast-export stream
+ingest, bulk commit helper shape, `--date-format=now` with missing author, and
+adjacent commit-record parsing explicit in the matrices. Expected delta is `+5`
+matrix rows, `+5` verified rows, `0` invalid-input rows and `-5` oracle
+`missing_or_unclassified` functions. Rust behavior changes are not expected.
+Actual delta matched.
+
+As of 2026-06-25 the `git_global_cli_compat.rs` batch is a root/global-CLI
+evidence-import slice without Rust behavior changes. The selected rows make
+exact empty `git` invocation usage, repository-configured alias expansion,
+`init` under `GIT_DIR` plus `GIT_WORK_TREE`, root-dotfile checkout dispatch
+and global `-C` status routing explicit in the matrices. Expected delta is
+`+5` matrix rows, `+5` verified rows, `0` invalid-input rows and `-5` oracle
+`missing_or_unclassified` functions. Rust behavior changes are not expected.
+Actual delta matched.
+
+As of 2026-06-25 the `git_index_mutation_compat.rs` batch is an
+evidence-import-plus-fix slice. The selected rows make symlink-parent
+replacement through nested `add`, case-insensitive absolute-path add on
+supported filesystems, symlink `--cacheinfo`, `--replace` directory/file swap,
+child-path `--cacheinfo` rejection under an indexed file, unmerged
+`--index-info` stage ingestion, and missing-object `--index-info` rows
+explicit in the matrices. The batch also fixes `update-index --add --replace`
+so parent file entries are removed before nested path replacement, matching
+stock Git for directory/file swaps. Expected delta is `+7` matrix rows, `+6`
+verified rows, `+1` invalid-input row and `-6` oracle
+`missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the `git_merge_plumbing_compat.rs` batch is an evidence-import
+slice without product-code changes. The selected rows make exact
+`merge-one-file` clean-text and identical add/add shapes, default configured
+`mergetool` dispatch, rerere unresolved-path `status` and `remaining`,
+pathspec-scoped `forget`, and `--rerere-autoupdate` recorded-resolution reuse
+explicit in the matrices. Expected delta is `+6` matrix rows, `+6` verified
+rows, `0` invalid-input rows and `-6` oracle `missing_or_unclassified`
+functions. Actual delta matched.
+
+As of 2026-06-25 the `git_clone_ref_format_compat.rs` stale-test correction is
+an example of a zero-row census slice. The selected row shape was already
+present in `clone_v2_47.tsv`; the work only rewired stock-oracle evidence from
+an old probe to passing focused tests. Expected delta was `0` matrix rows,
+`0` verified rows, `0` invalid-input rows and `-1` oracle
+`missing_or_unclassified` function. Actual delta matched.
+
+As of 2026-06-25 the `git_scalar_compat.rs` batch is a row-growth slice driven
+by already-selected scalar row shapes. The stock-scalar oracle was polluted by
+the local PATH resolving plain `git` to Zmin, so the batch first fixed the
+test harness to put the stock Git directory first for stock `scalar` runs.
+Expected delta was `+9` matrix rows, `+9` verified rows, `0` invalid-input
+rows and `-3` oracle `missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the `git_admin_tools_compat.rs` follow-up is another zero-row
+evidence slice. The selected row shapes already existed in
+`diagnose_v2_47.tsv`, `bugreport_v2_47.tsv` and `instaweb_v2_47.tsv`; the work
+only attached the exact focused tests to those rows. Expected delta was `0`
+matrix rows, `0` verified rows, `0` invalid-input rows and `-4` oracle
+`missing_or_unclassified` functions. Actual delta matched.
+
+As of 2026-06-25 the `git_cms_porcelain_compat.rs` follow-up is a zero-row
+extension-classification slice. The CMS-friendly commands were already tracked
+as Zmin-only surfaces in `docs/cli/zmin_extensions_inventory.md`; the work
+only replaced the suite-level evidence placeholder with exact focused test
+functions. Expected delta was `0` matrix rows, `0` verified rows, `0`
+invalid-input rows and `-4` oracle `missing_or_unclassified` functions. Actual
+delta matched.
+
 `docs/cli/existing_oracle_test_inventory.tsv` is now an evidence layer only.
 After a row or coherent expansion group is selected from the census, this audit
 still records the source bucket, expected row/status delta and oracle evidence
@@ -61,8 +246,8 @@ The text-level row delta audit must be regenerated with
 behavior row count is authoritative for row-level progress because some commits
 rewrite or split existing rows rather than adding net-new row coverage.
 
-The stock-oracle test inventory currently has `961` focused oracle functions:
-`705` represented by matrix, extension or deferral evidence, and `256` still
+The stock-oracle test inventory currently has `969` focused oracle functions:
+`946` represented by matrix, extension or deferral evidence, and `23` still
 missing or unclassified.
 
 ## Net Growth By Command
@@ -241,6 +426,205 @@ is:
 - Any different movement is a process error to investigate before committing.
 
 ## Declared Oracle Import Batches
+
+### Completed: Mail Series Binary Format-Patch Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_mail_series_compat.rs`
+- functions:
+  - `format_patch_binary_summary_matches_stock_git`
+- expected row delta: `+1` behavior row in
+  `docs/cli/matrices/format_patch_v2_47.tsv`
+- expected status split: `+1` closed row, `+0` open rows, `+0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+1`,
+  missing_or_unclassified `-1`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+1` represented doc-option pair for the modeled binary `--stdout -1 HEAD`
+  format-patch surface
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+1` behavior row,
+  `+1` closed row, `+0` open rows, `+0` invalid-input rows, `+1`
+  represented oracle function, `-1` missing-or-unclassified oracle function,
+  `+0` commands with rows and `+1` represented doc-option pair.
+
+### Completed: Repository-State Zmin Seed Handoff Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_repository_state_compat.rs`
+- functions:
+  - `zmin_seed_handoff_keeps_repository_state_identical`
+- expected row delta: `+1` behavior row in
+  `docs/cli/matrices/init_v2_47.tsv`
+- expected status split: `+1` closed row, `+0` open rows, `+0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+1`,
+  missing_or_unclassified `-1`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+0` represented doc-option pairs; the row exercises a downstream
+  repository-state handoff rooted in an already represented `init`
+  `--initial-branch main` seed workflow
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+1` behavior row,
+  `+1` closed row, `+0` open rows, `+0` invalid-input rows, `+1`
+  represented oracle function, `-1` missing-or-unclassified oracle function,
+  `+0` commands with rows and `+0` represented doc-option pairs.
+
+### Completed: Stash Index Config Apply Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_stash_compat.rs`
+- functions:
+  - `stash_index_config_implies_apply_index_like_stock_git`
+- expected row delta: `+1` behavior row in
+  `docs/cli/matrices/stash_v2_47.tsv`
+- expected status split: `+1` closed row, `+0` open rows, `+0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+1`,
+  missing_or_unclassified `-1`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+1` represented doc-option pair for the modeled `stash.index=true`
+  config-driven apply-index behavior
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+1` behavior row,
+  `+1` closed row, `+0` open rows, `+0` invalid-input rows, `+1`
+  represented oracle function, `-1` missing-or-unclassified oracle function,
+  `+0` commands with rows and `+1` represented doc-option pair.
+
+### Completed: Mail Tools SMTP and IMAP Transport Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_mail_tools_compat.rs`
+- functions:
+  - `send_email_sends_patch_to_configured_smtp_server`
+  - `imap_send_appends_mbox_messages_to_plain_imap_server`
+- expected row delta: `+2` behavior rows across
+  `docs/cli/matrices/send_email_v2_47.tsv` and
+  `docs/cli/matrices/imap_send_v2_47.tsv`
+- expected status split: `+2` closed rows, `+0` open rows, `+0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+2`,
+  missing_or_unclassified `-2`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+2` represented doc-option pairs for the current modeled send-email
+  positional patch send flow and `imap-send --no-curl` append flow
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+2` behavior rows,
+  `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
+  represented oracle functions, `-2` missing-or-unclassified oracle functions,
+  `+0` commands with rows and `+2` represented doc-option pairs.
+
+### Completed: Sparse-Checkout Pathspec and Sparse-Index Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_sparse_checkout_compat.rs`
+- functions:
+  - `sparse_checkout_pathspec_edge_cases_match_stock_git`
+  - `sparse_checkout_sparse_index_options_match_stock_git`
+- expected row delta: `+2` behavior rows in
+  `docs/cli/matrices/sparse_checkout_v2_47.tsv`
+- expected status split: `+2` closed rows, `+0` open rows, `+0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+2`,
+  missing_or_unclassified `-2`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+2` represented doc-option pairs for the current modeled
+  `sparse-checkout` pathspec edge-case surface and `--sparse-index`
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+2` behavior rows,
+  `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
+  represented oracle functions, `-2` missing-or-unclassified oracle functions,
+  `+0` commands with rows and `+2` represented doc-option pairs.
+
+### Completed: Daemon Inetd Unknown-Service Evidence Remap
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_transport_http_compat.rs`
+- functions:
+  - `daemon_unknown_service_matches_stock_git_inetd_failure`
+- expected row delta: `+0` behavior rows; remap existing evidence in
+  `docs/cli/matrices/daemon_v2_47.tsv`
+- expected status split: `+0` closed rows, `+0` open rows, `+0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+1`,
+  missing_or_unclassified `-1`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+0` represented doc-option pairs; the existing daemon inetd invalid-input
+  row already covers this behavior shape
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+0` behavior rows,
+  `+0` closed rows, `+0` open rows, `+0` invalid-input rows, `+1`
+  represented oracle function, `-1` missing-or-unclassified oracle function,
+  `+0` commands with rows and `+0` represented doc-option pairs.
+
+### Completed: HTTP Backend Invalid Filter Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_transport_http_compat.rs`
+- functions:
+  - `http_backend_upload_pack_invalid_filters_match_stock_git_failures`
+- expected row delta: `+1` behavior row in
+  `docs/cli/matrices/http_backend_v2_47.tsv`
+- expected status split: `+0` closed rows, `+0` open rows, `+1` invalid-input
+  row
+- expected oracle inventory delta: represented `+1`,
+  missing_or_unclassified `-1`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+0` represented doc-option pairs; `http-backend` has no documented CLI
+  option seed in the current census and already has matrix coverage
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+1` behavior row,
+  `+0` closed rows, `+0` open rows, `+1` invalid-input row, `+1`
+  represented oracle function, `-1` missing-or-unclassified oracle function,
+  `+0` commands with rows and `+0` represented doc-option pairs.
+
+### Completed: HTTP Push Writable Remote Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_transport_http_compat.rs`
+- functions:
+  - `http_push_puts_loose_objects_and_updates_remote_ref`
+  - `http_push_deletes_remote_refspec`
+- expected row delta: `+2` behavior rows in
+  `docs/cli/matrices/http_push_v2_47.tsv`
+- expected status split: `+2` closed rows, `0` open rows, `0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+2`,
+  missing_or_unclassified `-2`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+1` represented doc-option pair for `--dry-run`; `http-push` already has
+  rows, while the delete refspec row exercises the existing positional heads
+  surface in a real repository state
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+2` behavior rows,
+  `+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+2`
+  represented oracle functions, `-2` missing-or-unclassified oracle functions,
+  `+0` commands with rows and `+1` represented doc-option pair.
+
+### Completed: HTTP Packfile Read Batch
+
+- source: focused stock-oracle test backlog
+- file: `crates/zmin-cli/tests/git_transport_http_compat.rs`
+- functions:
+  - `http_fetch_fetches_dumb_http_objects_like_stock_git`
+  - `clone_reads_smart_http_pack_like_stock_git`
+  - `pull_rebase_reads_smart_http_pack_like_stock_git`
+- expected row delta: `+3` behavior rows across
+  `docs/cli/matrices/http_fetch_v2_47.tsv`,
+  `docs/cli/matrices/clone_v2_47.tsv` and
+  `docs/cli/matrices/pull_v2_47.tsv`
+- expected status split: `+3` closed rows, `0` open rows, `0` invalid-input
+  rows
+- expected oracle inventory delta: represented `+3`,
+  missing_or_unclassified `-3`
+- expected command/doc-option movement: `+0` commands with rows,
+  `+0` represented doc-option pairs; all three commands and option spellings
+  are already represented in the current census
+- Rust behavior changes required: no
+- actual post-import movement matched the declaration: `+3` behavior rows,
+  `+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+3`
+  represented oracle functions, `-3` missing-or-unclassified oracle functions,
+  `+0` commands with rows and `+0` represented doc-option pairs.
 
 ### Completed: Local Fetch Refspec Resolution Batch
 
@@ -4653,6 +5037,192 @@ row and `+0` remaining checklist rows.
 
 ## Latest Declared Import
 
+Source bucket: remaining hard-fail scan unclassified reftable parse guards.
+
+Evidence source:
+
+- `docs/cli/oracle_test_deferrals.md` source-guard deferrals for
+  `unsupported reftable version`
+- `docs/cli/oracle_test_deferrals.md` source-guard deferrals for
+  `unsupported reftable ref value type`
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`
+- implemented-but-unverified schema rows: expected `+0`
+- remaining checklist rows: expected `-2`
+- Rust behavior changes: no
+
+Expected rows:
+
+- none; this is classification-only
+
+The goal is to document the last two hard-fail scan hits so they stop showing
+up as unclassified backlog without pretending they are closed Git behavior
+rows.
+
+Actual post-import movement matched the declaration: `+0` behavior rows, `+0`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `-2` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: regenerated oracle inventory `git_foreign_scm_compat.rs`
+evidence gaps, with exact helper-trace tests and explicit local stock-helper
+availability classification.
+
+Evidence source:
+
+- `git_foreign_scm_compat::cvsexportcommit_exports_text_commit_to_cvs_checkout`
+- `git_foreign_scm_compat::cvsimport_imports_cvsps_patchsets_into_git_commits`
+- `git_foreign_scm_compat::cvsimport_runs_cvsps_when_patchset_file_is_not_provided`
+- `git_foreign_scm_compat::p4_clone_imports_head_revision_into_git_refs_and_worktree`
+- `git_foreign_scm_compat::p4_submit_opens_changed_files_and_submits_head`
+- `git_foreign_scm_compat::p4_unknown_subcommand_matches_stock_git_usage`
+- `git_foreign_scm_compat::svn_clone_imports_head_tree_into_git_svn_ref_and_worktree`
+- `git_foreign_scm_compat::svn_dcommit_adds_deletes_commits_and_updates_git_svn_ref`
+- `git_foreign_scm_compat::archimport_imports_tree_snapshot_into_git_repo`
+
+Expected movement:
+
+- behavior rows: `+7`
+- closed rows: `+0`
+- open rows: `+7`
+- invalid-input rows: `+0`
+- represented oracle functions: `+9`
+- missing-or-unclassified oracle functions: `-9`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`
+- implemented-but-unverified schema rows: expected `+0`
+- remaining checklist rows: expected `+7`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git cvsexportcommit -w <cvs checkout> HEAD`
+- `git cvsimport -a -R -z 0 -P <patchset file> -C <target> -d <cvsroot> module`
+- `git cvsimport -C <target> -d <cvsroot> module`
+- `git p4 clone --branch master //depot/project <target>`
+- `git p4 submit`
+- `git svn clone <url> <target>`
+- `git svn dcommit`
+
+The `git p4 unknown` rows already existed and only needed exact test evidence
+added. `git archimport` already had an exact-open row; this slice rewires it
+to the exact focused test and removes the plan-doc placeholder evidence.
+
+Actual post-import movement matched the declaration: `+7` behavior rows, `+0`
+closed rows, `+7` open rows, `+0` invalid-input rows, `+9` represented oracle
+functions, `-9` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+7` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: regenerated oracle inventory `git_sequencer_compat.rs`
+evidence gaps, with exact stock-oracle Rust test evidence.
+
+Evidence source:
+
+- `git_sequencer_compat::bisect_terms_next_skip_and_replay_match_stock_git_state`
+- `git_sequencer_compat::bisect_custom_terms_and_skip_range_match_stock_git_state`
+- `git_sequencer_compat::bisect_skip_reports_skipped_only_candidates_like_stock_git`
+- `git_sequencer_compat::bisect_help_view_no_checkout_and_pathspec_cover_stable_modes`
+- `git_sequencer_compat::bisect_first_parent_limits_candidates_to_first_parent_chain`
+- `git_sequencer_compat::rebase_replays_linear_topic_like_stock_git`
+- `git_sequencer_compat::rebase_uses_configured_upstream_like_stock_git`
+- `git_sequencer_compat::rebase_with_branch_argument_checks_out_and_replays_like_stock_git`
+
+Expected movement:
+
+- behavior rows: `+23`
+- closed rows: `+23`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+8`
+- missing-or-unclassified oracle functions: `-8`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`
+- implemented-but-unverified schema rows: expected `+0`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git bisect terms`
+- `git bisect skip`
+- `git bisect replay bisect.log`
+- `git bisect start --term-old=fixed --term-new=broken HEAD HEAD~4`
+- `git bisect start --no-checkout HEAD HEAD~4`
+- `git bisect start --first-parent HEAD HEAD~2`
+- `git rebase origin/main`
+- `git rebase`
+- `git rebase origin/main topic`
+
+This is an evidence-import slice for already-implemented sequencer behavior;
+the matrix expansion makes the stable bisect and non-interactive rebase
+surface explicit without growing the product backlog.
+
+Actual post-import movement matched the declaration: `+23` behavior rows, `+23`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+8` represented oracle
+functions, `-8` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
+Source bucket: regenerated oracle inventory `git_refs_compat.rs` focused
+`update-ref` evidence gaps, with exact stock-oracle Rust test evidence.
+
+Evidence source:
+
+- `git_refs_compat::update_ref_pseudoref_matches_stock_git_and_resolves_revision`
+- `git_refs_compat::update_ref_stdin_batch_transactions_match_stock_git`
+- `git_refs_compat::update_ref_stdin_batch_updates_match_stock_git`
+- `git_refs_compat::update_ref_reflog_updates_match_stock_git`
+- `git_refs_compat::update_ref_no_deref_modes_match_stock_git_head_storage`
+- `git_refs_compat::update_ref_invalid_refname_failures_match_stock_git`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+6`
+- missing-or-unclassified oracle functions: `-6`
+- commands with rows: `+0`
+- represented doc-option pairs: expected `+0`
+- implemented-but-unverified schema rows: expected `+0`
+- remaining checklist rows: expected `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git update-ref REVERSE HEAD`
+- `git update-ref refs/heads/bad..name <oid>`
+
+The remaining focused evidence maps onto existing `update-ref` matrix rows for
+stdin transactions, `--batch-updates`, reflog writes and `--no-deref` HEAD
+behavior. This is an evidence-wiring slice, not a new backlog-growth pass.
+
+Actual post-import movement matched the declaration: `+2` behavior rows, `+2`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+6` represented oracle
+functions, `-6` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## Latest Declared Import
+
 Source bucket: census implemented-but-unverified `update-ref` schema surfaces,
 with focused stock-oracle shell evidence.
 
@@ -4730,3 +5300,785 @@ closed row, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+0` represented doc-option pairs, `-1` implemented-but-unverified schema
 row and `+0` remaining checklist rows.
+
+## 2026-06-25 - check-ref-format doc-option parser gap
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+2`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+2`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git check-ref-format --no-allow-onelevel refs/heads/main`
+- `git check-ref-format --allow-onelevel --normalize main`
+- `git check-ref-format --refspec-pattern foo/bar*baz`
+- `git check-ref-format --refspec-pattern foo/bar*/baz`
+- `git check-ref-format --refspec-pattern refs/heads/*:refs/remotes/origin/*`
+- `git check-ref-format --refspec-pattern foo/*/bar/*`
+
+This batch closes the remaining local parser gap for the documented
+`--no-allow-onelevel` and `--refspec-pattern` surfaces. The evidence compares
+stock Git and Zmin exit status, stdout and stderr through the focused
+`git_check_ref_format_compat` test for accepted default/no-toggle forms,
+normalize pairing, valid single-wildcard refspec patterns and invalid
+multi-wildcard or colon-containing forms.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+4`
+closed rows, `+0` open rows, `+2` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - pack-refs documented option surface expansion
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+3`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git pack-refs --auto`
+- `git pack-refs --include refs/heads/feature`
+- `git pack-refs --exclude refs/heads/feature`
+- `git pack-refs --all --exclude refs/heads/feature`
+
+This batch closes the next local `git pack-refs` parser gap by adding the
+documented `--auto`, `--include` and `--exclude` surfaces and wiring them to
+stock-shaped files-backend behavior. The evidence compares stock Git and Zmin
+via the focused `git_maintenance_compat` test on packed-refs content and
+remaining loose refs for auto, include-only, exclude-only and all-plus-exclude
+cases.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+4`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle quiet parser surface
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+2`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git bundle create --quiet repo.bundle HEAD`
+- `git bundle create -q repo.bundle HEAD`
+- `git bundle verify --quiet repo.bundle`
+
+This batch closes the next local `git bundle` parser gap by adding the
+documented `--quiet` / `-q` surface and wiring it to stock-compatible
+`bundle create` and `bundle verify` behavior. The evidence compares stock Git
+and Zmin exit status, stdout, stderr and bundle side effects for quiet create,
+short quiet create and quiet verify.
+
+Actual post-import movement matched the declaration: `+3` behavior rows, `+3`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - check-ref-format precedence and branch-history surface
+
+Expected movement:
+
+- behavior rows: `+10`
+- closed rows: `+7`
+- open rows: `+0`
+- invalid-input rows: `+3`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git check-ref-format --allow-onelevel --no-allow-onelevel main`
+- `git check-ref-format --no-allow-onelevel --allow-onelevel main`
+- `git check-ref-format --allow-onelevel --refspec-pattern foo*`
+- `git check-ref-format --normalize --refspec-pattern /refs//heads/*`
+- `git check-ref-format --branch @{-1}`
+- `git check-ref-format --branch @{-1}` in detached-checkout history
+- `git check-ref-format --branch @{-2}`
+- `git check-ref-format --branch @{-3}`
+- `git check-ref-format --branch -bad`
+- `git check-ref-format --branch @{-99}`
+
+This batch closes the next cheap `git check-ref-format` parser-plus-evidence
+surface by teaching Zmin to honor last-one-wins
+`--allow-onelevel` / `--no-allow-onelevel`, accept leading-dash branch values
+as branch operands so they can be rejected with the stock fatal error, and
+expand branch-mode previous-checkout syntax through HEAD reflog history like
+stock Git. The focused evidence compares exact stdout, stderr and exit codes
+for the new precedence, refspec and branch-history rows through
+`git_check_ref_format_compat`.
+
+Actual post-import movement matched the declaration: `+10` behavior rows, `+7`
+closed rows, `+0` open rows, `+3` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - refs verify no-toggle surface
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+8`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git refs verify --no-verbose`
+- `git refs verify --no-strict`
+- `git refs verify --strict --verbose`
+- `git refs verify --verbose --strict`
+- `git refs verify --strict --no-strict`
+- `git refs verify --no-strict --strict`
+- `git refs verify --verbose --no-verbose`
+- `git refs verify --no-verbose --verbose`
+
+This batch closes the next cheap local `git refs verify` toggle subgroup by
+teaching Zmin to accept the documented `--[no-]verbose` and `--[no-]strict`
+forms, and to honor last-one-wins ordering for both switches like stock Git.
+The focused evidence compares exact stdout, stderr and exit codes for the
+healthy-repository rows through `git_refs_compat`.
+
+Actual post-import movement matched the declaration: `+8` behavior rows, `+8`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle invalid-version quiet composition surface
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+8`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git bundle create --version=1 --quiet repo.bundle HEAD`
+- `git bundle create --quiet --version=1 repo.bundle HEAD`
+- `git bundle create --version=1 --no-quiet repo.bundle HEAD`
+- `git bundle create --no-quiet --version=1 repo.bundle HEAD`
+- `git bundle create --version=foo --quiet repo.bundle HEAD`
+- `git bundle create --quiet --version=foo repo.bundle HEAD`
+- `git bundle create --version= --quiet repo.bundle HEAD`
+- `git bundle create --quiet --version= repo.bundle HEAD`
+
+This batch closes the next cheap local `git bundle` invalid-input subgroup by
+making the existing stock-Git rejections for unsupported or unparsable bundle
+versions explicit when composed with `--quiet` and `--no-quiet`. The focused
+evidence compares exact stdout, stderr and exit codes through
+`git_pack_integrity_compat`.
+
+Actual post-import movement matched the declaration: `+8` behavior rows, `+0`
+closed rows, `+0` open rows, `+8` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle short quiet version surface
+
+Expected movement:
+
+- behavior rows: `+12`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+6`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git bundle create -q --version=2 repo.bundle HEAD`
+- `git bundle create --version=2 -q repo.bundle HEAD`
+- `git bundle create -q --version=3 repo.bundle HEAD`
+- `git bundle create --version=3 -q repo.bundle HEAD`
+- `git bundle create -q --version=-1 repo.bundle HEAD`
+- `git bundle create --version=-1 -q repo.bundle HEAD`
+- `git bundle create -q --version=1 repo.bundle HEAD`
+- `git bundle create --version=1 -q repo.bundle HEAD`
+- `git bundle create -q --version=foo repo.bundle HEAD`
+- `git bundle create --version=foo -q repo.bundle HEAD`
+- `git bundle create -q --version= repo.bundle HEAD`
+- `git bundle create --version= -q repo.bundle HEAD`
+
+This batch closes the next cheap local `git bundle` subgroup by making the
+short quiet alias `-q` explicit when composed with versioned `create`,
+including both accepted and rejected version values. The focused evidence
+compares exact stdout, stderr and exit codes, plus stock verification for
+created bundles, through `git_pack_integrity_compat`.
+
+Actual post-import movement matched the declaration: `+12` behavior rows, `+6`
+closed rows, `+0` open rows, `+6` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - command progress classified closure metric
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: no
+
+Expected outputs:
+
+- `tools/git-compat-command-summary.sh` emits `behavior_rows_classified`
+- `docs/cli/census/command_progress.tsv` includes classified row counts and pct
+- `tools/git-cli-readiness-status.sh` prints classified rows alongside verified
+
+This docs-only tooling batch fixes the per-command closure metric so
+`command_progress.tsv` distinguishes exact verified-success rows from total
+classified rows (`verified + invalid-input parity`). That removes false
+"remaining" impressions for commands whose matrices are fully classified but
+contain many stock-compatible rejection rows.
+
+Actual post-import movement matched the declaration: `+0` behavior rows, `+0`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - reviewed-complete closure batch for seven helper-free commands
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-28`
+- complete command matrices: `+7`
+- complete doc-option pairs: `+28`
+- Rust behavior changes: no
+
+Expected commands:
+
+- `bundle`
+- `check-attr`
+- `check-ref-format`
+- `commit-graph`
+- `merge-base`
+- `pack-refs`
+- `refs`
+
+This docs-only census batch promotes seven already fully classified
+helper-free commands into the durable reviewed-complete command and
+doc-option-pair lists. Each command already had `100%` represented documented
+options, `0` exact-open rows, and `100%` classified written-row coverage, so
+the remaining work was only to mark those surfaces as reviewed complete and
+regenerate the census.
+
+Actual post-import movement matched the declaration: `+0` behavior rows, `+0`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows, `-28` remaining checklist rows,
+`+7` complete command matrices, and `+28` complete doc-option pairs.
+
+## 2026-06-25 - commit-graph progress ordering surface
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git commit-graph write --reachable --progress --no-progress`
+- `git commit-graph write --reachable --no-progress --progress`
+- `git commit-graph verify --progress --no-progress`
+- `git commit-graph verify --no-progress --progress`
+
+This batch closes the next cheap local `git commit-graph` subgroup by
+teaching Zmin to honor last-one-wins ordering for `--progress` and
+`--no-progress` on both `write` and `verify` like stock Git. The focused
+evidence compares exact stdout, stderr, exit codes and repository state for
+the new ordering rows through `git_maintenance_compat`.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+4`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle version 3 and -1 quiet composition surface
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+8`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git bundle create --version=3 --quiet repo.bundle HEAD`
+- `git bundle create --quiet --version=3 repo.bundle HEAD`
+- `git bundle create --version=3 --no-quiet repo.bundle HEAD`
+- `git bundle create --no-quiet --version=3 repo.bundle HEAD`
+- `git bundle create --version=-1 --quiet repo.bundle HEAD`
+- `git bundle create --quiet --version=-1 repo.bundle HEAD`
+- `git bundle create --version=-1 --no-quiet repo.bundle HEAD`
+- `git bundle create --no-quiet --version=-1 repo.bundle HEAD`
+
+This batch closes the next cheap local `git bundle` subgroup by making the
+existing version `3` and default-sentinel `-1` create paths explicit when
+composed with `--quiet` and `--no-quiet`, including both orderings of the
+version option. The focused evidence compares exact stdout, stderr, exit codes
+and stock verification of the created bundle payload through
+`git_pack_integrity_compat`.
+
+Actual post-import movement matched the declaration: `+8` behavior rows, `+8`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle no-quiet toggle surface
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git bundle create --no-quiet repo.bundle HEAD`
+- `git bundle create --quiet --no-quiet repo.bundle HEAD`
+- `git bundle create --no-quiet --quiet repo.bundle HEAD`
+- `git bundle verify --no-quiet repo.bundle`
+- `git bundle verify --quiet --no-quiet repo.bundle`
+- `git bundle verify --no-quiet --quiet repo.bundle`
+
+This batch closes the next cheap local `git bundle` subgroup by teaching Zmin
+to accept the documented `--no-quiet` form and honor last-one-wins ordering
+against `--quiet` for both `create` and `verify` like stock Git. The focused
+evidence compares exact stdout, stderr, exit codes and bundle side effects for
+the new quiet-toggle rows through `git_pack_integrity_compat`.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+6`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle version quiet composition surface
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git bundle create --version=2 --quiet repo.bundle HEAD`
+- `git bundle create --quiet --version=2 repo.bundle HEAD`
+- `git bundle create --version=2 --no-quiet repo.bundle HEAD`
+- `git bundle create --no-quiet --version=2 repo.bundle HEAD`
+
+This batch closes the next cheap local `git bundle` subgroup by making the
+existing `--version=2` create path explicit when composed with `--quiet` and
+`--no-quiet`, including both orderings of the version option. The focused
+evidence compares exact stdout, stderr, exit codes and stock verification of
+the created bundle payload through `git_pack_integrity_compat`.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+4`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle progress ordering surface
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+4`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git bundle create --progress --no-progress repo.bundle HEAD`
+- `git bundle create --no-progress --progress repo.bundle HEAD`
+- `git bundle unbundle --progress --no-progress repo.bundle`
+- `git bundle unbundle --no-progress --progress repo.bundle`
+
+This batch closes the next cheap local `git bundle` subgroup by teaching Zmin
+to honor last-one-wins ordering for `--progress` and `--no-progress` on both
+`create` and `unbundle` like stock Git. The focused evidence compares exact
+stdout, stderr, exit codes and bundle side effects for the new ordering rows
+through `git_pack_integrity_compat`.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+4`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - commit-graph progress and object-dir surface
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+3`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git commit-graph write --reachable --progress`
+- `git commit-graph write --reachable --no-progress`
+- `git commit-graph write --object-dir=.git/objects --reachable`
+- `git commit-graph verify --progress`
+- `git commit-graph verify --no-progress`
+- `git commit-graph verify --object-dir=.git/objects`
+
+This batch closes the smallest local `git commit-graph` documented parser
+subgroup by adding `--progress`, `--no-progress` and `--object-dir` for
+`write` and `verify`, plus stock-like verify progress stderr. It also fixes
+the census/command-summary nested-subcommand option accounting so parent
+`commit-graph` command progress reflects child subcommand rows.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+6`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - maintenance no-auto and no-quiet surface
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git maintenance run --task=gc --no-quiet`
+- `git maintenance run --task=gc --quiet --no-quiet`
+- `git maintenance run --task=gc --no-quiet --quiet`
+- `git maintenance run --task=gc --no-auto`
+- `git maintenance run --task=gc --auto --no-auto`
+- `git maintenance run --task=gc --no-auto --auto`
+
+This batch closes the next helper-free `git maintenance` option subgroup by
+adding `--no-auto` and `--no-quiet` plus stock last-one-wins interaction with
+`--auto` and `--quiet`.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+6`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - refs invalid-option parity surface
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+4`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+2`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git refs verify --dry-run`
+- `git refs verify --ref-format=files`
+- `git refs verify --ref-format=reftable`
+- `git refs verify --ref-format=`
+
+This batch closes the remaining `git refs` documented option spellings for
+Git `2.47.1` by teaching Zmin to reject unsupported `verify` flags with the
+same exit code, stderr and usage block as stock Git.
+
+Actual post-import movement matched the declaration: `+4` behavior rows, `+0`
+closed rows, `+0` open rows, `+4` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - maintenance no-schedule invalid-input surface
+
+Expected movement:
+
+- behavior rows: `+5`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+5`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git maintenance run --no-schedule`
+- `git maintenance run --schedule=daily --no-schedule`
+- `git maintenance run --task=gc --no-schedule`
+- `git maintenance run --schedule=hourly --no-schedule --task=gc`
+- `git maintenance run --no-schedule --schedule=hourly --task=gc`
+
+This batch closes the next cheap invalid-input subgroup for `git maintenance`
+by teaching Zmin to reject `--no-schedule` with the same fatal exit `128` and
+stderr as stock Git, regardless of option order with `--schedule` and
+`--task`.
+
+Actual post-import movement matched the declaration: `+5` behavior rows, `+0`
+closed rows, `+0` open rows, `+5` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - bundle progress parser surface
+
+Expected movement:
+
+- behavior rows: `+5`
+- closed rows: `+5`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+1`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git bundle create --progress repo.bundle HEAD`
+- `git bundle create --quiet --progress repo.bundle HEAD`
+- `git bundle unbundle --progress repo.bundle`
+- `git bundle unbundle --progress repo.bundle refs/heads/*`
+- `git bundle unbundle --no-progress repo.bundle`
+
+This batch closes the remaining local `git bundle` documented progress surface
+by adding parser support for `--progress` and wiring stock-compatible progress
+stderr for `create` and `unbundle`, plus `--no-progress` suppression for the
+unbundle path. The evidence compares stock Git and Zmin exit status, stdout,
+stderr and bundle side effects through a focused `git_pack_integrity_compat`
+test.
+
+Actual post-import movement matched the declaration: `+5` behavior rows, `+5`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+1` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - check-attr cached source and z surfaces
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+8`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+3`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git check-attr --cached text diff -- main.rs`
+- `git check-attr --source=HEAD text diff -- main.rs`
+- `git check-attr --source HEAD text diff -- main.rs`
+- `git check-attr -z text diff -- main.rs`
+- `git check-attr --all -z -- main.rs`
+- `git check-attr --stdin -z text diff`
+- `git check-attr --source=HEAD --all -z -- main.rs`
+- `git check-attr --cached -z text diff -- main.rs`
+
+This batch closes the remaining local `git check-attr` documented parser
+surface by adding `--cached`, `--source` and `-z`, including tree-ish-backed
+attribute loading, index-backed attribute loading, NUL-delimited output, and
+NUL-delimited stdin path parsing. The evidence compares stock Git and Zmin
+stdout bytes for the exact query rows through a focused `git_text_tools_compat`
+test.
+
+Actual post-import movement matched the declaration: `+8` behavior rows, `+8`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.
+
+## 2026-06-25 - merge-base all parser surface
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+2`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git merge-base --all a b`
+- `git merge-base -a a b`
+- `git merge-base --all HEAD HEAD`
+
+This batch closes the remaining local `git merge-base` documented parser
+surface by adding `--all` / `-a` and wiring it to the existing
+`merge_bases_all_cached` implementation. The evidence compares stock Git and
+Zmin stdout for the exact all-mode rows through a focused `git_merge_compat`
+test.
+
+Actual post-import movement matched the declaration: `+3` behavior rows, `+3`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows.

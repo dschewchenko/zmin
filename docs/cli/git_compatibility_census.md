@@ -42,8 +42,10 @@ python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-compat-
 | File | Purpose |
 | --- | --- |
 | `docs/cli/census/summary.tsv` | top-level counts for source layers and buckets |
-| `docs/cli/census/command_progress.tsv` | per-command progress counts plus seed-coverage and verified-row percentages |
+| `docs/cli/census/command_progress.tsv` | per-command progress counts plus seed coverage, classified-row percentages and verified-row percentages |
 | `docs/cli/census/all_items.tsv` | union of generated census rows |
+| `docs/cli/census/reviewed_complete_command_matrices.tsv` | reviewed commands whose full behavior matrix is finished |
+| `docs/cli/census/reviewed_complete_doc_option_pairs.tsv` | reviewed documented option pairs whose full behavior matrix is finished |
 | `docs/cli/census/verified_behavior.tsv` | exact verified behavior rows safe to skip unless code or evidence changes |
 | `docs/cli/census/invalid_input_parity.tsv` | exact invalid-input rows where stock Git and Zmin rejections match |
 | `docs/cli/census/exact_open_oracle_gaps.tsv` | exact open rows blocked by a missing local stock-Git oracle command/tool |
@@ -55,23 +57,25 @@ python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-compat-
 
 ## Current Snapshot
 
-Generated on 2026-06-23 from the current branch census inputs.
+Generated on 2026-06-24 from the current branch census inputs.
 
 | Metric | Count | Meaning |
 | --- | ---: | --- |
 | Git `2.47.1` commands | `151` | upstream command-list seed |
-| Git doc option seed rows | `4632` | documented option spelling seed, not final denominator |
+| Git doc option seed rows | `3175` | documented option spelling seed, not final denominator |
 | Zmin schema baseline commands | `151` | command entry points present in schema |
 | Zmin schema additional commands | `52` | outside Git `2.47.1` baseline |
-| Existing matrix rows | `2846` | evidence layer, not full denominator |
-| Verified exact rows | `2457` | closed behavior variants safe to skip exactly |
-| Invalid-input parity rows | `388` | stock-compatible rejection variants |
-| Exact open or partial matrix rows | `1` | row exists but is not closed |
-| Implemented but unverified rows | `676` | schema args without exact matrix evidence |
-| Remaining checklist rows | `4676` | doc-option expansion, exact opens and unclassified guards |
-| Zmin-only or deferred rows | `33` | extension and deferral classifications outside the denominator |
-| Oracle evidence layer rows | `961` | existing tests, not the primary backlog |
-| Source hard-fail rows | `88` | raw guard hits in source scan |
+| Existing matrix rows | `4692` | evidence layer, not full denominator |
+| Complete command matrices | `40` | reviewed commands whose full behavior matrix is finished |
+| Complete doc option pairs | `87` | reviewed documented command-option pairs whose full behavior matrix is finished |
+| Verified exact rows | `4062` | closed exact behavior rows safe to skip exactly |
+| Invalid-input parity rows | `608` | stock-compatible rejection variants |
+| Exact open or partial matrix rows | `21` | rows exist but are not closed |
+| Implemented but unverified rows | `0` | schema args without exact matrix evidence |
+| Remaining checklist rows | `3109` | doc-option expansion, exact opens and unclassified guards |
+| Zmin-only or deferred rows | `58` | extension and deferral classifications outside the denominator |
+| Oracle evidence layer rows | `969` | existing tests, not the primary backlog |
+| Source hard-fail rows | `92` | raw guard hits in source scan |
 | Unclassified hard-fail rows | `0` | source guard hits not matched to classification docs |
 
 ## Bucket Rules

@@ -101,6 +101,7 @@ run_exact send_pack_all empty 0 0 "" --all
 run_exact send_pack_dry_run empty 0 0 "" --dry-run refs/heads/main
 run_exact send_pack_force main 0 0 "" --force refs/heads/main
 run_exact send_pack_receive_pack empty 0 0 "" --receive-pack=git-receive-pack refs/heads/main
+run_exact send_pack_receive_pack_separate empty 0 0 "" --receive-pack git-receive-pack refs/heads/main
 run_exact send_pack_stdin empty 0 0 "refs/heads/main"$'\n' --stdin
 run_exact send_pack_verbose empty 0 0 "" --verbose refs/heads/main
 run_exact send_pack_force_short main 0 0 "" -f refs/heads/main

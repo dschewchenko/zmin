@@ -4287,6 +4287,7 @@ pub(crate) struct NameRevOptions {
     pub(crate) excludes: Vec<String>,
     pub(crate) all: bool,
     pub(crate) annotate_stdin: bool,
+    pub(crate) no_undefined: bool,
     pub(crate) always: bool,
     pub(crate) commits: Vec<String>,
 }
@@ -4399,7 +4400,15 @@ fn print_name_rev(
     candidates: &[NameRevCandidate],
     options: &NameRevOptions,
 ) -> Result<()> {
-    let name = best_name_rev(id, candidates).unwrap_or_else(|| "undefined".to_owned());
+    let name = best_name_rev(id, candidates);
+    if options.no_undefined && name.is_none() {
+        print!("{} ", id.to_hex());
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!("fatal: cannot describe '{}'\n", id.to_hex()),
+        });
+    }
+    let name = name.unwrap_or_else(|| "undefined".to_owned());
     if options.name_only {
         println!("{name}");
     } else {
@@ -7881,7 +7890,12 @@ fn insert_parent_paths(targets: &mut BTreeSet<Vec<u8>>, path: &[u8]) {
     }
 }
 
-pub(crate) fn merge_base(is_ancestor: bool, octopus: bool, commits: Vec<String>) -> Result<()> {
+pub(crate) fn merge_base(
+    all: bool,
+    is_ancestor: bool,
+    octopus: bool,
+    commits: Vec<String>,
+) -> Result<()> {
     if is_ancestor && commits.len() != 2 {
         return Err(CliError::Fatal {
             code: 128,
@@ -7936,6 +7950,13 @@ pub(crate) fn merge_base(is_ancestor: bool, octopus: bool, commits: Vec<String>)
         } else {
             Err(CliError::Exit(1))
         };
+    }
+
+    if all {
+        for base in merge_bases_all_cached(&commit_cache, left, right)? {
+            println!("{}", base.to_hex());
+        }
+        return Ok(());
     }
 
     let base = if octopus {

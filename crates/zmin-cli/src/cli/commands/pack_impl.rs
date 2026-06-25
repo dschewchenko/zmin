@@ -755,12 +755,27 @@ fn verify_multi_pack_index_bytes(bytes: &[u8]) -> Result<()> {
 
 fn commit_graph(command: CommitGraphCommand) -> Result<()> {
     match command {
-        CommitGraphCommand::Write { reachable } => commit_graph_write(reachable),
-        CommitGraphCommand::Verify => commit_graph_verify(),
+        CommitGraphCommand::Write {
+            object_dir,
+            reachable,
+            progress,
+            no_progress,
+        } => commit_graph_write(object_dir, reachable, progress, no_progress),
+        CommitGraphCommand::Verify {
+            object_dir,
+            progress,
+            no_progress,
+        } => commit_graph_verify(object_dir, progress, no_progress),
     }
 }
 
-pub(crate) fn commit_graph_write(reachable: bool) -> Result<()> {
+pub(crate) fn commit_graph_write(
+    object_dir: Option<PathBuf>,
+    reachable: bool,
+    progress: bool,
+    no_progress: bool,
+) -> Result<()> {
+    let _ = (progress, no_progress);
     if !reachable {
         return Err(CliError::Fatal {
             code: 129,
@@ -768,14 +783,15 @@ pub(crate) fn commit_graph_write(reachable: bool) -> Result<()> {
         });
     }
     let repo = find_repo()?;
-    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let objects_dir = resolve_objects_dir(object_dir, &repo.objects_dir)?;
+    let store = LooseObjectStore::new(objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let commits = collect_reachable_commit_graph_commits(&repo, &store, &commit_cache)?;
     if commits.is_empty() {
         return Ok(());
     }
     let bytes = encode_commit_graph(&commit_cache, &commits)?;
-    let path = repo.git_dir.join("objects/info/commit-graph");
+    let path = objects_dir.join("info/commit-graph");
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -783,15 +799,71 @@ pub(crate) fn commit_graph_write(reachable: bool) -> Result<()> {
     Ok(())
 }
 
-fn commit_graph_verify() -> Result<()> {
+fn commit_graph_verify(
+    object_dir: Option<PathBuf>,
+    progress: bool,
+    no_progress: bool,
+) -> Result<()> {
     let repo = find_repo()?;
-    let path = repo.git_dir.join("objects/info/commit-graph");
+    let objects_dir = resolve_objects_dir(object_dir, &repo.objects_dir)?;
+    let path = objects_dir.join("info/commit-graph");
     let bytes = match map_file_bytes(&path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(CliError::Io(err)),
     };
-    verify_commit_graph_bytes(bytes.as_slice())
+    verify_commit_graph_bytes(bytes.as_slice())?;
+    if progress && !no_progress {
+        print_commit_graph_verify_progress(commit_graph_entry_count(bytes.as_slice())?);
+    }
+    Ok(())
+}
+
+fn resolve_objects_dir(object_dir: Option<PathBuf>, default_objects_dir: &std::path::Path) -> Result<PathBuf> {
+    match object_dir {
+        Some(path) if path.is_absolute() => Ok(path),
+        Some(path) => Ok(std::env::current_dir()?.join(path)),
+        None => Ok(default_objects_dir.to_path_buf()),
+    }
+}
+
+fn commit_graph_entry_count(bytes: &[u8]) -> Result<usize> {
+    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    let chunk_count = bytes[6] as usize;
+    let graph_data_end = bytes.len() - digest_len - bytes[7] as usize * digest_len;
+    let mut chunks = Vec::with_capacity(chunk_count);
+    for idx in 0..chunk_count {
+        let cursor = 8 + idx * 12;
+        let chunk_id = [
+            bytes[cursor],
+            bytes[cursor + 1],
+            bytes[cursor + 2],
+            bytes[cursor + 3],
+        ];
+        let offset = read_u64_be(&bytes[cursor + 4..cursor + 12])? as usize;
+        chunks.push((chunk_id, offset));
+    }
+    let oidf = commit_graph_chunk_range_from_offsets(bytes, &chunks, b"OIDF", graph_data_end)?;
+    Ok(read_u32_be(&oidf[255 * 4..256 * 4])? as usize)
+}
+
+fn print_commit_graph_verify_progress(total: usize) {
+    if total > 1 {
+        eprint!(
+            "Verifying commits in commit graph: {:>3}% ({}/{})\r",
+            100 / total,
+            1,
+            total
+        );
+    }
+    eprint!(
+        "Verifying commits in commit graph: 100% ({}/{})\r",
+        total, total
+    );
+    eprintln!(
+        "Verifying commits in commit graph: 100% ({}/{}), done.",
+        total, total
+    );
 }
 
 enum FileBytes {
@@ -3769,20 +3841,46 @@ fn pack_objects_output_path(base_name: &std::path::Path, pack_id: &ObjectId, ext
 }
 
 pub(crate) fn bundle(
+    quiet: bool,
+    progress: bool,
+    no_progress: bool,
     operation: &str,
     version: Option<String>,
     file: PathBuf,
     args: Vec<String>,
 ) -> Result<()> {
+    let show_progress = progress && !no_progress;
     match operation {
-        "create" => bundle_create(file, version, args),
+        "create" => bundle_create(file, version, args, show_progress),
         _ if version.is_some() => Err(CliError::Fatal {
             code: 129,
             message: "--version is only supported for bundle create".into(),
         }),
+        "list-heads" if progress || no_progress => Err(CliError::Stderr {
+            code: 129,
+            text: format!(
+                "error: unknown option `{}`\nusage: git bundle list-heads <file> [<refname>...]\n",
+                if progress { "progress" } else { "no-progress" }
+            ),
+        }),
+        "list-heads" if quiet => Err(CliError::Stderr {
+            code: 129,
+            text: "error: unknown option `quiet'\nusage: git bundle list-heads <file> [<refname>...]\n".into(),
+        }),
         "list-heads" => bundle_list_heads(file, args),
-        "verify" => bundle_verify(file),
-        "unbundle" => bundle_unbundle(file, args),
+        "verify" if progress || no_progress => Err(CliError::Stderr {
+            code: 129,
+            text: format!(
+                "error: unknown option `{}`\nusage: git bundle verify [-q | --quiet] <file>\n\n    -q, --[no-]quiet      do not show bundle details\n",
+                if progress { "progress" } else { "no-progress" }
+            ),
+        }),
+        "verify" => bundle_verify(file, quiet),
+        "unbundle" if quiet => Err(CliError::Stderr {
+            code: 129,
+            text: "error: unknown option `quiet'\nusage: git bundle unbundle [--progress] <file> [<refname>...]\n\n    --[no-]progress       show progress meter\n".into(),
+        }),
+        "unbundle" => bundle_unbundle(file, args, show_progress),
         _ => Err(CliError::Fatal {
             code: 129,
             message: format!("unknown bundle subcommand '{operation}'"),
@@ -3790,7 +3888,12 @@ pub(crate) fn bundle(
     }
 }
 
-fn bundle_create(file: PathBuf, version: Option<String>, revs: Vec<String>) -> Result<()> {
+fn bundle_create(
+    file: PathBuf,
+    version: Option<String>,
+    revs: Vec<String>,
+    show_progress: bool,
+) -> Result<()> {
     let bundle_version = parse_bundle_create_version(version.as_deref())?;
     let (max_count, since, revs) = parse_bundle_create_revs(revs)?;
     if revs.is_empty() {
@@ -3891,6 +3994,7 @@ fn bundle_create(file: PathBuf, version: Option<String>, revs: Vec<String>) -> R
             out.write_all(b"\n")?;
         }
         out.write_all(b"\n")?;
+        let pack_start = out.stream_position()?;
         write_pack_from_store_with_options(
             &packed_first_store,
             GitHashAlgorithm::Sha1,
@@ -3898,6 +4002,10 @@ fn bundle_create(file: PathBuf, version: Option<String>, revs: Vec<String>) -> R
             pack_encode_options(None, None),
             &mut out,
         )?;
+        let pack_bytes = out.stream_position()? - pack_start;
+        if show_progress {
+            print_bundle_create_progress(ids.len(), pack_bytes);
+        }
         out.flush()?;
         Ok::<_, CliError>(())
     })();
@@ -3907,6 +4015,27 @@ fn bundle_create(file: PathBuf, version: Option<String>, revs: Vec<String>) -> R
     result?;
     fs::rename(temp_file, file)?;
     Ok(())
+}
+
+fn print_bundle_create_progress(total: usize, pack_bytes: u64) {
+    if total == 0 {
+        return;
+    }
+    eprintln!("Enumerating objects: {total}, done.");
+    for current in 1..=total {
+        let percent = current * 100 / total;
+        eprint!("Counting objects: {percent:3}% ({current}/{total})\r");
+    }
+    eprintln!("Counting objects: 100% ({total}/{total}), done.");
+    for current in 1..=total {
+        let percent = current * 100 / total;
+        eprint!("Writing objects: {percent:3}% ({current}/{total})\r");
+    }
+    eprintln!(
+        "Writing objects: 100% ({total}/{total}), {pack_bytes} bytes | {:.2} KiB/s, done.",
+        pack_bytes as f64
+    );
+    eprintln!("Total {total} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)");
 }
 
 fn parse_bundle_create_version(version: Option<&str>) -> Result<&'static str> {
@@ -4138,7 +4267,7 @@ fn bundle_list_heads(file: PathBuf, patterns: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn bundle_verify(file: PathBuf) -> Result<()> {
+fn bundle_verify(file: PathBuf, quiet: bool) -> Result<()> {
     let repo = find_repo().ok();
     let bundle = parse_bundle_command_header(&file)?;
     let store = repo
@@ -4146,27 +4275,33 @@ fn bundle_verify(file: PathBuf) -> Result<()> {
         .map(|repo| LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1));
     verify_bundle_prerequisites(store.as_ref(), &bundle.prerequisites)?;
     let _ = index_bundle_pack(&file, bundle.pack_offset, store.as_ref())?;
-    println!("The bundle contains these {} refs:", bundle.heads.len());
-    for head in &bundle.heads {
-        println!("{} {}", head.id.to_hex(), head.name);
-    }
-    if bundle.prerequisites.is_empty() {
-        println!("The bundle records a complete history.");
-    } else {
-        println!(
-            "The bundle requires these {} refs:",
-            bundle.prerequisites.len()
-        );
-        for id in &bundle.prerequisites {
-            println!("{}", id.to_hex());
+    if !quiet {
+        if bundle.heads.len() == 1 {
+            println!("The bundle contains this ref:");
+        } else {
+            println!("The bundle contains these {} refs:", bundle.heads.len());
         }
+        for head in &bundle.heads {
+            println!("{} {}", head.id.to_hex(), head.name);
+        }
+        if bundle.prerequisites.is_empty() {
+            println!("The bundle records a complete history.");
+        } else {
+            println!(
+                "The bundle requires these {} refs:",
+                bundle.prerequisites.len()
+            );
+            for id in &bundle.prerequisites {
+                println!("{}", id.to_hex());
+            }
+        }
+        println!("The bundle uses this hash algorithm: sha1");
     }
-    println!("The bundle uses this hash algorithm: sha1");
-    println!("{} is okay", file.display());
+    eprintln!("{} is okay", file.display());
     Ok(())
 }
 
-fn bundle_unbundle(file: PathBuf, patterns: Vec<String>) -> Result<()> {
+fn bundle_unbundle(file: PathBuf, patterns: Vec<String>, show_progress: bool) -> Result<()> {
     let repo = find_repo()?;
     let bundle = parse_bundle_command_header(&file)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -4181,6 +4316,9 @@ fn bundle_unbundle(file: PathBuf, patterns: Vec<String>) -> Result<()> {
             return Err(CliError::Io(error));
         }
     };
+    if show_progress {
+        print_bundle_unbundle_progress(decode_pack_index(GitHashAlgorithm::Sha1, indexed.index.clone())?.len());
+    }
     let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
     install_temp_pack_file(
         &pack_dir.join(format!("{pack_name}.pack")),
@@ -4194,6 +4332,17 @@ fn bundle_unbundle(file: PathBuf, patterns: Vec<String>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_bundle_unbundle_progress(total: usize) {
+    if total == 0 {
+        return;
+    }
+    for current in 1..=total {
+        let percent = current * 100 / total;
+        eprint!("Unbundling objects: {percent:3}% ({current}/{total})\r");
+    }
+    eprintln!("Unbundling objects: 100% ({total}/{total}), done.");
 }
 
 pub(crate) fn fetch_bundle_refspecs(

@@ -100,6 +100,291 @@ fn symbolic_ref_read_modes_match_stock_git() {
 }
 
 #[test]
+fn symbolic_ref_delete_recurse_and_message_modes_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/inner", "refs/heads/main"],
+        );
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/outer", "refs/heads/inner"],
+        );
+        git(repo, ["branch", "other"]);
+    }
+
+    for args in [
+        ["symbolic-ref", "--recurse", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "-d", "refs/heads/inner"].as_slice(),
+        ["symbolic-ref", "-m", "reason", "HEAD", "refs/heads/other"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin symbolic-ref"),
+            command_any_output("git", git_repo.path(), args, "git symbolic-ref"),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join(".git/HEAD")).expect("read zmin HEAD"),
+        fs::read_to_string(git_repo.path().join(".git/HEAD")).expect("read git HEAD")
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join(".git/logs/HEAD")).expect("read zmin HEAD reflog"),
+        fs::read_to_string(git_repo.path().join(".git/logs/HEAD")).expect("read git HEAD reflog")
+    );
+
+    let zmin_delete = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["symbolic-ref", "--delete", "-q", "refs/heads/missing"],
+        "zmin symbolic-ref",
+    );
+    let git_delete = command_any_output(
+        "git",
+        git_repo.path(),
+        &["symbolic-ref", "--delete", "-q", "refs/heads/missing"],
+        "git symbolic-ref",
+    );
+    assert_eq!(zmin_delete, git_delete);
+}
+
+#[test]
+fn symbolic_ref_option_combinations_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/inner", "refs/heads/main"],
+        );
+        git(
+            repo,
+            ["symbolic-ref", "refs/heads/outer", "refs/heads/inner"],
+        );
+    }
+
+    for args in [
+        ["symbolic-ref", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-short", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-delete", "HEAD"].as_slice(),
+        ["symbolic-ref", "--quiet", "--short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--short", "--quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--short", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--short", "--no-delete", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-recurse", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--no-delete", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-recurse", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--short", "--no-short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-short", "--short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--quiet", "--quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--short", "--no-recurse", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--recurse", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--recurse", "--no-recurse", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--recurse", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "-q", "--no-quiet", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "-q", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--short", "--no-quiet", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-short", "--no-quiet", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-quiet", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--quiet", "--no-recurse", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--short", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--no-recurse", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-short", "--no-recurse", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--no-short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--short", "--no-short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-short", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--delete", "--delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-short", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--short", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--short", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-recurse", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-recurse", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "refs/heads/inner"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-quiet", "refs/heads/inner"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-delete", "refs/heads/inner"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--delete", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "--delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "-d", "--no-delete", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--no-delete", "-d", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "-d", "-d", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "--delete", "-d", "refs/heads/outer"].as_slice(),
+        ["symbolic-ref", "-d", "--delete", "refs/heads/outer"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin symbolic-ref"),
+            command_any_output("git", git_repo.path(), args, "git symbolic-ref"),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join(".git/HEAD")).expect("read zmin HEAD"),
+        fs::read_to_string(git_repo.path().join(".git/HEAD")).expect("read git HEAD")
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join(".git/logs/HEAD")).expect("read zmin HEAD reflog"),
+        fs::read_to_string(git_repo.path().join(".git/logs/HEAD")).expect("read git HEAD reflog")
+    );
+
+    let git_detached = committed_repo();
+    let zmin_detached = committed_repo();
+    for repo in [git_detached.path(), zmin_detached.path()] {
+        let head = git(repo, ["rev-parse", "HEAD"]);
+        git(repo, ["checkout", "-q", head.trim()]);
+    }
+
+    for args in [
+        ["symbolic-ref", "--quiet", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "-q", "--no-quiet", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-quiet", "-q", "HEAD"].as_slice(),
+        ["symbolic-ref", "-q", "-q", "HEAD"].as_slice(),
+        ["symbolic-ref", "--short", "--short", "HEAD"].as_slice(),
+        ["symbolic-ref", "--no-short", "--no-short", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_detached.path(), args, "zmin symbolic-ref"),
+            command_any_output("git", git_detached.path(), args, "git symbolic-ref"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn show_ref_exists_and_quiet_verify_failure_modes_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["branch", "feature"]);
+        git(repo, ["tag", "-a", "v1", "-m", "v1"]);
+    }
+
+    for args in [
+        ["show-ref", "--exists", "refs/heads/missing"].as_slice(),
+        ["show-ref", "--exists", "refs/tags/v1"].as_slice(),
+        ["show-ref", "--exists", "HEAD"].as_slice(),
+        ["show-ref", "--exists"].as_slice(),
+        ["show-ref", "--exists", "refs/heads/main", "refs/tags/v1"].as_slice(),
+        ["show-ref", "-q", "--verify", "refs/heads/missing"].as_slice(),
+        ["show-ref", "-q", "--verify", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--hash", "-q", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--hash", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--hash", "refs/heads/missing"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin show-ref"),
+            command_any_output("git", git_repo.path(), args, "git show-ref"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn show_ref_option_combinations_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["branch", "feature"]);
+        git(repo, ["tag", "-a", "v1", "-m", "v1"]);
+    }
+
+    for args in [
+        ["show-ref", "--head", "--heads", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--head", "--heads"].as_slice(),
+        ["show-ref", "--tags", "--hash=12"].as_slice(),
+        ["show-ref", "--heads", "--hash=12"].as_slice(),
+        ["show-ref", "--branches", "--hash=12"].as_slice(),
+        ["show-ref", "--dereference", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--dereference"].as_slice(),
+        ["show-ref", "--head", "--heads", "--hash=12"].as_slice(),
+        ["show-ref", "--hash=12", "--head", "--heads"].as_slice(),
+        ["show-ref", "--verify", "--hash=12", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--hash=12", "refs/tags/v1"].as_slice(),
+        ["show-ref", "--head", "--branches", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--head", "--branches"].as_slice(),
+        ["show-ref", "--heads", "--tags", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--heads", "--tags"].as_slice(),
+        ["show-ref", "--heads", "--tags", "--hash=12"].as_slice(),
+        ["show-ref", "--head", "--tags", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--head", "--tags"].as_slice(),
+        ["show-ref", "--head", "--tags", "--hash=12"].as_slice(),
+        ["show-ref", "--hash=12", "--head", "--tags"].as_slice(),
+        ["show-ref", "--head", "--heads", "--tags", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--head", "--heads", "--tags"].as_slice(),
+        ["show-ref", "--head", "--heads", "--tags", "--hash=12"].as_slice(),
+        ["show-ref", "--verify", "--head", "--hash", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--head", "--hash=12", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--tags", "--hash=12", "refs/tags/v1"].as_slice(),
+        ["show-ref", "--head", "--branches", "--tags", "--hash"].as_slice(),
+        ["show-ref", "--hash", "--head", "--branches", "--tags"].as_slice(),
+        ["show-ref", "--head", "--branches", "--tags", "--hash=12"].as_slice(),
+        ["show-ref", "--hash=12", "--head", "--branches", "--tags"].as_slice(),
+        ["show-ref", "--verify", "--heads", "--hash", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--heads", "--hash=12", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--branches", "--hash=12", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--head", "--heads", "--hash", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--head", "--heads", "--hash=12", "refs/heads/main"].as_slice(),
+        ["show-ref", "--verify", "--head", "--tags", "--hash=12", "refs/tags/v1"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin show-ref"),
+            command_any_output("git", git_repo.path(), args, "git show-ref"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn show_ref_exclude_existing_matches_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["branch", "feature"]);
+        git(repo, ["tag", "-a", "v1", "-m", "v1"]);
+    }
+
+    let stdin = "refs/heads/main\nrefs/heads/missing\nrefs/tags/v1\nabc\n deadbeef refs/heads/other\nrefs/heads/missing^{}\n";
+    for args in [
+        ["show-ref", "--exclude-existing"].as_slice(),
+        ["show-ref", "--exclude-existing=refs/heads/"].as_slice(),
+        ["show-ref", "--exclude-existing=refs/tags/"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, stdin, "zmin show-ref"),
+            command_any_output_with_stdin("git", git_repo.path(), args, stdin, "git show-ref"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn update_ref_pseudoref_matches_stock_git_and_resolves_revision() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
@@ -133,6 +418,56 @@ fn refs_verify_matches_stock_git_for_healthy_repository() {
         ["refs", "verify"].as_slice(),
         ["refs", "verify", "--verbose"].as_slice(),
         ["refs", "verify", "--strict"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin refs verify"),
+            command_any_output("git", repo.path(), args, "git refs verify"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn refs_verify_toggle_combinations_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"refs verify toggles\n").expect("write file");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["branch", "feature"]);
+    git(repo.path(), ["tag", "v1"]);
+
+    for args in [
+        ["refs", "verify", "--no-verbose"].as_slice(),
+        ["refs", "verify", "--no-strict"].as_slice(),
+        ["refs", "verify", "--strict", "--verbose"].as_slice(),
+        ["refs", "verify", "--verbose", "--strict"].as_slice(),
+        ["refs", "verify", "--strict", "--no-strict"].as_slice(),
+        ["refs", "verify", "--no-strict", "--strict"].as_slice(),
+        ["refs", "verify", "--verbose", "--no-verbose"].as_slice(),
+        ["refs", "verify", "--no-verbose", "--verbose"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin refs verify"),
+            command_any_output("git", repo.path(), args, "git refs verify"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn refs_verify_invalid_option_failures_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"refs verify invalid\n").expect("write file");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    for args in [
+        ["refs", "verify", "--dry-run"].as_slice(),
+        ["refs", "verify", "--ref-format=files"].as_slice(),
+        ["refs", "verify", "--ref-format=reftable"].as_slice(),
+        ["refs", "verify", "--ref-format="].as_slice(),
     ] {
         assert_eq!(
             command_any_output(zmin_bin(), repo.path(), args, "zmin refs verify"),

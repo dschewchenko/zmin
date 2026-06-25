@@ -7,10 +7,10 @@ use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    command_any_output, command_failure_output_with_env, command_output_with_env,
-    command_stdout_bytes, configure_identity, git, git_failure_output, git_init, git_status,
-    git_with_env, git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_failure_output,
-    write_file, zmin_bin,
+    assert_repository_state_matches, command_any_output, command_failure_output_with_env,
+    command_output_with_env, command_stdout_bytes, configure_identity, git, git_failure_output,
+    git_init, git_status, git_args, git_with_env, git_with_stdin, git_with_stdin_args, run_zmin,
+    run_zmin_args, run_zmin_failure_output, write_file, zmin_bin,
 };
 
 fn pack_refs_fixture_repo() -> TempDir {
@@ -336,6 +336,10 @@ fn ref_file_list(repo: &std::path::Path) -> Vec<String> {
     refs
 }
 
+fn packed_refs_file(repo: &std::path::Path) -> Option<String> {
+    fs::read_to_string(repo.join(".git/packed-refs")).ok()
+}
+
 fn collect_ref_files(dir: &std::path::Path, prefix: &str, refs: &mut Vec<String>) {
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -392,6 +396,45 @@ fn commit_graph_verify_header_variants_match_stock_git() {
             command_any_output("git", git_repo.path(), &["commit-graph", "verify"], "git",),
             "{label}"
         );
+    }
+}
+
+#[test]
+fn commit_graph_option_combinations_match_stock_git() {
+    for args in [
+        &["commit-graph", "write", "--reachable", "--progress"][..],
+        &["commit-graph", "write", "--reachable", "--no-progress"],
+        &["commit-graph", "write", "--object-dir=.git/objects", "--reachable"],
+        &["commit-graph", "write", "--reachable", "--progress", "--no-progress"],
+        &["commit-graph", "write", "--reachable", "--no-progress", "--progress"],
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "{args:?}"
+        );
+        assert_repository_state_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    for args in [
+        &["commit-graph", "verify", "--progress"][..],
+        &["commit-graph", "verify", "--no-progress"],
+        &["commit-graph", "verify", "--object-dir=.git/objects"],
+        &["commit-graph", "verify", "--progress", "--no-progress"],
+        &["commit-graph", "verify", "--no-progress", "--progress"],
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        git(git_repo.path(), ["commit-graph", "write", "--reachable"]);
+        run_zmin(zmin_repo.path(), ["commit-graph", "write", "--reachable"]);
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "{args:?}"
+        );
+        assert_repository_state_matches(git_repo.path(), zmin_repo.path());
     }
 }
 
@@ -706,6 +749,26 @@ fn pack_refs_matches_stock_git_for_default_all_and_no_prune() {
         ref_file_list(zmin_repo.path()),
         ref_file_list(git_repo.path())
     );
+}
+
+#[test]
+fn pack_refs_matches_stock_git_for_auto_include_and_exclude() {
+    for args in [
+        ["pack-refs", "--auto"].as_slice(),
+        ["pack-refs", "--include", "refs/heads/feature"].as_slice(),
+        ["pack-refs", "--exclude", "refs/heads/feature"].as_slice(),
+        ["pack-refs", "--all", "--exclude", "refs/heads/feature"].as_slice(),
+    ] {
+        let git_repo = pack_refs_fixture_repo();
+        let zmin_repo = pack_refs_fixture_repo();
+        git_args(git_repo.path(), args);
+        run_zmin_args(zmin_repo.path(), args);
+        assert_eq!(packed_refs_file(zmin_repo.path()), packed_refs_file(git_repo.path()));
+        assert_eq!(
+            ref_file_list(zmin_repo.path()),
+            ref_file_list(git_repo.path())
+        );
+    }
 }
 
 #[test]
@@ -2375,6 +2438,61 @@ fn maintenance_run_schedule_task_and_auto_failures_match_stock_git() {
 }
 
 #[test]
+fn maintenance_no_schedule_failures_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    for args in [
+        ["maintenance", "run", "--no-schedule"].as_slice(),
+        ["maintenance", "run", "--schedule=daily", "--no-schedule"].as_slice(),
+        ["maintenance", "run", "--task=gc", "--no-schedule"].as_slice(),
+        ["maintenance", "run", "--schedule=hourly", "--no-schedule", "--task=gc"].as_slice(),
+        ["maintenance", "run", "--no-schedule", "--schedule=hourly", "--task=gc"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn maintenance_run_no_auto_and_no_quiet_match_stock_git() {
+    for args in [
+        ["maintenance", "run", "--task=gc", "--no-quiet"].as_slice(),
+        ["maintenance", "run", "--task=gc", "--quiet", "--no-quiet"].as_slice(),
+        ["maintenance", "run", "--task=gc", "--no-quiet", "--quiet"].as_slice(),
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(pack_file_count(zmin_repo.path()), pack_file_count(git_repo.path()));
+        assert_eq!(git_status(zmin_repo.path(), ["fsck", "--strict"]), 0);
+    }
+
+    for args in [
+        ["maintenance", "run", "--task=gc", "--no-auto"].as_slice(),
+        ["maintenance", "run", "--task=gc", "--auto", "--no-auto"].as_slice(),
+        ["maintenance", "run", "--task=gc", "--no-auto", "--auto"].as_slice(),
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(pack_file_count(zmin_repo.path()), pack_file_count(git_repo.path()));
+        assert_eq!(git_status(zmin_repo.path(), ["fsck", "--strict"]), 0);
+    }
+}
+
+#[test]
 fn maintenance_prefetch_noops_without_remotes_like_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
@@ -2622,4 +2740,51 @@ fn prune_invalid_expire_value_matches_stock_git() {
         run_zmin_failure_output(zmin_repo.path(), &["prune", "--expire=bogus"]),
         git_failure_output(git_repo.path(), &["prune", "--expire=bogus"])
     );
+}
+
+#[test]
+fn prune_matches_stock_git_for_documented_progress_and_verbose_flags() {
+    for (args, keeps_object) in [
+        (vec!["prune", "--dry-run", "--expire=now"], true),
+        (vec!["prune", "--verbose", "--expire=now"], false),
+        (vec!["prune", "-v", "--expire=now"], false),
+        (vec!["prune", "--progress", "--expire=now"], false),
+        (vec!["prune", "--no-progress", "--expire=now"], false),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let (git_pruned, git_kept, git_staged) = prune_fixture(git_repo.path());
+        let (zmin_pruned, zmin_kept, zmin_staged) = prune_fixture(zmin_repo.path());
+        assert_eq!(zmin_pruned, git_pruned);
+        assert_eq!(zmin_kept, git_kept);
+        assert_eq!(zmin_staged, git_staged);
+
+        let stock_args = args
+            .iter()
+            .copied()
+            .chain([git_kept.as_str()])
+            .collect::<Vec<_>>();
+        let zmin_args = args
+            .iter()
+            .copied()
+            .chain([zmin_kept.as_str()])
+            .collect::<Vec<_>>();
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), &zmin_args),
+            git_args(git_repo.path(), &stock_args)
+        );
+        assert_eq!(loose_object_exists(zmin_repo.path(), &zmin_pruned), keeps_object);
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_pruned),
+            loose_object_exists(git_repo.path(), &git_pruned)
+        );
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_kept),
+            loose_object_exists(git_repo.path(), &git_kept)
+        );
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_staged),
+            loose_object_exists(git_repo.path(), &git_staged)
+        );
+    }
 }

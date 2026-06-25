@@ -167,13 +167,38 @@ pub(crate) fn dispatch(
             raw_args,
         ),
         runtime::Command::Pull {
+            ff,
             ff_only,
+            no_ff,
             strategies,
             rebase,
             no_rebase,
+            depth,
+            deepen,
+            unshallow,
+            update_shallow,
+            shallow_since,
+            shallow_exclude,
+            upload_pack,
             remote,
             branch,
-        } => run_pull(ff_only, strategies, rebase, no_rebase, remote, branch),
+        } => run_pull(
+            ff,
+            ff_only,
+            no_ff,
+            strategies,
+            rebase,
+            no_rebase,
+            depth,
+            deepen,
+            unshallow,
+            update_shallow,
+            shallow_since,
+            shallow_exclude,
+            upload_pack,
+            remote,
+            branch,
+        ),
         runtime::Command::Push {
             force,
             set_upstream,
@@ -215,6 +240,7 @@ pub(crate) fn dispatch(
             strict,
             no_strict,
             stateless_rpc,
+            http_backend_info_refs,
             advertise_refs,
             timeout,
             directory,
@@ -222,7 +248,7 @@ pub(crate) fn dispatch(
             strict,
             no_strict,
             stateless_rpc,
-            advertise_refs,
+            advertise_refs: advertise_refs || http_backend_info_refs,
             timeout,
             directory,
         }),
@@ -319,9 +345,12 @@ pub(crate) fn dispatch(
             refs,
         }),
         runtime::Command::HttpBackend => super::transport_commands::http_backend(),
-        runtime::Command::ReceivePack { quiet, directory } => {
-            super::transport_commands::receive_pack(quiet, directory)
-        }
+        runtime::Command::ReceivePack {
+            http_backend_info_refs,
+            quiet,
+            directory,
+        } => super::transport_commands::receive_pack(http_backend_info_refs, quiet, directory),
+
         runtime::Command::Shell { command, args } => {
             super::transport_commands::shell(command, args)
         }
@@ -417,14 +446,39 @@ pub(crate) fn run_fetch(
 }
 
 pub(crate) fn run_pull(
+    ff: bool,
     ff_only: bool,
+    no_ff: bool,
     strategies: Vec<String>,
     rebase_mode: Option<String>,
     no_rebase: bool,
+    depth: Option<String>,
+    deepen: Option<String>,
+    unshallow: bool,
+    update_shallow: bool,
+    shallow_since: Option<String>,
+    shallow_exclude: Vec<String>,
+    upload_pack: Option<String>,
     remote: Option<String>,
     branch: Option<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::transport_commands::run_pull(ff_only, strategies, rebase_mode, no_rebase, remote, branch)
+    super::transport_commands::run_pull(
+        ff,
+        ff_only,
+        no_ff,
+        strategies,
+        rebase_mode,
+        no_rebase,
+        depth,
+        deepen,
+        unshallow,
+        update_shallow,
+        shallow_since,
+        shallow_exclude,
+        upload_pack,
+        remote,
+        branch,
+    )
 }
 
 pub(crate) fn run_push(

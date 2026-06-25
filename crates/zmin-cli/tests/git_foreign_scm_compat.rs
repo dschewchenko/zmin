@@ -5,7 +5,7 @@ use std::process::Command;
 
 use common::{
     configure_identity, git, git_failure_output, git_init, git_with_env, run_zmin,
-    run_zmin_failure_output, run_zmin_status, run_zmin_with_stdin, zmin_bin,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_stdin, stock_git_bin, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -177,51 +177,79 @@ fn cvsimport_runs_cvsps_when_patchset_file_is_not_provided() {
     assert!(cvsps_invocation.contains("module"));
 }
 
+#[cfg(unix)]
 #[test]
 fn p4_clone_imports_head_revision_into_git_refs_and_worktree() {
     let dir = TempDir::new().expect("temp dir");
     let bin = dir.path().join("bin");
     let data = dir.path().join("p4-data");
-    let target = dir.path().join("project");
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
     fs::create_dir_all(&data).expect("create p4 data");
     fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
     fs::create_dir_all(data.join("dir")).expect("create p4 dir");
     fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
     write_fake_p4(&bin, &data, &dir.path().join("p4.log"));
 
-    run_zmin_with_path(
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
         dir.path(),
         &bin,
-        [
+        &[
             "p4",
             "clone",
             "--branch",
             "master",
             "//depot/project",
-            target.to_str().expect("target path"),
+            stock_target.to_str().expect("stock target path"),
         ],
     );
+    assert_eq!(stock.0, 0, "stock git stderr: {}", stock.2);
+
+    let zmin = run_command_with_path(
+        zmin_bin(),
+        dir.path(),
+        &bin,
+        &[
+            "p4",
+            "clone",
+            "--branch",
+            "master",
+            "//depot/project",
+            zmin_target.to_str().expect("zmin target path"),
+        ],
+    );
+    assert_eq!(zmin.0, 0, "zmin stderr: {}", zmin.2);
 
     assert_eq!(
-        fs::read_to_string(target.join("a.txt")).expect("read a"),
+        fs::read_to_string(zmin_target.join("a.txt")).expect("read zmin a"),
         "alpha\n"
     );
     assert_eq!(
-        fs::read_to_string(target.join("dir/b.txt")).expect("read b"),
+        fs::read_to_string(zmin_target.join("dir/b.txt")).expect("read zmin b"),
         "bravo\n"
     );
     assert_eq!(
-        git(&target, ["rev-parse", "refs/remotes/p4/master"]),
-        git(&target, ["rev-parse", "refs/heads/master"])
+        normalize_p4_clone_stderr(&stock.2),
+        normalize_p4_clone_stderr(&zmin.2)
     );
     assert_eq!(
-        git(&target, ["config", "--get", "git-p4.depotpath"]),
-        "//depot/project"
+        git(&stock_target, ["rev-parse", "--abbrev-ref", "HEAD"]),
+        git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"])
+    );
+    assert_eq!(git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    assert_eq!(
+        git(&zmin_target, ["rev-parse", "refs/remotes/p4/master"]),
+        git(&zmin_target, ["rev-parse", "refs/heads/main"])
+    );
+    assert_eq!(
+        git(&stock_target, ["log", "-1", "--format=%B", "refs/remotes/p4/master"]),
+        git(&zmin_target, ["log", "-1", "--format=%B", "refs/remotes/p4/master"])
     );
     let log = fs::read_to_string(dir.path().join("p4.log")).expect("read p4 log");
-    assert!(log.contains("files //depot/project/..."));
-    assert!(log.contains("print -q //depot/project/a.txt#1"));
-    assert!(log.contains("print -q //depot/project/dir/b.txt#2"));
+    assert!(log.contains("-G files //depot/project/...#head"));
+    assert!(log.contains("-G describe -s 2"));
+    assert!(log.contains("-G -x - print"));
 }
 
 #[test]
@@ -229,43 +257,77 @@ fn p4_submit_opens_changed_files_and_submits_head() {
     let dir = TempDir::new().expect("temp dir");
     let bin = dir.path().join("bin");
     let data = dir.path().join("p4-data");
-    let target = dir.path().join("project");
-    let log_path = dir.path().join("p4-submit.log");
+    let seed_target = dir.path().join("seed-project");
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let stock_log_path = dir.path().join("stock-p4-submit.log");
+    let zmin_log_path = dir.path().join("zmin-p4-submit.log");
     fs::create_dir_all(&data).expect("create p4 data");
     fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
     fs::create_dir_all(data.join("dir")).expect("create p4 dir");
     fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
-    write_fake_p4(&bin, &data, &log_path);
+    write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
 
-    run_zmin_with_path(
+    let seed_clone = run_command_with_path_and_env(
+        zmin_bin(),
         dir.path(),
         &bin,
-        [
+        &[("P4_LOG_PATH", zmin_log_path.to_str().expect("zmin log path"))],
+        &[
             "p4",
             "clone",
             "--branch",
             "master",
             "//depot/project",
-            target.to_str().expect("target path"),
+            seed_target.to_str().expect("seed target path"),
         ],
     );
-    configure_identity(&target);
-    fs::write(target.join("a.txt"), b"alpha\nchanged\n").expect("modify a");
-    fs::write(target.join("new.txt"), b"new\n").expect("write new");
-    fs::remove_file(target.join("dir/b.txt")).expect("remove b");
-    git(&target, ["add", "-A"]);
-    git_with_env(&target, ["commit", "-m", "submit change"]);
+    assert_eq!(seed_clone.0, 0, "zmin clone stderr: {}", seed_clone.2);
+    copy_dir_recursive(&seed_target, &stock_target);
+    copy_dir_recursive(&seed_target, &zmin_target);
 
-    run_zmin_with_path(&target, &bin, ["p4", "submit"]);
+    for target in [&stock_target, &zmin_target] {
+        configure_identity(target);
+        git(target, ["config", "git-p4.skipSubmitEdit", "true"]);
+        fs::write(target.join("a.txt"), b"alpha\nchanged\n").expect("modify a");
+        fs::write(target.join("new.txt"), b"new\n").expect("write new");
+        fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+        git(target, ["add", "-A"]);
+        git_with_env(target, ["commit", "-m", "submit change"]);
+    }
 
-    let log = fs::read_to_string(log_path).expect("read p4 log");
+    let stock = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        &bin,
+        &[("P4_LOG_PATH", stock_log_path.to_str().expect("stock log path"))],
+        &["p4", "submit"],
+    );
+    assert_eq!(stock.0, 0, "stock submit stderr: {}", stock.2);
+    let zmin = run_command_with_path_and_env(
+        zmin_bin(),
+        &zmin_target,
+        &bin,
+        &[("P4_LOG_PATH", zmin_log_path.to_str().expect("zmin log path"))],
+        &["p4", "submit"],
+    );
+    assert_eq!(zmin.0, 0, "zmin submit stderr: {}", zmin.2);
+
+    assert_eq!(zmin.2, stock.2);
+    assert_eq!(
+        normalize_p4_submit_stdout(&zmin.1),
+        normalize_p4_submit_stdout(&stock.1)
+    );
+
+    let log = fs::read_to_string(zmin_log_path).expect("read zmin p4 log");
+    assert!(log.contains("sync"));
     assert!(log.contains("edit a.txt"));
     assert!(log.contains("add new.txt"));
     assert!(log.contains("delete dir/b.txt"));
     assert!(log.contains("submit -d submit change"));
     assert_eq!(
-        git(&target, ["rev-parse", "refs/remotes/p4/master"]),
-        git(&target, ["rev-parse", "HEAD"])
+        git(&zmin_target, ["rev-parse", "refs/remotes/p4/master"]),
+        git(&zmin_target, ["rev-parse", "HEAD"])
     );
 }
 
@@ -470,7 +532,17 @@ fn foreign_scm_adapters_cover_unsupported_and_client_failures() {
 
     assert_eq!(run_zmin_status(dir.path(), ["p4", "clone"]), 129);
     assert_eq!(run_zmin_status(dir.path(), ["p4", "submit"]), 128);
-    assert_eq!(run_zmin_status(dir.path(), ["p4", "unknown"]), 2);
+    assert_eq!(
+        run_zmin_status(dir.path(), ["p4", "unknown"]),
+        Command::new(stock_git_bin())
+            .args(["p4", "unknown"])
+            .current_dir(dir.path())
+            .output()
+            .expect("run stock git p4 unknown")
+            .status
+            .code()
+            .expect("stock git p4 unknown exit code")
+    );
     assert_eq!(
         run_zmin_with_path_status(
             dir.path(),
@@ -487,7 +559,17 @@ fn foreign_scm_adapters_cover_unsupported_and_client_failures() {
 
     assert_eq!(run_zmin_status(dir.path(), ["svn", "clone"]), 129);
     assert_eq!(run_zmin_status(dir.path(), ["svn", "dcommit"]), 128);
-    assert_eq!(run_zmin_status(dir.path(), ["svn", "unknown"]), 129);
+    assert_eq!(
+        run_zmin_status(dir.path(), ["svn", "unknown"]),
+        Command::new(stock_git_bin())
+            .args(["svn", "unknown"])
+            .current_dir(dir.path())
+            .output()
+            .expect("run stock git svn unknown")
+            .status
+            .code()
+            .expect("stock git svn unknown exit code")
+    );
     assert_eq!(
         run_zmin_with_path_status(
             dir.path(),
@@ -567,6 +649,53 @@ fn run_zmin_with_path_status<const N: usize>(
         .expect("zmin exited by signal")
 }
 
+fn run_command_with_path(
+    program: &str,
+    cwd: &std::path::Path,
+    path_prefix: &std::path::Path,
+    args: &[&str],
+) -> (i32, String, String) {
+    run_command_with_path_and_env(program, cwd, path_prefix, &[], args)
+}
+
+fn run_command_with_path_and_env(
+    program: &str,
+    cwd: &std::path::Path,
+    path_prefix: &std::path::Path,
+    envs: &[(&str, &str)],
+    args: &[&str],
+) -> (i32, String, String) {
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths(
+        std::iter::once(path_prefix.to_path_buf()).chain(std::env::split_paths(&current_path)),
+    )
+    .expect("join PATH");
+    let home = cwd.join("home");
+    fs::create_dir_all(&home).expect("create command home");
+    let output = Command::new(program)
+        .args(args)
+        .env("PATH", path)
+        .env("HOME", &home)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")
+        .current_dir(cwd)
+        .envs(envs.iter().copied())
+        .output()
+        .expect("run command");
+    (
+        output.status.code().expect("command exited by signal"),
+        String::from_utf8(output.stdout)
+            .expect("command stdout utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("command stderr utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
 fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
     stdout
         .lines()
@@ -585,6 +714,59 @@ fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn normalize_p4_clone_stderr(stderr: &str) -> String {
+    stderr
+        .replace("stock-project", "<target>")
+        .replace("zmin-project", "<target>")
+}
+
+fn normalize_p4_submit_stdout(stdout: &str) -> String {
+    stdout
+        .lines()
+        .map(|line| {
+            let line = line.trim_start_matches('\r');
+            if let Some((prefix, _)) = line.split_once(" located at ")
+            {
+                if prefix.starts_with("Perforce checkout for depot path ") {
+                    return format!("{prefix} located at <target>");
+                }
+            }
+            if let Some(rest) = line.strip_prefix("Applying ") {
+                if let Some((_, message)) = rest.split_once(' ') {
+                    return format!("Applying <commit> {message}");
+                }
+            }
+            if line.starts_with("Importing revision ")
+                && line.contains("Current branch ")
+                && line.ends_with(" is up to date.")
+            {
+                let prefix = line
+                    .split("Current branch ")
+                    .next()
+                    .expect("submit import prefix");
+                return format!("{prefix}Current branch <branch> is up to date.");
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn copy_dir_recursive(source: &std::path::Path, destination: &std::path::Path) {
+    fs::create_dir_all(destination).expect("create destination dir");
+    for entry in fs::read_dir(source).expect("read source dir") {
+        let entry = entry.expect("read source entry");
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        let file_type = entry.file_type().expect("source file type");
+        if file_type.is_dir() {
+            copy_dir_recursive(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).expect("copy file");
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -682,10 +864,9 @@ fn write_fake_p4(bin: &std::path::Path, data: &std::path::Path, log: &std::path:
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = files ]; then echo '//depot/project/a.txt#1 - add change 1 (text)'; echo '//depot/project/dir/b.txt#2 - edit change 2 (text)'; exit 0; fi\nif [ \"$1\" = print ]; then case \"$3\" in '//depot/project/a.txt#1') cat '{}/a.txt' ;; '//depot/project/dir/b.txt#2') cat '{}/dir/b.txt' ;; *) exit 1 ;; esac; exit 0; fi\ncase \"$1\" in edit|add|delete|submit) exit 0 ;; esac\nexit 1\n",
-            log.display(),
-            data.display(),
-            data.display()
+            "#!/usr/bin/env python3\nimport marshal\nimport os\nimport pathlib\nimport shutil\nimport sys\n\nLOG = pathlib.Path(os.environ.get('P4_LOG_PATH', {log:?}))\nDATA = pathlib.Path({data:?})\nargs = sys.argv[1:]\nplain_args = list(args)\nwhile plain_args[:1] and plain_args[0] == '-r' and len(plain_args) >= 2:\n    plain_args = plain_args[2:]\nCWD = pathlib.Path.cwd()\nLOG.parent.mkdir(parents=True, exist_ok=True)\nwith LOG.open('a', encoding='utf-8') as handle:\n    handle.write(' '.join(args) + '\\n')\n\nFILES = {{\n    '//depot/project/a.txt#1': (b'alpha\\n', b'add', b'1'),\n    '//depot/project/dir/b.txt#2': (b'bravo\\n', b'edit', b'2'),\n}}\n\nOPENED_TYPES = {{\n    'a.txt': 'text',\n    'dir/b.txt': 'text',\n    'new.txt': 'text',\n}}\n\ndef reset_workspace():\n    for rel in ['a.txt', 'dir/b.txt', 'new.txt', 'a.txt#1', 'dir/b.txt#2']:\n        path = CWD / rel\n        if path.exists() or path.is_symlink():\n            path.unlink()\n    shutil.rmtree(CWD / 'dir', ignore_errors=True)\n    (CWD / 'dir').mkdir(parents=True, exist_ok=True)\n    (CWD / 'a.txt').write_bytes((DATA / 'a.txt').read_bytes())\n    (CWD / 'dir' / 'b.txt').write_bytes((DATA / 'dir' / 'b.txt').read_bytes())\n\nif '-G' in args:\n    payload = []\n    if 'login' in args and '-s' in args:\n        payload.append({{b'code': b'stat', b'User': b'p4-user'}})\n    elif 'user' in args and '-o' in args:\n        payload.append({{b'code': b'stat', b'User': b'p4-user'}})\n    elif 'users' in args:\n        payload.append({{b'code': b'stat', b'User': b'p4-user', b'Email': b'a@b', b'FullName': b'git perforce import user'}})\n    elif 'describe' in args and '-s' in args:\n        payload.append({{b'code': b'stat', b'desc': b'Import snapshot', b'user': b'p4-user', b'time': b'1700000000', b'change': b'2'}})\n    elif 'changes' in args:\n        payload.append({{b'code': b'stat', b'change': b'2'}})\n    elif 'files' in args:\n        payload.extend([\n            {{b'code': b'stat', b'depotFile': b'//depot/project/a.txt', b'rev': b'1', b'action': b'add', b'change': b'1', b'type': b'text'}},\n            {{b'code': b'stat', b'depotFile': b'//depot/project/dir/b.txt', b'rev': b'2', b'action': b'edit', b'change': b'2', b'type': b'text'}},\n        ])\n    elif 'where' in args:\n        payload.append({{b'code': b'stat', b'depotFile': b'//depot/project/...', b'path': str(CWD / '...').encode()}})\n    elif 'opened' in args:\n        payload = []\n    elif 'change' in args and '-o' in args:\n        payload.append({{b'code': b'stat', b'Change': b'new', b'Client': b'fake-client', b'User': b'p4-user', b'Status': b'new', b'Description': b'<enter description here>', b'File0': b'//depot/project/a.txt', b'File1': b'//depot/project/new.txt'}})\n    elif '-x' in args and 'print' in args:\n        stdin_items = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]\n        for depot in stdin_items:\n            data, action, rev = FILES[depot]\n            payload.append({{b'code': b'stat', b'depotFile': depot.encode(), b'data': data, b'action': action, b'rev': rev, b'type': b'text'}})\n    else:\n        sys.exit(1)\n    for row in payload:\n        marshal.dump(row, sys.stdout.buffer)\n    sys.exit(0)\n\nif plain_args and plain_args[0] == 'files':\n    print('//depot/project/a.txt#1 - add change 1 (text)')\n    print('//depot/project/dir/b.txt#2 - edit change 2 (text)')\n    sys.exit(0)\nif plain_args and plain_args[0] == 'print':\n    depot = plain_args[2]\n    rel = depot.removeprefix('//depot/project/').split('#', 1)[0]\n    sys.stdout.buffer.write((DATA / rel).read_bytes())\n    sys.exit(0)\nif plain_args and plain_args[0] == 'sync':\n    reset_workspace()\n    sys.exit(0)\nif plain_args and plain_args[0] == 'diff':\n    sys.exit(0)\nif plain_args and plain_args[0] == 'opened':\n    if len(plain_args) > 1 and plain_args[1] in OPENED_TYPES:\n        print(plain_args[1] + '#1 - opened for edit change 1 (' + OPENED_TYPES[plain_args[1]] + ')')\n    sys.exit(0)\nif plain_args and plain_args[0] in {{'edit', 'add', 'delete', 'submit', 'revert', 'reopen'}}:\n    sys.exit(0)\nsys.exit(1)\n",
+            log = log.display().to_string(),
+            data = data.display().to_string(),
         ),
     )
     .expect("write fake p4");

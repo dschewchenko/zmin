@@ -30,7 +30,7 @@ fn clone_unsupported_remote_helper_failure_matches_stock_git() {
 }
 
 #[test]
-fn clone_ref_format_files_is_accepted_and_reftable_is_explicitly_unsupported() {
+fn clone_ref_format_files_matches_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = create_clone_source(dir.path(), "source");
 
@@ -61,24 +61,6 @@ fn clone_ref_format_files_is_accepted_and_reftable_is_explicitly_unsupported() {
             "git"
         )
         .1
-    );
-
-    let reftable = command_output(
-        zmin_bin(),
-        dir.path(),
-        &[
-            "clone",
-            "--ref-format=reftable",
-            source.to_str().expect("source path"),
-            "zmin-reftable",
-        ],
-        "zmin",
-    );
-    assert_eq!(reftable.0, 128);
-    assert!(
-        reftable
-            .2
-            .contains("reftable ref storage is not supported yet")
     );
 }
 
@@ -367,11 +349,7 @@ fn clone_rejects_symlinked_local_object_store_like_stock_git() {
     let zmin_entry = command_output(
         zmin_bin(),
         dir.path(),
-        &[
-            "clone",
-            source.to_str().expect("source path"),
-            "zmin-entry",
-        ],
+        &["clone", source.to_str().expect("source path"), "zmin-entry"],
         "zmin",
     );
     assert_eq!(zmin_entry.0, git_entry.0);
@@ -387,11 +365,7 @@ fn fetch_rejects_symlinked_destination_object_store() {
     let source = create_clone_source(dir.path(), "source");
     run_zmin(
         dir.path(),
-        [
-            "clone",
-            source.to_str().expect("source path"),
-            "zmin-clone",
-        ],
+        ["clone", source.to_str().expect("source path"), "zmin-clone"],
     );
     let clone = dir.path().join("zmin-clone");
     let loose_object = first_loose_object(&source.join(".git/objects"));
@@ -442,11 +416,7 @@ fn clone_skips_symlink_directory_case_collision_like_stock_git() {
     let zmin_clone = command_output(
         zmin_bin(),
         dir.path(),
-        &[
-            "clone",
-            source.to_str().expect("source path"),
-            "zmin-clone",
-        ],
+        &["clone", source.to_str().expect("source path"), "zmin-clone"],
         "zmin",
     );
 
@@ -494,11 +464,7 @@ fn clone_local_repo_matches_stock_git_state() {
     );
     run_zmin(
         dir.path(),
-        [
-            "clone",
-            source.to_str().expect("source path"),
-            "zmin-clone",
-        ],
+        ["clone", source.to_str().expect("source path"), "zmin-clone"],
     );
     let git_clone = dir.path().join("git-clone");
     let zmin_clone = dir.path().join("zmin-clone");
@@ -563,11 +529,7 @@ fn clone_local_repo_matches_stock_git_state() {
             "git-no-hardlinks-clone",
             "zmin-no-hardlinks-clone",
         ),
-        (
-            "--hardlinks",
-            "git-hardlinks-clone",
-            "zmin-hardlinks-clone",
-        ),
+        ("--hardlinks", "git-hardlinks-clone", "zmin-hardlinks-clone"),
     ] {
         git(
             dir.path(),
@@ -642,10 +604,7 @@ fn clone_local_repo_matches_stock_git_state() {
         );
     }
     assert_eq!(
-        run_zmin(
-            &zmin_config_clone,
-            ["status", "--porcelain=v1", "--branch"]
-        ),
+        run_zmin(&zmin_config_clone, ["status", "--porcelain=v1", "--branch"]),
         git(&git_config_clone, ["status", "--porcelain=v1", "--branch"])
     );
 
@@ -821,12 +780,7 @@ fn clone_local_repo_matches_stock_git_state() {
     let zmin_no_tags = dir.path().join("zmin-no-tags");
     let git_no_tags = dir.path().join("git-no-tags");
     assert_eq!(
-        command_output(
-            zmin_bin(),
-            &zmin_no_tags,
-            &["show-ref", "--tags"],
-            "zmin"
-        ),
+        command_output(zmin_bin(), &zmin_no_tags, &["show-ref", "--tags"], "zmin"),
         command_output("git", &git_no_tags, &["show-ref", "--tags"], "git")
     );
     assert_eq!(
@@ -1008,10 +962,7 @@ fn clone_local_repo_matches_stock_git_state() {
         canonical_alternates(&git_shared_clone.join(".git/objects/info/alternates"))
     );
     assert_eq!(
-        run_zmin(
-            &zmin_shared_clone,
-            ["status", "--porcelain=v1", "--branch"]
-        ),
+        run_zmin(&zmin_shared_clone, ["status", "--porcelain=v1", "--branch"]),
         git(&git_shared_clone, ["status", "--porcelain=v1", "--branch"])
     );
     assert_eq!(
@@ -1188,13 +1139,7 @@ fn clone_local_repo_matches_stock_git_state() {
     );
     run_zmin(
         dir.path(),
-        [
-            "clone",
-            "--depth",
-            "1",
-            &source_file_url,
-            "zmin-file-clone",
-        ],
+        ["clone", "--depth", "1", &source_file_url, "zmin-file-clone"],
     );
     let zmin_file_clone = dir.path().join("zmin-file-clone");
     let git_file_clone = dir.path().join("git-file-clone");
@@ -1397,10 +1342,7 @@ fn clone_local_repo_matches_stock_git_state() {
         git(&git_single_tag, ["branch", "-r"])
     );
     assert_eq!(
-        run_zmin(
-            &zmin_single_tag,
-            ["config", "--get", "remote.origin.fetch"]
-        ),
+        run_zmin(&zmin_single_tag, ["config", "--get", "remote.origin.fetch"]),
         git(&git_single_tag, ["config", "--get", "remote.origin.fetch"])
     );
     assert_eq!(
@@ -1585,8 +1527,7 @@ fn clone_local_repo_matches_stock_git_state() {
         git(&git_file_no_single_branch, ["log", "--oneline", "--all"])
     );
     assert_eq!(
-        fs::read_to_string(zmin_file_no_single_branch.join(".git/shallow"))
-            .expect("zmin shallow"),
+        fs::read_to_string(zmin_file_no_single_branch.join(".git/shallow")).expect("zmin shallow"),
         fs::read_to_string(git_file_no_single_branch.join(".git/shallow")).expect("git shallow")
     );
     for (index, args) in [

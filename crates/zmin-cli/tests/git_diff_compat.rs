@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use common::{
     command_any_output_with_stdin, configure_identity, git, git_args, git_failure_output, git_init,
     git_status, git_with_env, git_with_stdin, run_zmin, run_zmin_args, run_zmin_failure_output,
-    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, zmin_bin, write_file,
+    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, write_file, zmin_bin,
 };
 
 fn command_output(command: &str, cwd: &Path, args: &[&str]) -> (i32, String, String) {
@@ -1876,11 +1876,7 @@ fn diff_check_and_no_index_errors_match_stock_git() {
     git_with_env(repo.path(), ["commit", "-m", "initial"]);
 
     assert_eq!(
-        command_output(
-            zmin_bin(),
-            repo.path(),
-            &["diff", "--check", "--", "a.txt"]
-        ),
+        command_output(zmin_bin(), repo.path(), &["diff", "--check", "--", "a.txt"]),
         command_output("git", repo.path(), &["diff", "--check", "--", "a.txt"])
     );
 

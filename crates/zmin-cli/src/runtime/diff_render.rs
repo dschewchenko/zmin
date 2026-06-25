@@ -461,7 +461,9 @@ pub(crate) fn apply_break_rewrites(
             if entry.status == IndexDiffStatus::Modified {
                 let score = diff_entry_similarity_score(context, &entry, &entry)?;
                 let dissimilarity = 100_u8.saturating_sub(score);
-                if dissimilarity >= threshold && diff_entry_break_rewrite_large_enough(context, &entry)? {
+                if dissimilarity >= threshold
+                    && diff_entry_break_rewrite_large_enough(context, &entry)?
+                {
                     entry.similarity = Some(dissimilarity);
                 }
             }
@@ -492,8 +494,10 @@ fn diff_entry_break_rewrite_large_enough(
         new_index_entry,
         context.new_source,
     )?;
-    Ok(diff_content_line_count(&old_content) >= BREAK_REWRITE_MIN_LINES
-        && diff_content_line_count(&new_content) >= BREAK_REWRITE_MIN_LINES)
+    Ok(
+        diff_content_line_count(&old_content) >= BREAK_REWRITE_MIN_LINES
+            && diff_content_line_count(&new_content) >= BREAK_REWRITE_MIN_LINES,
+    )
 }
 
 fn diff_content_line_count(content: &[u8]) -> usize {
@@ -646,10 +650,7 @@ pub(crate) fn apply_diff_skip_rotate(
     entries
 }
 
-pub(crate) fn diff_entry_matches_name(
-    entry: &zmin_git_core::IndexDiffEntry,
-    target: &str,
-) -> bool {
+pub(crate) fn diff_entry_matches_name(entry: &zmin_git_core::IndexDiffEntry, target: &str) -> bool {
     diff_display_path(&entry.path, None) == target
         || entry
             .old_path
@@ -2170,9 +2171,9 @@ pub(crate) fn apply_root_tree_diff_filter(
 ) -> Vec<RootTreeDiffEntry> {
     if diff_filter.all_or_none {
         return if diff_filter.include_mask != 0
-            && entries.iter().any(|entry| {
-                diff_filter.include_mask & diff_filter_status_bit(entry.status) != 0
-            })
+            && entries
+                .iter()
+                .any(|entry| diff_filter.include_mask & diff_filter_status_bit(entry.status) != 0)
         {
             entries
         } else {

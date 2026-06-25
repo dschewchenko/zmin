@@ -57,10 +57,10 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         });
     }
 
-    if ff_only && !no_ff {
-        return fast_forward_to(&repo, &store, &commits[0], "merge", ff_only);
-    }
     let commit_cache = CommitObjectCache::new(&store);
+    if ff_only && !no_ff {
+        return merge_ff_only(&repo, &store, &commit_cache, &commits[0]);
+    }
     let mode = MergeCommitMode { no_commit, squash };
     if !strategies.is_empty() {
         return merge_with_strategy(
@@ -84,6 +84,36 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         !no_ff && !squash,
         mode,
     )
+}
+
+fn merge_ff_only(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    target: &str,
+) -> Result<()> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head_id = refs.resolve("HEAD")?;
+    let target_id = resolve_commitish(repo, store, target)?;
+    if head_id == target_id
+        || is_ancestor_commit_with_repo_cached(repo, commit_cache, &target_id, &head_id)?
+    {
+        println!("Already up to date.");
+        return Ok(());
+    }
+    if is_ancestor_commit_with_repo_cached(repo, commit_cache, &head_id, &target_id)? {
+        return fast_forward_to_cached(repo, store, commit_cache, target, "merge", true);
+    }
+    if best_merge_base_with_repo_cached(repo, commit_cache, &head_id, &target_id)?.is_none() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "refusing to merge unrelated histories".into(),
+        });
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: "Not possible to fast-forward, aborting.".into(),
+    })
 }
 
 fn merge_abort() -> Result<()> {
@@ -234,7 +264,9 @@ fn merge_ours_strategy(
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
     let target_id = resolve_commitish(repo, store, target)?;
-    if head_id == target_id || is_ancestor_commit_cached(commit_cache, &target_id, &head_id)? {
+    if head_id == target_id
+        || is_ancestor_commit_with_repo_cached(repo, commit_cache, &target_id, &head_id)?
+    {
         println!("Already up to date.");
         return Ok(());
     }
@@ -275,15 +307,20 @@ fn merge_commit(
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
     let target_id = resolve_commitish(repo, store, target)?;
-    if head_id == target_id || is_ancestor_commit_cached(commit_cache, &target_id, &head_id)? {
+    if head_id == target_id
+        || is_ancestor_commit_with_repo_cached(repo, commit_cache, &target_id, &head_id)?
+    {
         println!("Already up to date.");
         return Ok(());
     }
-    if allow_fast_forward && is_ancestor_commit_cached(commit_cache, &head_id, &target_id)? {
+    if allow_fast_forward
+        && is_ancestor_commit_with_repo_cached(repo, commit_cache, &head_id, &target_id)?
+    {
         return fast_forward_to_cached(repo, store, commit_cache, target, "merge", false);
     }
 
-    let Some(base_id) = best_merge_base_cached(commit_cache, &head_id, &target_id)? else {
+    let Some(base_id) = best_merge_base_with_repo_cached(repo, commit_cache, &head_id, &target_id)?
+    else {
         return Err(CliError::Fatal {
             code: 128,
             message: "refusing to merge unrelated histories".into(),

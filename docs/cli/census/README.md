@@ -8,3 +8,9 @@ python3 tools/git-compat-census.py --root .
 
 Use `docs/cli/git_compatibility_census.md` as the human entry point. The TSV
 files in this directory are the machine-readable checklist and evidence layers.
+
+Two TSV files in this directory are durable reviewed source lists, not generated
+outputs:
+
+- `reviewed_complete_command_matrices.tsv`
+- `reviewed_complete_doc_option_pairs.tsv`

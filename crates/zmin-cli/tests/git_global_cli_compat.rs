@@ -153,12 +153,7 @@ fn global_bare_option_applies_to_init_like_stock_git() {
         (0, "true".to_owned(), String::new())
     );
     assert_eq!(
-        command_output(
-            "git",
-            &zmin_repo,
-            &["config", "--bool", "core.bare"],
-            "git"
-        ),
+        command_output("git", &zmin_repo, &["config", "--bool", "core.bare"], "git"),
         command_output("git", &git_repo, &["config", "--bool", "core.bare"], "git")
     );
 }
@@ -360,7 +355,11 @@ fn init_creates_stock_git_readable_repository() {
 fn init_quiet_matches_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     for (git_name, zmin_name, args) in [
-        ("git-short", "zmin-short", ["init", "-q", "-b", "main"].as_slice()),
+        (
+            "git-short",
+            "zmin-short",
+            ["init", "-q", "-b", "main"].as_slice(),
+        ),
         (
             "git-long",
             "zmin-long",
@@ -437,12 +436,7 @@ fn checkout_dotfile_path_does_not_fail_branch_ref_validation() {
     );
     run_zmin(
         dir.path(),
-        [
-            "init",
-            "-b",
-            "main",
-            zmin_repo.to_str().expect("zmin path"),
-        ],
+        ["init", "-b", "main", zmin_repo.to_str().expect("zmin path")],
     );
     configure_identity(&git_repo);
     configure_identity(&zmin_repo);
@@ -643,8 +637,7 @@ fn rev_parse_show_ref_format_invalid_storage_reports_stock_error() {
     );
     assert_eq!(zmin.0, git.0);
     assert!(
-        zmin
-            .2
+        zmin.2
             .contains("error: invalid value for 'extensions.refstorage': 'broken'"),
         "stderr: {}",
         zmin.2
@@ -1234,12 +1227,7 @@ fn global_pathspec_options_match_stock_git_for_mutating_commands() {
     );
 
     assert_eq!(
-        command_output(
-            zmin_bin(),
-            &zmin_repo,
-            &["rm", "--cached", "dir/*"],
-            "zmin"
-        ),
+        command_output(zmin_bin(), &zmin_repo, &["rm", "--cached", "dir/*"], "zmin"),
         command_output("git", &git_repo, &["rm", "--cached", "dir/*"], "git")
     );
     assert_eq!(

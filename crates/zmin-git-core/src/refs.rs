@@ -38,10 +38,13 @@ pub enum RefStorageKind {
     Reftable,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackRefsOptions {
     pub all: bool,
     pub prune: bool,
+    pub auto: bool,
+    pub include: Vec<String>,
+    pub exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,14 +206,35 @@ impl RefStore {
     }
 
     pub fn pack_refs(&self, options: PackRefsOptions) -> io::Result<()> {
+        if options.auto {
+            return Ok(());
+        }
         let packed_refs = self.read_packed_refs()?;
         let packed_names = packed_refs.keys().cloned().collect::<BTreeSet<_>>();
         let mut refs = packed_refs;
         let mut prune_names = Vec::new();
+        let use_include_patterns = !options.all && !options.include.is_empty();
 
         for name in self.loose_ref_names("refs/")? {
-            let should_pack =
-                options.all || name.starts_with("refs/tags/") || packed_names.contains(&name);
+            let excluded = options
+                .exclude
+                .iter()
+                .any(|pattern| Self::ref_glob_matches(&name, pattern));
+            let included = if use_include_patterns {
+                options
+                    .include
+                    .iter()
+                    .any(|pattern| Self::ref_glob_matches(&name, pattern))
+            } else {
+                false
+            };
+            let should_pack = if options.all {
+                !excluded
+            } else if use_include_patterns {
+                included && !excluded
+            } else {
+                (name.starts_with("refs/tags/") || packed_names.contains(&name)) && !excluded
+            };
             if !should_pack {
                 continue;
             }
@@ -245,6 +269,39 @@ impl RefStore {
             }
         }
         Ok(())
+    }
+
+    fn ref_glob_matches(name: &str, pattern: &str) -> bool {
+        let name = name.as_bytes();
+        let pattern = pattern.as_bytes();
+        let (mut name_idx, mut pattern_idx) = (0usize, 0usize);
+        let (mut star_pattern, mut star_name) = (None, 0usize);
+
+        while name_idx < name.len() {
+            if pattern_idx < pattern.len() && pattern[pattern_idx] == name[name_idx] {
+                name_idx += 1;
+                pattern_idx += 1;
+                continue;
+            }
+            if pattern_idx < pattern.len() && pattern[pattern_idx] == b'*' {
+                star_pattern = Some(pattern_idx);
+                pattern_idx += 1;
+                star_name = name_idx;
+                continue;
+            }
+            if let Some(star_idx) = star_pattern {
+                pattern_idx = star_idx + 1;
+                star_name += 1;
+                name_idx = star_name;
+                continue;
+            }
+            return false;
+        }
+
+        while pattern_idx < pattern.len() && pattern[pattern_idx] == b'*' {
+            pattern_idx += 1;
+        }
+        pattern_idx == pattern.len()
     }
 
     pub fn write_fresh_packed_refs(
@@ -1768,6 +1825,9 @@ mod tests {
         refs.pack_refs(PackRefsOptions {
             all: true,
             prune: true,
+            auto: false,
+            include: Vec::new(),
+            exclude: Vec::new(),
         })
         .expect("pack refs");
 

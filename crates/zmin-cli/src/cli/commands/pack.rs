@@ -1,7 +1,10 @@
 use crate::runtime;
 use std::path::PathBuf;
 
-pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
+pub(crate) fn dispatch(
+    command: runtime::Command,
+    raw_args: &[String],
+) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::PackObjects {
             stdout,
@@ -31,11 +34,21 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             base_name,
         }),
         runtime::Command::Bundle {
+            quiet,
+            no_quiet,
+            progress,
+            no_progress,
             operation,
             version,
             file,
             args,
-        } => run_bundle(operation, version, file, args),
+        } => {
+            let quiet = resolve_bundle_quiet(raw_args, quiet, no_quiet);
+            let no_quiet = resolve_bundle_no_quiet(raw_args, quiet, no_quiet);
+            let progress = resolve_bundle_progress(raw_args, progress, no_progress)
+                || (operation == "create" && no_quiet);
+            run_bundle(quiet, progress, false, operation, version, file, args)
+        }
         runtime::Command::IndexPack {
             stdin,
             output,
@@ -140,7 +153,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_strict: _,
         } => super::pack_commands::mktag_command(),
         runtime::Command::CommitGraph { command } => {
-            super::pack_commands::commit_graph_command(command)
+            super::pack_commands::commit_graph_command(
+                resolve_commit_graph_command_toggles(command, raw_args),
+            )
         }
         runtime::Command::MultiPackIndex {
             object_dir,
@@ -150,6 +165,98 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
     }
 }
 
+fn resolve_commit_graph_command_toggles(
+    command: runtime::CommitGraphCommand,
+    raw_args: &[String],
+) -> runtime::CommitGraphCommand {
+    match command {
+        runtime::CommitGraphCommand::Write {
+            object_dir,
+            reachable,
+            progress,
+            no_progress,
+        } => runtime::CommitGraphCommand::Write {
+            object_dir,
+            reachable,
+            progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
+            no_progress: false,
+        },
+        runtime::CommitGraphCommand::Verify {
+            object_dir,
+            progress,
+            no_progress,
+        } => runtime::CommitGraphCommand::Verify {
+            object_dir,
+            progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
+            no_progress: false,
+        },
+    }
+}
+
+fn resolve_commit_graph_progress(raw_args: &[String], progress: bool, no_progress: bool) -> bool {
+    if !progress && !no_progress {
+        return false;
+    }
+
+    let mut resolved = false;
+    for arg in raw_args {
+        match arg.as_str() {
+            "--progress" => resolved = true,
+            "--no-progress" => resolved = false,
+            _ => {}
+        }
+    }
+    resolved
+}
+
+fn resolve_bundle_progress(raw_args: &[String], progress: bool, no_progress: bool) -> bool {
+    if !progress && !no_progress {
+        return false;
+    }
+
+    let mut resolved = false;
+    for arg in raw_args {
+        match arg.as_str() {
+            "--progress" => resolved = true,
+            "--no-progress" => resolved = false,
+            _ => {}
+        }
+    }
+    resolved
+}
+
+fn resolve_bundle_quiet(raw_args: &[String], quiet: bool, no_quiet: bool) -> bool {
+    if !quiet && !no_quiet {
+        return false;
+    }
+
+    let mut resolved = false;
+    for arg in raw_args {
+        match arg.as_str() {
+            "-q" | "--quiet" => resolved = true,
+            "--no-quiet" => resolved = false,
+            _ => {}
+        }
+    }
+    resolved
+}
+
+fn resolve_bundle_no_quiet(raw_args: &[String], quiet: bool, no_quiet: bool) -> bool {
+    if !quiet && !no_quiet {
+        return false;
+    }
+
+    let mut resolved = false;
+    for arg in raw_args {
+        match arg.as_str() {
+            "-q" | "--quiet" => resolved = false,
+            "--no-quiet" => resolved = true,
+            _ => {}
+        }
+    }
+    resolved
+}
+
 pub(crate) fn run_pack_objects(
     options: runtime::PackObjectsOptions,
 ) -> std::result::Result<(), runtime::CliError> {
@@ -157,12 +264,15 @@ pub(crate) fn run_pack_objects(
 }
 
 pub(crate) fn run_bundle(
+    quiet: bool,
+    progress: bool,
+    no_progress: bool,
     operation: String,
     version: Option<String>,
     file: PathBuf,
     args: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::pack_commands::bundle(&operation, version, file, args)
+    super::pack_commands::bundle(quiet, progress, no_progress, &operation, version, file, args)
 }
 
 pub(crate) fn run_index_pack(

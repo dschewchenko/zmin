@@ -749,6 +749,7 @@ fn scalar_maintenance_command(operation: &str, force: bool, tasks: Vec<String>) 
         operation,
         auto: false,
         schedule: None,
+        no_schedule: false,
         scheduler: None,
         config_file: None,
         force,

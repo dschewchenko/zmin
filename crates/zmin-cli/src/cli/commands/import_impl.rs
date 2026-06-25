@@ -209,9 +209,7 @@ pub(crate) fn fast_export(all: bool, refs: Vec<String>) -> Result<()> {
                 wrote_ref_commit = true;
             }
         }
-        if !wrote_ref_commit
-            && let Some(mark) = state.commit_marks.get(&tip)
-        {
+        if !wrote_ref_commit && let Some(mark) = state.commit_marks.get(&tip) {
             writeln!(out, "reset {ref_name}")?;
             writeln!(out, "from :{mark}")?;
             writeln!(out)?;

@@ -828,14 +828,7 @@ fn notes_copy_stdin_no_stdin_toggles_match_stock_git_order() {
         command_output(
             "git",
             git_repo.path(),
-            &[
-                "notes",
-                "copy",
-                "--stdin",
-                "--no-stdin",
-                &git_from,
-                &git_to,
-            ],
+            &["notes", "copy", "--stdin", "--no-stdin", &git_from, &git_to,],
             "git",
         )
     );
@@ -1514,7 +1507,10 @@ fn notes_remove_ignore_missing_and_stdin_match_stock_git() {
     let zmin_second = git(zmin_repo.path(), ["rev-parse", "HEAD"]);
     assert_eq!(zmin_second, git_second);
 
-    git_with_env(git_repo.path(), ["notes", "add", "-m", "second", &git_second]);
+    git_with_env(
+        git_repo.path(),
+        ["notes", "add", "-m", "second", &git_second],
+    );
     run_zmin_with_env(
         zmin_repo.path(),
         ["notes", "add", "-m", "second", &zmin_second],
@@ -1523,13 +1519,7 @@ fn notes_remove_ignore_missing_and_stdin_match_stock_git() {
         command_output(
             zmin_bin(),
             zmin_repo.path(),
-            &[
-                "notes",
-                "remove",
-                "--stdin",
-                "--no-stdin",
-                &zmin_second,
-            ],
+            &["notes", "remove", "--stdin", "--no-stdin", &zmin_second,],
             "zmin",
         ),
         command_output(
@@ -1544,7 +1534,10 @@ fn notes_remove_ignore_missing_and_stdin_match_stock_git() {
         git_status(git_repo.path(), ["notes", "show", &git_second])
     );
 
-    git_with_env(git_repo.path(), ["notes", "add", "-m", "second", &git_second]);
+    git_with_env(
+        git_repo.path(),
+        ["notes", "add", "-m", "second", &git_second],
+    );
     run_zmin_with_env(
         zmin_repo.path(),
         ["notes", "add", "-m", "second", &zmin_second],

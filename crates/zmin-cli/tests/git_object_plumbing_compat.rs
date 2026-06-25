@@ -7,9 +7,9 @@ use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
     clone_repo_fixture, command_any_output_with_stdin_bytes, command_stdout_bytes,
-    configure_identity, git, git_args, git_init, git_status, git_with_env, git_with_stdin,
-    git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_status, run_zmin_with_env,
-    run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
+    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
+    git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_failure_output,
+    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
 };
 
 fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
@@ -241,6 +241,56 @@ fn hash_object_and_cat_file_match_stock_git() {
     assert_eq!(
         run_zmin_status(repo.path(), ["cat-file", "-e", &git_id]),
         git_status(repo.path(), ["cat-file", "-e", &git_id])
+    );
+}
+
+#[test]
+fn hash_object_matches_stock_git_for_documented_long_option_modes() {
+    let repo = git_init();
+    fs::write(repo.path().join("a.txt"), b"alpha\n").expect("write fixture");
+
+    assert_eq!(
+        run_zmin_with_stdin(repo.path(), ["hash-object", "--path=a.txt", "--stdin"], "stdin\n"),
+        git_with_stdin(repo.path(), ["hash-object", "--path=a.txt", "--stdin"], "stdin\n")
+    );
+    assert_eq!(
+        run_zmin_with_stdin(repo.path(), ["hash-object", "--stdin-paths"], "a.txt\n"),
+        git_with_stdin(repo.path(), ["hash-object", "--stdin-paths"], "a.txt\n")
+    );
+    assert_eq!(
+        run_zmin_with_stdin(
+            repo.path(),
+            ["hash-object", "--stdin-paths", "--no-filters"],
+            "a.txt\n",
+        ),
+        git_with_stdin(
+            repo.path(),
+            ["hash-object", "--stdin-paths", "--no-filters"],
+            "a.txt\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin(repo.path(), ["hash-object", "--literally", "--stdin"], "stdin\n"),
+        git_with_stdin(repo.path(), ["hash-object", "--literally", "--stdin"], "stdin\n")
+    );
+
+    assert_eq!(
+        run_zmin_failure_output(
+            repo.path(),
+            &["hash-object", "--no-filters", "--stdin", "--path=a.txt"],
+        ),
+        git_failure_output(
+            repo.path(),
+            &["hash-object", "--no-filters", "--stdin", "--path=a.txt"],
+        )
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["hash-object", "--stdin-paths", "--path=a.txt"]),
+        git_failure_output(repo.path(), &["hash-object", "--stdin-paths", "--path=a.txt"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["hash-object", "--stdin", "--stdin-paths"]),
+        git_failure_output(repo.path(), &["hash-object", "--stdin", "--stdin-paths"])
     );
 }
 
@@ -896,6 +946,58 @@ fn show_index_matches_stock_git_for_pack_index_stdin() {
 }
 
 #[test]
+fn show_index_option_order_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"hello\n").expect("write fixture");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["repack", "-adq"]);
+    let idx = fs::read(first_pack_index(repo.path())).expect("read pack index");
+
+    for args in [
+        &["show-index", "--object-format=sha256", "--object-format=sha1"][..],
+        &["show-index", "--object-format=bogus", "--no-object-format"][..],
+        &["show-index", "--no-object-format", "--object-format=bogus"][..],
+        &["show-index", "--object-format=sha256"][..],
+        &["show-index", "--object-format=sha1", "--object-format=sha256"][..],
+        &["show-index", "--no-object-format", "--object-format=sha256"][..],
+        &["show-index", "--object-format", "sha1", "--object-format=sha1"][..],
+        &["show-index", "--object-format=sha1", "--object-format", "sha1"][..],
+        &["show-index", "--no-object-format", "--object-format=sha1", "--no-object-format"][..],
+        &["show-index", "--object-format=sha1", "--no-object-format", "--object-format=sha1"][..],
+        &["show-index", "--object-format=sha256", "--no-object-format"][..],
+        &["show-index", "--no-object-format", "--object-format=bogus", "--no-object-format"][..],
+        &["show-index", "--object-format=bogus", "--no-object-format", "--object-format=sha1"][..],
+        &["show-index", "--object-format", "sha1", "--object-format", "sha1"][..],
+        &["show-index", "--object-format=sha1", "--object-format=sha1", "--no-object-format"][..],
+        &["show-index", "--no-object-format", "--object-format", "sha1", "--no-object-format"][..],
+        &["show-index", "--object-format", "sha1", "--no-object-format", "--object-format", "sha1"][..],
+        &["show-index", "--object-format=sha256", "--object-format=sha256"][..],
+        &["show-index", "--object-format=sha256", "--object-format=sha256", "--no-object-format"][..],
+        &["show-index", "--object-format=bogus", "--no-object-format", "--no-object-format"][..],
+        &["show-index", "--no-object-format", "--object-format=sha1", "--object-format=sha1"][..],
+        &["show-index", "--object-format=sha1", "--no-object-format", "--no-object-format"][..],
+        &["show-index", "--no-object-format", "--object-format=sha256", "--no-object-format"][..],
+        &["show-index", "--object-format", "sha1", "--object-format", "sha1", "--no-object-format"][..],
+        &["show-index", "--object-format", "sha1", "--object-format", "sha1", "--no-object-format", "--object-format", "sha1"][..],
+        &["show-index", "--no-object-format", "--object-format", "sha1", "--object-format", "sha1", "--no-object-format"][..],
+        &["show-index", "--object-format=sha1", "--object-format=sha1", "--object-format=sha1"][..],
+        &["show-index", "--object-format=sha256", "--object-format=sha256", "--object-format=sha256"][..],
+        &["show-index", "--object-format=sha256", "--object-format=sha256", "--no-object-format", "--object-format=sha1"][..],
+        &["show-index", "--object-format=bogus", "--no-object-format", "--object-format=sha1", "--no-object-format"][..],
+        &["show-index", "--no-object-format", "--no-object-format", "--object-format=sha1"][..],
+        &["show-index", "--no-object-format", "--no-object-format", "--object-format=sha256"][..],
+        &["show-index", "--object-format=sha1", "--no-object-format", "--object-format=sha256", "--no-object-format"][..],
+    ] {
+        assert_eq!(
+            command_any_output_with_stdin_bytes(zmin_bin(), repo.path(), &args, &idx, "zmin"),
+            command_any_output_with_stdin_bytes("git", repo.path(), &args, &idx, "git")
+        );
+    }
+}
+
+#[test]
 fn show_index_rejects_unsupported_pack_index_version_like_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -1183,8 +1285,7 @@ fn show_pretty_raw_for_commit_tree_records_tree_like_stock_git() {
     assert_eq!(zmin_tree, git_tree);
 
     let git_commit = git_with_stdin(git_repo.path(), ["commit-tree", &git_tree], "NO\n");
-    let zmin_commit =
-        run_zmin_with_stdin(zmin_repo.path(), ["commit-tree", &zmin_tree], "NO\n");
+    let zmin_commit = run_zmin_with_stdin(zmin_repo.path(), ["commit-tree", &zmin_tree], "NO\n");
     let git_raw = git(
         git_repo.path(),
         ["show", "--pretty=raw", "--no-patch", &git_commit],

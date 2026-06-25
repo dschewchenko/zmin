@@ -81,12 +81,13 @@ run_stdin_case() {
   local git_work="$tmpdir/${name}.git"
   local zmin_work="$tmpdir/${name}.zmin"
   local input="$tmpdir/${name}.stdin"
+  local stdin_text="${CHECK_MAILMAP_STDIN_TEXT:-Alias Name <alias@example.com>\n}"
   local git_exit=0
   local zmin_exit=0
 
   cp -R "$base_seed" "$git_work"
   cp -R "$base_seed" "$zmin_work"
-  printf 'Alias Name <alias@example.com>\n' >"$input"
+  printf '%b' "$stdin_text" >"$input"
 
   set +e
   (cd "$git_work" && "$GIT_BIN" "$@") <"$input" >"$tmpdir/${name}.git.out" 2>"$tmpdir/${name}.git.err"
@@ -110,9 +111,24 @@ make_seed_repo "$base_seed"
 run_case check_mailmap_positional check-mailmap 'Alias Name <alias@example.com>'
 run_case check_mailmap_multiple check-mailmap 'Alias Name <alias@example.com>' 'Other <old@example.com>'
 run_case check_mailmap_mailmap_file check-mailmap --mailmap-file alt.mailmap 'Alt Alias <alt-alias@example.com>'
+run_case check_mailmap_mailmap_file_equals check-mailmap --mailmap-file=alt.mailmap 'Alt Alias <alt-alias@example.com>'
 blob_oid="$(cat "$base_seed/blob.oid")"
 run_case check_mailmap_mailmap_blob check-mailmap --mailmap-blob "$blob_oid" 'Blob Alias <blob-alias@example.com>'
+run_case check_mailmap_mailmap_blob_equals check-mailmap --mailmap-blob="$blob_oid" 'Blob Alias <blob-alias@example.com>'
+run_case check_mailmap_mailmap_file_then_blob check-mailmap --mailmap-file alt.mailmap --mailmap-blob "$blob_oid" 'Blob Alias <blob-alias@example.com>'
+run_case check_mailmap_mailmap_blob_then_file check-mailmap --mailmap-blob "$blob_oid" --mailmap-file alt.mailmap 'Alt Alias <alt-alias@example.com>'
+run_case check_mailmap_mailmap_file_equals_then_blob_equals check-mailmap --mailmap-file=alt.mailmap --mailmap-blob="$blob_oid" 'Blob Alias <blob-alias@example.com>'
 run_stdin_case check_mailmap_stdin_repeated check-mailmap --stdin --stdin
+run_stdin_case check_mailmap_stdin_tripled check-mailmap --stdin --stdin --stdin
+CHECK_MAILMAP_STDIN_TEXT='Alt Alias <alt-alias@example.com>\n' run_stdin_case check_mailmap_stdin_with_mailmap_file check-mailmap --stdin --mailmap-file alt.mailmap
+CHECK_MAILMAP_STDIN_TEXT='Blob Alias <blob-alias@example.com>\n' run_stdin_case check_mailmap_stdin_with_mailmap_blob check-mailmap --stdin --mailmap-blob "$blob_oid"
+CHECK_MAILMAP_STDIN_TEXT='Blob Alias <blob-alias@example.com>\n' run_stdin_case check_mailmap_stdin_file_then_blob check-mailmap --stdin --mailmap-file alt.mailmap --mailmap-blob "$blob_oid"
+CHECK_MAILMAP_STDIN_TEXT='Alt Alias <alt-alias@example.com>\n' run_stdin_case check_mailmap_stdin_blob_then_file check-mailmap --stdin --mailmap-blob "$blob_oid" --mailmap-file alt.mailmap
+run_stdin_case check_mailmap_no_then_stdin check-mailmap --no-stdin --stdin
+run_stdin_case check_mailmap_stdin_stdin_no_stdin_stdin check-mailmap --stdin --stdin --no-stdin --stdin
+CHECK_MAILMAP_STDIN_TEXT='Alt Alias <alt-alias@example.com>\n' run_stdin_case check_mailmap_stdin_no_stdin_stdin_file check-mailmap --stdin --no-stdin --stdin --mailmap-file alt.mailmap
+run_case check_mailmap_stdin_no_stdin_with_mailmap_file_positional check-mailmap --stdin --no-stdin --mailmap-file alt.mailmap 'Alt Alias <alt-alias@example.com>'
+run_case check_mailmap_stdin_no_stdin_with_mailmap_blob_positional check-mailmap --stdin --no-stdin --mailmap-blob "$blob_oid" 'Blob Alias <blob-alias@example.com>'
 run_stdin_case check_mailmap_no_stdin_rejected check-mailmap --no-stdin
 run_stdin_case check_mailmap_stdin_rejects_value check-mailmap --stdin=true
 run_stdin_case check_mailmap_stdin_rejects_empty_value check-mailmap --stdin=

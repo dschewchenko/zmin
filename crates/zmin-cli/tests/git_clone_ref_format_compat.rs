@@ -6,7 +6,7 @@ use common::{
 use tempfile::TempDir;
 
 #[test]
-fn clone_ref_format_reftable_is_open_gap_against_stock_git() {
+fn clone_ref_format_reftable_matches_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
     git(
@@ -52,10 +52,33 @@ fn clone_ref_format_reftable_is_open_gap_against_stock_git() {
         ],
         "zmin clone --ref-format=reftable",
     );
-    assert_eq!(zmin.0, 128);
-    assert!(zmin.1.is_empty());
-    assert!(zmin.2.contains("reftable ref storage is not supported yet"));
-    assert!(!dir.path().join("zmin-reftable").exists());
+    assert_eq!(zmin.0, 0);
+    assert_eq!(
+        command_output(
+            "git",
+            &dir.path().join("zmin-reftable"),
+            &["rev-parse", "--show-ref-format"],
+            "git rev-parse --show-ref-format"
+        )
+        .1,
+        "reftable"
+    );
+    assert_eq!(
+        command_output(
+            "git",
+            &dir.path().join("zmin-reftable"),
+            &["rev-parse", "HEAD"],
+            "git rev-parse HEAD"
+        )
+        .1,
+        command_output(
+            "git",
+            &dir.path().join("git-reftable"),
+            &["rev-parse", "HEAD"],
+            "git rev-parse HEAD"
+        )
+        .1
+    );
 }
 
 #[test]

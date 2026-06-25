@@ -13,6 +13,23 @@ use common::{
 use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
+fn normalize_bundle_progress_result(result: (i32, String, String)) -> (i32, String, String) {
+    let stderr = result
+        .2
+        .lines()
+        .map(|line| {
+            if let Some((prefix, rest)) = line.split_once(" bytes | ") {
+                if let Some((_, suffix)) = rest.split_once(", done.") {
+                    return format!("{prefix} bytes | <rate>, done.{suffix}");
+                }
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (result.0, result.1, stderr)
+}
+
 #[test]
 fn fsck_matches_stock_git_for_healthy_repo_and_detects_corrupt_object() {
     let repo = committed_repo();
@@ -3415,6 +3432,582 @@ fn bundle_create_version_values_match_stock_git() {
             );
         }
     }
+
+    let version_bundle = bundle_dir.path().join("version-quiet.bundle");
+    let version_bundle_arg = version_bundle.to_str().expect("version quiet bundle path");
+    for args in [
+        ["bundle", "create", "--version=2", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--quiet", "--version=2", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "-q", "--version=2", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=2", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=2",
+            "--no-quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--no-quiet",
+            "--version=2",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        ["bundle", "create", "--version=3", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--quiet", "--version=3", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "-q", "--version=3", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=3", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=3",
+            "--no-quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--no-quiet",
+            "--version=3",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        ["bundle", "create", "--version=-1", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--quiet", "--version=-1", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "-q", "--version=-1", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=-1", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=-1",
+            "--no-quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--no-quiet",
+            "--version=-1",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        ["bundle", "create", "--version=1", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--quiet", "--version=1", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "-q", "--version=1", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=1", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=1",
+            "--no-quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--no-quiet",
+            "--version=1",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        ["bundle", "create", "--version=foo", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--quiet", "--version=foo", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "-q", "--version=foo", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=foo", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--quiet", "--version=", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "-q", "--version=", version_bundle_arg, "HEAD"].as_slice(),
+        ["bundle", "create", "--version=", "-q", version_bundle_arg, "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            normalize_bundle_progress_result(command_any_output(
+                zmin_bin(),
+                source.path(),
+                args,
+                "zmin",
+            )),
+            normalize_bundle_progress_result(command_any_output(
+                "git",
+                source.path(),
+                args,
+                "git",
+            )),
+            "bundle create combo {args:?}"
+        );
+        let bundle_exists = version_bundle.exists();
+        if bundle_exists {
+            assert_eq!(
+                git_status_args(source.path(), &["bundle", "verify", version_bundle_arg]),
+                0,
+                "stock Git should verify zmin combo bundle for {args:?}"
+            );
+            std::fs::remove_file(&version_bundle).expect("remove version combo bundle");
+        }
+    }
+}
+
+#[test]
+fn bundle_quiet_flags_match_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+
+    let bundle_dir = TempDir::new().expect("bundle dir");
+    for (bundle_name, quiet_arg) in [
+        ("quiet.bundle", "--quiet"),
+        ("short-quiet.bundle", "-q"),
+    ] {
+        let git_bundle = bundle_dir.path().join(format!("git-{bundle_name}"));
+        let zmin_bundle = bundle_dir.path().join(format!("zmin-{bundle_name}"));
+        let verify_bundle = bundle_dir.path().join(format!("verify-{bundle_name}"));
+        let git_bundle_arg = git_bundle.to_str().expect("git bundle path");
+        let zmin_bundle_arg = zmin_bundle.to_str().expect("zmin bundle path");
+        let verify_bundle_arg = verify_bundle.to_str().expect("verify bundle path");
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                source.path(),
+                &["bundle", "create", quiet_arg, zmin_bundle_arg, "HEAD"],
+                "zmin",
+            ),
+            command_any_output(
+                "git",
+                source.path(),
+                &["bundle", "create", quiet_arg, git_bundle_arg, "HEAD"],
+                "git",
+            ),
+            "bundle create {quiet_arg}"
+        );
+        assert_eq!(zmin_bundle.exists(), git_bundle.exists());
+        fs::copy(&git_bundle, &verify_bundle).expect("copy verify bundle");
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                source.path(),
+                &["bundle", "verify", "--quiet", verify_bundle_arg],
+                "zmin",
+            ),
+            command_any_output(
+                "git",
+                source.path(),
+                &["bundle", "verify", "--quiet", verify_bundle_arg],
+                "git",
+            ),
+            "bundle verify --quiet"
+        );
+    }
+
+    let no_quiet_bundle = bundle_dir.path().join("no-quiet.bundle");
+    let no_quiet_bundle_arg = no_quiet_bundle.to_str().expect("no-quiet bundle path");
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &["bundle", "create", "--no-quiet", no_quiet_bundle_arg, "HEAD"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &["bundle", "create", "--no-quiet", no_quiet_bundle_arg, "HEAD"],
+            "git",
+        ),
+        "bundle create --no-quiet"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--quiet",
+                "--no-quiet",
+                no_quiet_bundle_arg,
+                "HEAD",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--quiet",
+                "--no-quiet",
+                no_quiet_bundle_arg,
+                "HEAD",
+            ],
+            "git",
+        ),
+        "bundle create --quiet --no-quiet"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--no-quiet",
+                "--quiet",
+                no_quiet_bundle_arg,
+                "HEAD",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--no-quiet",
+                "--quiet",
+                no_quiet_bundle_arg,
+                "HEAD",
+            ],
+            "git",
+        ),
+        "bundle create --no-quiet --quiet"
+    );
+
+    let verify_bundle = bundle_dir.path().join("verify-no-quiet.bundle");
+    fs::copy(&no_quiet_bundle, &verify_bundle).expect("copy no-quiet verify bundle");
+    let verify_bundle_arg = verify_bundle.to_str().expect("verify no-quiet bundle path");
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &["bundle", "verify", "--no-quiet", verify_bundle_arg],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &["bundle", "verify", "--no-quiet", verify_bundle_arg],
+            "git",
+        ),
+        "bundle verify --no-quiet"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "verify",
+                "--quiet",
+                "--no-quiet",
+                verify_bundle_arg,
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "verify",
+                "--quiet",
+                "--no-quiet",
+                verify_bundle_arg,
+            ],
+            "git",
+        ),
+        "bundle verify --quiet --no-quiet"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "verify",
+                "--no-quiet",
+                "--quiet",
+                verify_bundle_arg,
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "verify",
+                "--no-quiet",
+                "--quiet",
+                verify_bundle_arg,
+            ],
+            "git",
+        ),
+        "bundle verify --no-quiet --quiet"
+    );
+}
+
+#[test]
+fn bundle_progress_flags_match_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+
+    let bundle_dir = TempDir::new().expect("bundle dir");
+    let git_bundle = bundle_dir.path().join("git-progress.bundle");
+    let zmin_bundle = bundle_dir.path().join("zmin-progress.bundle");
+    let git_bundle_arg = git_bundle.to_str().expect("git bundle path");
+    let zmin_bundle_arg = zmin_bundle.to_str().expect("zmin bundle path");
+
+    assert_eq!(
+        normalize_bundle_progress_result(command_any_output(
+            zmin_bin(),
+            source.path(),
+            &["bundle", "create", "--progress", zmin_bundle_arg, "HEAD"],
+            "zmin",
+        )),
+        normalize_bundle_progress_result(command_any_output(
+            "git",
+            source.path(),
+            &["bundle", "create", "--progress", git_bundle_arg, "HEAD"],
+            "git",
+        )),
+        "bundle create --progress"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--quiet",
+                "--progress",
+                zmin_bundle_arg,
+                "HEAD",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--quiet",
+                "--progress",
+                git_bundle_arg,
+                "HEAD",
+            ],
+            "git",
+        ),
+        "bundle create --quiet --progress"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--progress",
+                "--no-progress",
+                zmin_bundle_arg,
+                "HEAD",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--progress",
+                "--no-progress",
+                git_bundle_arg,
+                "HEAD",
+            ],
+            "git",
+        ),
+        "bundle create --progress --no-progress"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--no-progress",
+                "--progress",
+                zmin_bundle_arg,
+                "HEAD",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            source.path(),
+            &[
+                "bundle",
+                "create",
+                "--no-progress",
+                "--progress",
+                git_bundle_arg,
+                "HEAD",
+            ],
+            "git",
+        ),
+        "bundle create --no-progress --progress"
+    );
+
+    let verify_bundle = bundle_dir.path().join("verify-progress.bundle");
+    fs::copy(&git_bundle, &verify_bundle).expect("copy verify bundle");
+    let verify_bundle_arg = verify_bundle.to_str().expect("verify bundle path");
+    let git_target = git_init();
+    let zmin_target = git_init();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_target.path(),
+            &["bundle", "unbundle", "--progress", verify_bundle_arg],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_target.path(),
+            &["bundle", "unbundle", "--progress", verify_bundle_arg],
+            "git",
+        ),
+        "bundle unbundle --progress"
+    );
+
+    let git_filtered = git_init();
+    let zmin_filtered = git_init();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_filtered.path(),
+            &[
+                "bundle",
+                "unbundle",
+                "--progress",
+                verify_bundle_arg,
+                "refs/heads/*",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_filtered.path(),
+            &[
+                "bundle",
+                "unbundle",
+                "--progress",
+                verify_bundle_arg,
+                "refs/heads/*",
+            ],
+            "git",
+        ),
+        "bundle unbundle --progress refs/heads/*"
+    );
+
+    let git_no_progress = git_init();
+    let zmin_no_progress = git_init();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_no_progress.path(),
+            &["bundle", "unbundle", "--no-progress", verify_bundle_arg],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_no_progress.path(),
+            &["bundle", "unbundle", "--no-progress", verify_bundle_arg],
+            "git",
+        ),
+        "bundle unbundle --no-progress"
+    );
+
+    let git_progress_no_progress = git_init();
+    let zmin_progress_no_progress = git_init();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_progress_no_progress.path(),
+            &[
+                "bundle",
+                "unbundle",
+                "--progress",
+                "--no-progress",
+                verify_bundle_arg,
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_progress_no_progress.path(),
+            &[
+                "bundle",
+                "unbundle",
+                "--progress",
+                "--no-progress",
+                verify_bundle_arg,
+            ],
+            "git",
+        ),
+        "bundle unbundle --progress --no-progress"
+    );
+
+    let git_no_progress_progress = git_init();
+    let zmin_no_progress_progress = git_init();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_no_progress_progress.path(),
+            &[
+                "bundle",
+                "unbundle",
+                "--no-progress",
+                "--progress",
+                verify_bundle_arg,
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_no_progress_progress.path(),
+            &[
+                "bundle",
+                "unbundle",
+                "--no-progress",
+                "--progress",
+                verify_bundle_arg,
+            ],
+            "git",
+        ),
+        "bundle unbundle --no-progress --progress"
+    );
 }
 
 #[test]

@@ -407,6 +407,7 @@ fn mailinfo_matches_stock_git_for_common_patch_mail() {
         ["mailinfo", "-k", "zmin-msg", "zmin-patch"].as_slice(),
         ["mailinfo", "-b", "zmin-msg", "zmin-patch"].as_slice(),
         ["mailinfo", "-m", "zmin-msg", "zmin-patch"].as_slice(),
+        ["mailinfo", "--no-scissors", "zmin-msg", "zmin-patch"].as_slice(),
     ] {
         let git_args = args
             .iter()
@@ -652,12 +653,7 @@ fn quiltimport_applies_series_like_stock_git() {
     );
     git(
         dir.path(),
-        [
-            "init",
-            "-b",
-            "main",
-            zmin_repo.to_str().expect("zmin path"),
-        ],
+        ["init", "-b", "main", zmin_repo.to_str().expect("zmin path")],
     );
     for repo in [&git_repo, &zmin_repo] {
         configure_identity(repo);
@@ -676,10 +672,7 @@ fn quiltimport_applies_series_like_stock_git() {
     ];
     assert_eq!(run_zmin(&zmin_repo, args), git(&git_repo, args));
     assert_eq!(
-        git(
-            &zmin_repo,
-            ["log", "--format=%an <%ae>|%s|%b", "--reverse"]
-        ),
+        git(&zmin_repo, ["log", "--format=%an <%ae>|%s|%b", "--reverse"]),
         git(&git_repo, ["log", "--format=%an <%ae>|%s|%b", "--reverse"])
     );
     assert_eq!(

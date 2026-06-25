@@ -1,5 +1,5 @@
 use std::env;
-use std::io::{BufRead, BufWriter, Write};
+use std::io::{BufRead, BufWriter, Read, Write};
 use std::sync::Arc;
 
 use super::*;
@@ -62,10 +62,24 @@ pub(crate) fn hash_object_command(
     object_type: &str,
     write: bool,
     stdin: bool,
+    stdin_paths: bool,
+    no_filters: bool,
+    literally: bool,
+    path: Option<String>,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
     let kind = parse_object_kind(object_type)?;
-    if !stdin && paths.is_empty() {
+    let _ = literally;
+    if stdin && stdin_paths {
+        return Err(hash_object_usage_error("Can't use --stdin-paths with --stdin"));
+    }
+    if path.is_some() && no_filters {
+        return Err(hash_object_usage_error("Can't use --path with --no-filters"));
+    }
+    if stdin_paths && path.is_some() {
+        return Err(hash_object_usage_error("Can't use --stdin-paths with --path"));
+    }
+    if !stdin && !stdin_paths && paths.is_empty() {
         return Err(CliError::Message(
             "`hash-object` requires --stdin or at least one path".into(),
         ));
@@ -79,18 +93,51 @@ pub(crate) fn hash_object_command(
     let store = write_repo
         .as_ref()
         .map(|repo| LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1));
+    let hash_repo = (!no_filters).then_some(worktree_repo.as_ref()).flatten();
 
     if stdin {
-        println!("{}", write_or_hash_stdin(store.as_ref(), kind)?.to_hex());
+        println!(
+            "{}",
+            write_or_hash_stdin(
+                store.as_ref(),
+                hash_repo,
+                kind,
+                path.as_deref().map(Path::new),
+            )?
+            .to_hex()
+        );
+    }
+
+    if stdin_paths {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        for line in input.lines() {
+            if line.is_empty() {
+                continue;
+            }
+            println!(
+                "{}",
+                write_or_hash_path(store.as_ref(), hash_repo, kind, Path::new(line))?.to_hex()
+            );
+        }
     }
 
     for path in paths {
         println!(
             "{}",
-            write_or_hash_path(store.as_ref(), worktree_repo.as_ref(), kind, &path)?.to_hex()
+            write_or_hash_path(store.as_ref(), hash_repo, kind, &path)?.to_hex()
         );
     }
     Ok(())
+}
+
+fn hash_object_usage_error(message: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!(
+            "error: {message}\nusage: git hash-object [-t <type>] [-w] [--path=<file> | --no-filters]\n                       [--stdin [--literally]] [--] <file>...\n   or: git hash-object [-t <type>] [-w] --stdin-paths [--no-filters]\n\n    -t <type>             object type\n    -w                    write the object into the object database\n    --[no-]stdin          read the object from stdin\n    --[no-]stdin-paths    read file names from stdin\n    --no-filters          store file as is without filters\n    --filters             opposite of --no-filters\n    --[no-]literally      just hash any random garbage to create corrupt objects for debugging Git\n    --[no-]path <file>    process file as it were from this path\n\n"
+        ),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1056,6 +1103,9 @@ pub(crate) fn show_index(object_format: Option<&str>) -> Result<()> {
     };
     let mut input = Vec::new();
     io::stdin().read_to_end(&mut input)?;
+    if algorithm == GitHashAlgorithm::Sha256 {
+        return show_index_sha256_permissive(&input).map_err(show_index_error);
+    }
     for_each_pack_index_entry(algorithm, input, &mut |entry| {
         println!(
             "{} {} ({:08x})",
@@ -1067,6 +1117,129 @@ pub(crate) fn show_index(object_format: Option<&str>) -> Result<()> {
     })
     .map_err(show_index_error)?;
     Ok(())
+}
+
+fn show_index_sha256_permissive(input: &[u8]) -> io::Result<()> {
+    const IDX_MAGIC: [u8; 4] = [0xff, b't', b'O', b'c'];
+    const IDX_VERSION: u32 = 2;
+    const FANOUT_ENTRIES: usize = 256;
+    const SHA256_LEN: usize = 32;
+
+    if input.len() < 8 + FANOUT_ENTRIES * 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "pack index is too short",
+        ));
+    }
+
+    let version = if input[..4] == IDX_MAGIC {
+        let raw_version = show_index_read_u32(input, 4)?;
+        if raw_version != IDX_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported pack index version {raw_version}"),
+            ));
+        }
+        2_u32
+    } else {
+        1_u32
+    };
+
+    let fanout_start = if version == 2 { 8 } else { 0 };
+    let mut previous = 0_u32;
+    let mut count = 0_usize;
+    for idx in 0..FANOUT_ENTRIES {
+        let value = show_index_read_u32(input, fanout_start + idx * 4)?;
+        if value < previous {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "pack index fanout is not sorted",
+            ));
+        }
+        previous = value;
+        count = value as usize;
+    }
+
+    let names_start = fanout_start + FANOUT_ENTRIES * 4;
+    if version == 1 {
+        for idx in 0..count {
+            let record_start = names_start + idx * (4 + SHA256_LEN);
+            let offset = show_index_read_u32(input, record_start)? as u64;
+            let id = show_index_read_bytes(input, record_start + 4, SHA256_LEN)?;
+            println!(
+                "{} {} ({:08x})",
+                offset,
+                ObjectId::new(GitHashAlgorithm::Sha256, id).to_hex(),
+                0,
+            );
+        }
+        return Ok(());
+    }
+
+    let names_bytes = count
+        .checked_mul(SHA256_LEN)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack index is too large"))?;
+    let table_bytes = count
+        .checked_mul(4)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack index is too large"))?;
+    let crc_start = names_start
+        .checked_add(names_bytes)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack index is too large"))?;
+    let offsets_start = crc_start
+        .checked_add(table_bytes)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack index is too large"))?;
+    let large_offsets_start = offsets_start
+        .checked_add(table_bytes)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack index is too large"))?;
+
+    for idx in 0..count {
+        let id = show_index_read_bytes(input, names_start + idx * SHA256_LEN, SHA256_LEN)?;
+        let crc32 = show_index_read_u32(input, crc_start + idx * 4)?;
+        let offset = show_index_v2_offset_at(input, offsets_start, large_offsets_start, idx)?;
+        println!(
+            "{} {} ({:08x})",
+            offset,
+            ObjectId::new(GitHashAlgorithm::Sha256, id).to_hex(),
+            crc32,
+        );
+    }
+
+    Ok(())
+}
+
+fn show_index_read_bytes(input: &[u8], offset: usize, len: usize) -> io::Result<&[u8]> {
+    input
+        .get(offset..offset + len)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "pack index is truncated"))
+}
+
+fn show_index_read_u32(input: &[u8], offset: usize) -> io::Result<u32> {
+    let bytes = show_index_read_bytes(input, offset, 4)?;
+    Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn show_index_v2_offset_at(
+    input: &[u8],
+    offsets_start: usize,
+    large_offsets_start: usize,
+    idx: usize,
+) -> io::Result<u64> {
+    let offset = show_index_read_u32(input, offsets_start + idx * 4)?;
+    if offset & 0x8000_0000 == 0 {
+        return Ok(offset as u64);
+    }
+
+    let large_idx = (offset & 0x7fff_ffff) as usize;
+    let large_start = large_idx
+        .checked_mul(8)
+        .and_then(|delta| large_offsets_start.checked_add(delta))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "inconsistent 64b offset index"))?;
+    let bytes = input
+        .get(large_start..large_start + 8)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "inconsistent 64b offset index"))?;
+    Ok(u64::from_be_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]))
 }
 
 fn show_index_error(error: io::Error) -> CliError {
@@ -1353,19 +1526,28 @@ fn count_prune_packable_objects(
 
 pub(crate) fn check_ref_format_command(
     allow_onelevel: bool,
+    allow_onelevel_option_present: bool,
     normalize: bool,
+    refspec_pattern: bool,
     branch: Option<&str>,
     refname: Option<&str>,
 ) -> Result<()> {
     if let Some(branch) = branch {
-        if allow_onelevel || normalize || refname.is_some() {
+        if allow_onelevel_option_present || normalize || refspec_pattern || refname.is_some() {
             return Err(CliError::Fatal {
                 code: 129,
                 message: "usage: git check-ref-format [--normalize] [<options>] <refname>\n   or: git check-ref-format --branch <branchname-shorthand>".into(),
             });
         }
+        let branch = resolve_check_ref_format_branch_name(branch)?;
+        if !branch.starts_with("refs/") && branch.starts_with('-') {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("'{branch}' is not a valid branch name"),
+            });
+        }
         let full_ref = if branch.starts_with("refs/") {
-            branch.to_owned()
+            branch.clone()
         } else {
             format!("refs/heads/{branch}")
         };
@@ -1393,7 +1575,7 @@ pub(crate) fn check_ref_format_command(
     } else {
         refname.to_owned()
     };
-    if check_ref_format(&candidate, allow_onelevel) {
+    if check_ref_format_mode(&candidate, allow_onelevel, refspec_pattern) {
         if normalize {
             println!("{candidate}");
         }
@@ -1401,6 +1583,44 @@ pub(crate) fn check_ref_format_command(
     } else {
         Err(CliError::Exit(1))
     }
+}
+
+fn resolve_check_ref_format_branch_name(branch: &str) -> Result<String> {
+    let Some(inner) = branch
+        .strip_prefix("@{-")
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return Ok(branch.to_owned());
+    };
+    let index = inner.parse::<usize>().ok().filter(|index| *index > 0);
+    match index {
+        Some(index) => {
+            super::worktree_commands::previous_checkout_target(index).map_err(|_| {
+                CliError::Fatal {
+                    code: 128,
+                    message: format!("'{branch}' is not a valid branch name"),
+                }
+            })
+        }
+        None => Ok(branch.to_owned()),
+    }
+}
+
+fn check_ref_format_mode(candidate: &str, allow_onelevel: bool, refspec_pattern: bool) -> bool {
+    if !refspec_pattern {
+        return check_ref_format(candidate, allow_onelevel);
+    }
+
+    let Some(star_idx) = candidate.find('*') else {
+        return check_ref_format(candidate, allow_onelevel);
+    };
+    if candidate[star_idx + 1..].contains('*') {
+        return false;
+    }
+
+    let mut normalized = candidate.to_owned();
+    normalized.replace_range(star_idx..=star_idx, "x");
+    check_ref_format(&normalized, allow_onelevel)
 }
 
 fn normalize_refname(value: &str) -> String {
@@ -1848,6 +2068,7 @@ pub(crate) fn check_mailmap(
     mailmap_file: Option<PathBuf>,
     mailmap_blob: Option<String>,
     stdin: bool,
+    empty_requires_no_contacts: bool,
     identities: Vec<String>,
 ) -> Result<()> {
     if stdin && !identities.is_empty() {
@@ -1872,8 +2093,12 @@ pub(crate) fn check_mailmap(
     } else {
         if identities.is_empty() {
             return Err(CliError::Fatal {
-                code: 129,
-                message: "check-mailmap requires an identity or --stdin".into(),
+                code: if empty_requires_no_contacts { 128 } else { 129 },
+                message: if empty_requires_no_contacts {
+                    "no contacts specified".into()
+                } else {
+                    "check-mailmap requires an identity or --stdin".into()
+                },
             });
         }
         for input in &identities {
@@ -2006,39 +2231,105 @@ fn apply_mailmap(entries: &[MailmapEntry], identity: &MailmapIdentity) -> Mailma
     identity.clone()
 }
 
-pub(crate) fn check_attr(all: bool, stdin: bool, args: Vec<String>) -> Result<()> {
+pub(crate) fn check_attr(
+    all: bool,
+    cached: bool,
+    stdin: bool,
+    nul: bool,
+    source: Option<String>,
+    args: Vec<String>,
+) -> Result<()> {
     let repo = find_repo()?;
-    let attrs = GitAttributes::load_from_root(&repo.root)?;
+    let attrs = load_check_attr_source(&repo, cached, source.as_deref())?;
     let (attr_names, paths) = parse_check_attr_args(all, stdin, args)?;
     if stdin {
-        let stdin = io::stdin();
-        let mut stdin = io::BufReader::new(stdin.lock());
-        let mut line = String::new();
-        loop {
-            line.clear();
-            if stdin.read_line(&mut line)? == 0 {
-                break;
+        if nul {
+            let mut input = Vec::new();
+            io::stdin().read_to_end(&mut input)?;
+            for path in input.split(|byte| *byte == b'\0') {
+                if path.is_empty() {
+                    continue;
+                }
+                let path = String::from_utf8_lossy(path).into_owned();
+                check_attr_path(&repo, &attrs, all, nul, &attr_names, &path)?;
             }
-            check_attr_path(
-                &repo,
-                &attrs,
-                all,
-                &attr_names,
-                line.trim_end_matches(['\r', '\n']),
-            )?;
+        } else {
+            let stdin = io::stdin();
+            let mut stdin = io::BufReader::new(stdin.lock());
+            let mut line = String::new();
+            loop {
+                line.clear();
+                if stdin.read_line(&mut line)? == 0 {
+                    break;
+                }
+                check_attr_path(
+                    &repo,
+                    &attrs,
+                    all,
+                    nul,
+                    &attr_names,
+                    line.trim_end_matches(['\r', '\n']),
+                )?;
+            }
         }
     } else {
         for path in &paths {
-            check_attr_path(&repo, &attrs, all, &attr_names, path)?;
+            check_attr_path(&repo, &attrs, all, nul, &attr_names, path)?;
         }
     }
     Ok(())
+}
+
+fn load_check_attr_source(repo: &GitRepo, cached: bool, source: Option<&str>) -> Result<GitAttributes> {
+    if let Some(source) = source {
+        return load_check_attr_source_treeish(repo, source);
+    }
+    if cached {
+        return load_check_attr_source_index(repo);
+    }
+    Ok(GitAttributes::load_from_root(&repo.root)?)
+}
+
+fn load_check_attr_source_index(repo: &GitRepo) -> Result<GitAttributes> {
+    let index = read_index(&repo.index_path)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    for entry in index.entries() {
+        if entry.path.as_slice() != b".gitattributes" {
+            continue;
+        }
+        let object = store.read_object(&entry.id)?;
+        if object.kind != GitObjectKind::Blob {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "index .gitattributes is not a blob".into(),
+            });
+        }
+        return Ok(GitAttributes::parse(&String::from_utf8_lossy(&object.content)));
+    }
+    Ok(GitAttributes::default())
+}
+
+fn load_check_attr_source_treeish(repo: &GitRepo, source: &str) -> Result<GitAttributes> {
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let tree = resolve_treeish(repo, &store, source).map_err(CliError::Io)?;
+    let Some(entry) = find_tree_entry(&store, &tree, b".gitattributes").map_err(CliError::Io)? else {
+        return Ok(GitAttributes::default());
+    };
+    let object = store.read_object(&entry.id)?;
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "tree-ish .gitattributes is not a blob".into(),
+        });
+    }
+    Ok(GitAttributes::parse(&String::from_utf8_lossy(&object.content)))
 }
 
 fn check_attr_path(
     repo: &GitRepo,
     attrs: &GitAttributes,
     all: bool,
+    nul: bool,
     attr_names: &[String],
     path: &str,
 ) -> Result<()> {
@@ -2049,7 +2340,11 @@ fn check_attr_path(
         attrs.check(&relative, attr_names)
     };
     for (name, value) in rows {
-        println!("{path}: {name}: {}", value.as_check_attr_value());
+        if nul {
+            print!("{path}\0{name}\0{}\0", value.as_check_attr_value());
+        } else {
+            println!("{path}: {name}: {}", value.as_check_attr_value());
+        }
     }
     Ok(())
 }
@@ -2717,7 +3012,26 @@ fn write_or_hash(
     }
 }
 
-fn write_or_hash_stdin(store: Option<&LooseObjectStore>, kind: GitObjectKind) -> Result<ObjectId> {
+fn write_or_hash_stdin(
+    store: Option<&LooseObjectStore>,
+    repo: Option<&GitRepo>,
+    kind: GitObjectKind,
+    path: Option<&Path>,
+) -> Result<ObjectId> {
+    if let Some(path) = path {
+        let mut content = Vec::new();
+        io::stdin().read_to_end(&mut content)?;
+        if kind == GitObjectKind::Blob
+            && let Some(repo) = repo
+        {
+            let absolute = absolute_path_from_arg(path)?;
+            if let Ok(relative) = repo_relative_path(&repo.root, &absolute) {
+                let content = clean_worktree_content(repo, &relative, content)?;
+                return write_or_hash(store, kind, &content);
+            }
+        }
+        return write_or_hash(store, kind, &content);
+    }
     if kind != GitObjectKind::Blob {
         let mut content = Vec::new();
         io::stdin().read_to_end(&mut content)?;

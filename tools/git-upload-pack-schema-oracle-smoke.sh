@@ -78,6 +78,7 @@ run_exact() {
   printf '%s\texact\tgit_exit=%s\tzmin_exit=%s\n' "$name" "$git_exit" "$zmin_exit"
 }
 
+run_exact upload_pack_http_backend_info_refs 0 --http-backend-info-refs
 run_exact upload_pack_advertise_refs 0 --advertise-refs
 run_exact upload_pack_strict_empty_stdin 128 --strict
 run_exact upload_pack_no_strict_empty_stdin 128 --no-strict

@@ -4,7 +4,7 @@ use tempfile::TempDir;
 
 use common::{
     clone_repo_fixture, command_any_output, configure_identity, git, git_init, git_with_env,
-    run_zmin, run_zmin_with_env, zmin_bin, write_file,
+    run_zmin, run_zmin_with_env, write_file, zmin_bin,
 };
 
 fn sequencer_fixture_repo() -> TempDir {
@@ -233,12 +233,7 @@ fn bisect_terms_next_skip_and_replay_match_stock_git_state() {
 
     assert_eq!(
         command_any_output("git", git_repo.path(), &["bisect", "terms"], "git"),
-        command_any_output(
-            zmin_bin(),
-            zmin_repo.path(),
-            &["bisect", "terms"],
-            "zmin"
-        )
+        command_any_output(zmin_bin(), zmin_repo.path(), &["bisect", "terms"], "zmin")
     );
 
     git(git_repo.path(), ["bisect", "start", "HEAD", "HEAD~4"]);
@@ -420,8 +415,7 @@ fn bisect_skip_reports_skipped_only_candidates_like_stock_git() {
     run_zmin(zmin_repo.path(), ["bisect", "start", "HEAD", "HEAD~2"]);
 
     let git_output = command_any_output("git", git_repo.path(), &["bisect", "skip"], "git");
-    let zmin_output =
-        command_any_output(zmin_bin(), zmin_repo.path(), &["bisect", "skip"], "zmin");
+    let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), &["bisect", "skip"], "zmin");
 
     assert_eq!(zmin_output, git_output);
     let zmin_log = run_zmin(zmin_repo.path(), ["bisect", "log"]);

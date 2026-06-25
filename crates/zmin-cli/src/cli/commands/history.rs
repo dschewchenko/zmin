@@ -122,6 +122,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             all,
             annotate_stdin,
             undefined: _undefined,
+            no_undefined,
             always,
             commits,
         } => super::history_commands::name_rev(super::history_commands::NameRevOptions {
@@ -131,6 +132,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             excludes,
             all,
             annotate_stdin,
+            no_undefined,
             always,
             commits,
         }),
@@ -241,58 +243,56 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             pretty,
             i_still_use_this: _,
             revs,
-        } => {
-            super::history_commands::log(super::history_commands::LogOptions {
-                oneline,
-                zero: false,
-                all,
-                parents,
-                first_parent: false,
-                no_diff_merges: false,
-                diff_merges: None,
-                separate_merges: false,
-                dd: false,
-                reverse,
-                root,
-                patch: patch || combined || dense_combined,
-                patch_with_stat,
-                combined,
-                dense_combined,
-                stat,
-                numstat,
-                shortstat,
-                raw: raw
-                    || !(patch
-                        || patch_with_stat
-                        || combined
-                        || dense_combined
-                        || stat
-                        || numstat
-                        || shortstat
-                        || summary
-                        || name_only
-                        || name_status),
-                summary,
-                name_only,
-                name_status,
-                diff_required: true,
-                pickaxe_string: pickaxe_string.as_deref(),
-                pickaxe_regex: pickaxe_regex.as_deref(),
-                pickaxe_regex_mode,
-                pickaxe_all,
-                decorate: None,
-                clear_decorations: false,
-                ignore_matching_lines: Vec::new(),
-                walk_reflogs: false,
-                no_walk: false,
-                format: format.as_deref(),
-                max_count: max_count.as_deref(),
-                since: since.as_deref(),
-                date: date.as_deref(),
-                pretty: pretty.as_deref(),
-                revs,
-            })
-        }
+        } => super::history_commands::log(super::history_commands::LogOptions {
+            oneline,
+            zero: false,
+            all,
+            parents,
+            first_parent: false,
+            no_diff_merges: false,
+            diff_merges: None,
+            separate_merges: false,
+            dd: false,
+            reverse,
+            root,
+            patch: patch || combined || dense_combined,
+            patch_with_stat,
+            combined,
+            dense_combined,
+            stat,
+            numstat,
+            shortstat,
+            raw: raw
+                || !(patch
+                    || patch_with_stat
+                    || combined
+                    || dense_combined
+                    || stat
+                    || numstat
+                    || shortstat
+                    || summary
+                    || name_only
+                    || name_status),
+            summary,
+            name_only,
+            name_status,
+            diff_required: true,
+            pickaxe_string: pickaxe_string.as_deref(),
+            pickaxe_regex: pickaxe_regex.as_deref(),
+            pickaxe_regex_mode,
+            pickaxe_all,
+            decorate: None,
+            clear_decorations: false,
+            ignore_matching_lines: Vec::new(),
+            walk_reflogs: false,
+            no_walk: false,
+            format: format.as_deref(),
+            max_count: max_count.as_deref(),
+            since: since.as_deref(),
+            date: date.as_deref(),
+            pretty: pretty.as_deref(),
+            revs,
+        }),
         runtime::Command::Show {
             no_patch,
             oneline,
@@ -360,10 +360,11 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             revs,
         }),
         runtime::Command::MergeBase {
+            all,
             is_ancestor,
             octopus,
             commits,
-        } => super::history_commands::merge_base(is_ancestor, octopus, commits),
+        } => super::history_commands::merge_base(all, is_ancestor, octopus, commits),
         runtime::Command::LastModified {
             recursive,
             show_trees,

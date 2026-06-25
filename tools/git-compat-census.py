@@ -120,6 +120,20 @@ def nested_parent_statuses(
     return Counter()
 
 
+def nested_schema_refs(
+    parent_command: str,
+    option: str,
+    schema_options: dict[tuple[str, str], list[dict[str, str]]],
+) -> list[dict[str, str]]:
+    refs: list[dict[str, str]] = []
+    prefix = f"{parent_command}-"
+    for (command, schema_option), arg_refs in schema_options.items():
+        if schema_option != option or not command.startswith(prefix):
+            continue
+        refs.extend(arg_refs)
+    return refs
+
+
 def read_tsv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         die(f"required TSV is missing: {path}")
@@ -134,6 +148,24 @@ def write_tsv(path: Path, columns: list[str], rows: list[dict[str, str]]) -> Non
         writer.writeheader()
         for row in rows:
             writer.writerow({column: row.get(column, "") for column in columns})
+
+
+def reviewed_complete_commands(root: Path) -> set[str]:
+    path = root / "docs/cli/census/reviewed_complete_command_matrices.tsv"
+    if not path.exists():
+        return set()
+    return {row["command"] for row in read_tsv(path) if row.get("command")}
+
+
+def reviewed_complete_option_pairs(root: Path) -> set[tuple[str, str]]:
+    path = root / "docs/cli/census/reviewed_complete_doc_option_pairs.tsv"
+    if not path.exists():
+        return set()
+    return {
+        (row["command"], row["option"])
+        for row in read_tsv(path)
+        if row.get("command") and row.get("option")
+    }
 
 
 def command_list_from_cache(root: Path, baseline: str) -> list[str]:
@@ -568,12 +600,15 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     commands = command_list_from_cache(root, baseline)
     command_set = set(commands)
     options = option_seed_from_docs(root)
+    documented_option_pairs = {(row["command"], row["option"]) for row in options}
     schema = load_zmin_schema(root, schema_json)
     zmin_commands, additional_commands, zmin_options = normalize_schema(schema)
     matrices = matrix_rows(root)
     hard_fails = hard_fail_scan(root)
     extension_commands = zmin_extension_command_names(root)
     extension_options = zmin_extension_option_keys(root)
+    complete_commands = reviewed_complete_commands(root)
+    complete_option_pairs = reviewed_complete_option_pairs(root) & documented_option_pairs
 
     matrix_options_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     matrix_primary_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
@@ -717,7 +752,11 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
         command = option["command"]
         spelling = option["option"]
         statuses = matrix_options_by_status.get((command, spelling), Counter())
-        schema_refs = zmin_options.get((command, spelling), [])
+        schema_refs = zmin_options.get((command, spelling), []) or nested_schema_refs(
+            command, spelling, zmin_options
+        )
+        if (command, spelling) in complete_option_pairs and not (statuses["open"] or statuses["partial"]):
+            continue
         if statuses["closed"] or statuses["invalid-input"]:
             next_action = "expand remaining values, negations, repeated forms, combinations, states, transports and platforms for this documented option"
             bucket = "not implemented / broken / open"
@@ -831,6 +870,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     all_items = verified + invalid_input + implemented_unverified + remaining + extension_deferred + oracle_rows + hard_fail_rows
 
     summary_counter = Counter()
+    summary_counter["complete_command_matrices"] = len(complete_commands)
+    summary_counter["complete_doc_option_pairs"] = len(complete_option_pairs)
     summary_counter["git_2_47_commands"] = len(commands)
     summary_counter["git_doc_option_seed_rows"] = len(options)
     summary_counter["zmin_schema_commands"] = len(zmin_commands)
@@ -858,6 +899,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
             "note": note,
         }
         for metric, count, note in [
+            ("complete_command_matrices", summary_counter["complete_command_matrices"], "reviewed commands whose full behavior matrix is finished"),
+            ("complete_doc_option_pairs", summary_counter["complete_doc_option_pairs"], "reviewed documented command-option pairs whose full behavior matrix is finished"),
             ("git_2_47_commands", summary_counter["git_2_47_commands"], "upstream command-list seed"),
             ("git_doc_option_seed_rows", summary_counter["git_doc_option_seed_rows"], "documented option spelling seed, not final denominator"),
             ("zmin_schema_commands", summary_counter["zmin_schema_commands"], "commands emitted by zmin compat schema"),
@@ -907,8 +950,13 @@ def main() -> int:
     root = Path(args.root).resolve()
     out_dir = root / args.out_dir
     census = make_census(root, args.baseline, args.zmin_schema_json)
+    command_progress = run_text(
+        [str(root / "tools/git-compat-command-summary.sh"), "--tsv"],
+        root,
+    )
 
     write_tsv(out_dir / "summary.tsv", ["metric", "count", "note"], census["summary"])
+    (out_dir / "command_progress.tsv").write_text(command_progress)
     for name in [
         "verified_behavior",
         "invalid_input_parity",

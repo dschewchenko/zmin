@@ -2254,6 +2254,36 @@ pub(crate) fn commit_depths_cached(
     Ok(depths)
 }
 
+pub(crate) fn commit_depths_with_repo_cached(
+    repo: &GitRepo,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    start: &ObjectId,
+) -> Result<HashMap<ObjectId, usize>> {
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut depths = HashMap::with_capacity(1024);
+    depths.insert(start.clone(), 0usize);
+    let mut pending = VecDeque::from([start.clone()]);
+    while let Some(id) = pending.pop_front() {
+        if shallow_commits.contains(&id) {
+            continue;
+        }
+        let depth = depths[&id];
+        let links = commit_cache.read_commit_links(&id)?;
+        let parent_depth = depth.checked_add(1).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit depth overflow".into(),
+        })?;
+        reserve_commit_depth_parent_traversal(&mut pending, &mut depths, links.parents.len());
+        for parent in &links.parents {
+            if let Entry::Vacant(entry) = depths.entry(parent.clone()) {
+                pending.push_back(entry.key().clone());
+                entry.insert(parent_depth);
+            }
+        }
+    }
+    Ok(depths)
+}
+
 pub(crate) fn best_merge_base_cached(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     left: &ObjectId,
@@ -2268,6 +2298,39 @@ pub(crate) fn best_merge_base_cached(
 
     let left_depths = commit_depths_cached(commit_cache, left)?;
     let right_depths = commit_depths_cached(commit_cache, right)?;
+    let (scan_depths, lookup_depths) = if left_depths.len() <= right_depths.len() {
+        (&left_depths, &right_depths)
+    } else {
+        (&right_depths, &left_depths)
+    };
+    let mut best = None::<(usize, ObjectId)>;
+    for (id, scan_depth) in scan_depths {
+        let Some(lookup_depth) = lookup_depths.get(id) else {
+            continue;
+        };
+        let score = scan_depth + lookup_depth;
+        if should_replace_merge_base_candidate(best.as_ref(), score, id) {
+            best = Some((score, id.clone()));
+        }
+    }
+    Ok(best.map(|(_, id)| id))
+}
+
+pub(crate) fn best_merge_base_with_repo_cached(
+    repo: &GitRepo,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    left: &ObjectId,
+    right: &ObjectId,
+) -> Result<Option<ObjectId>> {
+    if is_ancestor_commit_with_repo_cached(repo, commit_cache, right, left)? {
+        return Ok(Some(right.clone()));
+    }
+    if is_ancestor_commit_with_repo_cached(repo, commit_cache, left, right)? {
+        return Ok(Some(left.clone()));
+    }
+
+    let left_depths = commit_depths_with_repo_cached(repo, commit_cache, left)?;
+    let right_depths = commit_depths_with_repo_cached(repo, commit_cache, right)?;
     let (scan_depths, lookup_depths) = if left_depths.len() <= right_depths.len() {
         (&left_depths, &right_depths)
     } else {
@@ -2476,6 +2539,87 @@ pub(crate) fn is_ancestor_commit_cached(
     while let Some(id) = stack.pop() {
         if id == *ancestor {
             return Ok(true);
+        }
+        let Some(seen) = seen.as_mut() else {
+            break;
+        };
+        let links = commit_cache.read_commit_links(&id)?;
+        reserve_ancestor_parent_traversal(&mut stack, seen, links.parents.len());
+        for parent in &links.parents {
+            if parent == ancestor {
+                return Ok(true);
+            }
+            schedule_ancestor_parent(&mut stack, seen, parent);
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn is_ancestor_commit_with_repo_cached(
+    repo: &GitRepo,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    ancestor: &ObjectId,
+    descendant: &ObjectId,
+) -> Result<bool> {
+    if ancestor == descendant {
+        return Ok(true);
+    }
+
+    let shallow_commits = read_shallow_commits(repo)?;
+    let mut seen: Option<HashSet<ObjectId>> = None;
+    let mut stack = Vec::with_capacity(128);
+    let mut current = descendant.clone();
+
+    loop {
+        if shallow_commits.contains(&current) {
+            return Ok(false);
+        }
+        let links = commit_cache.read_commit_links(&current)?;
+
+        if current == *ancestor {
+            return Ok(true);
+        }
+
+        if links.parents.is_empty() {
+            return Ok(false);
+        }
+
+        if links.parents.len() == 1 {
+            if let Some(seen) = seen.as_mut() {
+                if !seen.insert(current.clone()) {
+                    break;
+                }
+            }
+
+            let parent = &links.parents[0];
+            if parent == ancestor {
+                return Ok(true);
+            }
+            current = parent.clone();
+            continue;
+        }
+
+        let seen_nodes = seen.get_or_insert_with(|| HashSet::with_capacity(128));
+        if !seen_nodes.insert(current.clone()) {
+            break;
+        }
+
+        reserve_ancestor_parent_traversal(&mut stack, seen_nodes, links.parents.len());
+        for parent in &links.parents {
+            if parent == ancestor {
+                return Ok(true);
+            }
+            schedule_ancestor_parent(&mut stack, seen_nodes, parent);
+        }
+        break;
+    }
+
+    while let Some(id) = stack.pop() {
+        if id == *ancestor {
+            return Ok(true);
+        }
+        if shallow_commits.contains(&id) {
+            continue;
         }
         let Some(seen) = seen.as_mut() else {
             break;
@@ -4245,6 +4389,39 @@ mod tests {
         assert!(
             is_ancestor_commit_cached(&commit_cache, &merge_into_branch, &main_merge)
                 .expect("cached merge ancestor check")
+        );
+    }
+
+    #[test]
+    fn shallow_cached_ancestor_check_stops_at_boundary() {
+        let dir = TempDir::new().expect("temp dir");
+        let store = LooseObjectStore::new(dir.path().join("objects"), GitHashAlgorithm::Sha1);
+        let tree = store
+            .write_object(
+                GitObjectKind::Tree,
+                &encode_tree(&[]).expect("encode empty tree"),
+            )
+            .expect("write tree");
+        let root = write_test_commit(&store, &tree, &[], 1, "root");
+        let head = write_test_commit(&store, &tree, std::slice::from_ref(&root), 2, "head");
+        fs::write(dir.path().join("shallow"), format!("{}\n", head.to_hex())).expect("shallow");
+        let repo = GitRepo {
+            root: dir.path().to_path_buf(),
+            git_dir: dir.path().to_path_buf(),
+            objects_dir: dir.path().join("objects"),
+            index_path: dir.path().join("index"),
+        };
+        let commit_cache = CommitObjectCache::new(&store);
+
+        assert!(is_ancestor_commit_cached(&commit_cache, &root, &head).expect("plain ancestor"));
+        assert!(
+            !is_ancestor_commit_with_repo_cached(&repo, &commit_cache, &root, &head)
+                .expect("shallow-aware ancestor")
+        );
+        assert_eq!(
+            best_merge_base_with_repo_cached(&repo, &commit_cache, &root, &head)
+                .expect("shallow-aware merge base"),
+            None
         );
     }
 

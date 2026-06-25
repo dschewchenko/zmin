@@ -9756,7 +9756,7 @@ fn write_fetch_commit_graph_if_enabled() -> Result<()> {
     {
         return Ok(());
     }
-    pack_commands::commit_graph_write(true)?;
+    pack_commands::commit_graph_write(None, true, false, false)?;
     write_split_commit_graph_chain_marker(&repo)
 }
 
@@ -10974,14 +10974,24 @@ fn fetch_remote_url(repo: &GitRepo, remote: &str) -> Result<String> {
 }
 
 pub(crate) fn run_pull(
+    ff: bool,
     ff_only: bool,
+    no_ff: bool,
     strategies: Vec<String>,
     rebase_mode: Option<String>,
     no_rebase: bool,
+    depth: Option<String>,
+    deepen: Option<String>,
+    unshallow: bool,
+    update_shallow: bool,
+    shallow_since: Option<String>,
+    shallow_exclude: Vec<String>,
+    upload_pack: Option<String>,
     remote: Option<String>,
     branch: Option<String>,
 ) -> Result<()> {
     let _trace = phase_trace("pull.total");
+    let _ = ff;
     let repo = find_repo_or_bare()?;
     let refs = refs_adapter_from_git_dir(&repo.git_dir);
     let current_branch = current_branch_ref(&refs)?.ok_or_else(|| CliError::Fatal {
@@ -11010,6 +11020,37 @@ pub(crate) fn run_pull(
             message: "options '--rebase' and '--strategy' cannot be used together".into(),
         });
     }
+    let deepen = deepen.as_deref().map(validate_positive_depth).transpose()?;
+    let shallow_since = shallow_since
+        .as_deref()
+        .map(parse_git_date)
+        .transpose()?
+        .map(|(timestamp, _)| timestamp);
+    if depth.is_some() && deepen.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --depth and --deepen cannot be used together".into(),
+        });
+    }
+    if unshallow && (depth.is_some() || deepen.is_some()) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --unshallow cannot be used with --depth or --deepen".into(),
+        });
+    }
+    if shallow_since.is_some() && (depth.is_some() || deepen.is_some() || unshallow) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-since cannot be used with other shallow mode options".into(),
+        });
+    }
+    if !shallow_exclude.is_empty() && (depth.is_some() || deepen.is_some() || unshallow) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "fetch --shallow-exclude cannot be used with other shallow mode options"
+                .into(),
+        });
+    }
     let (remote, branch, explicit_local_remote) = {
         let _trace = phase_trace("pull.resolve_remote_branch");
         let remote = match remote {
@@ -11026,18 +11067,35 @@ pub(crate) fn run_pull(
         let explicit_local_remote = !remote_exists(&repo, &remote)?;
         (remote, branch, explicit_local_remote)
     };
+    if !shallow_exclude.is_empty() && !explicit_local_remote {
+        let url = fetch_remote_url(&repo, &remote)?;
+        if !is_http_transport_url(&url)
+            && !is_git_daemon_transport_url(&url)
+            && !is_ssh_transport_url(&url)
+        {
+            let first = shallow_exclude.first().cloned().unwrap_or_default();
+            fs::write(repo.git_dir.join("FETCH_HEAD"), b"")?;
+            return Err(CliError::Stderr {
+                code: 1,
+                text: format!(
+                    "fatal: git upload-pack: deepen-not is not a ref: deepen-not {first}\n\
+fatal: the remote end hung up unexpectedly\n"
+                ),
+            });
+        }
+    }
     let target = if explicit_local_remote {
         {
             let _trace = phase_trace("pull.fetch_explicit_local");
             fetch_with_depth(
                 Some(remote.clone()),
                 Some(branch.clone()),
-                None,
-                None,
-                false,
-                false,
-                None,
-                &[],
+                depth.as_deref(),
+                deepen,
+                unshallow,
+                update_shallow,
+                shallow_since,
+                &shallow_exclude,
                 1,
                 false,
                 false,
@@ -11055,7 +11113,7 @@ pub(crate) fn run_pull(
                 false,
                 FetchRecurseSubmodulesMode::Default,
                 &[],
-                None,
+                upload_pack.as_deref(),
             )?;
         }
         "FETCH_HEAD".to_owned()
@@ -11064,7 +11122,34 @@ pub(crate) fn run_pull(
         let _ = branch_ref_name(&branch)?;
         {
             let _trace = phase_trace("pull.fetch_remote");
-            fetch_with_missing_ref_code(Some(remote.clone()), Some(branch.clone()), 1)?;
+            fetch_with_depth(
+                Some(remote.clone()),
+                Some(branch.clone()),
+                depth.as_deref(),
+                deepen,
+                unshallow,
+                update_shallow,
+                shallow_since,
+                &shallow_exclude,
+                1,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                true,
+                &[],
+                false,
+                FetchRecurseSubmodulesMode::Default,
+                &[],
+                upload_pack.as_deref(),
+            )?;
         }
         format!("refs/remotes/{remote}/{branch}")
     };
@@ -11083,10 +11168,23 @@ pub(crate) fn run_pull(
             abort: false,
             continue_: false,
             ff_only,
-            no_ff: false,
+            no_ff,
             no_commit: false,
             squash: false,
             strategies,
+            commits: vec![target],
+            commit_label: explicit_local_remote.then_some(branch),
+        });
+    }
+    if no_ff {
+        return merge_commands::merge(merge_commands::MergeOptions {
+            abort: false,
+            continue_: false,
+            ff_only: false,
+            no_ff: true,
+            no_commit: false,
+            squash: false,
+            strategies: Vec::new(),
             commits: vec![target],
             commit_label: explicit_local_remote.then_some(branch),
         });
@@ -11955,6 +12053,7 @@ fn fetch_with_depth(
             upload_pack_command,
             &[],
             false,
+            true,
         );
     }
     let result = fetch_with_repo_and_remote(
@@ -11989,6 +12088,7 @@ fn fetch_with_missing_ref_code(
     remote: Option<String>,
     branch: Option<String>,
     missing_ref_code: i32,
+    upload_pack_command: Option<&str>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let remote = default_fetch_remote(&repo, remote)?;
@@ -12016,7 +12116,7 @@ fn fetch_with_missing_ref_code(
         false,
         false,
         &[],
-        None,
+        upload_pack_command,
     )
 }
 
@@ -12499,6 +12599,7 @@ pub(crate) fn fetch_with_repo_and_remote(
         } else {
             format!("refs/remotes/{remote}/{branch}")
         };
+        let old_id = destination_refs.resolve(&destination_ref).ok();
         let atomic_updates = if atomic {
             let mut updates = Vec::with_capacity(1);
             push_atomic_fetch_ref_update(
@@ -12552,6 +12653,20 @@ pub(crate) fn fetch_with_repo_and_remote(
             }
         } else {
             write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, prefetch)?;
+            if !quiet {
+                eprintln!("From {}", fetch_head_url_display(&url));
+                eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+                if let Some(old_id) = old_id {
+                    if old_id != id {
+                        eprintln!(
+                            "{}",
+                            fetch_fast_forward_update_row(&ref_name, &destination_ref, &old_id, &id)
+                        );
+                    }
+                } else {
+                    eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
+                }
+            }
         }
         return Ok(());
     }
@@ -19644,6 +19759,7 @@ fn fetch_with_repo_and_remote_depth(
     upload_pack_command: Option<&str>,
     upload_pack_shallows: &[ObjectId],
     force_upload_pack_roots: bool,
+    forced_update_row_for_branch: bool,
 ) -> Result<()> {
     let url = fetch_remote_url(&repo, &remote)?;
     if is_http_transport_url(&url) {
@@ -19686,9 +19802,25 @@ fn fetch_with_repo_and_remote_depth(
         let id = source_refs
             .resolve(&ref_name)
             .map_err(|_| missing_remote_ref_error(&branch, missing_ref_code))?;
-        destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+        let destination_ref = format!("refs/remotes/{remote}/{branch}");
+        let old_id = destination_refs.resolve(&destination_ref).ok();
+        destination_refs.write_ref(&destination_ref, &id)?;
         if write_fetch_head {
             write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, false)?;
+        }
+        eprintln!("From {}", fetch_head_url_display(&url));
+        eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+        if let Some(old_id) = old_id {
+            if old_id != id {
+                let update_row = if forced_update_row_for_branch {
+                    fetch_forced_update_row(&ref_name, &destination_ref, &old_id, &id)
+                } else {
+                    fetch_fast_forward_update_row(&ref_name, &destination_ref, &old_id, &id)
+                };
+                eprintln!("{update_row}");
+            }
+        } else {
+            eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
         }
         if let Some(command) = upload_pack_command {
             let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
@@ -19877,9 +20009,23 @@ fn fetch_with_repo_and_remote_shallow_since(
     let id = source_refs
         .resolve(&ref_name)
         .map_err(|_| missing_remote_ref_error(&branch, missing_ref_code))?;
-    destination_refs.write_ref(&format!("refs/remotes/{remote}/{branch}"), &id)?;
+    let destination_ref = format!("refs/remotes/{remote}/{branch}");
+    let old_id = destination_refs.resolve(&destination_ref).ok();
+    destination_refs.write_ref(&destination_ref, &id)?;
     if write_fetch_head {
         write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, false)?;
+    }
+    eprintln!("From {}", fetch_head_url_display(&url));
+    eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+    if let Some(old_id) = old_id {
+        if old_id != id {
+            eprintln!(
+                "{}",
+                fetch_fast_forward_update_row(&ref_name, &destination_ref, &old_id, &id)
+            );
+        }
+    } else {
+        eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
     }
     if let Some(command) = upload_pack_command {
         let haves = collect_upload_pack_haves(&destination_store, &destination_refs)?;
@@ -20232,6 +20378,7 @@ fn fetch_with_repo_and_remote_deepen(
         upload_pack_command,
         &sorted_object_ids_from_set(&shallow_boundaries),
         upload_pack_command.is_some(),
+        false,
     )
 }
 
@@ -23460,7 +23607,7 @@ struct ReceivePackUpdate {
     ref_name: String,
 }
 
-pub(crate) fn receive_pack(_quiet: bool, directory: PathBuf) -> Result<()> {
+pub(crate) fn receive_pack(http_backend_info_refs: bool, _quiet: bool, directory: PathBuf) -> Result<()> {
     let repo = upload_pack_repo_from_path(&directory, true)?;
     let runtime = primitive_runtime_for_repo(&repo);
     let refs = runtime.refs_store_adapter();
@@ -23469,6 +23616,10 @@ pub(crate) fn receive_pack(_quiet: bool, directory: PathBuf) -> Result<()> {
     let mut stdout = io::BufWriter::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdout);
     write_receive_pack_advertisement_from_adapter(&refs, &mut stdout)?;
     stdout.flush()?;
+
+    if http_backend_info_refs {
+        return Ok(());
+    }
 
     let stdin = io::stdin();
     let mut stdin = io::BufReader::with_capacity(PACK_RECEIPT_BUF_CAPACITY, stdin.lock());
@@ -23584,12 +23735,6 @@ pub(crate) fn shell(command: Option<String>, args: Vec<String>) -> Result<()> {
             message: "Run with no arguments or with -c cmd".into(),
         });
     };
-    if command == "git-upload-pack" && !args.is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "Run with no arguments or with -c cmd".into(),
-        });
-    }
     if command.starts_with("git-upload-pack ") && !command.contains('\'') {
         return Err(CliError::Fatal {
             code: 128,
@@ -23618,7 +23763,7 @@ pub(crate) fn shell(command: Option<String>, args: Vec<String>) -> Result<()> {
         }
         "git-receive-pack" => {
             let directory = shell_single_directory_arg(&words)?;
-            receive_pack(false, directory)
+            receive_pack(false, false, directory)
         }
         "git-upload-archive" => {
             let directory = shell_single_directory_arg(&words)?;

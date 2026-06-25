@@ -65,3 +65,49 @@ run_case stripspace_comment_lines_short_rejects_value 129 -c=true
 run_case stripspace_strip_comments_long_rejects_value 129 --strip-comments=true
 run_case stripspace_comment_lines_long_rejects_value 129 --comment-lines=true
 run_case stripspace_whitespace_rejected 129 --whitespace
+run_case stripspace_short_then_long_conflict 129 -s --comment-lines
+run_case stripspace_long_then_short_conflict 129 --comment-lines -s
+run_case stripspace_comment_then_strip_conflict 129 -c --strip-comments
+run_case stripspace_strip_then_comment_conflict 129 --strip-comments -c
+run_case stripspace_short_strip_then_comment_conflict 129 -s -c
+run_case stripspace_short_comment_then_strip_conflict 129 -c -s
+run_case stripspace_short_then_long_same_mode 0 -s --strip-comments
+run_case stripspace_long_then_short_same_mode 0 --strip-comments -s
+run_case stripspace_comment_short_then_long_same_mode 0 -c --comment-lines
+run_case stripspace_comment_long_then_short_same_mode 0 --comment-lines -c
+run_case stripspace_short_long_short_same_mode 0 -s --strip-comments -s
+run_case stripspace_comment_short_long_short_same_mode 0 -c --comment-lines -c
+run_case stripspace_long_short_long_same_mode 0 --strip-comments -s --strip-comments
+run_case stripspace_comment_long_short_long_same_mode 0 --comment-lines -c --comment-lines
+run_case stripspace_short_long_long_same_mode 0 -s --strip-comments --strip-comments
+run_case stripspace_comment_short_long_long_same_mode 0 -c --comment-lines --comment-lines
+run_case stripspace_short_short_long_same_mode 0 -s -s --strip-comments
+run_case stripspace_long_long_short_same_mode 0 --strip-comments --strip-comments -s
+run_case stripspace_comment_short_short_long_same_mode 0 -c -c --comment-lines
+run_case stripspace_comment_long_long_short_same_mode 0 --comment-lines --comment-lines -c
+run_case stripspace_short_long_long_short_same_mode 0 -s --strip-comments --strip-comments -s
+run_case stripspace_comment_short_long_long_short_same_mode 0 -c --comment-lines --comment-lines -c
+run_case stripspace_long_short_short_same_mode 0 --strip-comments -s -s
+run_case stripspace_comment_long_short_short_same_mode 0 --comment-lines -c -c
+run_case stripspace_long_tripled_same_mode 0 --strip-comments --strip-comments --strip-comments
+run_case stripspace_comment_long_tripled_same_mode 0 --comment-lines --comment-lines --comment-lines
+run_case stripspace_short_tripled_same_mode 0 -s -s -s
+run_case stripspace_comment_short_tripled_same_mode 0 -c -c -c
+run_case stripspace_short_short_long_short_same_mode 0 -s -s --strip-comments -s
+run_case stripspace_comment_short_short_long_short_same_mode 0 -c -c --comment-lines -c
+run_case stripspace_long_short_long_short_same_mode 0 --strip-comments -s --strip-comments -s
+run_case stripspace_comment_long_short_long_short_same_mode 0 --comment-lines -c --comment-lines -c
+run_case stripspace_short_long_short_long_same_mode 0 -s --strip-comments -s --strip-comments
+run_case stripspace_comment_short_long_short_long_same_mode 0 -c --comment-lines -c --comment-lines
+run_case stripspace_long_long_short_short_same_mode 0 --strip-comments --strip-comments -s -s
+run_case stripspace_comment_long_long_short_short_same_mode 0 --comment-lines --comment-lines -c -c
+run_case stripspace_short_four_same_mode 0 -s -s -s -s
+run_case stripspace_comment_short_four_same_mode 0 -c -c -c -c
+run_case stripspace_long_four_same_mode 0 --strip-comments --strip-comments --strip-comments --strip-comments
+run_case stripspace_comment_long_four_same_mode 0 --comment-lines --comment-lines --comment-lines --comment-lines
+run_case stripspace_short_long_long_long_same_mode 0 -s --strip-comments --strip-comments --strip-comments
+run_case stripspace_comment_short_long_long_long_same_mode 0 -c --comment-lines --comment-lines --comment-lines
+run_case stripspace_long_short_short_short_same_mode 0 --strip-comments -s -s -s
+run_case stripspace_comment_long_short_short_short_same_mode 0 --comment-lines -c -c -c
+run_case stripspace_short_short_long_long_same_mode 0 -s -s --strip-comments --strip-comments
+run_case stripspace_comment_short_short_long_long_same_mode 0 -c -c --comment-lines --comment-lines

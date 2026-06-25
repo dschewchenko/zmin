@@ -28,13 +28,13 @@ coverage numbers in the Git compatibility matrix.
 | `zmin diff-pairs` | stable | `git_diff_compat::diff_pairs_matches_stock_git_for_raw_diff_input` | consumes raw `git diff-tree -z -r --raw` input on stdin and renders selected diff formats; stock Git has no `git diff-pairs` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin last-modified` | stable | `git_history_query_compat::last_modified_reports_latest_commit_per_path` | reports the latest commit that affected each selected path, with recursive and NUL-delimited modes; stock Git has no `git last-modified` command, so this is tracked outside the Git `2.47.1` denominator |
 | `zmin history` | experimental | `git_admin_tools_compat::history_reword_dry_run_prints_ref_updates_without_moving_branch`; `git_admin_tools_compat::history_split_dry_run_splits_selected_file_hunks`; `git_admin_tools_compat::history_split_pathspec_can_select_all_matching_hunks` | additive history rewrite workflow with `reword` and `split` dry-run coverage; stock Git `2.47.1` has no `git history` command, so this is tracked outside the compatibility denominator |
-| `zmin save <message>` | experimental | `git_cms_porcelain_compat` | CMS-style `add -A` plus `commit -m` wrapper |
-| `zmin changes` | experimental | `git_cms_porcelain_compat` | human-readable status wrapper |
-| `zmin publish` | experimental | `git_cms_porcelain_compat` | safe push wrapper |
-| `zmin update` | experimental | `git_cms_porcelain_compat` | safe pull wrapper |
-| `zmin undo` | experimental | `git_cms_porcelain_compat` | operation-log backed undo for the last clean `save` |
-| `zmin timeline` | experimental | `git_cms_porcelain_compat` | human-readable history wrapper |
-| `zmin recover` | experimental | `git_cms_porcelain_compat` | safe file restore wrapper |
+| `zmin save <message>` | experimental | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | CMS-style `add -A` plus `commit -m` wrapper |
+| `zmin changes` | experimental | `git_cms_porcelain_compat::cms_changes_and_save_compose_existing_git_operations` | human-readable status wrapper |
+| `zmin publish` | experimental | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe push wrapper |
+| `zmin update` | experimental | `git_cms_porcelain_compat::cms_publish_and_update_use_safe_remote_operations` | safe pull wrapper |
+| `zmin undo` | experimental | `git_cms_porcelain_compat::cms_undo_reverts_last_logged_save_only_when_safe` | operation-log backed undo for the last clean `save` |
+| `zmin timeline` | experimental | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases` | human-readable history wrapper |
+| `zmin recover` | experimental | `git_cms_porcelain_compat::cms_timeline_and_recover_are_safe_human_aliases` | safe file restore wrapper |
 
 ## Zmin-Only Schema Command Aliases
 
@@ -67,7 +67,7 @@ evidence compares against newer/current stock Git rather than Git `2.47.1`.
 | Command | Option | Status | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | `zmin clone` | `--worktree-first` | stable | `git_clone_compat::clone_instant_local_repo_marks_worktree_first_without_changing_git_state`; `git_clone_compat::clone_worktree_first_rejects_non_worktree_or_remote_modes` | materializes selected `HEAD` first and records `zmin.worktreeFirst=true` |
-| `zmin clone` | `--instant` | stable | `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs` | alias for worktree-first clone mode over git-daemon, SSH and smart HTTP transport |
+| `zmin clone` | `--instant` | stable | `git_clone_compat::clone_instant_local_repo_fetch_and_pull_remain_canonical_git_operations`; `git_transport_http_compat::clone_instant_git_daemon_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_materializes_head_then_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_materializes_head_then_fetch_hydrates_refs` | alias for worktree-first clone mode over local repositories, git-daemon, SSH and smart HTTP transport; local instant clones keep later `fetch origin` and `pull --ff-only` as canonical Git operations while preserving `zmin.worktreeFirst=true` |
 | `zmin clone` | `--background-fetch` | experimental | `git_transport_http_compat::clone_instant_git_daemon_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_ssh_background_fetch_hydrates_refs`; `git_transport_http_compat::clone_instant_smart_http_background_fetch_hydrates_refs` | starts a detached `fetch origin` after an instant remote clone |
 | `zmin clone` | `--demand-hydrate` | experimental | `git_transport_http_compat::clone_instant_git_daemon_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_ssh_demand_hydrate_recovers_missing_head_objects`; `git_transport_http_compat::clone_instant_smart_http_demand_hydrate_recovers_missing_head_objects` | marks instant remote clones as promisor-backed for missing-object hydration |
 | `zmin cat-file` | `--type` | stable | `manual stock oracle 2026-06-23: git cat-file --type exits 129; zmin cat-file --type maps to -t` | Zmin-only long alias for `cat-file -t`; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |

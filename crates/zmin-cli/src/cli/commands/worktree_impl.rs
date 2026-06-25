@@ -9747,7 +9747,7 @@ pub(crate) fn checkout(
         return checkout_current_head(force);
     }
     if target == "-" {
-        let previous = previous_checkout_target()?;
+        let previous = previous_checkout_target(1)?;
         return checkout_existing(force, &previous);
     }
     if target.starts_with("refs/heads/") {
@@ -9784,19 +9784,26 @@ fn checkout_current_head(force: bool) -> Result<()> {
     Ok(())
 }
 
-fn previous_checkout_target() -> Result<String> {
+pub(crate) fn previous_checkout_target(index: usize) -> Result<String> {
+    if index == 0 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "could not resolve previous checkout".into(),
+        });
+    }
     let repo = find_repo()?;
     let contents = fs::read_to_string(repo.git_dir.join("logs").join("HEAD"))?;
     contents
         .lines()
         .rev()
         .filter_map(|line| line.split_once('\t').map(|(_, message)| message))
-        .find_map(|message| {
+        .filter_map(|message| {
             message
                 .strip_prefix("checkout: moving from ")
                 .and_then(|rest| rest.split_once(" to "))
                 .map(|(previous, _)| previous.to_owned())
         })
+        .nth(index - 1)
         .ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "could not resolve previous checkout".into(),

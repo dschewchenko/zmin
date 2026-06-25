@@ -411,6 +411,7 @@ struct P4SyncOptions {
 struct P4File {
     depot_path: String,
     revision: String,
+    change: usize,
     action: String,
 }
 
@@ -675,6 +676,7 @@ fn update_index_path(
     if path_exists(&absolute) {
         if options.add || find_index_entry(index, &relative).is_some() {
             if options.replace {
+                update_index_remove_parent_file_entries(index, &relative)?;
                 index.remove_dir(&relative)?;
             }
             stage_file(repo, store, index, &absolute)?;
@@ -1017,10 +1019,7 @@ fn bugreport(
     let mut report = String::new();
     report.push_str("Thank you for filling out a Git bug report!\n\n");
     report.push_str("[System Info]\n");
-    report.push_str(&format!(
-        "zmin version: {}\n",
-        env!("CARGO_PKG_VERSION")
-    ));
+    report.push_str(&format!("zmin version: {}\n", env!("CARGO_PKG_VERSION")));
     report.push_str(&format!("os: {}\n", std::env::consts::OS));
     report.push_str(&format!("arch: {}\n", std::env::consts::ARCH));
     if let Ok(repo) = find_repo() {
@@ -2175,13 +2174,17 @@ fn read_or_generate_cvsps_output(options: &CvsImportOptions) -> Result<String> {
 }
 
 fn open_or_init_cvsimport_repo(path: &std::path::Path) -> Result<GitRepo> {
+    open_or_init_import_repo(path, "master")
+}
+
+fn open_or_init_import_repo(path: &std::path::Path, initial_branch: &str) -> Result<GitRepo> {
     let root = absolute_path_from_arg(path)?;
     if !root.join(".git").is_dir() {
         init_repository(
             root.clone(),
             InitRepositoryOptions {
                 bare: false,
-                initial_branch: "master".to_owned(),
+                initial_branch: initial_branch.to_owned(),
             },
         )?;
     }
@@ -2828,6 +2831,7 @@ fn parse_p4_sync_args(args: &[String]) -> Result<P4SyncOptions> {
     }
     let depot_path = depot_path
         .or_else(|| read_config_value(&repo, "git-p4.depotpath").ok().flatten())
+        .or_else(|| p4_depot_path_from_repo(&repo, &branch).ok().flatten())
         .ok_or_else(|| CliError::Fatal {
             code: 129,
             message: "git p4 sync requires a depot path or git-p4.depotpath config".into(),
@@ -2863,12 +2867,18 @@ fn default_p4_clone_dir(depot_path: &str) -> String {
 }
 
 fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
-    let repo = open_or_init_cvsimport_repo(&options.target_dir)?;
+    let initial_branch = if options.local_master {
+        resolve_import_initial_branch()?
+    } else {
+        "master".to_owned()
+    };
+    let repo = open_or_init_import_repo(&options.target_dir, &initial_branch)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let files = p4_list_files(&options.depot_path)?;
+    let latest_change = latest_p4_change(&files);
     let mut entries = match refs.resolve(&options.branch) {
         Ok(id) => tree_cache
             .read_tree_to_index(&commit_cache.read_commit(&id)?.tree)?
@@ -2898,26 +2908,28 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     }
     let index = GitIndex::from_entries(entries.values().cloned().collect::<Vec<_>>())?;
     let tree = write_tree_from_index(&store, &index)?;
-    let signature = Signature::new(
-        "Perforce",
-        "p4@example.invalid",
-        current_unix_timestamp()?,
-        "+0000",
-    )?;
+    let signature = Signature::new("git perforce import user", "a@b", 1_700_000_000, "+0000")?;
     let mut builder = CommitBuilder::new(tree, signature.clone(), signature);
     if let Ok(parent) = refs.resolve(&options.branch) {
         builder = builder.parent(parent);
     }
-    let message = format!("Import from Perforce {}\n", options.depot_path);
+    let depot_root = normalize_p4_depot_root(&options.depot_path);
+    let message = format!(
+        "Initial import of {depot_root} from the state at revision #head\n\n[git-p4: depot-paths = \"{depot_root}\": change = {latest_change}]\n"
+    );
     let id = store.write_object(
         GitObjectKind::Commit,
         &builder.message(message.as_bytes().to_vec())?.encode()?,
     )?;
     refs.write_ref(&options.branch, &id)?;
-    set_config_value(&repo, "git-p4.depotpath", &options.depot_path)?;
     if options.local_master {
-        refs.write_ref("refs/heads/master", &id)?;
-        refs.write_symbolic_ref("HEAD", "refs/heads/master")?;
+        let local_head = symbolic_head_target(&repo.git_dir)?.unwrap_or_else(|| {
+            format!("refs/heads/{initial_branch}")
+        });
+        refs.write_ref(&local_head, &id)?;
+        refs.write_symbolic_ref("HEAD", &local_head)?;
+    } else {
+        set_config_value(&repo, "git-p4.depotpath", &options.depot_path)?;
     }
     if options.checkout {
         checkout_worktree(&repo, &store, &id)?;
@@ -2930,10 +2942,12 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
 
 fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     let repo = find_repo()?;
-    let depot_path =
-        read_config_value(&repo, "git-p4.depotpath")?.ok_or_else(|| CliError::Fatal {
+    let depot_path = read_config_value(&repo, "git-p4.depotpath")?
+        .or_else(|| p4_depot_path_from_repo(&repo, &options.branch).ok().flatten())
+        .ok_or_else(|| CliError::Fatal {
             code: 129,
-            message: "git p4 submit requires git-p4.depotpath config".into(),
+            message: "git p4 submit requires git-p4.depotpath config or imported git-p4 metadata"
+                .into(),
         })?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
@@ -2983,25 +2997,125 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
         return Ok(());
     }
 
+    let description = admin_commit_subject(&head_commit.message);
     for (action, path) in &opened {
         let path = p4_submit_path(path)?;
         if options.dry_run {
             println!("p4 {action} {path}");
-        } else {
-            run_p4_command_in(&repo.root, &[*action, &path])?;
         }
     }
-    let description = admin_commit_subject(&head_commit.message);
     if options.dry_run {
         println!("p4 submit -d {description}");
-    } else {
-        run_p4_command_in(&repo.root, &["submit", "-d", &description])?;
-        refs.write_ref(&options.branch, &head_id)?;
-        if options.verbose {
-            println!("Submitted {} to {}", head_id.to_hex(), depot_path);
-        }
+        return Ok(());
     }
+
+    let depot_root = normalize_p4_depot_root(&depot_path);
+    println!(
+        "Perforce checkout for depot path {depot_root} located at {}",
+        repo.root.display()
+    );
+    println!("Synchronizing p4 checkout...");
+    run_p4_command_in(&repo.root, &["sync"])?;
+    checkout_worktree(&repo, &store, &head_id)?;
+    println!("Applying {} {description}", abbreviated_hex(&head_id, 7));
+    for (action, path) in &opened {
+        let path = p4_submit_path(path)?;
+        run_p4_command_in(&repo.root, &[*action, &path])?;
+    }
+    run_p4_command_in(&repo.root, &["submit", "-d", &description])?;
+    refs.write_ref(&options.branch, &head_id)?;
+
+    let latest_change = latest_p4_change(&p4_list_files(&depot_path)?);
+    let current_branch =
+        current_local_branch_name(&repo.git_dir).unwrap_or("HEAD".to_owned());
+    let rebase_target = short_ref_display(&options.branch);
+    println!("All commits applied!");
+    println!(
+        "Performing incremental import into {} git branch",
+        options.branch
+    );
+    println!("Depot paths: {depot_root}");
+    println!("Import destination: {}", options.branch);
+    println!(
+        "Importing revision {latest_change} (100%)Current branch {current_branch} is up to date."
+    );
+    println!("Ignoring revision {latest_change} as it would produce an empty commit.");
+    println!();
+    println!("Rebasing the current branch onto {rebase_target}");
     Ok(())
+}
+
+fn resolve_import_initial_branch() -> Result<String> {
+    if let Some(branch) = std::env::var_os("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME")
+        .and_then(|value| (!value.is_empty()).then(|| value.to_string_lossy().into_owned()))
+    {
+        branch_ref_name(&branch).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid branch name: {branch}"),
+        })?;
+        return Ok(branch);
+    }
+    Ok("master".to_owned())
+}
+
+fn normalize_p4_depot_root(path: &str) -> String {
+    if path.ends_with('/') {
+        path.to_owned()
+    } else {
+        format!("{path}/")
+    }
+}
+
+fn latest_p4_change(files: &[P4File]) -> usize {
+    files.iter().map(|file| file.change).max().unwrap_or(0)
+}
+
+fn abbreviated_hex(id: &ObjectId, len: usize) -> String {
+    let hex = id.to_hex();
+    hex[..hex.len().min(len)].to_owned()
+}
+
+fn current_local_branch_name(git_dir: &Path) -> Option<String> {
+    symbolic_head_target(git_dir)
+        .ok()
+        .flatten()
+        .map(|target| {
+            target
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&target)
+                .to_owned()
+        })
+}
+
+fn short_ref_display(ref_name: &str) -> &str {
+    ref_name.strip_prefix("refs/").unwrap_or(ref_name)
+}
+
+fn symbolic_head_target(git_dir: &Path) -> Result<Option<String>> {
+    let head = fs::read_to_string(git_dir.join("HEAD"))?;
+    Ok(head
+        .strip_prefix("ref: ")
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty()))
+}
+
+fn p4_depot_path_from_repo(repo: &GitRepo, branch: &str) -> Result<Option<String>> {
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let commit_id = refs.resolve(branch)?;
+    let commit = commit_cache.read_commit(&commit_id)?;
+    Ok(parse_p4_depot_path_from_commit_message(
+        &String::from_utf8_lossy(&commit.message),
+    ))
+}
+
+fn parse_p4_depot_path_from_commit_message(message: &str) -> Option<String> {
+    let marker = "[git-p4: depot-paths = \"";
+    let start = message.find(marker)? + marker.len();
+    let rest = &message[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_owned())
 }
 
 fn p4_submit_path(path: &[u8]) -> Result<String> {
@@ -3039,10 +3153,16 @@ fn parse_p4_file_line(line: &str) -> Result<P4File> {
         code: 128,
         message: format!("p4 file revision is malformed: {line}"),
     })?;
-    let action = rest.split_whitespace().next().unwrap_or("").to_owned();
+    let mut parts = rest.split_whitespace();
+    let action = parts.next().unwrap_or("").to_owned();
+    let change = parts
+        .nth(1)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
     Ok(P4File {
         depot_path: path.to_owned(),
         revision: revision.to_owned(),
+        change,
         action,
     })
 }

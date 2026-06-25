@@ -48,6 +48,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_recode: _,
             encoding: _,
             scissors: _,
+            no_scissors: _,
             quoted_cr: _,
             msg,
             patch,

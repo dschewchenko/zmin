@@ -405,6 +405,11 @@ fn parse_git_absolute_date(value: &str) -> Result<(i64, String)> {
             return Ok((datetime.and_utc().timestamp() - offset_seconds, timezone));
         }
     }
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        && let Some(datetime) = date.and_hms_opt(0, 0, 0)
+    {
+        return Ok((datetime.and_utc().timestamp() - offset_seconds, timezone));
+    }
     Err(CliError::Message(format!(
         "git date timestamp is invalid: invalid digit found in string: {value}"
     )))

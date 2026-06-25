@@ -1525,11 +1525,12 @@ fn sequencer_signature_summary_date(signature: &Signature) -> Result<String> {
         code: 128,
         message: "commit has invalid author timezone".into(),
     })?;
-    let utc =
-        chrono::DateTime::from_timestamp(signature.timestamp, 0).ok_or_else(|| CliError::Fatal {
+    let utc = chrono::DateTime::from_timestamp(signature.timestamp, 0).ok_or_else(|| {
+        CliError::Fatal {
             code: 128,
             message: "commit author timestamp is out of range".into(),
-        })?;
+        }
+    })?;
     Ok(utc
         .with_timezone(&offset)
         .format("%a %b %-d %H:%M:%S %Y %z")

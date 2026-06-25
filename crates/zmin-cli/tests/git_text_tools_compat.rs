@@ -3,8 +3,9 @@ mod common;
 use std::fs;
 
 use common::{
-    git, git_args, git_failure_output, git_init, git_with_stdin, git_with_stdin_args, run_zmin,
-    run_zmin_args, run_zmin_failure_output, run_zmin_with_stdin, run_zmin_with_stdin_args,
+    command_stdout_bytes, command_stdout_bytes_with_stdin, git, git_args, git_failure_output,
+    git_init, git_with_env, git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_with_stdin, run_zmin_with_stdin_args, zmin_bin,
 };
 
 #[test]
@@ -35,6 +36,339 @@ fn check_mailmap_matches_stock_git_for_common_entries() {
         run_zmin_with_stdin(repo.path(), ["check-mailmap", "--stdin"], input),
         git_with_stdin(repo.path(), ["check-mailmap", "--stdin"], input)
     );
+
+    let alt_mailmap = repo.path().join("alt.mailmap");
+    fs::write(
+        &alt_mailmap,
+        b"Alt Name <alt@example.com> Alt Alias <alt-alias@example.com>\n",
+    )
+    .expect("write alt mailmap");
+    assert_eq!(
+        run_zmin(
+            repo.path(),
+            [
+                "check-mailmap",
+                "--mailmap-file=alt.mailmap",
+                "Alt Alias <alt-alias@example.com>",
+            ],
+        ),
+        git(
+            repo.path(),
+            [
+                "check-mailmap",
+                "--mailmap-file=alt.mailmap",
+                "Alt Alias <alt-alias@example.com>",
+            ],
+        )
+    );
+
+    let blob_mailmap = repo.path().join("blob.mailmap");
+    fs::write(
+        &blob_mailmap,
+        b"Blob Name <blob@example.com> Blob Alias <blob-alias@example.com>\n",
+    )
+    .expect("write blob mailmap");
+    let blob_oid = git(repo.path(), ["hash-object", "-w", "blob.mailmap"]);
+    let blob_oid = blob_oid.trim();
+    assert_eq!(
+        run_zmin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                &format!("--mailmap-blob={blob_oid}"),
+                "Blob Alias <blob-alias@example.com>",
+            ],
+        ),
+        git_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                &format!("--mailmap-blob={blob_oid}"),
+                "Blob Alias <blob-alias@example.com>",
+            ],
+        )
+    );
+
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--stdin", "--stdin"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--stdin", "--stdin"],
+            input,
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "Alias Name <alias@example.com>",
+            ],
+            "Alias Name <alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "Alias Name <alias@example.com>",
+            ],
+            "Alias Name <alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--no-stdin", "--stdin"],
+            "Alias Name <alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--no-stdin", "--stdin"],
+            "Alias Name <alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--mailmap-file", "alt.mailmap"],
+            "Alt Alias <alt-alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--mailmap-file", "alt.mailmap"],
+            "Alt Alias <alt-alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--mailmap-blob", blob_oid],
+            "Blob Alias <blob-alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--mailmap-blob", blob_oid],
+            "Blob Alias <blob-alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--mailmap-file",
+                "alt.mailmap",
+                "--mailmap-blob",
+                blob_oid,
+                "Blob Alias <blob-alias@example.com>",
+            ],
+        ),
+        git_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--mailmap-file",
+                "alt.mailmap",
+                "--mailmap-blob",
+                blob_oid,
+                "Blob Alias <blob-alias@example.com>",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--mailmap-blob",
+                blob_oid,
+                "--mailmap-file",
+                "alt.mailmap",
+                "Alt Alias <alt-alias@example.com>",
+            ],
+        ),
+        git_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--mailmap-blob",
+                blob_oid,
+                "--mailmap-file",
+                "alt.mailmap",
+                "Alt Alias <alt-alias@example.com>",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--mailmap-file=alt.mailmap",
+                &format!("--mailmap-blob={blob_oid}"),
+                "Blob Alias <blob-alias@example.com>",
+            ],
+        ),
+        git_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--mailmap-file=alt.mailmap",
+                &format!("--mailmap-blob={blob_oid}"),
+                "Blob Alias <blob-alias@example.com>",
+            ],
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--stdin", "--no-stdin", "--stdin"],
+            "Alias Name <alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["check-mailmap", "--stdin", "--stdin", "--no-stdin", "--stdin"],
+            "Alias Name <alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "--mailmap-file",
+                "alt.mailmap",
+                "Alt Alias <alt-alias@example.com>",
+            ],
+            "Alias Name <alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "--mailmap-file",
+                "alt.mailmap",
+                "Alt Alias <alt-alias@example.com>",
+            ],
+            "Alias Name <alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "--mailmap-blob",
+                blob_oid,
+                "Blob Alias <blob-alias@example.com>",
+            ],
+            "Alias Name <alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "--mailmap-blob",
+                blob_oid,
+                "Blob Alias <blob-alias@example.com>",
+            ],
+            "Alias Name <alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--mailmap-file",
+                "alt.mailmap",
+                "--mailmap-blob",
+                blob_oid,
+            ],
+            "Blob Alias <blob-alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--mailmap-file",
+                "alt.mailmap",
+                "--mailmap-blob",
+                blob_oid,
+            ],
+            "Blob Alias <blob-alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--mailmap-blob",
+                blob_oid,
+                "--mailmap-file",
+                "alt.mailmap",
+            ],
+            "Alt Alias <alt-alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--mailmap-blob",
+                blob_oid,
+                "--mailmap-file",
+                "alt.mailmap",
+            ],
+            "Alt Alias <alt-alias@example.com>\n",
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "--stdin",
+                "--mailmap-file",
+                "alt.mailmap",
+            ],
+            "Alt Alias <alt-alias@example.com>\n",
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--no-stdin",
+                "--stdin",
+                "--mailmap-file",
+                "alt.mailmap",
+            ],
+            "Alt Alias <alt-alias@example.com>\n",
+        )
+    );
 }
 
 #[test]
@@ -50,6 +384,13 @@ fn check_attr_matches_stock_git_for_common_attributes() {
     fs::write(repo.path().join("file.bin"), b"\0bin\n").expect("write bin");
     fs::write(repo.path().join("docs/a.md"), b"doc\n").expect("write doc");
     fs::write(repo.path().join("readme.md"), b"readme\n").expect("write readme");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "attrs"]);
+    fs::write(
+        repo.path().join(".gitattributes"),
+        b"*.rs -text diff=changed custom\n*.bin text -binary\n/docs/** linguist-documentation\n*.md diff=markdown\n",
+    )
+    .expect("rewrite attributes");
 
     for args in [
         ["check-attr", "text", "diff", "custom", "--", "main.rs"].as_slice(),
@@ -98,6 +439,36 @@ fn check_attr_matches_stock_git_for_common_attributes() {
             "main.rs\nfile.bin\n"
         )
     );
+
+    for args in [
+        ["check-attr", "--cached", "text", "diff", "--", "main.rs"].as_slice(),
+        ["check-attr", "--source=HEAD", "text", "diff", "--", "main.rs"].as_slice(),
+        ["check-attr", "--source", "HEAD", "text", "diff", "--", "main.rs"].as_slice(),
+        ["check-attr", "-z", "text", "diff", "--", "main.rs"].as_slice(),
+        ["check-attr", "--all", "-z", "--", "main.rs"].as_slice(),
+        ["check-attr", "--source=HEAD", "--all", "-z", "--", "main.rs"].as_slice(),
+        ["check-attr", "--cached", "-z", "text", "diff", "--", "main.rs"].as_slice(),
+    ] {
+        assert_eq!(
+            command_stdout_bytes(zmin_bin(), repo.path(), args),
+            command_stdout_bytes("git", repo.path(), args)
+        );
+    }
+
+    assert_eq!(
+        command_stdout_bytes_with_stdin(
+            zmin_bin(),
+            repo.path(),
+            &["check-attr", "--stdin", "-z", "text", "diff"],
+            b"main.rs\0file.bin\0",
+        ),
+        command_stdout_bytes_with_stdin(
+            "git",
+            repo.path(),
+            &["check-attr", "--stdin", "-z", "text", "diff"],
+            b"main.rs\0file.bin\0",
+        )
+    );
 }
 
 #[test]
@@ -109,6 +480,79 @@ fn column_matches_stock_git_for_common_modes() {
         ["column", "--mode=column", "--padding=2", "--width=20"].as_slice(),
         ["column", "--mode=row", "--padding=2", "--width=20"].as_slice(),
         ["column", "--padding=2", "--width=20"].as_slice(),
+        ["column", "--no-mode", "--width=20"].as_slice(),
+        ["column", "--mode", "--width=20"].as_slice(),
+        ["column", "--mode=", "--width=20"].as_slice(),
+        ["column", "--width=20", "--no-width"].as_slice(),
+        ["column", "--no-command", "--width=20"].as_slice(),
+        ["column", "--raw-mode=1", "--width=20"].as_slice(),
+        ["column", "--raw-mode=17", "--width=20"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_with_stdin_args(repo.path(), args, input),
+            git_with_stdin_args(repo.path(), args, input)
+        );
+    }
+
+    git(repo.path(), ["config", "--replace-all", "column.status", "column,dense"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
+        git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
+    );
+    git(repo.path(), ["config", "--replace-all", "column.status", "column,nodense"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
+        git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
+    );
+    git(repo.path(), ["config", "--replace-all", "column.status", "row,dense"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
+        git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
+    );
+    git(repo.path(), ["config", "--replace-all", "column.status", "dense"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
+        git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
+    );
+    git(repo.path(), ["config", "--replace-all", "column.status", "nodense"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
+        git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
+    );
+    git(repo.path(), ["config", "--replace-all", "column.status", "row,nodense"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
+        git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
+    );
+    git(repo.path(), ["config", "--unset-all", "column.status"]);
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--command=", "--mode=column", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--command=", "--mode=column", "--width=20"],
+            input,
+        )
+    );
+    for args in [
+        ["column", "--command=status", "--mode=column"].as_slice(),
+        ["column", "--command=status", "--mode=row"].as_slice(),
+        ["column", "--command=status", "--mode=plain"].as_slice(),
+        ["column", "--command=status", "--mode=nodense"].as_slice(),
+        ["column", "--command=status", "--mode=row,nodense"].as_slice(),
+        ["column", "--command=status", "--mode=column,nodense"].as_slice(),
+        ["column", "--command=status", "--mode="].as_slice(),
+        ["column", "--command=status", "--no-mode"].as_slice(),
+        ["column", "--command=status", "--raw-mode=0"].as_slice(),
+        ["column", "--command=status", "--raw-mode=16"].as_slice(),
+        ["column", "--command=status", "--raw-mode=17"].as_slice(),
+        ["column", "--command=", "--width=20"].as_slice(),
+        ["column", "--command=", "--raw-mode=16", "--width=20"].as_slice(),
+        ["column", "--no-command", "--mode=column", "--width=20"].as_slice(),
+        ["column", "--no-command", "--raw-mode=16", "--width=20"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_with_stdin_args(repo.path(), args, input),
@@ -130,8 +574,147 @@ fn column_matches_stock_git_for_common_modes() {
     }
 
     assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--command=status", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--command=status", "--width=20"],
+            input,
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--mode=column", "--indent=>>", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--mode=column", "--indent=>>", "--width=20"],
+            input,
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--mode=column", "--nl=ZZ", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--mode=column", "--nl=ZZ", "--width=20"],
+            input,
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--raw-mode=0", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--raw-mode=0", "--width=20"],
+            input,
+        )
+    );
+    for args in [
+        ["column", "--raw-mode=0", "--mode=column", "--width=20"].as_slice(),
+        ["column", "--mode=column", "--raw-mode=0", "--width=20"].as_slice(),
+        ["column", "--raw-mode=1", "--mode=column", "--width=20"].as_slice(),
+        ["column", "--mode=column", "--raw-mode=1", "--width=20"].as_slice(),
+        ["column", "--raw-mode=1", "--padding=2", "--width=20"].as_slice(),
+        ["column", "--raw-mode=1", "--indent=>>", "--width=20"].as_slice(),
+        ["column", "--raw-mode=1", "--nl=ZZ", "--width=20"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_with_stdin_args(repo.path(), args, input),
+            git_with_stdin_args(repo.path(), args, input)
+        );
+    }
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--indent=>>", "--no-indent", "--mode=column", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--indent=>>", "--no-indent", "--mode=column", "--width=20"],
+            input,
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &["column", "--nl=ZZ", "--no-nl", "--mode=column", "--width=20"],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &["column", "--nl=ZZ", "--no-nl", "--mode=column", "--width=20"],
+            input,
+        )
+    );
+    assert_eq!(
+        run_zmin_with_stdin_args(
+            repo.path(),
+            &[
+                "column",
+                "--padding=2",
+                "--mode=column",
+                "--width=20",
+                "--no-padding",
+            ],
+            input,
+        ),
+        git_with_stdin_args(
+            repo.path(),
+            &[
+                "column",
+                "--padding=2",
+                "--mode=column",
+                "--width=20",
+                "--no-padding",
+            ],
+            input,
+        )
+    );
+
+    assert_eq!(
         run_zmin_failure_output(repo.path(), &["column", "--mode=bad"]),
         git_failure_output(repo.path(), &["column", "--mode=bad"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--width="]),
+        git_failure_output(repo.path(), &["column", "--width="])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--padding="]),
+        git_failure_output(repo.path(), &["column", "--padding="])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--raw-mode=bogus", "--width=20"]),
+        git_failure_output(repo.path(), &["column", "--raw-mode=bogus", "--width=20"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--command", "status"]),
+        git_failure_output(repo.path(), &["column", "--command", "status"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--width=20", "--command=status"]),
+        git_failure_output(repo.path(), &["column", "--width=20", "--command=status"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--command=status", "--no-command"]),
+        git_failure_output(repo.path(), &["column", "--command=status", "--no-command"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["column", "--command=", "--no-command", "--width=20"]),
+        git_failure_output(repo.path(), &["column", "--command=", "--no-command", "--width=20"])
     );
 }
 
@@ -177,4 +760,68 @@ fn stripspace_matches_stock_git_for_common_modes() {
             comment_fixture
         )
     );
+
+    for args in [
+        ["stripspace", "-s", "--comment-lines"].as_slice(),
+        ["stripspace", "--comment-lines", "-s"].as_slice(),
+        ["stripspace", "-c", "--strip-comments"].as_slice(),
+        ["stripspace", "--strip-comments", "-c"].as_slice(),
+        ["stripspace", "-s", "-c"].as_slice(),
+        ["stripspace", "-c", "-s"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["stripspace", "-s", "--strip-comments"].as_slice(),
+        ["stripspace", "--strip-comments", "-s"].as_slice(),
+        ["stripspace", "-c", "--comment-lines"].as_slice(),
+        ["stripspace", "--comment-lines", "-c"].as_slice(),
+        ["stripspace", "-s", "--strip-comments", "-s"].as_slice(),
+        ["stripspace", "-c", "--comment-lines", "-c"].as_slice(),
+        ["stripspace", "--strip-comments", "-s", "--strip-comments"].as_slice(),
+        ["stripspace", "--comment-lines", "-c", "--comment-lines"].as_slice(),
+        ["stripspace", "-s", "--strip-comments", "--strip-comments"].as_slice(),
+        ["stripspace", "-c", "--comment-lines", "--comment-lines"].as_slice(),
+        ["stripspace", "-s", "-s", "--strip-comments"].as_slice(),
+        ["stripspace", "--strip-comments", "--strip-comments", "-s"].as_slice(),
+        ["stripspace", "-c", "-c", "--comment-lines"].as_slice(),
+        ["stripspace", "--comment-lines", "--comment-lines", "-c"].as_slice(),
+        ["stripspace", "-s", "--strip-comments", "--strip-comments", "-s"].as_slice(),
+        ["stripspace", "-c", "--comment-lines", "--comment-lines", "-c"].as_slice(),
+        ["stripspace", "--strip-comments", "-s", "-s"].as_slice(),
+        ["stripspace", "--comment-lines", "-c", "-c"].as_slice(),
+        ["stripspace", "--strip-comments", "--strip-comments", "--strip-comments"].as_slice(),
+        ["stripspace", "--comment-lines", "--comment-lines", "--comment-lines"].as_slice(),
+        ["stripspace", "-s", "-s", "-s"].as_slice(),
+        ["stripspace", "-c", "-c", "-c"].as_slice(),
+        ["stripspace", "-s", "-s", "--strip-comments", "-s"].as_slice(),
+        ["stripspace", "-c", "-c", "--comment-lines", "-c"].as_slice(),
+        ["stripspace", "--strip-comments", "-s", "--strip-comments", "-s"].as_slice(),
+        ["stripspace", "--comment-lines", "-c", "--comment-lines", "-c"].as_slice(),
+        ["stripspace", "-s", "--strip-comments", "-s", "--strip-comments"].as_slice(),
+        ["stripspace", "-c", "--comment-lines", "-c", "--comment-lines"].as_slice(),
+        ["stripspace", "--strip-comments", "--strip-comments", "-s", "-s"].as_slice(),
+        ["stripspace", "--comment-lines", "--comment-lines", "-c", "-c"].as_slice(),
+        ["stripspace", "-s", "-s", "-s", "-s"].as_slice(),
+        ["stripspace", "-c", "-c", "-c", "-c"].as_slice(),
+        ["stripspace", "--strip-comments", "--strip-comments", "--strip-comments", "--strip-comments"].as_slice(),
+        ["stripspace", "--comment-lines", "--comment-lines", "--comment-lines", "--comment-lines"].as_slice(),
+        ["stripspace", "-s", "--strip-comments", "--strip-comments", "--strip-comments"].as_slice(),
+        ["stripspace", "-c", "--comment-lines", "--comment-lines", "--comment-lines"].as_slice(),
+        ["stripspace", "--strip-comments", "-s", "-s", "-s"].as_slice(),
+        ["stripspace", "--comment-lines", "-c", "-c", "-c"].as_slice(),
+        ["stripspace", "-s", "-s", "--strip-comments", "--strip-comments"].as_slice(),
+        ["stripspace", "-c", "-c", "--comment-lines", "--comment-lines"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_with_stdin_args(repo.path(), args, comment_fixture),
+            git_with_stdin_args(repo.path(), args, comment_fixture),
+            "args: {args:?}"
+        );
+    }
 }

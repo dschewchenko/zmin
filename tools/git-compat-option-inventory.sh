@@ -89,7 +89,27 @@ awk '$1 ~ /^git-/ { command = $1; sub(/^git-/, "", command); print command }' "$
         BEGIN {
           $command = $ENV{"ZMIN_PARSE_COMMAND"};
           $doc = $ENV{"ZMIN_PARSE_DOC"};
+          $section = "";
+          $pending_heading = "";
         }
+
+        chomp;
+
+        if (/^[-=~^+]+$/ && $pending_heading ne "") {
+          $section = $pending_heading;
+          $pending_heading = "";
+          next;
+        }
+
+        if (/^[A-Z][A-Z0-9 ()\/-]*$/) {
+          $pending_heading = $_;
+          next;
+        }
+
+        $pending_heading = "";
+
+        next unless $section eq "OPTIONS";
+        next unless /^\s*-/;
 
         s/`//g;
         s/\047//g;

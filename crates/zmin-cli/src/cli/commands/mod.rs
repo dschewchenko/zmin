@@ -164,7 +164,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::CredentialStore { .. }
         | crate::runtime::Command::CredentialCache { .. }) => credential::dispatch(command),
         command @ (crate::runtime::Command::Column { .. }
-        | crate::runtime::Command::Stripspace { .. }) => text::dispatch(command),
+        | crate::runtime::Command::Stripspace { .. }) => text::dispatch(command, raw_args),
         command @ (crate::runtime::Command::ForEachRepo { .. }
         | crate::runtime::Command::UpdateIndex { .. }
         | crate::runtime::Command::Bugreport { .. }
@@ -195,7 +195,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::CheckIgnore { .. }
         | crate::runtime::Command::CheckMailmap { .. }
         | crate::runtime::Command::CheckAttr { .. }
-        | crate::runtime::Command::UnpackObjects { .. }) => core::dispatch(command),
+        | crate::runtime::Command::UnpackObjects { .. }) => core::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Clone { .. }
         | crate::runtime::Command::LsRemote { .. }
         | crate::runtime::Command::Fetch { .. }
@@ -243,7 +243,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::VerifyTag { .. }
         | crate::runtime::Command::Mktag { .. }
         | crate::runtime::Command::CommitGraph { .. }
-        | crate::runtime::Command::MultiPackIndex { .. }) => pack::dispatch(command),
+        | crate::runtime::Command::MultiPackIndex { .. }) => pack::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Remote { .. }
         | crate::runtime::Command::PackRefs { .. }
         | crate::runtime::Command::UpdateRef { .. }

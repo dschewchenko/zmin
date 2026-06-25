@@ -150,7 +150,8 @@ When resuming work, use this checklist before editing code:
 8. Run the focused test, then the relevant build and count gates.
 9. Update generated counts in README, `git_compatibility_inventory.md`, this
    plan and project notes.
-10. Commit and push before starting another slice.
+10. Commit locally before starting another slice. Push only on explicit
+    request.
 
 Do not start from the raw `unsupported` scan alone. The scan only finds source
 guards; each guard still needs classification against stock Git.
@@ -214,7 +215,8 @@ Repeat this loop until the full Git `2.47.1` matrix is closed:
    expected row-count delta from `docs/cli/matrix_row_growth_audit.md`.
 7. Run the focused evidence, build and count gates listed below.
 8. Update README, inventory, this plan and project notes with generated counts.
-9. Commit and push before switching to another command, option class or lane.
+9. Commit locally before switching to another command, option class or lane.
+   Push only on explicit request.
 
 If actual row growth differs from the declared bucket, stop and explain the
 difference before committing. Do not let `written behavior rows` grow as an
@@ -239,7 +241,8 @@ Every compatibility slice must finish these items:
    gates.
 5. Update README, `git_compatibility_inventory.md`, this plan and project notes
    with the generated counts.
-6. Commit and push before starting a different command or option class.
+6. Commit locally before starting a different command or option class. Push
+   only on explicit request.
 
 ### Active Queue
 
@@ -255,7 +258,8 @@ Every compatibility slice must finish these items:
 
 This queue is the handoff point when work resumes. Do not start a later item
 until the earlier item has a matrix row, stock-Git evidence, generated count
-updates, project-note update, commit and push.
+updates, project-note update and a local commit when the slice is substantial.
+Push only on explicit request.
 
 | Order | Slice | Required evidence | Required docs/counts |
 | ---: | --- | --- | --- |
@@ -296,29 +300,55 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
+The focused `git_object_plumbing_compat.rs`,
+`git_transport_http_compat.rs`,
+`git_clone_ref_format_compat.rs`, `git_scalar_compat.rs`,
+`git_admin_tools_compat.rs`, `git_cms_porcelain_compat.rs`,
+`git_clone_compat.rs`, `compatibility_command.rs`,
+`git_fast_import_export_compat.rs`, `git_global_cli_compat.rs` and
+all focused oracle buckets in `docs/cli/existing_oracle_test_inventory.tsv`
+are now fully represented or classified. The next recommended batch still
+keeps the exact-open queue visible, but the smallest local no-helper follow-up
+is no longer `git column`; that local subgroup is closed. `git pack-refs` now
+has all `5/5` documented options represented too, so the next smallest local
+parser-plus-evidence batch has now also closed the small `git prune`
+documented-flag subgroup. The next smallest helper-free follow-up should move
+to the next narrow command-tail classification or helper-free doc-option
+subgroup after the new `git hash-object` long-option batch.
+The exact helper-backed
+foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
+oracle. The remaining exact-open tail in this environment is the
+local-helper-unavailable batch tracked in
+`docs/cli/census/exact_open_oracle_gaps.tsv`.
+
 ### Latest Completed Slice
 
-The latest completed slice creates `update_index_v2_47.tsv`, backed by
-`tools/git-update-index-schema-oracle-smoke.sh`.
+The latest completed slice is the small focused `git mailinfo --no-scissors`
+parser-plus-evidence batch. Zmin now matches stock Git for the exact
+`git mailinfo --no-scissors git-msg git-patch < patch-mail.txt` flow, covering
+stdout, exit status and the resulting message/patch output files.
 
-`update_index_v2_47.tsv` now records exact rows for `git update-index --add
-a.txt`, `git update-index a.txt`, clean `--refresh`/`--really-refresh`,
-assume-unchanged and skip-worktree set/clear toggles, `--remove`,
-`--force-remove`, `--stdin`, `-z --stdin`, two `--cacheinfo` value forms,
-`--replace --cacheinfo` and two `--index-info` stdin formats. The smoke
-compares stock Git and Zmin exit status, stdout, stderr, `ls-files --stage`,
-`ls-files -v` index flags and worktree status. The oracle inventory remains
-`707` represented/classified functions and `254` `missing_or_unclassified`
-because the evidence is a shell smoke, not a Rust test inventory function.
-Current written rows are `2846`, with `2457/2846` matching stock Git, `1/2846`
-open and `388/2846` invalid-input.
+Focused gates were
+`cargo test -p zmin-cli --test git_mail_tools_compat mailinfo_matches_stock_git_for_common_patch_mail -- --nocapture`,
+`python3 tools/git-compat-census.py`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(mailinfo|summary)\t'`,
+and `git diff --check`.
+
+Current census counts are `5106` matrix rows, `4405` verified rows, `672`
+invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
+open-or-partial rows, `47/151` complete command matrices, `115/3175`
+complete documented option pairs, and `3086` remaining checklist rows.
+`mailinfo` now reads `10/10` represented documented options, `13/13`
+classified rows, `13/13` matching stock Git rows and `0` open rows.
 
 ### No-Skip Rule
 
 Every iteration must update the durable handoff before it is considered done:
 matrix row, focused evidence, generated counts, README/inventory/plan/project
-notes, commit and push. If any item is missing, the slice stays open even if
-the code happens to pass the focused test.
+notes and a local commit when the slice is substantial. Push only on explicit
+request. If any item is missing, the slice stays open even if the code happens
+to pass the focused test.
 
 The latest closed guard classification is `fetch` from an invalid bundle file.
 Stock Git treats `git fetch bad.bundle HEAD:refs/heads/from-bundle` as an
@@ -595,17 +625,6 @@ that repository with exit `128`, empty stdout and invalid config diagnostics
 that include the local `.git/config` line number. Zmin now checks object format
 during status setup and emits the same diagnostics.
 
-The latest open guard classification is `transport_impl.rs`
-`reftable ref storage is not supported yet` for
-`git clone --ref-format=reftable <path> dst`. Stock Git in the current oracle
-environment creates a reftable clone and reports `reftable` from
-`rev-parse --show-ref-format`; Zmin currently exits `128` before destination
-creation. This is now an open Git-supported behavior row, not invalid input.
-The adjacent `refs.rs` parser guards `unsupported reftable version` and
-`unsupported reftable ref value type` are also classified under the same open
-reftable storage gap until Zmin has a real reftable writer/reader and oracle
-coverage for valid and invalid reftable table variants.
-
 The latest closed transport slice is `clone --reference-if-able` for dumb HTTP
 sources. Zmin now accepts
 `git clone --reference-if-able <path> http://host/repo.git dst`, writes the
@@ -780,7 +799,7 @@ until a full matrix is expanded and verified.
 | `apply` stdin patch modes | `10` | `0` | `git apply --check`, default stdin apply, `--cached`, `--index`, binary reverse `-R`, rename, Unix mode-only and header-only invalid patch forms already covered by `git_apply_compat` |
 | `patch-id` stdin patch modes | `6` | `0` | default, `--stable`, `--unstable`, `--verbatim` diff patch forms plus stable and unstable log patch streams already covered by `git_apply_compat` |
 | `stripspace` stdin text modes | `5` | `0` | default, `-s`, `-c`, `--strip-comments` and `--comment-lines` stdin text forms already covered by `git_text_tools_compat` |
-| `check-mailmap` common entry forms | `6` | `0` | positional name-and-email, email-only, display-name, canonical-email, unmapped identity and `--stdin` batch forms already covered by `git_text_tools_compat` |
+| `check-mailmap` common entry and stdin/mailmap option forms | `23` | `0` | positional name-and-email, email-only, display-name, canonical-email, unmapped identity, `--stdin` batch/triple/order forms, stdin with `--mailmap-file` or `--mailmap-blob`, stdin file/blob last-option-wins forms, `--mailmap-file` separate/equals, `--mailmap-blob` separate/equals, and positional file/blob last-option-wins forms already covered by `git_text_tools_compat` and oracle smoke |
 | `interpret-trailers` common stdin modes | `10` | `0` | default, `--only-trailers`, `--parse`, `--trailer`, `--where before/after`, `--if-exists addIfDifferent/add/replace` and `--if-missing doNothing` stdin forms already covered by `git_mail_tools_compat` |
 | `mailinfo` common patch mail modes | `4` | `0` | default, `-k`, `-b` and `-m` stdin patch-mail forms already covered by `git_mail_tools_compat` |
 | `mailsplit` mbox and maildir modes | `2` | `0` | mbox `-d4 -f3 -o...` and maildir `-o...` split forms already covered by `git_mail_tools_compat` |
@@ -790,7 +809,9 @@ until a full matrix is expanded and verified.
 | `bugreport` suffix filename modes | `3` | `0` | custom, strftime and path suffix report-file variants already covered by `git_admin_tools_compat` |
 | `for-each-repo` configured repository modes | `4` | `0` | configured repository iteration, missing repository failures with and without `--keep-going`, and missing config key no-op already covered by `git_admin_tools_compat` |
 | `replay` linear range modes | `4` | `1` | plain range usage failure plus contained advance, fixed-date advance and `--onto` replay forms already covered by `git_admin_tools_compat` |
-| `clean` no-interactive toggle forms | `3` | `0` | `--no-interactive -n`, `-n --no-interactive`, `--interactive --no-interactive -n` |
+| `clean` toggle-order and compact short forms | `12` | `0` | `-n/--no-dry-run`, `-f/--no-force`, `-q/--no-quiet`, `--no-interactive` order-sensitive forms plus compact `-fd` and `-fx -ekeep.tmp` already covered by `git_clean_compat` |
+| `clean` force/quiet/path and nested git combos | `8` | `0` | `-n -x`, `-f -x/-X -d`, `-f -d dir`, quiet `-f -q -x/-X -d`, compact `-ffd`, and quiet nested `-ff -q -d` already covered by `git_clean_compat` |
+| `clean` quiet dry-run and path-limited combos | `14` | `0` | quiet `-n -d`, quiet path-limited dry-run, quiet `-n -q -x/-X` with and without `-d`, quiet top-level force, quiet path-limited force, and quiet ignored-directory pathspec dry-run/force forms already covered by `git_clean_compat` |
 | `column --mode` dense layout forms | `4` | `0` | `dense`, `nodense`, `column,dense`, `row,dense` |
 | `rerere` invalid operation usage | `1` | `0` | `git rerere bogus` exits `129` with stock usage text instead of a custom unsupported-operation fatal diagnostic |
 | `reflog` shorthand invalid ref usage | `1` | `0` | `git reflog bogus` is parsed as shorthand `show` ref and exits `128` with stock ambiguous-revision diagnostics instead of using an unsupported-subcommand branch |
@@ -803,7 +824,7 @@ until a full matrix is expanded and verified.
 | `grep` tracked, cached and treeish text search forms | `12` | `0` | default pattern search, `-n`, `-l`, `-F`, pathspec, `--cached`, `HEAD -- <path>`, treeish line/filename modes, treeish directory pathspec and no-match exit behavior already covered by `git_grep_compat` |
 | `check-ref-format` common accepted and invalid forms | `11` | `0` | full refname validation, `--allow-onelevel`, `--normalize`, `--branch`, one-level rejection, invalid path components, trailing slash and invalid branch shorthand already covered by `git_check_ref_format_compat` |
 | `filter-branch` supported filters and options | `13` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, `-d` temp directory, `--commit-filter` passthrough, `--commit-filter` with `skip_commit`, initial `--state-branch`, and repeated state-branch forms already covered by `git_filter_branch_compat` |
-| `clone` local path options | `45` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, `--origin` long forms, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, `--single-branch`, local and file URL `--depth 1`, `-b`/`--branch feature`, `--checkout`/`--no-checkout` ordering, `--separate-git-dir`, `--no-single-branch` ordering, bare, mirror, shared bare/mirror and bare/mirror no-tags forms, explicit `--ref-format=files`, and case-insensitive symlink/directory collision checkout already covered by `git_clone_compat` |
+| `clone` local path options | `51` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, long/equals `--origin`, `--branch`, `--single-branch` and `--config` forms, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, local and file URL `--depth 1`, `-b`/`--branch feature`, `--checkout`/`--no-checkout` ordering, `--separate-git-dir`, `--no-single-branch` ordering, bare, mirror, shared bare/mirror and bare/mirror no-tags forms, explicit `--ref-format=files`, and case-insensitive symlink/directory collision checkout already covered by `git_clone_compat` |
 | `log --date` author/committer format values | `13` | `0` | built-in date modes plus `format:` and `format-local:` strftime values for `%ad` and `%cd` |
 | `log` replacement basic NUL format output | `1` | `0` | `-z --format=%H%x00%P%x00%D%x00%s -1` through the `git` shim |
 | `log` replacement iso-strict NUL date output | `1` | `0` | `--date=iso-strict -z --format=%H%x00%ad%x00%cd` through the `git` shim |
@@ -1018,7 +1039,6 @@ until implementation and focused parity evidence close them.
 
 | Source guard | Classification | Matrix / evidence |
 | --- | --- | --- |
-| `transport_impl.rs` `reftable ref storage is not supported yet` in `git clone --ref-format=reftable` parsing | open Git-supported feature gap; stock Git creates a reftable clone in the current oracle environment | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_reftable_is_open_gap_against_stock_git` |
 
 ## Closed Code Guard Mappings
 
@@ -1052,7 +1072,8 @@ behavior, invalid input, or corrupt-format handling.
 | `reference_impl.rs` `unsupported repo output format '{other}'` in `zmin repo` output parsing | Zmin-only extension validation, not part of the Git `2.47.1` denominator | `docs/cli/zmin_extensions_inventory.md`; `git_admin_tools_compat::repo_command_is_tracked_zmin_only_extension`; `/usr/bin/git repo -h` reports that stock Git has no `repo` command |
 | `text_impl.rs` `unsupported option '{other}'` in `git column --mode=<value>` parsing | stock-compatible invalid input for unsupported column mode tokens | `docs/cli/matrices/column_v2_47.tsv`; `git_text_tools_compat::column_matches_stock_git_for_common_modes`; `/usr/bin/git column --mode=bogus` exits `129` with `error: unsupported option 'bogus'` |
 | `history_impl.rs` `unsupported_blame_line_range` fallback in `git blame -L` parsing/resolution | stock-compatible invalid input and supported rich range behavior for expanded blame line-range forms | `docs/cli/matrices/blame_v2_47.tsv`; `git_history_query_compat::blame_zero_line_range_matches_stock_git_failure`; `git_history_query_compat::blame_invalid_regex_line_ranges_match_stock_git_failure`; `git_history_query_compat::blame_basic_regex_invalid_backreferences_match_stock_git_failure` |
-| `transport_impl.rs` `unknown ref storage format` in `git clone --ref-format=<value>` parsing | stock-compatible invalid input for unknown clone ref storage values; this does not close the adjacent Git-supported `reftable` gap | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_unknown_value_matches_stock_git` |
+| `transport_impl.rs` `unknown ref storage format` in `git clone --ref-format=<value>` parsing | stock-compatible invalid input for unknown clone ref storage values | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_unknown_value_matches_stock_git` |
+| `transport_impl.rs` `reftable ref storage is not supported yet` in `git clone --ref-format=reftable` parsing | Git-supported clone ref storage now matches stock Git for local reftable clone creation, `rev-parse --show-ref-format`, `.git/reftable` layout and HEAD resolution | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_ref_format_compat::clone_ref_format_reftable_matches_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` / `unsupported_clone_destination_label` in `git clone` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols; the destination-label helper only renders the stock-shaped clone prefix before the remote-helper failure | `docs/cli/matrices/clone_v2_47.tsv`; `git_clone_compat::clone_unsupported_remote_helper_failure_matches_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git fetch` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/fetch_v2_47.tsv`; `git_transport_local_compat::fetch_and_push_unsupported_remote_helper_failures_match_stock_git` |
 | `transport_impl.rs` `unsupported_remote_helper_error` in `git ls-remote` remote-helper URL handling | stock-compatible invalid input for unsupported remote-helper protocols | `docs/cli/matrices/ls_remote_v2_47.tsv`; `git_transport_local_compat::ls_remote_unsupported_remote_helper_failure_matches_stock_git` |

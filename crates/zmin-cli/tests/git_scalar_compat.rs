@@ -50,16 +50,19 @@ fn run_scalar_command_with_timeout(
     let xdg_config_home = home.path().join(".config");
     let stdout_file = tempfile::NamedTempFile::new().expect("stdout temp file");
     let stderr_file = tempfile::NamedTempFile::new().expect("stderr temp file");
-    let mut child = match Command::new(common::test_command_program(command))
+    let mut builder = Command::new(common::test_command_program(command));
+    builder
         .args(args)
         .current_dir(cwd)
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", &xdg_config_home)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .stdout(Stdio::from(stdout_file.reopen().expect("reopen stdout")))
-        .stderr(Stdio::from(stderr_file.reopen().expect("reopen stderr")))
-        .spawn()
-    {
+        .stderr(Stdio::from(stderr_file.reopen().expect("reopen stderr")));
+    if command == "scalar" {
+        builder.env("PATH", stock_scalar_path_env());
+    }
+    let mut child = match builder.spawn() {
         Ok(child) => child,
         Err(_) => return None,
     };
@@ -83,6 +86,16 @@ fn run_scalar_command_with_timeout(
     let _ = child.kill();
     let _ = child.wait_with_output();
     None
+}
+
+fn stock_scalar_path_env() -> std::ffi::OsString {
+    let stock_git_dir = common::stock_git_bin()
+        .parent()
+        .expect("stock git parent")
+        .to_path_buf();
+    let current_path = std::env::var_os("PATH").unwrap_or_default();
+    let paths = std::iter::once(stock_git_dir).chain(std::env::split_paths(&current_path));
+    std::env::join_paths(paths).expect("join PATH")
 }
 
 fn normalize_scalar_platform_stderr(result: (i32, String, String)) -> (i32, String, String) {

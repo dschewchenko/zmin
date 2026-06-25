@@ -98,6 +98,7 @@ pub(crate) struct MaintenanceOptions<'a> {
     pub(crate) operation: &'a str,
     pub(crate) auto: bool,
     pub(crate) schedule: Option<&'a str>,
+    pub(crate) no_schedule: bool,
     pub(crate) scheduler: Option<&'a str>,
     pub(crate) config_file: Option<&'a Path>,
     pub(crate) force: bool,
@@ -110,12 +111,19 @@ pub(crate) fn maintenance(options: MaintenanceOptions<'_>) -> Result<()> {
         operation,
         auto,
         schedule,
+        no_schedule,
         scheduler,
         config_file,
         force,
         quiet,
         tasks,
     } = options;
+    if no_schedule {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--no-schedule is not allowed".into(),
+        });
+    }
     if operation == "start" {
         return maintenance_start(scheduler, config_file);
     }
@@ -153,12 +161,19 @@ pub(crate) fn maintenance(options: MaintenanceOptions<'_>) -> Result<()> {
             })?,
             "commit-graph" => {
                 if !auto {
-                    pack_commands::commit_graph_write(true)?;
+                    pack_commands::commit_graph_write(None, true, false, false)?;
                 }
             }
             "pack-refs" => {
                 if !auto {
-                    reference_commands::pack_refs(true, true, false)?;
+                    reference_commands::pack_refs(
+                        true,
+                        false,
+                        Vec::new(),
+                        Vec::new(),
+                        true,
+                        false,
+                    )?;
                 }
             }
             "loose-objects" => {
@@ -1362,9 +1377,10 @@ mod maintenance_scheduler_tests {
         )
         .expect("launchctl plist");
 
-        assert!(plist.contains(
-            "<string>/tmp/Zmin &amp; Co/&lt;bin&gt;&quot;quoted&quot;/zmin</string>"
-        ));
+        assert!(
+            plist
+                .contains("<string>/tmp/Zmin &amp; Co/&lt;bin&gt;&quot;quoted&quot;/zmin</string>")
+        );
         assert!(!plist.contains("<string>/tmp/Zmin & Co/<bin>"));
         assert!(plist.contains("<string>--schedule=weekly</string>"));
     }
@@ -1422,10 +1438,8 @@ mod maintenance_scheduler_tests {
 
     #[test]
     fn schtasks_xml_contains_expected_schedule_patterns() {
-        let hourly = maintenance_schtasks_task_xml(
-            Path::new(r"C:\Program Files\Zmin\zmin.exe"),
-            "hourly",
-        );
+        let hourly =
+            maintenance_schtasks_task_xml(Path::new(r"C:\Program Files\Zmin\zmin.exe"), "hourly");
         assert!(hourly.contains("<StartBoundary>2020-01-01T01:19:00</StartBoundary>"));
         assert!(hourly.contains("<Interval>PT1H</Interval>"));
         assert!(hourly.contains("<Duration>PT23H</Duration>"));
@@ -1835,15 +1849,15 @@ fn collect_repack_candidate_ids_in_walk_order(
         }
     }
 
+    let mut index_objects = Vec::new();
     if repo.index_path.exists() {
         let index = read_index(&repo.index_path)?;
         for entry in index.entries() {
             if entry.mode != IndexMode::Gitlink
                 && reachable.contains(&entry.id)
                 && !keep_pack_object_ids.contains(&entry.id)
-                && seen.insert(entry.id.clone())
             {
-                ids.push(entry.id.clone());
+                index_objects.push(entry.id.clone());
             }
         }
     }
@@ -1861,6 +1875,11 @@ fn collect_repack_candidate_ids_in_walk_order(
         &mut seen,
         &mut ids,
     )?;
+    for id in index_objects {
+        if seen.insert(id.clone()) {
+            ids.push(id);
+        }
+    }
 
     Ok(ids)
 }
@@ -1914,7 +1933,7 @@ fn gc(options: GcOptions) -> Result<()> {
         }
         prune(args)?;
     }
-    pack_commands::commit_graph_write(true)?;
+    pack_commands::commit_graph_write(None, true, false, false)?;
     Ok(())
 }
 
@@ -2230,7 +2249,11 @@ mod tests {
         for path in std::env::var_os("PATH")
             .into_iter()
             .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-            .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+            .flat_map(|dir| {
+                stock_git_names()
+                    .into_iter()
+                    .map(move |name| dir.join(name))
+            })
         {
             if is_stock_git(&path) {
                 return path;

@@ -6,9 +6,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use common::{
-    clone_repo_fixture, configure_identity, git, git_args, git_failure_output, git_init,
-    git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_with_env, write_file,
-    zmin_bin,
+    clone_repo_fixture, command_any_output, configure_identity, git, git_args, git_failure_output,
+    git_init, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_with_env,
+    write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -2181,15 +2181,20 @@ fn var_list_and_failures_match_stock_git() {
 fn shell_pure_helpers_match_git_232_direct_execution() {
     let repo = git_init();
 
-    assert_eq!(run_zmin(repo.path(), ["sh-i18n"]), "");
-    assert_eq!(run_zmin(repo.path(), ["sh-i18n", "-h"]), "");
-    assert_eq!(run_zmin(repo.path(), ["sh-i18n", "ignored"]), "");
-    assert_eq!(run_zmin(repo.path(), ["sh-setup"]), "");
-    assert_eq!(
-        run_zmin(repo.path(), ["sh-setup", "-h"]),
-        "usage: git sh-setup "
-    );
-    assert_eq!(run_zmin(repo.path(), ["sh-setup", "ignored"]), "");
+    for args in [
+        ["sh-i18n"].as_slice(),
+        ["sh-i18n", "-h"].as_slice(),
+        ["sh-i18n", "ignored"].as_slice(),
+        ["sh-setup"].as_slice(),
+        ["sh-setup", "-h"].as_slice(),
+        ["sh-setup", "ignored"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_any_output("git", repo.path(), args, "git"),
+            "shell helper mismatch for {args:?}"
+        );
+    }
 }
 
 #[test]

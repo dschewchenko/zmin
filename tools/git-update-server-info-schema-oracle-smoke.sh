@@ -88,6 +88,16 @@ run_case update_server_info_force_short -f
 run_case update_server_info_force_long_repeated --force --force
 run_case update_server_info_force_short_repeated -f -f
 run_case update_server_info_no_force --no-force
+run_case update_server_info_force_then_no --force --no-force
+run_case update_server_info_no_then_force --no-force --force
+run_case update_server_info_short_then_no -f --no-force
+run_case update_server_info_no_then_short --no-force -f
+run_case update_server_info_repeat_no --no-force --no-force
+run_case update_server_info_force_no_force_force --force --no-force --force
+run_case update_server_info_no_force_force_no --no-force --force --no-force
+run_case update_server_info_short_no_force_short -f --no-force -f
+run_case update_server_info_force_three --force --force --force
+run_case update_server_info_no_force_value_then_force --no-force=true --force
 run_case update_server_info_force_long_rejects_value --force=true
 run_case update_server_info_force_short_rejects_value -f=true
 run_case update_server_info_no_force_rejects_value --no-force=true

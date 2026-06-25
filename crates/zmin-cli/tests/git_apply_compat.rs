@@ -7,8 +7,8 @@ use tempfile::TempDir;
 use common::{
     command_any_output_with_stdin, command_stdout_bytes, configure_identity, git, git_init,
     git_status_with_stdin, git_with_env, git_with_stdin, git_with_stdin_args,
-    run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, zmin_bin,
-    write_file,
+    run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file,
+    zmin_bin,
 };
 
 fn apply_base_repo() -> TempDir {

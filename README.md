@@ -18,7 +18,7 @@ official stores yet.
 
 ## Install
 
-Current preview: [`v0.0.1-preview.20260619T231023Z`](https://github.com/dschewchenko/zmin/releases/tag/v0.0.1-preview.20260619T231023Z)
+Current preview: [`v0.0.1-preview.20260619T231024Z`](https://github.com/dschewchenko/zmin/releases/tag/v0.0.1-preview.20260619T231024Z)
 
 Download a preview archive for your platform or build from source.
 
@@ -28,7 +28,7 @@ Apple Silicon:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-aarch64-apple-darwin.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-apple-darwin.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -37,7 +37,7 @@ Intel:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-x86_64-apple-darwin.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-apple-darwin.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -57,7 +57,7 @@ x86_64:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-unknown-linux-gnu.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -66,7 +66,7 @@ aarch64:
 
 ```bash
 mkdir -p ~/.local/bin
-curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-aarch64-unknown-linux-gnu.tar.gz | tar -xz
+curl -L https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-unknown-linux-gnu.tar.gz | tar -xz
 install -m 0755 zmin ~/.local/bin/zmin
 zmin --version
 ```
@@ -85,7 +85,7 @@ zmin --version
 PowerShell, x86_64:
 
 ```powershell
-$Version = "v0.0.1-preview.20260619T231023Z"
+$Version = "v0.0.1-preview.20260619T231024Z"
 Invoke-WebRequest "https://github.com/dschewchenko/zmin/releases/download/$Version/zmin-x86_64-pc-windows-msvc.zip" -OutFile zmin.zip
 Expand-Archive -Force zmin.zip .
 .\zmin.exe --version
@@ -105,14 +105,14 @@ cargo build -p zmin-cli --release --bin zmin
 Current binary preview archives:
 
 <!-- zmin-release-assets:start -->
-- [`zmin-x86_64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-x86_64-unknown-linux-gnu.tar.gz)
-- [`zmin-aarch64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-aarch64-unknown-linux-gnu.tar.gz)
-- [`zmin-x86_64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-x86_64-apple-darwin.tar.gz)
-- [`zmin-aarch64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-aarch64-apple-darwin.tar.gz)
-- [`zmin-x86_64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-x86_64-pc-windows-msvc.zip)
-- [`zmin-aarch64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/zmin-aarch64-pc-windows-msvc.zip)
+- [`zmin-x86_64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-unknown-linux-gnu.tar.gz)
+- [`zmin-aarch64-unknown-linux-gnu.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-unknown-linux-gnu.tar.gz)
+- [`zmin-x86_64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-apple-darwin.tar.gz)
+- [`zmin-aarch64-apple-darwin.tar.gz`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-apple-darwin.tar.gz)
+- [`zmin-x86_64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-x86_64-pc-windows-msvc.zip)
+- [`zmin-aarch64-pc-windows-msvc.zip`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/zmin-aarch64-pc-windows-msvc.zip)
 
-Checksums: [`SHA256SUMS`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231023Z/SHA256SUMS)
+Checksums: [`SHA256SUMS`](https://github.com/dschewchenko/zmin/releases/download/v0.0.1-preview.20260619T231024Z/SHA256SUMS)
 <!-- zmin-release-assets:end -->
 
 ## Start
@@ -254,7 +254,7 @@ Current command-level matrices:
 | `clone` | `56` | `0` | `24` | `70` | `62` | `0` | `1` | `7` | no |
 | `column` | `10` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `commit` | `63` | `0` | `24` | `66` | `63` | `0` | `0` | `3` | no |
-| `commit-graph` | `18` | `0` | `0` | `3` | `0` | `0` | `0` | `3` | no |
+| `commit-graph` | `3` | `0` | `3` | `10` | `7` | `0` | `0` | `3` | no |
 | `commit-tree` | `7` | `0` | `2` | `4` | `4` | `0` | `0` | `0` | no |
 | `config` | `243` | `0` | `17` | `123` | `113` | `0` | `0` | `10` | no |
 | `count-objects` | `4` | `0` | `2` | `8` | `8` | `0` | `0` | `0` | no |
@@ -290,7 +290,7 @@ Current command-level matrices:
 | `ls-tree` | `15` | `0` | `2` | `4` | `3` | `0` | `0` | `1` | no |
 | `mailinfo` | `10` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `mailsplit` | `6` | `0` | `2` | `2` | `2` | `0` | `0` | `0` | no |
-| `maintenance` | `14` | `0` | `4` | `20` | `14` | `0` | `0` | `6` | no |
+| `maintenance` | `5` | `0` | `5` | `44` | `32` | `0` | `0` | `12` | no |
 | `merge` | `69` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `12` | `10` | `0` | `0` | `2` | no |
 | `mktag` | `6` | `0` | `1` | `2` | `2` | `0` | `0` | `0` | no |

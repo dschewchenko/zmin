@@ -74,5 +74,43 @@ run_case show_index_object_format_sha1_equals show-index --object-format=sha1
 run_case show_index_object_format_sha1_separate show-index --object-format sha1
 run_case show_index_object_format_repeated show-index --object-format=sha1 --object-format=sha1
 run_case show_index_no_object_format show-index --no-object-format
+run_case show_index_no_then_yes show-index --no-object-format --object-format=sha1
+run_case show_index_yes_then_no show-index --object-format=sha1 --no-object-format
+run_case show_index_sep_then_no show-index --object-format sha1 --no-object-format
+run_case show_index_no_then_sep show-index --no-object-format --object-format sha1
+run_case show_index_repeat_no show-index --no-object-format --no-object-format
+run_case show_index_sha256 show-index --object-format=sha256
+run_case show_index_sha1_then_sha256 show-index --object-format=sha1 --object-format=sha256
+run_case show_index_sha256_then_sha1 show-index --object-format=sha256 --object-format=sha1
+run_case show_index_no_then_sha256 show-index --no-object-format --object-format=sha256
+run_case show_index_sep_then_equals show-index --object-format sha1 --object-format=sha1
+run_case show_index_equals_then_sep show-index --object-format=sha1 --object-format sha1
+run_case show_index_no_yes_no show-index --no-object-format --object-format=sha1 --no-object-format
+run_case show_index_yes_no_yes show-index --object-format=sha1 --no-object-format --object-format=sha1
+run_case show_index_sha256_then_no show-index --object-format=sha256 --no-object-format
+run_case show_index_invalid_then_no show-index --object-format=bogus --no-object-format
+run_case show_index_no_invalid_no show-index --no-object-format --object-format=bogus --no-object-format
+run_case show_index_invalid_no_yes show-index --object-format=bogus --no-object-format --object-format=sha1
+run_case show_index_sep_sep show-index --object-format sha1 --object-format sha1
+run_case show_index_yes_yes_no show-index --object-format=sha1 --object-format=sha1 --no-object-format
+run_case show_index_no_sep_no show-index --no-object-format --object-format sha1 --no-object-format
+run_case show_index_sep_no_sep show-index --object-format sha1 --no-object-format --object-format sha1
+run_case show_index_sha256_twice show-index --object-format=sha256 --object-format=sha256
+run_case show_index_sha256_twice_no show-index --object-format=sha256 --object-format=sha256 --no-object-format
+run_case show_index_invalid_no_no show-index --object-format=bogus --no-object-format --no-object-format
+run_case show_index_no_yes_yes show-index --no-object-format --object-format=sha1 --object-format=sha1
+run_case show_index_yes_no_no show-index --object-format=sha1 --no-object-format --no-object-format
+run_case show_index_no_sha256_no show-index --no-object-format --object-format=sha256 --no-object-format
+run_case show_index_sep_sep_no show-index --object-format sha1 --object-format sha1 --no-object-format
+run_case show_index_sep_sep_no_sep show-index --object-format sha1 --object-format sha1 --no-object-format --object-format sha1
+run_case show_index_no_sep_sep_no show-index --no-object-format --object-format sha1 --object-format sha1 --no-object-format
+run_case show_index_yes_tripled show-index --object-format=sha1 --object-format=sha1 --object-format=sha1
+run_case show_index_sha256_tripled show-index --object-format=sha256 --object-format=sha256 --object-format=sha256
+run_case show_index_sha256_sha256_no_yes show-index --object-format=sha256 --object-format=sha256 --no-object-format --object-format=sha1
+run_case show_index_invalid_no_yes_no show-index --object-format=bogus --no-object-format --object-format=sha1 --no-object-format
+run_case show_index_no_no_yes show-index --no-object-format --no-object-format --object-format=sha1
+run_case show_index_no_no_sha256 show-index --no-object-format --no-object-format --object-format=sha256
+run_case show_index_yes_no_sha256_no show-index --object-format=sha1 --no-object-format --object-format=sha256 --no-object-format
+run_case show_index_no_then_invalid show-index --no-object-format --object-format=bogus
 run_case show_index_object_format_invalid show-index --object-format=bogus
 run_case show_index_object_format_missing show-index --object-format

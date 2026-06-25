@@ -92,3 +92,51 @@ run_case show_ref_head_long show-ref --head
 run_case show_ref_branches_alias show-ref --branches
 run_case show_ref_dereference_long show-ref --dereference
 run_case show_ref_dereference_short show-ref -d
+run_case show_ref_head_hash show-ref --head --hash
+run_case show_ref_hash_head show-ref --hash --head
+run_case show_ref_head_heads_hash show-ref --head --heads --hash
+run_case show_ref_hash_head_heads show-ref --hash --head --heads
+run_case show_ref_head_heads_hash_value show-ref --head --heads --hash=12
+run_case show_ref_hash_value_head_heads show-ref --hash=12 --head --heads
+run_case show_ref_heads_hash show-ref --heads --hash
+run_case show_ref_heads_hash_value show-ref --heads --hash=12
+run_case show_ref_hash_heads show-ref --hash --heads
+run_case show_ref_tags_hash show-ref --tags --hash
+run_case show_ref_tags_hash_value show-ref --tags --hash=12
+run_case show_ref_hash_tags show-ref --hash --tags
+run_case show_ref_head_tags_hash show-ref --head --tags --hash
+run_case show_ref_hash_head_tags show-ref --hash --head --tags
+run_case show_ref_head_tags_hash_value show-ref --head --tags --hash=12
+run_case show_ref_hash_value_head_tags show-ref --hash=12 --head --tags
+run_case show_ref_heads_tags_hash show-ref --heads --tags --hash
+run_case show_ref_hash_heads_tags show-ref --hash --heads --tags
+run_case show_ref_heads_tags_hash_value show-ref --heads --tags --hash=12
+run_case show_ref_head_heads_tags_hash show-ref --head --heads --tags --hash
+run_case show_ref_hash_head_heads_tags show-ref --hash --head --heads --tags
+run_case show_ref_head_heads_tags_hash_value show-ref --head --heads --tags --hash=12
+run_case show_ref_head_branches_tags_hash show-ref --head --branches --tags --hash
+run_case show_ref_hash_head_branches_tags show-ref --hash --head --branches --tags
+run_case show_ref_head_branches_tags_hash_value show-ref --head --branches --tags --hash=12
+run_case show_ref_hash_value_head_branches_tags show-ref --hash=12 --head --branches --tags
+run_case show_ref_branches_hash show-ref --branches --hash
+run_case show_ref_branches_hash_value show-ref --branches --hash=12
+run_case show_ref_hash_branches show-ref --hash --branches
+run_case show_ref_head_branches_hash show-ref --head --branches --hash
+run_case show_ref_hash_head_branches show-ref --hash --head --branches
+run_case show_ref_deref_hash show-ref --dereference --hash
+run_case show_ref_hash_deref show-ref --hash --dereference
+run_case show_ref_deref_tags show-ref --dereference --tags
+run_case show_ref_tags_deref show-ref --tags --dereference
+run_case show_ref_verify_hash_existing show-ref --verify --hash refs/heads/main
+run_case show_ref_verify_head_hash_existing show-ref --verify --head --hash refs/heads/main
+run_case show_ref_verify_heads_hash_existing show-ref --verify --heads --hash refs/heads/main
+run_case show_ref_verify_hash_value_existing show-ref --verify --hash=12 refs/heads/main
+run_case show_ref_verify_head_hash_value_existing show-ref --verify --head --hash=12 refs/heads/main
+run_case show_ref_verify_heads_hash_value_existing show-ref --verify --heads --hash=12 refs/heads/main
+run_case show_ref_verify_branches_hash_value_existing show-ref --verify --branches --hash=12 refs/heads/main
+run_case show_ref_verify_head_heads_hash_existing show-ref --verify --head --heads --hash refs/heads/main
+run_case show_ref_verify_head_heads_hash_value_existing show-ref --verify --head --heads --hash=12 refs/heads/main
+run_case show_ref_verify_head_tags_hash_value_tag show-ref --verify --head --tags --hash=12 refs/tags/v1
+run_case show_ref_verify_tags_hash_value_tag show-ref --verify --tags --hash=12 refs/tags/v1
+run_case show_ref_verify_hash_value_tag show-ref --verify --hash=12 refs/tags/v1
+run_case show_ref_verify_hash_missing show-ref --verify --hash refs/heads/missing

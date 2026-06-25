@@ -174,6 +174,107 @@ fn clean_no_option_toggles_match_stock_git_order() {
 }
 
 #[test]
+fn clean_additional_option_combinations_match_stock_git() {
+    for args in [
+        vec!["clean", "-n", "-x"],
+        vec!["clean", "-f", "-x", "-d"],
+        vec!["clean", "-f", "-X", "-d"],
+        vec!["clean", "-f", "-d", "dir"],
+        vec!["clean", "-f", "-q", "-x", "-d"],
+        vec!["clean", "-f", "-q", "-X", "-d"],
+    ] {
+        let git_repo = clean_fixture_repo();
+        let zmin_repo = clean_fixture_repo();
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "clean output should match for {args:?}"
+        );
+        for path in [
+            "dir",
+            "untracked.txt",
+            "ignored.log",
+            "ignored_dir/ignored.txt",
+            "tracked_dir/tracked.txt",
+            "tracked_dir/untracked.txt",
+        ] {
+            assert_eq!(
+                zmin_repo.path().join(path).exists(),
+                git_repo.path().join(path).exists(),
+                "path state should match for {args:?}: {path}"
+            );
+        }
+    }
+
+    for args in [vec!["clean", "-ffd"], vec!["clean", "-ff", "-q", "-d"]] {
+        let git_repo = clean_fixture_repo();
+        let zmin_repo = clean_fixture_repo();
+        fs::create_dir_all(git_repo.path().join("nested")).expect("create git nested");
+        fs::create_dir_all(zmin_repo.path().join("nested")).expect("create zmin nested");
+        git(git_repo.path().join("nested").as_path(), ["init"]);
+        git(zmin_repo.path().join("nested").as_path(), ["init"]);
+        fs::write(git_repo.path().join("nested/file.txt"), b"nested\n").expect("write git nested");
+        fs::write(zmin_repo.path().join("nested/file.txt"), b"nested\n")
+            .expect("write zmin nested");
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "clean nested repo output should match for {args:?}"
+        );
+        assert_eq!(
+            zmin_repo.path().join("nested/.git").exists(),
+            git_repo.path().join("nested/.git").exists(),
+            "nested repo existence should match for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn clean_quiet_combinations_match_stock_git() {
+    for args in [
+        vec!["clean", "-n", "-q", "-d"],
+        vec!["clean", "-n", "-q", "dir"],
+        vec!["clean", "-n", "-q", "-x"],
+        vec!["clean", "-n", "-q", "-X"],
+        vec!["clean", "-n", "-q", "-x", "-d"],
+        vec!["clean", "-n", "-q", "-X", "-d"],
+        vec!["clean", "-n", "-q", "ignored_dir"],
+        vec!["clean", "-n", "-q", "-d", "ignored_dir"],
+        vec!["clean", "-f", "-q"],
+        vec!["clean", "-f", "-q", "-x"],
+        vec!["clean", "-f", "-q", "-X"],
+        vec!["clean", "-f", "-q", "-d", "dir"],
+        vec!["clean", "-f", "-q", "ignored_dir"],
+        vec!["clean", "-f", "-q", "-d", "ignored_dir"],
+    ] {
+        let git_repo = clean_fixture_repo();
+        let zmin_repo = clean_fixture_repo();
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "clean quiet output should match for {args:?}"
+        );
+        for path in [
+            "dir",
+            "untracked.txt",
+            "ignored.log",
+            "ignored_dir/ignored.txt",
+            "tracked_dir/tracked.txt",
+            "tracked_dir/untracked.txt",
+        ] {
+            assert_eq!(
+                zmin_repo.path().join(path).exists(),
+                git_repo.path().join(path).exists(),
+                "quiet path state should match for {args:?}: {path}"
+            );
+        }
+    }
+}
+
+#[test]
 fn clean_interactive_quit_matches_stock_git() {
     let git_clean_repo = git_init();
     let zmin_clean_repo = git_init();

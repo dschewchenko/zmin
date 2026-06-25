@@ -165,6 +165,14 @@ fn merge_base_multi_commit_modes_match_stock_git() {
         run_zmin_status(repo.path(), ["merge-base", "--is-ancestor", "a", "b", "c"]),
         git_status(repo.path(), ["merge-base", "--is-ancestor", "a", "b", "c"])
     );
+
+    for args in [
+        ["merge-base", "--all", "a", "b"].as_slice(),
+        ["merge-base", "-a", "a", "b"].as_slice(),
+        ["merge-base", "--all", "HEAD", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(run_zmin_args(repo.path(), args), git_args(repo.path(), args));
+    }
 }
 
 #[test]

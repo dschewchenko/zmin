@@ -188,13 +188,8 @@ mod tests {
     #[test]
     fn tag_encode_initial_capacity_is_bounded() {
         let target = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, b"hello\n");
-        let tagger = Signature::new(
-            "Zmin Test",
-            "zmin@example.invalid",
-            1_700_000_001,
-            "+0000",
-        )
-        .expect("tagger");
+        let tagger = Signature::new("Zmin Test", "zmin@example.invalid", 1_700_000_001, "+0000")
+            .expect("tagger");
         let message = b"tag message\n";
         let expected = encode_tag(&target, GitObjectKind::Blob, "v1", &tagger, message)
             .expect("encode tag")
@@ -221,13 +216,8 @@ mod tests {
     #[test]
     fn encode_and_decode_annotated_tag_object() {
         let target = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, b"hello\n");
-        let tagger = Signature::new(
-            "Zmin Test",
-            "zmin@example.invalid",
-            1_700_000_001,
-            "+0000",
-        )
-        .expect("signature");
+        let tagger = Signature::new("Zmin Test", "zmin@example.invalid", 1_700_000_001, "+0000")
+            .expect("signature");
         let encoded = TagBuilder::new(target.clone(), GitObjectKind::Blob, "v1", tagger)
             .expect("tag builder")
             .message(b"tag message\n".to_vec())

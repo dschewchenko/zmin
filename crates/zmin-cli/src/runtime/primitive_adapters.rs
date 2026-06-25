@@ -1546,7 +1546,13 @@ impl GitRefsStore for OwnedCliRefsStoreAdapter {
 
     fn pack_refs(&self, all: bool, prune: bool) -> PrimitiveResult<()> {
         self.common_refs
-            .pack_refs(PackRefsOptions { all, prune })
+            .pack_refs(PackRefsOptions {
+                all,
+                prune,
+                auto: false,
+                include: Vec::new(),
+                exclude: Vec::new(),
+            })
             .map_err(|error| PrimitiveError::Storage {
                 details: format!("pack refs: {error}"),
             })?;

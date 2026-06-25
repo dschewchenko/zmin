@@ -7,7 +7,7 @@ use tempfile::TempDir;
 
 use common::{
     configure_identity, git, git_args, git_init, git_status, git_with_env, git_with_stdin,
-    run_zmin, run_zmin_args, run_zmin_status, zmin_bin, write_file,
+    run_zmin, run_zmin_args, run_zmin_status, write_file, zmin_bin,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,10 +369,7 @@ fn mergetool_runs_configured_tool_and_stages_resolution_like_stock_git() {
     let command = "printf 'B:'; cat \"$BASE\"; printf 'L:'; cat \"$LOCAL\"; printf 'R:'; cat \"$REMOTE\"; printf 'resolved\\n' > \"$MERGED\"";
     for repo in [git_repo.path(), zmin_repo.path()] {
         git(repo, ["config", "mergetool.zmintest.cmd", command]);
-        git(
-            repo,
-            ["config", "mergetool.zmintest.trustExitCode", "true"],
-        );
+        git(repo, ["config", "mergetool.zmintest.trustExitCode", "true"]);
     }
 
     let args = ["mergetool", "--tool=zmintest", "--no-prompt", "f.txt"];
@@ -402,10 +399,7 @@ fn mergetool_uses_configured_default_tool_like_stock_git() {
     for repo in [git_repo.path(), zmin_repo.path()] {
         git(repo, ["config", "merge.tool", "zmintest"]);
         git(repo, ["config", "mergetool.zmintest.cmd", command]);
-        git(
-            repo,
-            ["config", "mergetool.zmintest.trustExitCode", "true"],
-        );
+        git(repo, ["config", "mergetool.zmintest.trustExitCode", "true"]);
         git(repo, ["config", "mergetool.prompt", "false"]);
     }
 
@@ -477,11 +471,7 @@ fn rerere_diff_default_forget_and_invalid_record_match_stock_git() {
     );
 
     assert_eq!(
-        command_all_output(
-            zmin_bin(),
-            zmin_repo.path(),
-            &["rerere", "forget", "f.txt"]
-        ),
+        command_all_output(zmin_bin(), zmin_repo.path(), &["rerere", "forget", "f.txt"]),
         command_all_output("git", git_repo.path(), &["rerere", "forget", "f.txt"])
     );
     assert!(
@@ -519,11 +509,7 @@ fn rerere_forget_matches_stock_git_for_pathspecs_and_duplicate_preimages() {
 
     assert_eq!(
         command_all_output("git", git_repo.path(), &["rerere", "forget", "*.txt"]),
-        command_all_output(
-            zmin_bin(),
-            zmin_repo.path(),
-            &["rerere", "forget", "*.txt"]
-        )
+        command_all_output(zmin_bin(), zmin_repo.path(), &["rerere", "forget", "*.txt"])
     );
     assert_eq!(
         git(git_repo.path(), ["rerere", "diff"]),
@@ -536,8 +522,7 @@ fn rerere_reuses_recorded_resolution_and_autoupdates_index_like_stock_git() {
     let git_repo = rerere_conflict_fixture();
     let zmin_repo = rerere_conflict_fixture();
     let git_conflict = fs::read_to_string(git_repo.path().join("f.txt")).expect("git conflict");
-    let zmin_conflict =
-        fs::read_to_string(zmin_repo.path().join("f.txt")).expect("zmin conflict");
+    let zmin_conflict = fs::read_to_string(zmin_repo.path().join("f.txt")).expect("zmin conflict");
     write_file(git_repo.path(), "f.txt", "resolved\n");
     write_file(zmin_repo.path(), "f.txt", "resolved\n");
     assert_eq!(

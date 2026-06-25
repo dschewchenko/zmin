@@ -196,6 +196,8 @@ focused parity evidence checks the same surface.
 - `docs/cli/matrices/fetch_v2_47.tsv` tracks the first `fetch` option,
   transport, repository-state and unsupported remote-helper invalid-input
   variants.
+- `docs/cli/matrices/git_v2_47.tsv` tracks root `git` entrypoint behavior for
+  empty invocation usage and repository-configured alias expansion.
 - `docs/cli/matrices/fetch_pack_v2_47.tsv` tracks the first `fetch-pack` local
   repository, thin/no-progress, include-tag and depth variants.
 - `docs/cli/matrices/http_backend_v2_47.tsv` tracks the first `http-backend`
@@ -437,7 +439,7 @@ variants.
 | `clone` | `56` | `0` | `26` | `docs/cli/matrices/clone_v2_47.tsv` | `72` | `62` | `0` | `1` | `9` | no |
 | `column` | `10` | `0` | `4` | `docs/cli/matrices/column_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |
 | `commit` | `63` | `0` | `30` | `docs/cli/matrices/commit_v2_47.tsv` | `72` | `69` | `0` | `0` | `3` | no |
-| `commit-graph` | `18` | `0` | `0` | `docs/cli/matrices/commit_graph_v2_47.tsv` | `3` | `0` | `0` | `0` | `3` | no |
+| `commit-graph` | `3` | `0` | `3` | `docs/cli/matrices/commit_graph_v2_47.tsv` | `10` | `7` | `0` | `0` | `3` | no |
 | `commit-tree` | `7` | `0` | `2` | `docs/cli/matrices/commit_tree_v2_47.tsv` | `5` | `5` | `0` | `0` | `0` | no |
 | `config` | `243` | `0` | `24` | `docs/cli/matrices/config_v2_47.tsv` | `130` | `117` | `0` | `0` | `13` | no |
 | `count-objects` | `4` | `0` | `4` | `docs/cli/matrices/count_objects_v2_47.tsv` | `11` | `11` | `0` | `0` | `0` | no |
@@ -473,7 +475,7 @@ variants.
 | `ls-tree` | `15` | `0` | `2` | `docs/cli/matrices/ls_tree_v2_47.tsv` | `6` | `5` | `0` | `0` | `1` | no |
 | `mailinfo` | `10` | `0` | `3` | `docs/cli/matrices/mailinfo_v2_47.tsv` | `6` | `6` | `0` | `0` | `0` | no |
 | `mailsplit` | `6` | `0` | `3` | `docs/cli/matrices/mailsplit_v2_47.tsv` | `4` | `4` | `0` | `0` | `0` | no |
-| `maintenance` | `14` | `0` | `4` | `docs/cli/matrices/maintenance_v2_47.tsv` | `20` | `14` | `0` | `0` | `6` | no |
+| `maintenance` | `5` | `0` | `5` | `docs/cli/matrices/maintenance_v2_47.tsv` | `44` | `32` | `0` | `0` | `12` | no |
 | `merge` | `69` | `0` | `1` | `docs/cli/matrices/merge_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
 | `merge-base` | `27` | `0` | `2` | `docs/cli/matrices/merge_base_v2_47.tsv` | `13` | `11` | `0` | `0` | `2` | no |
 | `mktag` | `6` | `0` | `1` | `docs/cli/matrices/mktag_v2_47.tsv` | `2` | `2` | `0` | `0` | `0` | no |

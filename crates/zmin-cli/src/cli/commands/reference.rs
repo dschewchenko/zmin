@@ -8,9 +8,12 @@ pub(crate) fn dispatch(
         runtime::Command::Remote { verbose, command } => run_remote(verbose, command),
         runtime::Command::PackRefs {
             all,
+            auto,
+            include,
+            exclude,
             prune,
             no_prune,
-        } => run_pack_refs(all, prune, no_prune),
+        } => run_pack_refs(all, auto, include, exclude, prune, no_prune),
         runtime::Command::UpdateRef {
             delete,
             no_deref,
@@ -37,12 +40,44 @@ pub(crate) fn dispatch(
         ),
         runtime::Command::SymbolicRef {
             quiet,
+            no_quiet,
+            delete,
+            no_delete,
             short,
+            no_short,
+            recurse,
             no_recurse,
+            message,
             name,
             target,
-        } => run_symbolic_ref(quiet, short, no_recurse, name, target),
-        runtime::Command::Refs { command } => run_refs(command),
+        } => run_symbolic_ref(
+            resolve_symbolic_ref_toggle(
+                raw_args,
+                &["-q", "--quiet"],
+                &["--no-quiet"],
+                quiet > 0,
+                no_quiet > 0,
+            ),
+            resolve_symbolic_ref_delete(delete > 0, no_delete > 0, raw_args),
+            resolve_symbolic_ref_toggle(
+                raw_args,
+                &["--short"],
+                &["--no-short"],
+                short > 0,
+                no_short > 0,
+            ),
+            resolve_symbolic_ref_toggle(
+                raw_args,
+                &["--no-recurse"],
+                &["--recurse"],
+                no_recurse > 0,
+                recurse > 0,
+            ),
+            message,
+            name,
+            target,
+        ),
+        runtime::Command::Refs { command } => run_refs(command, raw_args),
         runtime::Command::Repo { command } => run_repo(command),
         runtime::Command::ShowRef {
             quiet,
@@ -54,6 +89,7 @@ pub(crate) fn dispatch(
             abbrev,
             verify,
             exists,
+            exclude_existing,
             refs,
         } => run_show_ref(
             quiet,
@@ -65,6 +101,7 @@ pub(crate) fn dispatch(
             abbrev,
             verify,
             exists,
+            exclude_existing,
             refs,
         ),
         runtime::Command::ForEachRef {
@@ -294,6 +331,50 @@ pub(crate) fn dispatch(
     }
 }
 
+fn resolve_symbolic_ref_delete(delete: bool, no_delete: bool, raw_args: &[String]) -> bool {
+    resolve_symbolic_ref_toggle(
+        raw_args,
+        &["-d", "--delete"],
+        &["--no-delete"],
+        delete,
+        no_delete,
+    )
+}
+
+fn resolve_symbolic_ref_toggle(
+    raw_args: &[String],
+    enabled_flags: &[&str],
+    disabled_flags: &[&str],
+    enabled: bool,
+    disabled: bool,
+) -> bool {
+    if !enabled && !disabled {
+        return false;
+    }
+
+    let mut resolved = false;
+    let mut saw_toggle = false;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        let value = arg.as_str();
+        if enabled_flags.contains(&value) {
+            resolved = true;
+            saw_toggle = true;
+        } else if disabled_flags.contains(&value) {
+            resolved = false;
+            saw_toggle = true;
+        }
+    }
+
+    if saw_toggle {
+        resolved
+    } else {
+        enabled && !disabled
+    }
+}
+
 pub(crate) fn run_remote(
     verbose: bool,
     command: Option<runtime::RemoteCommand>,
@@ -303,10 +384,13 @@ pub(crate) fn run_remote(
 
 pub(crate) fn run_pack_refs(
     all: bool,
+    auto: bool,
+    include: Vec<String>,
+    exclude: Vec<String>,
     prune: bool,
     no_prune: bool,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::reference_commands::pack_refs(all, prune, no_prune)
+    super::reference_commands::pack_refs(all, auto, include, exclude, prune, no_prune)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -336,18 +420,87 @@ pub(crate) fn run_update_ref(
 
 pub(crate) fn run_symbolic_ref(
     quiet: bool,
+    delete: bool,
     short: bool,
     no_recurse: bool,
+    message: Option<String>,
     name: String,
     target: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::reference_commands::symbolic_ref(quiet, short, no_recurse, &name, target)
+    super::reference_commands::symbolic_ref(
+        quiet,
+        delete,
+        short,
+        no_recurse,
+        message.as_deref(),
+        &name,
+        target,
+    )
 }
 
 pub(crate) fn run_refs(
     command: runtime::RefsCommand,
+    raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
-    super::reference_commands::refs_command(command)
+    super::reference_commands::refs_command(resolve_refs_command_toggles(command, raw_args))
+}
+
+fn resolve_refs_command_toggles(
+    command: runtime::RefsCommand,
+    raw_args: &[String],
+) -> runtime::RefsCommand {
+    match command {
+        runtime::RefsCommand::Verify {
+            strict,
+            no_strict,
+            verbose,
+            no_verbose,
+            dry_run,
+            ref_format,
+        } => runtime::RefsCommand::Verify {
+            strict: resolve_refs_toggle(
+                raw_args,
+                &["--strict"],
+                &["--no-strict"],
+                strict,
+                no_strict,
+            ),
+            no_strict: false,
+            verbose: resolve_refs_toggle(
+                raw_args,
+                &["--verbose"],
+                &["--no-verbose"],
+                verbose,
+                no_verbose,
+            ),
+            no_verbose: false,
+            dry_run,
+            ref_format,
+        },
+    }
+}
+
+fn resolve_refs_toggle(
+    raw_args: &[String],
+    enabled_spells: &[&str],
+    disabled_spells: &[&str],
+    enabled_present: bool,
+    disabled_present: bool,
+) -> bool {
+    if !enabled_present && !disabled_present {
+        return false;
+    }
+
+    let mut resolved = false;
+    for arg in raw_args {
+        let arg = arg.as_str();
+        if enabled_spells.contains(&arg) {
+            resolved = true;
+        } else if disabled_spells.contains(&arg) {
+            resolved = false;
+        }
+    }
+    resolved
 }
 
 pub(crate) fn run_repo(
@@ -366,6 +519,7 @@ pub(crate) fn run_show_ref(
     abbrev: Option<usize>,
     verify: bool,
     exists: bool,
+    exclude_existing: Option<String>,
     refs: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
     super::reference_commands::show_ref(
@@ -378,6 +532,7 @@ pub(crate) fn run_show_ref(
         abbrev,
         verify,
         exists,
+        exclude_existing.as_deref(),
         refs,
     )
 }

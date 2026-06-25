@@ -637,6 +637,17 @@ fn validate_fetch_pack_invocation_before_clap(command_args: &[String]) -> Result
         .iter()
         .skip(1)
         .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == "--upload-pack")
+    {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "usage: git fetch-pack [--all] [--stdin] [--quiet | -q] [--keep | -k] [--thin] [--include-tag] [--upload-pack=<git-upload-pack>] [--depth=<n>] [--no-progress] [--diag-url] [-v] [<host>:]<directory> [<refs>...]\n".into(),
+        });
+    }
+    if command_args
+        .iter()
+        .skip(1)
+        .take_while(|arg| arg.as_str() != "--")
         .any(|arg| arg == "--verbose")
     {
         return Err(CliError::Stderr {

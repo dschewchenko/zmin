@@ -2,13 +2,30 @@ use super::*;
 use zmin_primitives::Error as PrimitiveError;
 use zmin_primitives::git_runtime::{GitObjectStore, GitPrimitiveRuntime, GitRefsStore};
 
-pub(crate) fn pack_refs(all: bool, prune: bool, no_prune: bool) -> Result<()> {
+pub(crate) fn pack_refs(
+    all: bool,
+    auto: bool,
+    include: Vec<String>,
+    exclude: Vec<String>,
+    prune: bool,
+    no_prune: bool,
+) -> Result<()> {
     let repo = find_repo()?;
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
-    runtime
-        .refs()
-        .pack_refs(all, prune || !no_prune)
-        .map_err(|error| map_primitive_error(error, "pack refs"))?;
+    let refs = RefStore::new(
+        &read_common_git_dir(&repo.git_dir)?,
+        symbolic_ref_object_format(&repo)?,
+    );
+    refs.pack_refs(PackRefsOptions {
+        all,
+        prune: prune || !no_prune,
+        auto,
+        include,
+        exclude,
+    })
+    .map_err(|error| CliError::Fatal {
+        code: 128,
+        message: format!("pack refs: {error}"),
+    })?;
     Ok(())
 }
 
@@ -1437,22 +1454,38 @@ fn remove_reflog(repo: &GitRepo, name: &str) -> Result<()> {
 
 pub(crate) fn symbolic_ref(
     quiet: bool,
+    delete: bool,
     short: bool,
     no_recurse: bool,
+    message: Option<&str>,
     name: &str,
     target: Vec<String>,
 ) -> Result<()> {
     let repo = find_repo_or_bare()?;
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let refs = runtime.refs();
-    if target.len() > 1 {
+    if target.len() > 1 || (delete && !target.is_empty()) {
         return Err(CliError::Stderr {
             code: 129,
             text: symbolic_ref_usage(),
         });
     }
+    if delete {
+        if symbolic_ref_read_raw(&repo, name)?.is_none() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("Cannot delete {name}, not a symbolic ref"),
+            });
+        }
+        refs.delete_ref(&name.to_owned())
+            .map_err(|error| map_primitive_error(error, "delete symbolic ref"))?;
+        remove_reflog(&repo, name)?;
+        return Ok(());
+    }
     if let Some(target) = target.first() {
+        let old_id = symbolic_ref_resolved_id(&repo, name)?;
         symbolic_ref_write_raw(&repo, name, target)?;
+        append_symbolic_ref_reflog(&repo, name, target, old_id, message)?;
         return Ok(());
     }
 
@@ -1486,6 +1519,49 @@ pub(crate) fn symbolic_ref(
         println!("{target}");
     }
     Ok(())
+}
+
+fn symbolic_ref_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
+    match repo_object_format(repo)?.as_str() {
+        "sha1" => Ok(GitHashAlgorithm::Sha1),
+        "sha256" => Ok(GitHashAlgorithm::Sha256),
+        value => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported object format '{value}'"),
+        }),
+    }
+}
+
+fn symbolic_ref_resolved_id(repo: &GitRepo, name: &str) -> Result<Option<ObjectId>> {
+    let refs = RefStore::new(&read_common_git_dir(&repo.git_dir)?, symbolic_ref_object_format(repo)?);
+    match refs.resolve(name) {
+        Ok(id) => Ok(Some(id)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn append_symbolic_ref_reflog(
+    repo: &GitRepo,
+    name: &str,
+    target: &str,
+    old_id: Option<ObjectId>,
+    message: Option<&str>,
+) -> Result<()> {
+    let Some(message) = message else {
+        return Ok(());
+    };
+    let Some(new_id) = symbolic_ref_resolved_id(repo, target)? else {
+        return Ok(());
+    };
+    let zero = ObjectId::new(new_id.algorithm(), &vec![0; new_id.algorithm().digest_len()]);
+    update_ref_append_reflog(
+        repo,
+        name,
+        old_id.as_ref().unwrap_or(&zero),
+        &new_id,
+        Some(message),
+    )
 }
 
 fn symbolic_ref_read_recursive(refs: &dyn GitRefsStore, name: &str) -> Result<Option<String>> {
@@ -1552,11 +1628,32 @@ fn symbolic_ref_write_raw(repo: &GitRepo, name: &str, target: &str) -> Result<()
 
 pub(crate) fn refs_command(command: RefsCommand) -> Result<()> {
     match command {
-        RefsCommand::Verify { strict, verbose } => refs_verify(strict, verbose),
+        RefsCommand::Verify {
+            strict,
+            no_strict: _,
+            verbose,
+            no_verbose: _,
+            dry_run,
+            ref_format,
+        } => refs_verify(strict, verbose, dry_run, ref_format.as_deref()),
     }
 }
 
-fn refs_verify(_strict: bool, verbose: bool) -> Result<()> {
+fn refs_verify(_strict: bool, verbose: bool, dry_run: bool, ref_format: Option<&str>) -> Result<()> {
+    if dry_run {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: unknown option `dry-run'\nusage: git refs verify [--strict] [--verbose]\n\n    --[no-]verbose        be verbose\n    --[no-]strict         enable strict checking\n".into(),
+        });
+    }
+    if let Some(value) = ref_format {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: format!(
+                "error: unknown option `ref-format={value}'\nusage: git refs verify [--strict] [--verbose]\n\n    --[no-]verbose        be verbose\n    --[no-]strict         enable strict checking\n"
+            ),
+        });
+    }
     let repo = find_repo()?;
     let refs = RefStore::new(repo.git_dir, GitHashAlgorithm::Sha1);
     if verbose {
@@ -1818,7 +1915,7 @@ fn print_show_ref_row(id: &ObjectId, name: &str, format: ShowRefFormat) -> Resul
     if let Some(length) = format.hash.or(format.abbrev) {
         hex.truncate(length.min(hex.len()));
     }
-    if format.hash.is_some() {
+    if format.hash.is_some() && !name.ends_with("^{}") {
         println!("{hex}");
     } else {
         println!("{hex} {name}");
@@ -1836,17 +1933,27 @@ pub(crate) fn show_ref(
     abbrev: Option<usize>,
     verify: bool,
     exists: bool,
+    exclude_existing: Option<&str>,
     patterns: Vec<String>,
 ) -> Result<()> {
     let repo = find_repo()?;
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let refs = runtime.refs();
     let format = ShowRefFormat { hash, abbrev };
+    if let Some(pattern) = exclude_existing {
+        return show_ref_exclude_existing(&repo, refs, pattern);
+    }
     if exists {
+        if patterns.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "--exists requires a reference".into(),
+            });
+        }
         if patterns.len() != 1 {
             return Err(CliError::Fatal {
-                code: 129,
-                message: "--exists requires exactly one ref".into(),
+                code: 128,
+                message: "--exists requires exactly one reference".into(),
             });
         }
         let common_dir = read_common_git_dir(&repo.git_dir)?;
@@ -1855,7 +1962,10 @@ pub(crate) fn show_ref(
         }
         return match refs.read_ref(&patterns[0]) {
             Ok(Some(_)) => Ok(()),
-            Ok(None) => Err(CliError::Exit(2)),
+            Ok(None) => Err(CliError::Stderr {
+                code: 2,
+                text: "error: reference does not exist\n".into(),
+            }),
             Err(error) => Err(map_primitive_error(error, "read reference")),
         };
     }
@@ -1871,6 +1981,9 @@ pub(crate) fn show_ref(
                 .read_ref(&ref_name)
                 .map_err(|error| map_primitive_error(error, "resolve reference"))?
             else {
+                if quiet {
+                    return Err(CliError::Exit(1));
+                }
                 return Err(CliError::Fatal {
                     code: 128,
                     message: format!("'{ref_name}' - not a valid ref"),
@@ -1951,6 +2064,39 @@ pub(crate) fn show_ref(
         {
             print_show_ref_row(&peeled, &format!("{name}^{{}}"), format)?;
         }
+    }
+    Ok(())
+}
+
+fn show_ref_exclude_existing(
+    repo: &GitRepo,
+    refs: &dyn GitRefsStore,
+    pattern: &str,
+) -> Result<()> {
+    let common_dir = read_common_git_dir(&repo.git_dir)?;
+    for line in io::stdin().lock().lines() {
+        let line = line?;
+        let candidate = line.strip_suffix("^{}").unwrap_or(&line);
+        let ref_name = candidate
+            .split_ascii_whitespace()
+            .last()
+            .unwrap_or(candidate);
+        if !pattern.is_empty() && !ref_name.starts_with(pattern) {
+            continue;
+        }
+        match refs.read_ref(&ref_name.to_owned()) {
+            Ok(Some(_)) => continue,
+            Ok(None) => {
+                if common_dir.join(ref_name).is_file() {
+                    continue;
+                }
+            }
+            Err(_) => {
+                eprintln!("warning: ref '{ref_name}' ignored");
+                continue;
+            }
+        }
+        println!("{candidate}");
     }
     Ok(())
 }
@@ -4687,8 +4833,12 @@ fn render_git_manual_page(page: &str) -> Result<()> {
         .arg(page)
         .output()
         .map_err(CliError::Io)?;
-    io::stdout().write_all(&output.stdout).map_err(CliError::Io)?;
-    io::stderr().write_all(&output.stderr).map_err(CliError::Io)?;
+    io::stdout()
+        .write_all(&output.stdout)
+        .map_err(CliError::Io)?;
+    io::stderr()
+        .write_all(&output.stderr)
+        .map_err(CliError::Io)?;
     Err(CliError::Exit(output.status.code().unwrap_or(1)))
 }
 
@@ -6500,7 +6650,10 @@ fn tag(options: TagOptions) -> Result<()> {
         && let Some(previous_id) = previous_id
         && previous_id != id
     {
-        println!("Updated tag '{name}' (was {})", short_object_id(&previous_id));
+        println!(
+            "Updated tag '{name}' (was {})",
+            short_object_id(&previous_id)
+        );
     }
     Ok(())
 }

@@ -199,6 +199,14 @@ pub enum Command {
         write: bool,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
+        #[arg(long = "stdin-paths", action = ArgAction::SetTrue)]
+        stdin_paths: bool,
+        #[arg(long = "no-filters", action = ArgAction::SetTrue)]
+        no_filters: bool,
+        #[arg(long = "literally", action = ArgAction::SetTrue)]
+        literally: bool,
+        #[arg(long = "path")]
+        path: Option<String>,
         #[arg(value_hint = ValueHint::FilePath)]
         paths: Vec<PathBuf>,
     },
@@ -276,8 +284,8 @@ pub enum Command {
     ShowIndex {
         #[arg(long = "object-format", action = ArgAction::Append)]
         object_format: Vec<String>,
-        #[arg(long = "no-object-format", action = ArgAction::SetTrue)]
-        no_object_format: bool,
+        #[arg(long = "no-object-format", action = ArgAction::Count)]
+        no_object_format: u8,
     },
     UpdateServerInfo {
         #[arg(short = 'f', long = "force", action = ArgAction::Count)]
@@ -288,9 +296,13 @@ pub enum Command {
     CheckRefFormat {
         #[arg(long = "allow-onelevel", action = ArgAction::SetTrue)]
         allow_onelevel: bool,
+        #[arg(long = "no-allow-onelevel", action = ArgAction::SetTrue)]
+        no_allow_onelevel: bool,
         #[arg(long = "normalize", action = ArgAction::SetTrue)]
         normalize: bool,
-        #[arg(long = "branch")]
+        #[arg(long = "refspec-pattern", action = ArgAction::SetTrue)]
+        refspec_pattern: bool,
+        #[arg(long = "branch", allow_hyphen_values = true)]
         branch: Option<String>,
         refname: Option<String>,
     },
@@ -324,8 +336,14 @@ pub enum Command {
     CheckAttr {
         #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "cached", action = ArgAction::SetTrue)]
+        cached: bool,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
+        #[arg(short = 'z', action = ArgAction::SetTrue)]
+        nul: bool,
+        #[arg(long = "source")]
+        source: Option<String>,
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -366,6 +384,14 @@ pub enum Command {
         base_name: Option<PathBuf>,
     },
     Bundle {
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "no-quiet", action = ArgAction::SetTrue)]
+        no_quiet: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-progress", action = ArgAction::SetTrue)]
+        no_progress: bool,
         operation: String,
         #[arg(long = "version")]
         version: Option<String>,
@@ -401,14 +427,32 @@ pub enum Command {
         pack_file: Option<PathBuf>,
     },
     Column {
-        #[arg(long = "mode")]
+        #[arg(long = "command")]
+        command: Option<String>,
+        #[arg(long = "no-command", action = ArgAction::SetTrue)]
+        no_command: bool,
+        #[arg(long = "mode", num_args = 0..=1, default_missing_value = "")]
         mode: Option<String>,
+        #[arg(long = "no-mode", action = ArgAction::SetTrue)]
+        no_mode: bool,
         #[arg(long = "raw-mode")]
-        raw_mode: Option<u32>,
+        raw_mode: Option<String>,
         #[arg(long = "width")]
-        width: Option<usize>,
+        width: Option<String>,
+        #[arg(long = "no-width", action = ArgAction::SetTrue)]
+        no_width: bool,
+        #[arg(long = "indent")]
+        indent: Option<String>,
+        #[arg(long = "no-indent", action = ArgAction::SetTrue)]
+        no_indent: bool,
+        #[arg(long = "nl")]
+        nl: Option<String>,
+        #[arg(long = "no-nl", action = ArgAction::SetTrue)]
+        no_nl: bool,
         #[arg(long = "padding")]
-        padding: Option<usize>,
+        padding: Option<String>,
+        #[arg(long = "no-padding", action = ArgAction::SetTrue)]
+        no_padding: bool,
     },
     GetTarCommitId,
     Archive {
@@ -510,6 +554,8 @@ pub enum Command {
         encoding: Option<String>,
         #[arg(long = "scissors", action = ArgAction::SetTrue)]
         scissors: bool,
+        #[arg(long = "no-scissors", action = ArgAction::SetTrue)]
+        no_scissors: bool,
         #[arg(long = "quoted-cr")]
         quoted_cr: Option<String>,
         #[arg(value_hint = ValueHint::FilePath)]
@@ -660,6 +706,8 @@ pub enum Command {
         annotate_stdin: bool,
         #[arg(long = "undefined", action = ArgAction::SetTrue)]
         undefined: bool,
+        #[arg(long = "no-undefined", action = ArgAction::SetTrue)]
+        no_undefined: bool,
         #[arg(long = "always", action = ArgAction::SetTrue)]
         always: bool,
         commits: Vec<String>,
@@ -1187,14 +1235,32 @@ pub enum Command {
         branch: Vec<String>,
     },
     Pull {
+        #[arg(long = "ff", action = ArgAction::SetTrue)]
+        ff: bool,
         #[arg(long = "ff-only", action = ArgAction::SetTrue)]
         ff_only: bool,
+        #[arg(long = "no-ff", action = ArgAction::SetTrue)]
+        no_ff: bool,
         #[arg(short = 's', long = "strategy")]
         strategies: Vec<String>,
         #[arg(long = "rebase", num_args = 0..=1, default_missing_value = "true")]
         rebase: Option<String>,
         #[arg(long = "no-rebase", action = ArgAction::SetTrue)]
         no_rebase: bool,
+        #[arg(long = "depth")]
+        depth: Option<String>,
+        #[arg(long = "deepen")]
+        deepen: Option<String>,
+        #[arg(long = "unshallow", action = ArgAction::SetTrue)]
+        unshallow: bool,
+        #[arg(long = "update-shallow", action = ArgAction::SetTrue)]
+        update_shallow: bool,
+        #[arg(long = "shallow-since")]
+        shallow_since: Option<String>,
+        #[arg(long = "shallow-exclude")]
+        shallow_exclude: Vec<String>,
+        #[arg(long = "upload-pack")]
+        upload_pack: Option<String>,
         remote: Option<String>,
         branch: Option<String>,
     },
@@ -1595,6 +1661,12 @@ pub enum Command {
     PackRefs {
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "auto", action = ArgAction::SetTrue)]
+        auto: bool,
+        #[arg(long = "include")]
+        include: Vec<String>,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
         #[arg(long = "prune", overrides_with = "no_prune", action = ArgAction::SetTrue)]
         prune: bool,
         #[arg(long = "no-prune", overrides_with = "prune", action = ArgAction::SetTrue)]
@@ -1658,18 +1730,24 @@ pub enum Command {
     },
     Maintenance {
         operation: String,
-        #[arg(long = "auto", action = ArgAction::SetTrue)]
+        #[arg(long = "auto", action = ArgAction::SetTrue, overrides_with = "no_auto")]
         auto: bool,
+        #[arg(long = "no-auto", action = ArgAction::SetTrue, overrides_with = "auto")]
+        no_auto: bool,
         #[arg(long = "schedule")]
         schedule: Option<String>,
+        #[arg(long = "no-schedule", action = ArgAction::SetTrue)]
+        no_schedule: bool,
         #[arg(long = "scheduler")]
         scheduler: Option<String>,
         #[arg(long = "config-file", value_hint = ValueHint::FilePath)]
         config_file: Option<PathBuf>,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
-        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        #[arg(long = "quiet", action = ArgAction::SetTrue, overrides_with = "no_quiet")]
         quiet: bool,
+        #[arg(long = "no-quiet", action = ArgAction::SetTrue, overrides_with = "quiet")]
+        no_quiet: bool,
         #[arg(long = "task")]
         tasks: Vec<String>,
     },
@@ -2698,6 +2776,8 @@ pub enum Command {
         no_strict: bool,
         #[arg(long = "stateless-rpc", action = ArgAction::SetTrue)]
         stateless_rpc: bool,
+        #[arg(long = "http-backend-info-refs", action = ArgAction::SetTrue)]
+        http_backend_info_refs: bool,
         #[arg(long = "advertise-refs", action = ArgAction::SetTrue)]
         advertise_refs: bool,
         #[arg(long = "timeout")]
@@ -2793,6 +2873,8 @@ pub enum Command {
         refs: Vec<String>,
     },
     ReceivePack {
+        #[arg(long = "http-backend-info-refs", action = ArgAction::SetTrue)]
+        http_backend_info_refs: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(value_hint = ValueHint::DirPath)]
@@ -2936,6 +3018,8 @@ pub enum Command {
         revs: Vec<String>,
     },
     MergeBase {
+        #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
+        all: bool,
         #[arg(long = "is-ancestor", action = ArgAction::SetTrue)]
         is_ancestor: bool,
         #[arg(long = "octopus", action = ArgAction::SetTrue)]
@@ -3083,12 +3167,24 @@ pub enum Command {
         newvalue: Option<String>,
     },
     SymbolicRef {
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(long = "short", action = ArgAction::SetTrue)]
-        short: bool,
-        #[arg(long = "no-recurse", action = ArgAction::SetTrue)]
-        no_recurse: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(long = "no-quiet", action = ArgAction::Count)]
+        no_quiet: u8,
+        #[arg(short = 'd', long = "delete", action = ArgAction::Count)]
+        delete: u8,
+        #[arg(long = "no-delete", action = ArgAction::Count)]
+        no_delete: u8,
+        #[arg(long = "short", action = ArgAction::Count)]
+        short: u8,
+        #[arg(long = "no-short", action = ArgAction::Count)]
+        no_short: u8,
+        #[arg(long = "recurse", action = ArgAction::Count)]
+        recurse: u8,
+        #[arg(long = "no-recurse", action = ArgAction::Count)]
+        no_recurse: u8,
+        #[arg(short = 'm')]
+        message: Option<String>,
         name: String,
         target: Vec<String>,
     },
@@ -3206,6 +3302,13 @@ pub enum Command {
         verify: bool,
         #[arg(long = "exists", action = ArgAction::SetTrue)]
         exists: bool,
+        #[arg(
+            long = "exclude-existing",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        exclude_existing: Option<String>,
         refs: Vec<String>,
     },
     ForEachRef {
@@ -3512,8 +3615,16 @@ pub enum RefsCommand {
     Verify {
         #[arg(long = "strict", action = ArgAction::SetTrue)]
         strict: bool,
+        #[arg(long = "no-strict", action = ArgAction::SetTrue)]
+        no_strict: bool,
         #[arg(long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(long = "no-verbose", action = ArgAction::SetTrue)]
+        no_verbose: bool,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        #[arg(long = "ref-format", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        ref_format: Option<String>,
     },
 }
 
@@ -3623,10 +3734,23 @@ pub enum RemoteCommand {
 #[derive(Subcommand, Debug)]
 pub enum CommitGraphCommand {
     Write {
+        #[arg(long = "object-dir", value_hint = ValueHint::DirPath)]
+        object_dir: Option<PathBuf>,
         #[arg(long = "reachable", action = ArgAction::SetTrue)]
         reachable: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-progress", action = ArgAction::SetTrue)]
+        no_progress: bool,
     },
-    Verify,
+    Verify {
+        #[arg(long = "object-dir", value_hint = ValueHint::DirPath)]
+        object_dir: Option<PathBuf>,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-progress", action = ArgAction::SetTrue)]
+        no_progress: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]

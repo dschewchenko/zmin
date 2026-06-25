@@ -84,6 +84,7 @@ represented_doc_option_pairs="$(awk -F'\t' '$1 == "doc_option_pairs_represented_
 total_represented_doc_option_pairs="$(awk -F'\t' '$1 == "doc_option_pairs_represented_by_rows" { print $3 }' "$matrix_summary")"
 behavior_rows_written="$(awk -F'\t' '$1 == "behavior_rows_written" { print $2 }' "$matrix_summary")"
 written_rows_matching_stock_git="$(awk -F'\t' '$1 == "written_rows_matching_stock_git" { print $2 }' "$matrix_summary")"
+behavior_rows_classified="$(awk -F'\t' '$1 == "behavior_rows_classified" { print $2 }' "$matrix_summary")"
 behavior_rows_open="$(awk -F'\t' '$1 == "behavior_rows_open" { print $2 }' "$matrix_summary")"
 invalid_input_rows="$(awk -F'\t' '$1 == "invalid_input_rows" { print $2 }' "$matrix_summary")"
 
@@ -99,6 +100,7 @@ printf 'commands_with_matrix_rows=%s/%s\n' "$commands_with_matrix_rows" "$total_
 printf 'doc_option_pairs_represented_by_rows=%s/%s\n' "$represented_doc_option_pairs" "$total_represented_doc_option_pairs"
 printf 'behavior_rows_written=%s\n' "$behavior_rows_written"
 printf 'written_rows_matching_stock_git=%s/%s\n' "$written_rows_matching_stock_git" "$behavior_rows_written"
+printf 'behavior_rows_classified=%s/%s\n' "$behavior_rows_classified" "$behavior_rows_written"
 printf 'behavior_rows_open=%s/%s\n' "$behavior_rows_open" "$behavior_rows_written"
 printf 'invalid_input_rows=%s/%s\n' "$invalid_input_rows" "$behavior_rows_written"
 

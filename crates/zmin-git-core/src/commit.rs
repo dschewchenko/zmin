@@ -595,11 +595,7 @@ mod tests {
             decoded.parents,
             vec![ObjectId::from_hex(GitHashAlgorithm::Sha1, &first).expect("parent id")]
         );
-        assert!(
-            decoded
-                .author
-                .starts_with(b"Zmin Test <zmin@example.com>")
-        );
+        assert!(decoded.author.starts_with(b"Zmin Test <zmin@example.com>"));
         assert!(
             decoded
                 .committer

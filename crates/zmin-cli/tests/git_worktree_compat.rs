@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 use common::{
     command_failure_output, command_output, configure_identity, git, git_failure_output, git_init,
-    git_with_env, run_zmin, run_zmin_failure_output, zmin_bin, write_file,
+    git_with_env, run_zmin, run_zmin_failure_output, write_file, zmin_bin,
 };
 
 fn worktree_fixture_repo() -> TempDir {
