@@ -343,27 +343,23 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest schema-tail closure, `repack` now has `104/104` classified
-written rows with `0` open and sits at `33/33` represented documented option
-pairs and `24/33` reviewed-complete documented option pairs. The schema tail
-is now fully represented, so the next best helper-free follow-up stays inside
-the remaining `repack` expansion-only families unless another census-backed
-cluster becomes higher-throughput.
+After the latest zero-code reviewed-complete closure, `repack` still has
+`104/104` classified written rows with `0` open and now sits at `33/33`
+represented documented option pairs and `32/33` reviewed-complete documented
+option pairs. Only the documented `--filter` surface still remains expansion-
+required, so the next best helper-free follow-up is the remaining filter value
+family unless another census-backed cluster becomes higher-throughput.
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `git repack`
-`--filter` / `--filter-to` schema-tail batch. Zmin now accepts
-`--filter=<spec>` for the covered helper-free local lanes, matches stock Git
-for `blob:none`, `combine:blob:none+tree:1`, repeated last-one-wins filter
-ordering, the invalid `bogus` diagnostic, the stock fatal guard for
-`--filter-to` without `--filter`, and root-side filtered pack artifact
-creation with rightmost prefix selection for repeated `--filter-to`.
+The latest completed slice is a zero-code `git repack` reviewed-complete
+documented-option closure batch. The existing exact stock-Git evidence now
+promotes `--cruft`, `--cruft-expiration`, `--expire-to`, `--filter-to`,
+`--geometric`, `--max-cruft-size`, `--unpack-unreachable`, and `-g` into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, leaving only the
+documented `--filter` value-family expansion still open inside `repack`.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat repack_filter -- --nocapture`,
-`cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
-`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
@@ -371,9 +367,9 @@ and `git diff --check`.
 
 Current census counts are `5319` matrix rows, `4611` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `79/151` complete command
-matrices, `439/3175` complete documented option pairs, and `2762`
+matrices, `447/3175` complete documented option pairs, and `2754`
 remaining checklist rows. `repack` now reads `33` documented option pairs,
-`24` reviewed-complete documented option pairs, `33` represented documented
+`32` reviewed-complete documented option pairs, `33` represented documented
 option pairs, and `104/104` classified written rows with `0` open.
 
 ### No-Skip Rule
@@ -1184,11 +1180,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the `repack --filter/--filter-to` helper-free
-closure:
+Current durable census after the zero-code `repack` reviewed-complete
+option-family closure:
 
 - complete command matrices: `79 / 151`
-- complete documented command-option pairs: `439 / 3175`
+- complete documented command-option pairs: `447 / 3175`
 - matrix rows: `5319`
 - verified rows: `4611`
 - invalid-input rows: `679`
@@ -1196,19 +1192,12 @@ closure:
 
 Latest completed batch:
 
-- `repack` now has the last remaining helper-free schema-tail documented
-  options represented in the current local lane surface.
-- The closed subgroup adds exact stock-Git evidence for `--filter=blob:none`,
-  `--filter=combine:blob:none+tree:1`, repeated last-one-wins filter and
-  filter-to ordering, the stock invalid `--filter=bogus` diagnostic, the stock
-  fatal guard for `--filter-to` without `--filter`, and root-side filtered
-  pack artifact creation.
+- `repack` now has nearly all represented documented option families promoted
+  into the reviewed-complete census list without additional Rust changes.
+- The closed subgroup promotes the existing exact stock-Git evidence for
+  `--cruft`, `--cruft-expiration`, `--expire-to`, `--filter-to`,
+  `--geometric`, `--max-cruft-size`, `--unpack-unreachable`, and `-g`.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_maintenance_compat repack_filter --
-  --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat
-  repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
-  `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
   and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
@@ -1219,8 +1208,8 @@ Latest in-progress family follow-up:
   `104/104` classified rows and `0` open written rows, but the full command is
   still not reviewed-complete because expansion-only families remain inside the
   documented surface.
-- The next best helper-free follow-up stays inside the remaining `repack`
-  expansion-required families unless another zero-row or dense census-backed
+- The next best helper-free follow-up is now the remaining `--filter`
+  value-family expansion unless another zero-row or dense census-backed
   cluster overtakes it on throughput.
 
 Latest zero-code closure:
