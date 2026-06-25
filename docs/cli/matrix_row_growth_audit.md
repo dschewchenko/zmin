@@ -40,6 +40,15 @@ option pairs, `0` invalid-input rows and `-10` remaining checklist rows. Rust
 behavior changes are expected because repeated documented boolean `repack`
 flags must parse like stock Git. Actual delta matched.
 
+As of 2026-06-25 the next batch is a second `repack` helper-free short-option
+closure. The selected rows add repeated and reordered short-option forms for
+`-a`, `-A`, `-d`, `-f`, `-F`, `-l`, and `-n`, then promote those seven
+short-option pairs into the durable reviewed-complete option list. Expected
+delta is `+8` matrix rows, `+8` verified rows, `+7` complete documented
+option pairs, `0` invalid-input rows and `-7` remaining checklist rows. No
+new command surfaces are expected; the work stays inside the already supported
+`repack` synopsis tail. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for helper-free commands `diagnose`, `imap-send`, `mailsplit`, `mv`
 and `quiltimport`. Their behavior rows, stock evidence and documented option
@@ -5777,6 +5786,49 @@ represented oracle functions, `+0` missing-or-unclassified oracle functions,
 `+0` commands with rows, `+0` represented doc-option pairs, `+0`
 implemented-but-unverified schema rows, `-10` remaining checklist rows, and
 `+10` complete doc-option pairs.
+
+## 2026-06-25 - repack short-option repetition closure
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+8`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-7`
+- complete command matrices: `+0`
+- complete doc-option pairs: `+7`
+- Rust behavior changes: no
+
+Expected rows:
+
+- `git repack -a -a -d -q`
+- `git repack -d -d -a -q`
+- `git repack -A -A -d -q`
+- `git repack -A -d -A -q`
+- `git repack -f -f -F -a -d -q`
+- `git repack -F -F -f -a -d -q`
+- `git repack -l -l -a -d -q`
+- `git repack -m -n -n -q`
+
+This batch finishes the helper-free supported `repack` synopsis tail. The new
+rows prove that repeated and reordered short options keep matching stock Git
+for all remaining supported synopsis switches outside the broader unsupported
+surfaces such as cruft and filter modes. With these rows in place, all
+`17/17` represented documented `repack` option pairs are now reviewed
+complete.
+
+Actual post-import movement matched the declaration: `+8` behavior rows,
+`+8` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows, `-7` remaining checklist rows, and
+`+7` complete doc-option pairs.
 
 ## 2026-06-25 - commit-graph progress ordering surface
 

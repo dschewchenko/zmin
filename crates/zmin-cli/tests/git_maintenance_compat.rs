@@ -311,6 +311,61 @@ fn repack_keep_pack_fixture_repo() -> TempDir {
     repo
 }
 
+fn repack_unreachable_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["checkout", "-b", "tmpbranch"]);
+    write_file(repo.path(), "tmp.txt", "tmp\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "tmp"]);
+    git(repo.path(), ["checkout", "main"]);
+    git(repo.path(), ["repack", "-adq"]);
+    git(repo.path(), ["branch", "-D", "tmpbranch"]);
+    git(
+        repo.path(),
+        [
+            "reflog",
+            "expire",
+            "--expire=now",
+            "--expire-unreachable=now",
+            "--all",
+        ],
+    );
+    repo
+}
+
+fn repack_shared_clone_fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let shared = dir.path().join("shared");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    write_file(&source, "a.txt", "base\n");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "base"]);
+    git(
+        dir.path(),
+        [
+            "clone",
+            "--shared",
+            source.to_str().expect("source path"),
+            shared.to_str().expect("shared clone path"),
+        ],
+    );
+    configure_identity(&shared);
+    write_file(&shared, "a.txt", "local\n");
+    git(&shared, ["add", "-A"]);
+    git_with_env(&shared, ["commit", "-m", "local"]);
+    (dir, source, shared)
+}
+
 fn assert_repack_observables_match(left: &std::path::Path, right: &std::path::Path) {
     assert_eq!(
         git_args(left, &["status", "--porcelain=v2", "--branch"]),
@@ -1407,6 +1462,49 @@ fn repack_keep_pack_multiple_values_match_stock_git() {
         );
     }
     assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+}
+
+#[test]
+fn repack_supported_short_option_repetitions_match_stock_git() {
+    for args in [
+        ["repack", "-a", "-a", "-d", "-q"].as_slice(),
+        ["repack", "-d", "-d", "-a", "-q"].as_slice(),
+        ["repack", "-f", "-f", "-F", "-a", "-d", "-q"].as_slice(),
+        ["repack", "-F", "-F", "-f", "-a", "-d", "-q"].as_slice(),
+        ["repack", "-m", "-n", "-n", "-q"].as_slice(),
+    ] {
+        let git_repo = repack_documented_option_fixture_repo();
+        let zmin_repo = repack_documented_option_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+
+    for args in [
+        ["repack", "-A", "-A", "-d", "-q"].as_slice(),
+        ["repack", "-A", "-d", "-A", "-q"].as_slice(),
+    ] {
+        let git_repo = repack_unreachable_fixture_repo();
+        let zmin_repo = repack_unreachable_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+
+    let (_git_tmp, _git_source, git_clone) = repack_shared_clone_fixture();
+    let (_zmin_tmp, _zmin_source, zmin_clone) = repack_shared_clone_fixture();
+    let args = ["repack", "-l", "-l", "-a", "-d", "-q"];
+    assert_eq!(
+        command_any_output(zmin_bin(), &zmin_clone, &args, "zmin"),
+        command_any_output("git", &git_clone, &args, "git")
+    );
+    assert_repack_observables_match(&git_clone, &zmin_clone);
 }
 
 #[test]
