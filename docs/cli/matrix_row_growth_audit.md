@@ -11,6 +11,16 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a zero-code `read-tree`
+reviewed-complete command promotion. Its behavior rows, exact stock-Git
+evidence, and all `17/17` reviewed-complete documented option pairs already
+exist in the matrix, focused compat tests, and generated census artifacts; this
+slice only promotes `read-tree` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Expected delta is
+`+0` matrix rows, `+1` complete command matrix, `+0` complete documented option
+pairs, `+0` verified rows, `+0` invalid-input rows, and `+0` remaining
+checklist rows. Rust behavior changes are not expected. Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `repack --filter`
 value-family closure plus reviewed-complete command promotion. The selected
 rows add exact stock-Git evidence for `blob:limit` values, all documented

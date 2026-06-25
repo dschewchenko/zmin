@@ -343,39 +343,32 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `--filter` value-family closure, `repack` now has
-`116/116` classified written rows with `0` open and sits at `33/33`
-represented documented option pairs and `33/33` reviewed-complete documented
-option pairs. `repack` is now a reviewed-complete command matrix, so the next
-best helper-free follow-up should move to another dense census-backed cluster
-unless a zero-code promotion overtakes it on throughput.
+After the latest zero-code command promotion, `read-tree` is now also a
+reviewed-complete command matrix at `17/17` reviewed-complete documented
+option pairs with `84/84` classified rows and `0` open. The next best
+helper-free follow-up should move to another dense census-backed cluster unless
+another zero-code promotion overtakes it on throughput.
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `git repack --filter`
-value-family closure plus reviewed-complete command promotion. Zmin now
-matches stock Git for the remaining documented filter forms on the current
-helper-free local lane: `blob:limit`, all documented `object:type` values,
-documented `tree:<depth>` forms, valid `sparse:oid`, percent-encoded
-`combine`, invalid tree-depth rejection, and the dropped `sparse:path`
-diagnostic. With those rows in place, `--filter` is now reviewed complete and
-`repack` is promoted into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
+The latest completed slice is a zero-code `git read-tree`
+reviewed-complete command promotion. The existing exact stock-Git evidence and
+reviewed-complete documented option coverage already closed the full current
+helper-free `read-tree` matrix, so this slice only promotes the command into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat repack_filter -- --nocapture`,
-`cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
-`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5331` matrix rows, `4623` verified rows, `679`
-invalid-input rows, `26` exact-open rows, `80/151` complete command
+invalid-input rows, `26` exact-open rows, `81/151` complete command
 matrices, `448/3175` complete documented option pairs, and `2753`
-remaining checklist rows. `repack` now reads `33` documented option pairs,
-`33` reviewed-complete documented option pairs, `33` represented documented
-option pairs, and `116/116` classified written rows with `0` open.
+remaining checklist rows. `read-tree` now reads `17` documented option pairs,
+`17` reviewed-complete documented option pairs, `17` represented documented
+option pairs, and `84/84` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1185,10 +1178,10 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the helper-free `repack --filter`
-value-family closure:
+Current durable census after the zero-code `read-tree`
+command promotion:
 
-- complete command matrices: `80 / 151`
+- complete command matrices: `81 / 151`
 - complete documented command-option pairs: `448 / 3175`
 - matrix rows: `5331`
 - verified rows: `4623`
@@ -1197,27 +1190,20 @@ value-family closure:
 
 Latest completed batch:
 
-- `repack` now has the final remaining documented option family closed on the
-  current helper-free local lane and is promoted into the reviewed-complete
-  command census list.
-- The closed subgroup adds exact stock-Git evidence for the remaining
-  `--filter` value family: `blob:limit`, all documented `object:type` values,
-  documented tree depths, valid `sparse:oid`, encoded `combine`, invalid tree
-  depth rejection, and the dropped `sparse:path` diagnostic.
+- `read-tree` now has its full current helper-free command matrix promoted
+  into the reviewed-complete command census list.
+- The closed subgroup adds no new behavior rows; it only makes the already
+  complete `read-tree` command closure durable in the reviewed command source
+  list.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_maintenance_compat repack_filter --
-  --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat
-  repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
-  `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `repack` is now reviewed complete at `33/33` documented option pairs with
-  `116/116` classified rows and `0` open written rows.
+- `read-tree` is now reviewed complete at `17/17` documented option pairs with
+  `84/84` classified rows and `0` open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed family or zero-code command/doc-option promotion cluster.
 
@@ -1229,6 +1215,5 @@ Latest zero-code closure:
 
 Next helper-free family candidates now remain:
 
-- `repack` expansion-required rows inside the represented documented families
-- another dense evidence-import or reviewed-complete closure batch from the
-  census once `repack` is no longer the best safe high-throughput move
+- another zero-code command promotion or dense evidence-import batch from the
+  census after the recent `read-tree` and `repack` durable closures
