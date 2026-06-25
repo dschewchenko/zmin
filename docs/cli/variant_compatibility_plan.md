@@ -314,9 +314,12 @@ has all `5/5` documented options represented too, and
 `interpret-trailers` is now reviewed complete. The next highest-throughput
 helper-free families
 by current doc-option tail size are `repack` (`17/33` represented documented
-options), `read-tree` (`3/17`), and `gc` (`5/12`), so the next batch should
-target one of those documented-option families rather than another one-row
-command tail.
+options), `read-tree` (`3/17`), and `gc` (`5/12`). The newly reviewed-complete
+`repack` subgroup covers `10` documented option pairs, so the next batch
+should either finish the remaining helper-free supported `repack` subgroup
+(`-a`, `-A`, `-d`, `-f`, `-F`, `-l`, `--local`, `-n`) or switch to the
+smaller `gc` documented-option family before opening broader unsupported
+surfaces.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -325,25 +328,28 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a focused `git interpret-trailers`
-parser-plus-evidence closure plus reviewed-complete promotion. This slice
-added the documented `--no-where`, `--no-if-exists`, and `--no-if-missing`
-parser surfaces, closed their exact stock-Git reset-ordering rows, and then
-promoted `interpret-trailers` into the reviewed-complete command and
-doc-option census artifacts.
+The latest completed slice is a focused `git repack` documented-option
+family batch. This slice added stock-Git evidence for repeated quiet aliases,
+separate/equals `--threads`, order-sensitive `--window` / `--depth`, long and
+repeated `--write-midx` / `-m`, long and repeated `--write-bitmap-index` /
+`-b`, and repeated `--keep-pack` values. It also fixed `repack` parser
+handling so repeated documented boolean flags such as `--quiet -q` are
+accepted like stock Git, then promoted `10` `repack` doc-option pairs into
+the reviewed-complete census artifacts.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_mail_tools_compat interpret_trailers_matches_stock_git_for_common_modes -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_documented_option_aliases_and_value_forms_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_keep_pack_multiple_values_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(interpret-trailers|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(repack|gc|read-tree|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5109` matrix rows, `4408` verified rows, `672`
+Current census counts are `5122` matrix rows, `4421` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `59/151` complete command matrices, `211/3175`
-complete documented option pairs, and `2990` remaining checklist rows.
+open-or-partial rows, `59/151` complete command matrices, `221/3175`
+complete documented option pairs, and `2980` remaining checklist rows.
 The promoted commands now read:
 - `replace` `11/11` represented documented options, `19/19` classified rows, `19/19` matching stock Git rows, `0` open
 - `merge-file` `10/10` represented documented options, `50/50` classified rows, `36/50` matching stock Git rows, `0` open

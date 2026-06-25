@@ -279,6 +279,83 @@ fn commit_graph_fixture_repo() -> TempDir {
     repo
 }
 
+fn repack_documented_option_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    git(repo.path(), ["repack", "-q"]);
+    write_file(repo.path(), "b.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    repo
+}
+
+fn repack_keep_pack_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    git(repo.path(), ["repack", "-q"]);
+    write_file(repo.path(), "b.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    git(repo.path(), ["repack", "-q"]);
+    write_file(repo.path(), "c.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "three"]);
+    repo
+}
+
+fn assert_repack_observables_match(left: &std::path::Path, right: &std::path::Path) {
+    assert_eq!(
+        git_args(left, &["status", "--porcelain=v2", "--branch"]),
+        git_args(right, &["status", "--porcelain=v2", "--branch"]),
+        "status diverged"
+    );
+    assert_eq!(
+        git_args(left, &["ls-files", "--stage"]),
+        git_args(right, &["ls-files", "--stage"]),
+        "index entries diverged"
+    );
+    assert_eq!(
+        git_args(left, &["show-ref", "--head", "--dereference"]),
+        git_args(right, &["show-ref", "--head", "--dereference"]),
+        "refs diverged"
+    );
+    assert_eq!(
+        git_args(
+            left,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)"
+            ],
+        ),
+        git_args(
+            right,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)"
+            ],
+        ),
+        "object inventories diverged"
+    );
+    assert_eq!(pack_file_count(left), pack_file_count(right), "pack counts diverged");
+    assert_eq!(
+        left.join(".git/objects/pack/multi-pack-index").exists(),
+        right.join(".git/objects/pack/multi-pack-index").exists(),
+        "multi-pack-index presence diverged"
+    );
+    assert_eq!(git_status(left, ["fsck", "--strict"]), 0, "left repo fsck failed");
+    assert_eq!(git_status(right, ["fsck", "--strict"]), 0, "right repo fsck failed");
+}
+
 fn two_pack_midx_fixture() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -1244,6 +1321,92 @@ fn repack_window_depth_writes_stock_readable_delta_pack() {
         command_stdout_bytes("git", repo.path(), &["cat-file", "-p", &changed]),
         changed_content.as_bytes()
     );
+}
+
+#[test]
+fn repack_documented_option_aliases_and_value_forms_match_stock_git() {
+    for args in [
+        ["repack", "--quiet"].as_slice(),
+        ["repack", "--quiet", "-q"].as_slice(),
+        ["repack", "-q", "-q"].as_slice(),
+        ["repack", "--threads=1"].as_slice(),
+        ["repack", "--threads", "1"].as_slice(),
+        ["repack", "--window=10", "--depth=10", "-q"].as_slice(),
+        ["repack", "--depth=10", "--window=10", "-q"].as_slice(),
+        ["repack", "--window", "10", "--depth", "10", "-q"].as_slice(),
+        ["repack", "--write-midx", "-q"].as_slice(),
+        ["repack", "--write-midx", "-m", "-q"].as_slice(),
+        ["repack", "-m", "-m", "-q"].as_slice(),
+        ["repack", "--write-bitmap-index", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--write-bitmap-index", "-b", "-a", "-d", "-q"].as_slice(),
+        ["repack", "-b", "-b", "-a", "-d", "-q"].as_slice(),
+    ] {
+        let git_repo = repack_documented_option_fixture_repo();
+        let zmin_repo = repack_documented_option_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
+fn repack_keep_pack_multiple_values_match_stock_git() {
+    let git_repo = repack_keep_pack_fixture_repo();
+    let zmin_repo = repack_keep_pack_fixture_repo();
+    let git_keep = pack_file_names(git_repo.path())
+        .into_iter()
+        .filter(|name| name.ends_with(".pack"))
+        .take(2)
+        .collect::<Vec<_>>();
+    let zmin_keep = pack_file_names(zmin_repo.path())
+        .into_iter()
+        .filter(|name| name.ends_with(".pack"))
+        .take(2)
+        .collect::<Vec<_>>();
+    assert_eq!(git_keep.len(), 2);
+    assert_eq!(zmin_keep.len(), 2);
+
+    let git_args = [
+        "repack",
+        "-a",
+        "-d",
+        "-q",
+        "--keep-pack",
+        git_keep[0].as_str(),
+        "--keep-pack",
+        git_keep[1].as_str(),
+    ];
+    let zmin_args = [
+        "repack",
+        "-a",
+        "-d",
+        "-q",
+        "--keep-pack",
+        zmin_keep[0].as_str(),
+        "--keep-pack",
+        zmin_keep[1].as_str(),
+    ];
+
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &zmin_args, "zmin"),
+        command_any_output("git", git_repo.path(), &git_args, "git")
+    );
+    for name in &git_keep {
+        assert!(
+            pack_file_names(git_repo.path()).contains(name),
+            "git repo should preserve kept pack {name}"
+        );
+    }
+    for name in &zmin_keep {
+        assert!(
+            pack_file_names(zmin_repo.path()).contains(name),
+            "zmin repo should preserve kept pack {name}"
+        );
+    }
+    assert_repack_observables_match(git_repo.path(), zmin_repo.path());
 }
 
 #[test]

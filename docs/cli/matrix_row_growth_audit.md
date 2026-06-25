@@ -29,6 +29,17 @@ command and doc-option census artifacts. Expected delta is `+3` matrix rows,
 option pairs, `0` invalid-input rows and `-14` remaining checklist rows. Rust
 behavior changes are expected. Actual delta matched.
 
+As of 2026-06-25 the next batch is a `repack` documented-option family
+closure. The selected rows add repeated quiet aliases, separate/equal
+`--threads`, order-sensitive `--window` / `--depth`, long and repeated
+`--write-midx` / `-m`, long and repeated `--write-bitmap-index` / `-b`, and
+repeated `--keep-pack` values, then promote the now-closed `repack`
+doc-option pairs into the durable reviewed-complete option list. Expected
+delta is `+13` matrix rows, `+13` verified rows, `+10` complete documented
+option pairs, `0` invalid-input rows and `-10` remaining checklist rows. Rust
+behavior changes are expected because repeated documented boolean `repack`
+flags must parse like stock Git. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for helper-free commands `diagnose`, `imap-send`, `mailsplit`, `mv`
 and `quiltimport`. Their behavior rows, stock evidence and documented option
@@ -5717,6 +5728,55 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+3` represented doc-option pairs, `+0`
 implemented-but-unverified schema rows, `-14` remaining checklist rows,
 `+1` complete command matrix, and `+14` complete doc-option pairs.
+
+## 2026-06-25 - repack documented-option family batch
+
+Expected movement:
+
+- behavior rows: `+13`
+- closed rows: `+13`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-10`
+- complete command matrices: `+0`
+- complete doc-option pairs: `+10`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git repack --quiet -q`
+- `git repack -q -q`
+- `git repack --threads 1`
+- `git repack --depth=10 --window=10 -q`
+- `git repack --window 10 --depth 10 -q`
+- `git repack --write-midx -q`
+- `git repack --write-midx -m -q`
+- `git repack -m -m -q`
+- `git repack --write-bitmap-index -adq`
+- `git repack --write-bitmap-index -b -adq`
+- `git repack -b -b -adq`
+- `git repack -adq --keep-pack <pack1> --keep-pack <pack2>`
+
+This batch closes a large helper-free `git repack` subgroup without opening
+the broader unsupported surfaces such as cruft packs or filtering. Zmin now
+accepts repeated documented boolean flags for `repack`, matching stock Git for
+mixed `--quiet` / `-q` and repeated `-m` / `-b` forms. The new evidence also
+covers separate `--threads 1`, value-form and ordering parity for
+`--window` / `--depth`, and repeated `--keep-pack` values. With those rows in
+place, the reviewed-complete census now marks `10` `repack` documented option
+pairs complete.
+
+Actual post-import movement matched the declaration: `+13` behavior rows,
+`+13` closed rows, `+0` open rows, `+0` invalid-input rows, `+0`
+represented oracle functions, `+0` missing-or-unclassified oracle functions,
+`+0` commands with rows, `+0` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows, `-10` remaining checklist rows, and
+`+10` complete doc-option pairs.
 
 ## 2026-06-25 - commit-graph progress ordering surface
 

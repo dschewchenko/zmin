@@ -1689,28 +1689,28 @@ pub enum Command {
         no_quiet: u8,
     },
     Repack {
-        #[arg(short = 'a', action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(short = 'A', action = ArgAction::SetTrue)]
-        all_and_loosen_unreachable: bool,
-        #[arg(short = 'd', action = ArgAction::SetTrue)]
-        delete_redundant: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(short = 'n', action = ArgAction::SetTrue)]
-        no_update_server_info: bool,
-        #[arg(short = 'f', action = ArgAction::SetTrue)]
-        no_reuse_delta: bool,
-        #[arg(short = 'F', action = ArgAction::SetTrue)]
-        no_reuse_object: bool,
-        #[arg(short = 'l', long = "local", action = ArgAction::SetTrue)]
-        local: bool,
-        #[arg(short = 'b', long = "write-bitmap-index", action = ArgAction::SetTrue)]
-        write_bitmap_index: bool,
+        #[arg(short = 'a', action = ArgAction::Count)]
+        all: u8,
+        #[arg(short = 'A', action = ArgAction::Count)]
+        all_and_loosen_unreachable: u8,
+        #[arg(short = 'd', action = ArgAction::Count)]
+        delete_redundant: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(short = 'n', action = ArgAction::Count)]
+        no_update_server_info: u8,
+        #[arg(short = 'f', action = ArgAction::Count)]
+        no_reuse_delta: u8,
+        #[arg(short = 'F', action = ArgAction::Count)]
+        no_reuse_object: u8,
+        #[arg(short = 'l', long = "local", action = ArgAction::Count)]
+        local: u8,
+        #[arg(short = 'b', long = "write-bitmap-index", action = ArgAction::Count)]
+        write_bitmap_index: u8,
         #[arg(long = "no-write-bitmap-index", action = ArgAction::SetTrue)]
         no_write_bitmap_index: bool,
-        #[arg(short = 'm', long = "write-midx", action = ArgAction::SetTrue)]
-        write_midx: bool,
+        #[arg(short = 'm', long = "write-midx", action = ArgAction::Count)]
+        write_midx: u8,
         #[arg(long = "no-write-midx", action = ArgAction::SetTrue)]
         no_write_midx: bool,
         #[arg(long = "window")]
