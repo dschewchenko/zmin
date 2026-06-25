@@ -11,6 +11,18 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `repack` cruft-family
+repeat/order closure inside the existing schema surface. The selected rows add
+exact stock-Git evidence for repeated `--cruft`, last-one-wins
+`--cruft-expiration` (`now` versus `never`), repeated `--expire-to` prefix
+selection, ignored `--expire-to` when `--cruft-expiration=never` keeps the
+cruft pack in the object store, and repeated `--max-cruft-size` with the
+stock 1 MiB minimum-size warning. Expected delta is `+6` matrix rows, `+6`
+verified rows, `+0` invalid-input rows, `+0` complete documented option
+pairs, `+0` complete command matrices, and `-6` remaining checklist rows.
+Rust behavior changes are expected because repeated cruft-family options must
+parse like stock Git. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for `branch`, `status`, `rm`, `fsck`, `maintenance`, and
 `merge-tree`. Their behavior rows, stock evidence, and documented option

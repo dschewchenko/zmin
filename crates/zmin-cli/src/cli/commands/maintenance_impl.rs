@@ -29,7 +29,7 @@ struct RepackOptions {
     depth: Option<usize>,
     threads: Option<usize>,
     max_pack_size: Option<String>,
-    max_cruft_size: Option<String>,
+    max_cruft_size: Vec<String>,
     keep_pack: Vec<String>,
 }
 
@@ -78,7 +78,7 @@ pub(crate) fn repack_command(
     depth: Option<usize>,
     threads: Option<usize>,
     max_pack_size: Option<String>,
-    max_cruft_size: Option<String>,
+    max_cruft_size: Vec<String>,
     keep_pack: Vec<String>,
 ) -> Result<()> {
     repack(RepackOptions {
@@ -1618,7 +1618,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
     let max_cruft_size = if write_cruft_pack {
-        parse_repack_size_limit(options.max_cruft_size.as_deref(), "max-cruft-size")?
+        parse_repack_size_limit_values(&options.max_cruft_size, "max-cruft-size")?
     } else {
         None
     };
@@ -1872,6 +1872,14 @@ fn parse_repack_size_limit(raw: Option<&str>, option: &str) -> Result<Option<u64
         });
     };
     Ok(Some(size))
+}
+
+fn parse_repack_size_limit_values(values: &[String], option: &str) -> Result<Option<u64>> {
+    let mut last = None;
+    for value in values {
+        last = parse_repack_size_limit(Some(value.as_str()), option)?;
+    }
+    Ok(last)
 }
 
 fn parse_size_with_optional_suffix(raw: &str) -> Option<u64> {
@@ -2218,7 +2226,7 @@ fn gc(options: GcOptions) -> Result<()> {
         depth: options.aggressive.then_some(250),
         threads: None,
         max_pack_size: None,
-        max_cruft_size: options.max_cruft_size.last().cloned(),
+        max_cruft_size: options.max_cruft_size.clone(),
         keep_pack: Vec::new(),
     })?;
     if !options.no_prune {

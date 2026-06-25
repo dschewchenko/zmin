@@ -381,6 +381,18 @@ fn repack_shared_clone_fixture() -> (TempDir, std::path::PathBuf, std::path::Pat
     (dir, source, shared)
 }
 
+fn root_artifact_names_with_prefix(
+    repo: &std::path::Path,
+    prefix: &str,
+) -> BTreeSet<String> {
+    fs::read_dir(repo)
+        .expect("read repo root")
+        .map(|entry| entry.expect("repo root entry").file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| name.starts_with(prefix))
+        .collect()
+}
+
 fn assert_repack_observables_match(left: &std::path::Path, right: &std::path::Path) {
     assert_eq!(
         git_args(left, &["status", "--porcelain=v2", "--branch"]),
@@ -1612,6 +1624,11 @@ fn repack_cruft_variants_match_stock_git() {
             false,
         ),
         (
+            ["repack", "--cruft", "--cruft", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
             ["repack", "--cruft", "--max-cruft-size=1", "-d", "-q"].as_slice(),
             2usize,
             false,
@@ -1625,6 +1642,45 @@ fn repack_cruft_variants_match_stock_git() {
             ["repack", "--cruft", "--cruft-expiration=now", "-d", "-q"].as_slice(),
             1usize,
             true,
+        ),
+        (
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=now",
+                "--cruft-expiration=never",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=never",
+                "--cruft-expiration=now",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            1usize,
+            true,
+        ),
+        (
+            [
+                "repack",
+                "--cruft",
+                "--max-cruft-size=2m",
+                "--max-cruft-size=1",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            2usize,
+            false,
         ),
     ] {
         let (git_repo, git_dangling) = repack_cruft_fixture_repo();
@@ -1663,40 +1719,91 @@ fn repack_cruft_variants_match_stock_git() {
 
 #[test]
 fn repack_cruft_expire_to_now_matches_stock_git() {
-    let (git_repo, git_dangling) = repack_cruft_fixture_repo();
-    let (zmin_repo, zmin_dangling) = repack_cruft_fixture_repo();
-    assert_eq!(zmin_dangling, git_dangling);
+    for (args, expected_pack_count, expected_loose_dangling, expected_prefix) in [
+        (
+            [
+                "repack",
+                "--cruft",
+                "--expire-to=out",
+                "--cruft-expiration=now",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            1usize,
+            true,
+            Some("out-"),
+        ),
+        (
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=now",
+                "--expire-to=out",
+                "--expire-to=other",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            1usize,
+            true,
+            Some("other-"),
+        ),
+        (
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=never",
+                "--expire-to=out",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            2usize,
+            false,
+            None,
+        ),
+    ] {
+        let (git_repo, git_dangling) = repack_cruft_fixture_repo();
+        let (zmin_repo, zmin_dangling) = repack_cruft_fixture_repo();
+        assert_eq!(zmin_dangling, git_dangling);
 
-    let args = [
-        "repack",
-        "--cruft",
-        "--expire-to=out",
-        "--cruft-expiration=now",
-        "-d",
-        "-q",
-    ];
-    assert_eq!(
-        command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
-        command_any_output("git", git_repo.path(), &args, "git")
-    );
-    assert_eq!(pack_file_count(zmin_repo.path()), 1);
-    assert_eq!(
-        loose_object_exists(zmin_repo.path(), &zmin_dangling),
-        loose_object_exists(git_repo.path(), &git_dangling)
-    );
-    let git_out = git_repo.path().join("out");
-    let zmin_out = zmin_repo.path().join("out");
-    assert_eq!(zmin_out.exists(), git_out.exists());
-    if zmin_out.exists() {
-        let zmin_entries = fs::read_dir(&zmin_out)
-            .expect("read zmin expire-to dir")
-            .count();
-        let git_entries = fs::read_dir(&git_out)
-            .expect("read git expire-to dir")
-            .count();
-        assert_eq!(zmin_entries, git_entries);
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(pack_file_count(zmin_repo.path()), expected_pack_count, "args: {args:?}");
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_dangling),
+            expected_loose_dangling,
+            "args: {args:?}"
+        );
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_dangling),
+            loose_object_exists(git_repo.path(), &git_dangling),
+            "args: {args:?}"
+        );
+        match expected_prefix {
+            Some(prefix) => {
+                let git_artifacts = root_artifact_names_with_prefix(git_repo.path(), prefix);
+                let zmin_artifacts = root_artifact_names_with_prefix(zmin_repo.path(), prefix);
+                assert_eq!(zmin_artifacts, git_artifacts, "args: {args:?}");
+                assert_eq!(zmin_artifacts.len(), 4, "args: {args:?}");
+            }
+            None => {
+                assert!(
+                    root_artifact_names_with_prefix(git_repo.path(), "out-").is_empty(),
+                    "args: {args:?}"
+                );
+                assert!(
+                    root_artifact_names_with_prefix(zmin_repo.path(), "out-").is_empty(),
+                    "args: {args:?}"
+                );
+            }
+        }
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
     }
-    assert_repack_observables_match(git_repo.path(), zmin_repo.path());
 }
 
 #[test]
