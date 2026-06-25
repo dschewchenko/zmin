@@ -325,7 +325,11 @@ reviewed complete too (`14/14` represented documented option pairs) after
 closing output-format inference, repeated prefix and add-file ordering, and
 `--worktree-attributes` parity; the full command is still not promoted because
 backend extra compression-level options remain outside the reviewed-complete
-command matrix. The next helper-free family should now move to another
+command matrix. `branch`, `status`, `rm`, `fsck`, `maintenance`, and
+`merge-tree` are now also eligible zero-row reviewed-complete commands because
+they already have `100%` represented documented options, `0` exact-open rows,
+`0` implemented-but-unverified rows, and `100%` classified written-row
+coverage. The next helper-free family should now move to another
 census-backed supported subgroup unless work intentionally opens unsupported
 surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`.
 The exact helper-backed
@@ -336,30 +340,31 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `archive` documented-option family
-closure. This batch replaces the flat archive parser with ordered handling for
-documented `--prefix`, `--add-file`, and `--add-virtual-file` forms, adds
-filename-based output-format inference, and matches stock Git for
-`--worktree-attributes` export-ignore behavior. With that evidence in place,
-`archive` is now reviewed complete across all `14/14` documented options with
-`24/24` classified rows and `0` open rows, but the full command is not yet
-promoted into the reviewed-complete command list because backend extra
-compression-level options under `<extra>` still need a deliberate command-level
-matrix decision.
+The latest completed slice is a zero-row reviewed-complete closure cluster for
+`branch`, `status`, `rm`, `fsck`, `maintenance`, and `merge-tree`. Their
+behavior matrices already had `100%` represented documented options, `0`
+exact-open rows, `0` implemented-but-unverified rows, and `100%` classified
+written-row coverage, so this batch promotes them into the durable reviewed
+command and doc-option census source lists without changing Rust behavior.
 
 Focused gates were
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(check-ignore|column|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(branch|status|rm|fsck|maintenance|merge-tree|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5145` matrix rows, `4444` verified rows, `672`
-invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `61/151` complete command matrices, `260/3175`
-complete documented option pairs, and `2941` remaining checklist rows.
+Current census counts are expected to move to `5155` matrix rows, `4454`
+verified rows, `672` invalid-input rows, `26`
+exact-open local-oracle-unavailable rows, `26` open-or-partial rows,
+`68/151` complete command matrices, `396/3175` complete documented option
+pairs, and `2805` remaining checklist rows.
 The promoted commands now read:
-- `check-ignore` `9/9` represented documented options reviewed complete, `23/23` classified rows, `13/23` matching stock Git rows, `0` open
-- `column` `7/7` represented documented options reviewed complete, `54/54` classified rows, `46/54` matching stock Git rows, `0` open
+- `branch` `48/48` represented documented options reviewed complete, `94/94` classified rows, `76/94` matching stock Git rows, `0` open
+- `status` `21/21` represented documented options reviewed complete, `183/183` classified rows, `170/183` matching stock Git rows, `0` open
+- `rm` `12/12` represented documented options reviewed complete, `50/50` classified rows, `41/50` matching stock Git rows, `0` open
+- `fsck` `15/15` represented documented options reviewed complete, `56/56` classified rows, `21/56` matching stock Git rows, `0` open
+- `maintenance` `5/5` represented documented options reviewed complete, `49/49` classified rows, `32/49` matching stock Git rows, `0` open
+- `merge-tree` `8/8` represented documented options reviewed complete, `37/37` classified rows, `22/37` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 
