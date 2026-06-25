@@ -1411,16 +1411,28 @@ fn read_tree_documented_option_forms_match_stock_git() {
     for args in [
         ["read-tree", "--dry-run", &tree].as_slice(),
         ["read-tree", "-n", &tree].as_slice(),
+        ["read-tree", "--dry-run", "--quiet", &tree].as_slice(),
+        ["read-tree", "-n", "--quiet", &tree].as_slice(),
         ["read-tree", "-v", &tree].as_slice(),
+        ["read-tree", "-v", "-v", &tree].as_slice(),
         ["read-tree", "--trivial", &tree].as_slice(),
+        ["read-tree", "--trivial", "--quiet", &tree].as_slice(),
         ["read-tree", "--aggressive", &tree].as_slice(),
+        ["read-tree", "--aggressive", "--quiet", &tree].as_slice(),
         ["read-tree", "--quiet", &tree].as_slice(),
         ["read-tree", "-q", &tree].as_slice(),
+        ["read-tree", "-q", "-q", &tree].as_slice(),
         ["read-tree", "--reset", &tree].as_slice(),
+        ["read-tree", "--reset", "--index-output=alt.index", &tree].as_slice(),
         ["read-tree", "--no-sparse-checkout", &tree].as_slice(),
+        ["read-tree", "--no-sparse-checkout", "--quiet", &tree].as_slice(),
         ["read-tree", "--recurse-submodules", &tree].as_slice(),
+        ["read-tree", "--recurse-submodules", "--no-recurse-submodules", &tree].as_slice(),
         ["read-tree", "--no-recurse-submodules", &tree].as_slice(),
+        ["read-tree", "--no-recurse-submodules", "--recurse-submodules", &tree].as_slice(),
         ["read-tree", "-i", "--prefix=import/", &tree].as_slice(),
+        ["read-tree", "-i", "--reset", &tree].as_slice(),
+        ["read-tree", "-i", "--prefix=import/", "--index-output=alt.index", &tree].as_slice(),
     ] {
         let git_repo = clone_repo_fixture(tree_repo.path());
         let zmin_repo = clone_repo_fixture(tree_repo.path());
@@ -1441,6 +1453,27 @@ fn read_tree_documented_option_forms_match_stock_git() {
             git(git_repo.path(), ["write-tree"]),
             "args: {args:?}"
         );
+        if args.contains(&"--index-output=alt.index") {
+            assert_eq!(
+                command_output_with_env(
+                    "git",
+                    zmin_repo.path(),
+                    &["write-tree"],
+                    &[("GIT_INDEX_FILE", "alt.index")],
+                    "git write-tree zmin alt index",
+                )
+                .1,
+                command_output_with_env(
+                    "git",
+                    git_repo.path(),
+                    &["write-tree"],
+                    &[("GIT_INDEX_FILE", "alt.index")],
+                    "git write-tree git alt index",
+                )
+                .1,
+                "args: {args:?}"
+            );
+        }
     }
 
     for args in [

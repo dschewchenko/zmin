@@ -156,6 +156,17 @@ complete documented option pairs, `0` complete command matrices, `0`
 invalid-input rows and `-7` remaining checklist rows. Rust behavior changes
 are expected. Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `read-tree` expansion-evidence
+closure inside the existing schema surface. The selected rows add repeated
+quiet and verbose forms, quiet compositions for dry-run/trivial/aggressive and
+no-sparse-checkout, reset plus alternate index output, index-only plus reset
+and prefix-plus-index-output, and both recurse-submodule override orders on
+repositories without submodules. Expected delta is `+12` matrix rows, `+12`
+verified rows, `+0` invalid-input rows, `+0` represented doc-option pairs,
+`+0` complete documented option pairs, `+0` complete command matrices, and
+`+0` remaining checklist rows. Rust behavior changes are not expected. Actual
+delta matched.
+
 As of 2026-06-25 the `git_foreign_scm_compat.rs` `p4 submit` follow-up is a
 zero-row closure slice. The selected row already existed in
 `docs/cli/matrices/p4_v2_47.tsv`; the work closes it by matching stock Git's

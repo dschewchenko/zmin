@@ -1187,28 +1187,26 @@ Current durable census after the `checkout-index` documented-surface closure:
 - complete command matrices: `76 / 151`
 - complete documented command-option pairs: `425 / 3175`
 - matrix rows: `5223`
-- verified rows: `4515`
+- verified rows: `4527`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `repack` now has another helper-free schema-tail closure promoted into the
-  reviewed-complete doc-option list.
-- The closed subgroup added `--window-memory`, `--max-pack-size`,
-  `--delta-islands` / `-i`, `--pack-kept-objects`, and
-  `--keep-unreachable` / `-k`, plus exact stock-Git evidence for equals and
-  separate size forms, minimum-size warning and invalid-value rejection,
-  accepted pack-objects hint passthrough behavior, and dangling loose-object
-  packing on the `keep-unreachable` lane.
+- `read-tree` now has another helper-free expansion batch closed inside the
+  existing schema surface.
+- The closed subgroup added exact stock-Git evidence for repeated `-q` and
+  `-v`, quiet compositions for `--dry-run`, `-n`, `--trivial`,
+  `--aggressive`, and `--no-sparse-checkout`, `--reset` plus
+  `--index-output`, `-i --reset`, `-i --prefix=import/ --index-output`,
+  and both recurse-submodule override orders on repositories without
+  submodules.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_maintenance_compat repack_documented_option_aliases_and_value_forms_match_stock_git -- --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat repack_keep_unreachable_variants_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_object_plumbing_compat read_tree_documented_option_forms_match_stock_git -- --nocapture`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
 
 Latest in-progress family follow-up:
 
@@ -1216,8 +1214,8 @@ Latest in-progress family follow-up:
   because its documented options are all represented but the command is still
   blocked on expansion-required rows inside already-modeled surfaces.
 - `repack` remains the largest unresolved helper-free documented-option
-  cluster, but its schema tail is now materially smaller after promoting the
-  accepted size-hint and keep-unreachable subgroup.
+  cluster by schema-missing count, while `read-tree` still has the best
+  immediate no-parser expansion lane for dense row additions.
 
 Latest zero-code closure:
 
