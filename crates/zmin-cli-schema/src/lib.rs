@@ -1688,8 +1688,18 @@ pub enum Command {
         no_reuse_delta: u8,
         #[arg(short = 'F', action = ArgAction::Count)]
         no_reuse_object: u8,
+        #[arg(long = "delta-islands", action = ArgAction::SetTrue)]
+        delta_islands: bool,
+        #[arg(short = 'i', action = ArgAction::Count)]
+        delta_islands_short: u8,
+        #[arg(short = 'k', action = ArgAction::Count)]
+        keep_unreachable_short: u8,
+        #[arg(long = "keep-unreachable", action = ArgAction::SetTrue)]
+        keep_unreachable: bool,
         #[arg(short = 'l', long = "local", action = ArgAction::Count)]
         local: u8,
+        #[arg(long = "pack-kept-objects", action = ArgAction::SetTrue)]
+        pack_kept_objects: bool,
         #[arg(short = 'b', long = "write-bitmap-index", action = ArgAction::Count)]
         write_bitmap_index: u8,
         #[arg(long = "no-write-bitmap-index", action = ArgAction::SetTrue)]
@@ -1700,10 +1710,14 @@ pub enum Command {
         no_write_midx: bool,
         #[arg(long = "window")]
         window: Option<usize>,
+        #[arg(long = "window-memory")]
+        window_memory: Option<String>,
         #[arg(long = "depth")]
         depth: Option<usize>,
         #[arg(long = "threads")]
         threads: Option<usize>,
+        #[arg(long = "max-pack-size")]
+        max_pack_size: Option<String>,
         #[arg(long = "keep-pack")]
         keep_pack: Vec<String>,
     },

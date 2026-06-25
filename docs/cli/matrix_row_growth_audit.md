@@ -144,6 +144,18 @@ rows, `+12` verified rows, `+7` complete documented option pairs, `+1`
 complete command matrix, `0` invalid-input rows and `-7` remaining checklist
 rows. Rust behavior changes are expected. Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `repack` accepted-schema-tail
+closure. The selected rows add the documented parser surface
+`--window-memory`, `--max-pack-size`, `--delta-islands` / `-i`,
+`--pack-kept-objects`, and `--keep-unreachable` / `-k`, while the product
+changes add stock-compatible size parsing for the accepted size-hint options,
+the 1 MiB minimum-size warning and invalid-value rejection for max-pack-size,
+and helper-free `keep-unreachable` packing for dangling loose objects on the
+`-adq` lane. Expected delta is `+11` matrix rows, `+11` verified rows, `+7`
+complete documented option pairs, `0` complete command matrices, `0`
+invalid-input rows and `-7` remaining checklist rows. Rust behavior changes
+are expected. Actual delta matched.
+
 As of 2026-06-25 the `git_foreign_scm_compat.rs` `p4 submit` follow-up is a
 zero-row closure slice. The selected row already existed in
 `docs/cli/matrices/p4_v2_47.tsv`; the work closes it by matching stock Git's

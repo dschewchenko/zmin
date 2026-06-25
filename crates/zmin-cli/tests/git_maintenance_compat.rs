@@ -1395,15 +1395,22 @@ fn repack_documented_option_aliases_and_value_forms_match_stock_git() {
         ["repack", "-q", "-q"].as_slice(),
         ["repack", "--threads=1"].as_slice(),
         ["repack", "--threads", "1"].as_slice(),
+        ["repack", "--window-memory=1m", "-q"].as_slice(),
+        ["repack", "--window-memory", "1m", "-q"].as_slice(),
         ["repack", "--window=10", "--depth=10", "-q"].as_slice(),
         ["repack", "--depth=10", "--window=10", "-q"].as_slice(),
         ["repack", "--window", "10", "--depth", "10", "-q"].as_slice(),
+        ["repack", "--max-pack-size=2m", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--max-pack-size=1", "-a", "-d", "-q"].as_slice(),
         ["repack", "--write-midx", "-q"].as_slice(),
         ["repack", "--write-midx", "-m", "-q"].as_slice(),
         ["repack", "-m", "-m", "-q"].as_slice(),
         ["repack", "--write-bitmap-index", "-a", "-d", "-q"].as_slice(),
         ["repack", "--write-bitmap-index", "-b", "-a", "-d", "-q"].as_slice(),
         ["repack", "-b", "-b", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--pack-kept-objects", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--delta-islands", "-a", "-d", "-q"].as_slice(),
+        ["repack", "-i", "-a", "-d", "-q"].as_slice(),
     ] {
         let git_repo = repack_documented_option_fixture_repo();
         let zmin_repo = repack_documented_option_fixture_repo();
@@ -1413,6 +1420,22 @@ fn repack_documented_option_aliases_and_value_forms_match_stock_git() {
             "args: {args:?}"
         );
         assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
+fn repack_invalid_documented_size_values_match_stock_git() {
+    for args in [
+        ["repack", "--window-memory=bogus", "-q"].as_slice(),
+        ["repack", "--max-pack-size=bogus", "-a", "-d", "-q"].as_slice(),
+    ] {
+        let git_repo = repack_documented_option_fixture_repo();
+        let zmin_repo = repack_documented_option_fixture_repo();
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
     }
 }
 
@@ -1514,6 +1537,55 @@ fn repack_supported_short_option_repetitions_match_stock_git() {
         command_any_output("git", &git_clone, &args, "git")
     );
     assert_repack_observables_match(&git_clone, &zmin_clone);
+}
+
+#[test]
+fn repack_keep_unreachable_variants_match_stock_git() {
+    for args in [
+        ["repack", "--keep-unreachable", "-a", "-d", "-q"].as_slice(),
+        ["repack", "-k", "-a", "-d", "-q"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let mut dangling = Vec::new();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            configure_identity(repo);
+            write_file(repo, "a.txt", "one\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "one"]);
+            dangling.push(git_with_stdin(
+                repo,
+                ["hash-object", "-w", "--stdin"],
+                "dangling\n",
+            ));
+            git(repo, ["repack", "-adq"]);
+            write_file(repo, "b.txt", "two\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "two"]);
+        }
+        let git_dangling = &dangling[0];
+        let zmin_dangling = &dangling[1];
+        assert_eq!(zmin_dangling, git_dangling);
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), zmin_dangling),
+            loose_object_exists(git_repo.path(), git_dangling)
+        );
+        assert_eq!(
+            packed_object_ids(zmin_repo.path()).contains(zmin_dangling),
+            packed_object_ids(git_repo.path()).contains(git_dangling)
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-t", zmin_dangling]),
+            git(git_repo.path(), ["cat-file", "-t", git_dangling])
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
 }
 
 #[test]

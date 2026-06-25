@@ -2,6 +2,7 @@ use super::*;
 
 const REPACK_CANDIDATE_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const MIN_CRUFT_PACK_SIZE_BYTES: u64 = 1_048_576;
+const MIN_PACK_SIZE_LIMIT_BYTES: u64 = 1_048_576;
 
 #[derive(Debug, Clone)]
 struct RepackOptions {
@@ -12,14 +13,19 @@ struct RepackOptions {
     no_update_server_info: bool,
     no_reuse_delta: bool,
     no_reuse_object: bool,
+    delta_islands: bool,
+    keep_unreachable: bool,
     local: bool,
+    pack_kept_objects: bool,
     write_bitmap_index: bool,
     no_write_bitmap_index: bool,
     write_midx: bool,
     no_write_midx: bool,
     window: Option<usize>,
+    window_memory: Option<String>,
     depth: Option<usize>,
     threads: Option<usize>,
+    max_pack_size: Option<String>,
     keep_pack: Vec<String>,
 }
 
@@ -52,14 +58,19 @@ pub(crate) fn repack_command(
     no_update_server_info: bool,
     no_reuse_delta: bool,
     no_reuse_object: bool,
+    delta_islands: bool,
+    keep_unreachable: bool,
     local: bool,
+    pack_kept_objects: bool,
     write_bitmap_index: bool,
     no_write_bitmap_index: bool,
     write_midx: bool,
     no_write_midx: bool,
     window: Option<usize>,
+    window_memory: Option<String>,
     depth: Option<usize>,
     threads: Option<usize>,
+    max_pack_size: Option<String>,
     keep_pack: Vec<String>,
 ) -> Result<()> {
     repack(RepackOptions {
@@ -70,14 +81,19 @@ pub(crate) fn repack_command(
         no_update_server_info,
         no_reuse_delta,
         no_reuse_object,
+        delta_islands,
+        keep_unreachable,
         local,
+        pack_kept_objects,
         write_bitmap_index,
         no_write_bitmap_index,
         write_midx,
         no_write_midx,
         window,
+        window_memory,
         depth,
         threads,
+        max_pack_size,
         keep_pack,
     })
 }
@@ -1575,10 +1591,24 @@ fn prune_packed(dry_run: bool, _quiet: bool) -> Result<()> {
 fn repack(options: RepackOptions) -> Result<()> {
     let write_bitmap_index = options.write_bitmap_index && !options.no_write_bitmap_index;
     let write_midx = options.write_midx && !options.no_write_midx;
+    let max_pack_size = parse_repack_size_limit(
+        options.max_pack_size.as_deref(),
+        "max-pack-size",
+    )?;
+    if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
+        eprintln!("warning: minimum pack size limit is 1 MiB");
+    }
+    let _window_memory = parse_repack_size_limit(
+        options.window_memory.as_deref(),
+        "window-memory",
+    )?;
     let _ = (
         options.no_reuse_delta,
         options.no_reuse_object,
         options.threads,
+        options.delta_islands,
+        options.pack_kept_objects,
+        max_pack_size,
         write_bitmap_index,
     );
     let repo = find_repo()?;
@@ -1589,7 +1619,10 @@ fn repack(options: RepackOptions) -> Result<()> {
     let keep_pack_names = normalize_keep_pack_names(&options.keep_pack);
     let keep_pack_object_ids = kept_pack_object_ids(&pack_dir, &old_pack_names, &keep_pack_names)?;
     let all_reachable = options.all || options.all_and_loosen_unreachable;
-    let ids: Vec<ObjectId> = if all_reachable {
+    let ids: Vec<ObjectId> = if options.keep_unreachable && all_reachable && options.delete_redundant
+    {
+        collect_all_repack_candidate_ids(&store, &keep_pack_object_ids)?
+    } else if all_reachable {
         let reachable = collect_reachable_objects(&repo, &store, &[])?;
         if options.all_and_loosen_unreachable {
             loosen_unreachable_packed_objects(&store, &reachable)?;
@@ -1682,6 +1715,38 @@ fn repack(options: RepackOptions) -> Result<()> {
     Ok(())
 }
 
+fn parse_repack_size_limit(raw: Option<&str>, option: &str) -> Result<Option<u64>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let Some(size) = parse_size_with_optional_suffix(raw) else {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: format!(
+                "error: option `{option}' expects a non-negative integer value with an optional k/m/g suffix\n"
+            ),
+        });
+    };
+    Ok(Some(size))
+}
+
+fn parse_size_with_optional_suffix(raw: &str) -> Option<u64> {
+    let digits_len = raw.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    if digits_len == 0 {
+        return None;
+    }
+    let base = raw[..digits_len].parse::<u64>().ok()?;
+    let suffix = &raw[digits_len..];
+    let multiplier = match suffix {
+        "" => 1,
+        "k" | "K" => 1024,
+        "m" | "M" => 1024 * 1024,
+        "g" | "G" => 1024 * 1024 * 1024,
+        _ => return None,
+    };
+    base.checked_mul(multiplier)
+}
+
 fn install_temp_repack_file(
     path: &std::path::Path,
     temp_pack_path: &std::path::Path,
@@ -1732,6 +1797,22 @@ fn kept_pack_object_ids(
             &mut insert_id,
         )?;
     }
+    Ok(ids)
+}
+
+fn collect_all_repack_candidate_ids(
+    store: &LooseObjectStore,
+    keep_pack_object_ids: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let mut ids = Vec::new();
+    store.for_each_object_id(&mut |id| {
+        if !keep_pack_object_ids.contains(id) {
+            ids.push(id.clone());
+        }
+        Ok(())
+    })?;
+    ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    ids.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
     Ok(ids)
 }
 
@@ -1958,14 +2039,19 @@ fn gc(options: GcOptions) -> Result<()> {
         no_update_server_info: false,
         no_reuse_delta: false,
         no_reuse_object: false,
+        delta_islands: false,
+        keep_unreachable: false,
         local: false,
+        pack_kept_objects: false,
         write_bitmap_index: false,
         no_write_bitmap_index: false,
         write_midx: false,
         no_write_midx: false,
         window: options.aggressive.then_some(250),
+        window_memory: None,
         depth: options.aggressive.then_some(250),
         threads: None,
+        max_pack_size: None,
         keep_pack: Vec::new(),
     })?;
     if !options.no_prune {

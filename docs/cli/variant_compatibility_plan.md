@@ -1185,38 +1185,39 @@ Largest raw clusters:
 Current durable census after the `checkout-index` documented-surface closure:
 
 - complete command matrices: `76 / 151`
-- complete documented command-option pairs: `418 / 3175`
-- matrix rows: `5212`
-- verified rows: `4504`
+- complete documented command-option pairs: `425 / 3175`
+- matrix rows: `5223`
+- verified rows: `4515`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `gc` is now reviewed complete at both the command and documented
-  option-pair levels.
-- The closed family added the remaining documented parser surface
-  `--[no-]detach`, `--[no-]cruft`, `--max-cruft-size`, `--force`, and
-  `--keep-largest-pack`, plus exact stock-Git evidence for auto no-op
-  detach/no-detach rows, quiet force/keep-largest-pack/cruft/no-cruft rows,
-  `--max-cruft-size` equals and separate forms, last-one-wins ordering,
-  the 1 MiB minimum-size warning and its no-cruft suppression path, and
-  invalid max-cruft-size rejection.
+- `repack` now has another helper-free schema-tail closure promoted into the
+  reviewed-complete doc-option list.
+- The closed subgroup added `--window-memory`, `--max-pack-size`,
+  `--delta-islands` / `-i`, `--pack-kept-objects`, and
+  `--keep-unreachable` / `-k`, plus exact stock-Git evidence for equals and
+  separate size forms, minimum-size warning and invalid-value rejection,
+  accepted pack-objects hint passthrough behavior, and dangling loose-object
+  packing on the `keep-unreachable` lane.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_maintenance_compat gc_supported_documented_option_combinations_match_stock_git -- --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat gc_invalid_max_cruft_size_matches_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat repack_documented_option_aliases_and_value_forms_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat repack_keep_unreachable_variants_match_stock_git -- --nocapture`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(gc|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
 
 Latest in-progress family follow-up:
 
 - `read-tree` remains the largest recently expanded helper-free plumbing lane
   because its documented options are all represented but the command is still
   blocked on expansion-required rows inside already-modeled surfaces.
-- The next efficient schema-tail closure now shifts to `repack`, which remains
-  the largest unresolved helper-free documented-option cluster.
+- `repack` remains the largest unresolved helper-free documented-option
+  cluster, but its schema tail is now materially smaller after promoting the
+  accepted size-hint and keep-unreachable subgroup.
 
 Latest zero-code closure:
 
@@ -1227,5 +1228,5 @@ Latest zero-code closure:
 
 Next helper-free family candidates by schema-missing size now remain:
 
-- `repack`: `16`
+- `repack`: `9`
 - `read-tree` expansion-required rows: `4`
