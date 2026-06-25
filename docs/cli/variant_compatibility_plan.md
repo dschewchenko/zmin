@@ -1179,8 +1179,41 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code `ls-files`
-reviewed-complete doc-option tail promotion:
+Current durable census after the helper-free `ls-files`
+`--no-empty-directory` closure plus reviewed-complete command promotion:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `509 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `ls-files` now covers the final documented `--no-empty-directory` family on
+  the helper-free local lane with exact stock-Git behavior, including
+  last-option-wins ordering against `--empty-directory`.
+- The slice adds one exact closed row, completes the final `ls-files`
+  documented option pair, and promotes `ls-files` into the reviewed-complete
+  command census list.
+- Focused verification was
+  `cargo test -p zmin-cli --test git_ls_files_compat ls_files_no_empty_directory_matches_stock_git -- --nocapture`,
+  `cargo check -p zmin-cli --bin zmin --profile compat`,
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(ls-files|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `ls-files` is now reviewed complete at `39/39` documented option pairs with
+  `39/39` represented documented option pairs, `159/159` classified rows, and
+  `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed family or zero-code command-promotion cluster.
+
+Previous durable census before the final `ls-files`
+`--no-empty-directory` closure:
 
 - complete command matrices: `81 / 151`
 - complete documented command-option pairs: `508 / 3175`
@@ -1200,7 +1233,7 @@ Latest completed batch:
   `tools/git-cli-readiness-status.sh`,
   and `tools/git-compat-command-summary.sh --tsv | rg '^(ls-files|summary)\t'`.
 
-Latest in-progress family follow-up:
+Previous in-progress family follow-up:
 
 - `ls-files` now has `38/39` documented option pairs reviewed complete with
   `38/39` represented documented option pairs and `0` open rows.

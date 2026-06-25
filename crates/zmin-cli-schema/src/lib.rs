@@ -1312,8 +1312,18 @@ pub enum Command {
         killed: bool,
         #[arg(long = "directory", action = ArgAction::SetTrue)]
         directory: bool,
-        #[arg(long = "empty-directory", action = ArgAction::SetTrue)]
+        #[arg(
+            long = "empty-directory",
+            action = ArgAction::SetTrue,
+            overrides_with = "no_empty_directory"
+        )]
         empty_directory: bool,
+        #[arg(
+            long = "no-empty-directory",
+            action = ArgAction::SetTrue,
+            overrides_with = "empty_directory"
+        )]
+        no_empty_directory: bool,
         #[arg(short = 'i', long = "ignored", action = ArgAction::SetTrue)]
         ignored: bool,
         #[arg(short = 'x', long = "exclude")]
@@ -3864,6 +3874,7 @@ pub struct LsFilesOptions {
     pub killed: bool,
     pub directory: bool,
     pub empty_directory: bool,
+    pub no_empty_directory: bool,
     pub ignored: bool,
     pub excludes: Vec<String>,
     pub exclude_from: Vec<PathBuf>,

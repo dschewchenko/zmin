@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `ls-files`
+`--no-empty-directory` closure plus reviewed-complete command promotion. The
+selected row adds the final represented documented `ls-files` option family to
+the matrix, closes the stock-compatible empty-directory negation and
+last-option-wins ordering against `--empty-directory`, and then promotes both
+`--no-empty-directory` and the full `ls-files` command into the durable
+reviewed-complete census lists. Expected delta is `+1` matrix row, `+1`
+verified row, `+1` complete documented option pair, `+1` complete command
+matrix, `+0` invalid-input rows, and `-1` remaining checklist row. Rust
+behavior changes are expected because `ls-files` must add the missing
+`--no-empty-directory` schema tail and stop reporting empty untracked
+directories when that negation is active. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option tail promotion for the remaining represented helper-free `ls-files`
 surface. The selected rows do not add new behavior evidence; they promote

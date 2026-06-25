@@ -593,7 +593,7 @@ pub(crate) fn status(
     } else {
         let _trace = phase_trace("status.untracked");
         let ignore = status_excludes(&repo)?;
-        untracked_files_with_mode(&repo.root, &tracked_paths, &ignore, untracked_mode)?
+        untracked_files_with_mode(&repo.root, &tracked_paths, &ignore, untracked_mode, true)?
     };
     let ignored = if ignored_mode == IgnoredMode::No {
         Vec::new()
@@ -1097,6 +1097,7 @@ fn status_submodule_state(
         &tracked_paths,
         &ignore,
         UntrackedMode::Normal,
+        true,
     )?
     .is_empty();
 
@@ -1682,7 +1683,7 @@ pub(crate) fn untracked_files(
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
 ) -> Result<Vec<Vec<u8>>> {
-    untracked_files_with_mode(root, tracked_paths, ignore, UntrackedMode::Normal)
+    untracked_files_with_mode(root, tracked_paths, ignore, UntrackedMode::Normal, true)
 }
 
 pub(crate) fn ignored_untracked_files(
@@ -1860,9 +1861,18 @@ pub(crate) fn untracked_files_with_mode(
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     mode: UntrackedMode,
+    include_empty_directories: bool,
 ) -> Result<Vec<Vec<u8>>> {
     let mut files = Vec::new();
-    collect_untracked_files(root, root, tracked_paths, ignore, mode, &mut files)?;
+    collect_untracked_files(
+        root,
+        root,
+        tracked_paths,
+        ignore,
+        mode,
+        include_empty_directories,
+        &mut files,
+    )?;
     files.sort();
     Ok(files)
 }
@@ -1873,6 +1883,7 @@ fn collect_untracked_files(
     tracked_paths: &TrackedPathSet<'_>,
     ignore: &GitIgnore,
     mode: UntrackedMode,
+    include_empty_directories: bool,
     files: &mut Vec<Vec<u8>>,
 ) -> Result<()> {
     for entry in fs::read_dir(dir)? {
@@ -1891,8 +1902,16 @@ fn collect_untracked_files(
                 continue;
             }
             if mode == UntrackedMode::All || tracked_paths_under(tracked_paths, &relative) {
-                collect_untracked_files(root, &path, tracked_paths, ignore, mode, files)?;
-            } else if mode == UntrackedMode::Directory
+                collect_untracked_files(
+                    root,
+                    &path,
+                    tracked_paths,
+                    ignore,
+                    mode,
+                    include_empty_directories,
+                    files,
+                )?;
+            } else if (mode == UntrackedMode::Directory && include_empty_directories)
                 || untracked_dir_contains_reportable_file(root, &path, tracked_paths, ignore)?
             {
                 let mut dir = relative;
@@ -1947,9 +1966,9 @@ pub(crate) fn tracked_paths_under(tracked_paths: &TrackedPathSet<'_>, relative_d
 }
 
 pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
-    let _empty_directory = options.empty_directory;
     let _sparse = options.sparse;
     let recurse_submodules = options.recurse_submodules && !options.no_recurse_submodules;
+    let include_empty_directories = options.directory && !options.no_empty_directory;
     let has_exclude_patterns = options.exclude_standard
         || !options.excludes.is_empty()
         || !options.exclude_from.is_empty()
@@ -2076,6 +2095,7 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                 &tracked_paths,
                 ignore.as_ref().expect("ignore graph for directory others"),
                 UntrackedMode::Directory,
+                include_empty_directories,
             )?)
         } else {
             Some(untracked_files_with_mode(
@@ -2083,6 +2103,7 @@ pub(crate) fn ls_files(options: LsFilesOptions) -> Result<()> {
                 &tracked_paths,
                 ignore.as_ref().expect("ignore graph for plain others"),
                 UntrackedMode::All,
+                true,
             )?)
         }
     } else {
@@ -9767,6 +9788,7 @@ fn stash_untracked_paths(
         &tracked_paths,
         &ignore,
         worktree_commands::UntrackedMode::All,
+        true,
     )?;
     if include_ignored {
         paths.extend(worktree_commands::ignored_untracked_files(

@@ -1517,6 +1517,7 @@ fn commit_untracked_entries(repo: &GitRepo, index: &GitIndex) -> Result<Vec<Vec<
         &tracked_paths,
         &ignore,
         worktree_commands::UntrackedMode::Normal,
+        true,
     )
 }
 

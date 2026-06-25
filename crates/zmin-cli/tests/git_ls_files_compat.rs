@@ -359,6 +359,45 @@ fn ls_files_modes_match_stock_git() {
 }
 
 #[test]
+fn ls_files_no_empty_directory_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("tracked.txt"), b"tracked\n").expect("write tracked");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "tracked"]);
+
+    fs::create_dir_all(repo.path().join("empty")).expect("create empty dir");
+    fs::create_dir_all(repo.path().join("nonempty")).expect("create nonempty dir");
+    fs::write(repo.path().join("nonempty/file.txt"), b"payload\n").expect("write payload");
+
+    for args in [
+        ["ls-files", "--others", "--directory", "--no-empty-directory"].as_slice(),
+        [
+            "ls-files",
+            "--others",
+            "--directory",
+            "--empty-directory",
+            "--no-empty-directory",
+        ]
+        .as_slice(),
+        [
+            "ls-files",
+            "--others",
+            "--directory",
+            "--no-empty-directory",
+            "--empty-directory",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            command_output_any(zmin_bin(), repo.path(), args),
+            stock_git_output_any(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn ls_files_stage_preserves_stock_git_raw_regular_index_modes() {
     let git_repo = git_init();
     let zmin_repo = git_init();
