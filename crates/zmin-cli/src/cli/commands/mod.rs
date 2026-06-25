@@ -183,7 +183,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::Archimport { .. }
         | crate::runtime::Command::P4 { .. }
         | crate::runtime::Command::Svn { .. }
-        | crate::runtime::Command::Instaweb { .. }) => admin::dispatch(command),
+        | crate::runtime::Command::Instaweb { .. }) => admin::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Init { .. }
         | crate::runtime::Command::HashObject { .. }
         | crate::runtime::Command::CatFile { .. }

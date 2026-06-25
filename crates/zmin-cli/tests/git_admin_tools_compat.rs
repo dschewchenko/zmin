@@ -363,6 +363,61 @@ fn command_any_with_git_editor_env_and_stdin(
     )
 }
 
+fn normalize_bugreport_output(output: &(i32, String, String), output_dir: &Path) -> (i32, String, String) {
+    let placeholder = "__OUT__";
+    let output_dir = output_dir.display().to_string();
+    (
+        output.0,
+        normalize_bugreport_stdout(&output.1.replace(&output_dir, placeholder)),
+        normalize_bugreport_filename_tokens(&output.2.replace(&output_dir, placeholder)),
+    )
+}
+
+fn normalize_bugreport_stdout(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.starts_with("Repository root: ") {
+                "Repository root: __REPO__".to_owned()
+            } else if line.starts_with("Available space on '") {
+                "Available space on '__REPO__': __SPACE__ GiB (mount flags 0x0)".to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_bugreport_filename_tokens(text: &str) -> String {
+    text.split_whitespace()
+        .map(normalize_bugreport_token)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalize_bugreport_token(token: &str) -> String {
+    let trimmed = token.trim_matches(|ch| matches!(ch, '\'' | '"' | '.' | ',' | ';' | ':' | '(' | ')'));
+    let normalized = normalize_bugreport_filename(trimmed);
+    if normalized == trimmed {
+        token.to_owned()
+    } else {
+        token.replacen(trimmed, &normalized, 1)
+    }
+}
+
+fn normalize_bugreport_filename(name: &str) -> String {
+    if name.starts_with("git-bugreport-") && name.ends_with(".txt") {
+        return "git-bugreport-<dynamic>.txt".to_owned();
+    }
+    if name.starts_with("git-diagnostics-") && name.ends_with(".zip") {
+        return "git-diagnostics-<dynamic>.zip".to_owned();
+    }
+    if let Some((prefix, file_name)) = name.rsplit_once('/') {
+        return format!("{prefix}/{}", normalize_bugreport_filename(file_name));
+    }
+    name.to_owned()
+}
+
 #[test]
 fn for_each_repo_matches_stock_git_for_configured_repositories() {
     let home = TempDir::new().expect("home dir");
@@ -586,6 +641,80 @@ fn bugreport_suffix_modes_match_stock_git_files() {
             zmin_output.path().join(&expected_file).is_file(),
             "zmin did not create expected file for {label}",
         );
+    }
+}
+
+#[test]
+fn bugreport_no_diagnose_modes_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = TempDir::new().expect("git bugreport output");
+    let zmin_output = TempDir::new().expect("zmin bugreport output");
+
+    for args in [
+        vec!["bugreport", "-o", "__OUT__", "--no-diagnose"],
+        vec!["bugreport", "-o", "__OUT__", "--diagnose=stats", "--no-diagnose"],
+        vec!["bugreport", "-o", "__OUT__", "--no-diagnose", "--diagnose=stats"],
+    ] {
+        let git_args = args
+            .iter()
+            .map(|arg| {
+                if *arg == "__OUT__" {
+                    git_output.path().to_str().expect("git output path")
+                } else {
+                    arg
+                }
+            })
+            .collect::<Vec<_>>();
+        let zmin_args = args
+            .iter()
+            .map(|arg| {
+                if *arg == "__OUT__" {
+                    zmin_output.path().to_str().expect("zmin output path")
+                } else {
+                    arg
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let git_result = command_any_with_git_editor("git", git_repo.path(), &git_args);
+        let zmin_result = command_any_with_git_editor(zmin_bin(), zmin_repo.path(), &zmin_args);
+        assert_eq!(
+            normalize_bugreport_output(&zmin_result, zmin_output.path()),
+            normalize_bugreport_output(&git_result, git_output.path()),
+            "args: {args:?}"
+        );
+
+        let git_files = fs::read_dir(git_output.path())
+            .expect("read git output")
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .map(|entry| normalize_bugreport_filename(&entry.file_name().to_string_lossy()))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let zmin_files = fs::read_dir(zmin_output.path())
+            .expect("read zmin output")
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .map(|entry| normalize_bugreport_filename(&entry.file_name().to_string_lossy()))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(zmin_files, git_files, "args: {args:?}");
+
+        for entry in fs::read_dir(git_output.path()).expect("clear git output") {
+            let path = entry.expect("git output entry").path();
+            if path.is_file() {
+                fs::remove_file(path).expect("remove git output file");
+            }
+        }
+        for entry in fs::read_dir(zmin_output.path()).expect("clear zmin output") {
+            let path = entry.expect("zmin output entry").path();
+            if path.is_file() {
+                fs::remove_file(path).expect("remove zmin output file");
+            }
+        }
     }
 }
 

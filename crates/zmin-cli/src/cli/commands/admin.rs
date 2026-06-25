@@ -1,6 +1,9 @@
 use crate::runtime;
 
-pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
+pub(crate) fn dispatch(
+    command: runtime::Command,
+    raw_args: &[String],
+) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::ForEachRepo {
             config,
@@ -62,11 +65,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             suffix,
             no_suffix,
             diagnose,
+            no_diagnose,
         } => super::admin_commands::bugreport_command(
             output_directory,
             suffix.as_deref(),
             no_suffix,
-            diagnose.as_deref(),
+            resolve_bugreport_diagnose(raw_args, diagnose.as_deref(), no_diagnose),
         ),
         runtime::Command::Diagnose {
             output_directory,
@@ -134,6 +138,25 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }
         _ => unreachable!("non-admin command dispatched to admin"),
     }
+}
+
+fn resolve_bugreport_diagnose<'a>(
+    raw_args: &[String],
+    diagnose: Option<&'a str>,
+    no_diagnose: bool,
+) -> Option<&'a str> {
+    if diagnose.is_none() && !no_diagnose {
+        return None;
+    }
+    let mut mode = diagnose;
+    for arg in raw_args.iter().skip(1).map(String::as_str) {
+        if arg == "--no-diagnose" {
+            mode = None;
+        } else if arg == "--diagnose" || arg.starts_with("--diagnose=") {
+            mode = diagnose;
+        }
+    }
+    mode
 }
 
 pub(crate) fn run_hook(

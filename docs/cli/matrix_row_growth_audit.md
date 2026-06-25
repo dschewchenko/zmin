@@ -5507,6 +5507,32 @@ implemented-but-unverified schema rows.
 
 ## Latest Declared Import
 
+Source bucket: census documented-option gap for `bugreport --no-diagnose`,
+using the existing focused stock-vs-Zmin oracle test lane.
+
+Evidence command:
+
+- `cargo test -p zmin-cli --test git_admin_tools_compat bugreport_no_diagnose_modes_match_stock_git -- --exact`
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+1`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+1`
+- complete command matrices: `+1` after promotion
+
+Actual post-import movement matched the declaration: `+3` behavior rows,
+`+3` closed rows, `+0` open rows, `+0` invalid-input rows, `+0` commands with
+rows, `+1` complete documented option pair, and `+1` reviewed-complete
+command matrix after promoting `bugreport`.
+
+## Previous Declared Import
+
 Source bucket: census implemented-but-unverified `cat-file --no-filter`
 schema surface, with focused stock-oracle smoke evidence.
 

@@ -852,6 +852,8 @@ pub enum Command {
         no_suffix: bool,
         #[arg(long = "diagnose", num_args = 0..=1, default_missing_value = "stats", require_equals = true)]
         diagnose: Option<String>,
+        #[arg(long = "no-diagnose", action = ArgAction::SetTrue)]
+        no_diagnose: bool,
     },
     Diagnose {
         #[arg(short = 'o', long = "output-directory", value_hint = ValueHint::DirPath)]

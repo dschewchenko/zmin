@@ -343,9 +343,8 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `describe` documented-option family closure, the exact-open
-queue in this environment is still down to helper-oracle-unavailable rows
-only:
+After the latest `bugreport` command promotion, the exact-open queue in this
+environment is still down to helper-oracle-unavailable rows only:
 `citool` (`5`), `cvsimport` (`2`), `svn` (`2`), `archimport` (`1`),
 `cvsexportcommit` (`1`) and `scalar` (`1`). `instaweb` now has `11/13`
 reviewed-complete documented option pairs with `11/13` represented documented
@@ -353,30 +352,36 @@ option pairs, and the remaining `instaweb` documented backlog is only the real
 Git `--module-path` surface plus the Zmin-only internal flags tracked in the
 extension inventory. The primary `remaining_to_fix_or_verify.tsv` backlog
 still has no real implemented-but-unverified family beyond the lone schema-only
-`archive <positional:args>` parser surface. `notes` is now fully reviewed
-complete as a command at `28/28` documented option pairs, `28/28`
-represented documented option pairs, `69/69` classified rows, and `0`
-exact-open written rows; `describe` is now likewise command-complete at
-`14/14` documented option pairs, `14/14` represented documented option pairs,
-`19/19` classified rows, and `0` exact-open written rows. The next highest-
-throughput helper-free follow-up is no longer another zero-code command
-promotion cluster: the current stock probe shows the next compact real batch
-is parser-alias parity for `fmt-merge-msg --summary/--no-summary`,
-`bugreport --no-diagnose`, and `http-fetch --index-pack-args`.
+`archive <positional:args>` parser surface. `notes` is fully reviewed complete
+as a command at `28/28` documented option pairs, `28/28` represented
+documented option pairs, `69/69` classified rows, and `0` exact-open written
+rows; `describe` is likewise command-complete at `14/14` documented option
+pairs, `14/14` represented documented option pairs, `19/19` classified rows,
+and `0` exact-open written rows; `bugreport` is now command-complete at
+`7/7` documented option pairs, `7/7` represented documented option pairs,
+`13/13` classified rows, and `0` exact-open written rows after closing the
+`--no-diagnose` ordering family. The next compact real batch is no longer the
+three-way parser-alias cluster: `bugreport --no-diagnose` is closed, while
+`fmt-merge-msg --summary/--no-summary` still exposes a real `--log` parity gap
+and `http-fetch --index-pack-args` still lacks clean local stock-Git evidence,
+so the next high-throughput follow-up should move to another census-backed
+supported subgroup or a larger zero-row command-promotion cluster.
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-code command promotion for helper-free
-`git describe`. The existing exact stock-Git describe evidence was already
-fully reviewed complete at `14/14` documented option pairs and `19/19`
-classified rows, so this slice promotes `describe` into
-`docs/cli/census/reviewed_complete_command_matrices.tsv` without changing Rust
-runtime behavior.
+The latest completed slice closes the helper-free `git bugreport
+--no-diagnose` family and promotes `bugreport` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Zmin now accepts
+`--no-diagnose`, matches stock Git on standalone report-only behavior, and
+follows last-one-wins ordering against `--diagnose=stats`, so the command is
+now fully reviewed complete at `7/7` documented option pairs and `13/13`
+classified rows.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(describe|summary)\t'`,
+`cargo test -p zmin-cli --test git_admin_tools_compat bugreport_no_diagnose_modes_match_stock_git -- --exact`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(bugreport|summary)\t'`,
 `tools/git-compat-audit-summary.sh --tsv`,
 and `git diff --check`.
 
