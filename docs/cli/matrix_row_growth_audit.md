@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the next batch is a helper-free `git multi-pack-index`
+incremental and refs-snapshot family closure. The selected change expands the
+write subcommand schema and runtime to cover stock-Git incremental write side
+effects on fresh and existing non-incremental MIDX lanes, plus the currently
+accepted-and-ignored refs-snapshot lane and the stock missing-file rejection
+when refs-snapshot is combined with bitmap. Expected delta is `+5` matrix
+rows, `+2` complete documented option pairs, `+3` represented documented
+option pairs, `+0` complete command matrices, `+3` verified rows, `+2`
+invalid-input rows, and `-2` remaining checklist rows. Actual delta matched
+at the reviewed and represented doc-option levels, and `multi-pack-index` now
+sits at `8/9` reviewed-complete documented option pairs with only the
+positive `--bitmap` writer lane still open.
+
 As of 2026-06-25 the next batch is a helper-free `git mergetool`
 `--tool-help` plus `-O` closure and command promotion. The selected change
 expands the schema and runtime to cover stock-Git host-local tool-help

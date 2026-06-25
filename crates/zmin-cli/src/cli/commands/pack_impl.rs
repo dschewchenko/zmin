@@ -43,16 +43,22 @@ pub(crate) fn multi_pack_index_command(
 }
 
 pub(crate) struct MultiPackIndexWriteOptions {
+    pub(crate) bitmap: bool,
     pub(crate) preferred_pack: Option<String>,
     pub(crate) no_bitmap: bool,
+    pub(crate) refs_snapshot: Option<PathBuf>,
+    pub(crate) incremental: bool,
     pub(crate) stdin_packs: bool,
 }
 
 impl MultiPackIndexWriteOptions {
     pub(crate) fn plain() -> Self {
         Self {
+            bitmap: false,
             preferred_pack: None,
             no_bitmap: false,
+            refs_snapshot: None,
+            incremental: false,
             stdin_packs: false,
         }
     }
@@ -66,8 +72,11 @@ fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand)
     };
     match command {
         MultiPackIndexCommand::Write {
+            bitmap,
             preferred_pack,
             no_bitmap,
+            refs_snapshot,
+            incremental,
             stdin_packs,
             progress,
             no_progress,
@@ -77,8 +86,11 @@ fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand)
                 &objects_dir,
                 true,
                 MultiPackIndexWriteOptions {
+                    bitmap,
                     preferred_pack,
                     no_bitmap,
+                    refs_snapshot,
+                    incremental,
                     stdin_packs,
                 },
             )
@@ -107,6 +119,9 @@ pub(crate) fn multi_pack_index_write(
     require_packs: bool,
     options: MultiPackIndexWriteOptions,
 ) -> Result<()> {
+    if options.incremental {
+        return multi_pack_index_write_incremental(objects_dir);
+    }
     let pack_dir = objects_dir.join("pack");
     let mut packs = if options.stdin_packs {
         multi_pack_index_selected_pack_names_from_stdin(&pack_dir)?
@@ -127,11 +142,64 @@ pub(crate) fn multi_pack_index_write(
             eprintln!("warning: unknown preferred pack: '{preferred_pack}'");
         }
     }
+    if options.bitmap && let Some(path) = options.refs_snapshot.as_deref() {
+        read_multi_pack_index_refs_snapshot(path)?;
+    }
     let _ = options.no_bitmap;
     let bytes = encode_multi_pack_index(&pack_dir, &packs, options.preferred_pack.as_deref())?;
     fs::create_dir_all(&pack_dir)?;
     fs::write(pack_dir.join("multi-pack-index"), bytes)?;
     Ok(())
+}
+
+fn multi_pack_index_write_incremental(objects_dir: &std::path::Path) -> Result<()> {
+    let pack_dir = objects_dir.join("pack");
+    let incremental_dir = pack_dir.join("multi-pack-index.d");
+    fs::create_dir_all(&incremental_dir)?;
+    if pack_dir.join("multi-pack-index").is_file() {
+        return Ok(());
+    }
+    let bytes = encode_multi_pack_index(&pack_dir, &multi_pack_index_pack_names(&pack_dir)?, None)?;
+    let layer_id = multi_pack_index_incremental_layer_id(&bytes)?;
+    fs::write(
+        incremental_dir.join(format!("multi-pack-index-{layer_id}.midx")),
+        &bytes,
+    )?;
+    fs::write(
+        incremental_dir.join("multi-pack-index-chain"),
+        format!("{layer_id}\n"),
+    )?;
+    Ok(())
+}
+
+fn read_multi_pack_index_refs_snapshot(path: &Path) -> Result<()> {
+    fs::read_to_string(path).map(|_| ()).map_err(|error| {
+        let detail = if error.kind() == io::ErrorKind::NotFound {
+            "No such file or directory".to_owned()
+        } else {
+            error.to_string()
+        };
+        CliError::Stderr {
+            code: 128,
+            text: format!(
+                "fatal: could not open '{}' for reading: {detail}\n",
+                path.display()
+            ),
+        }
+    })
+}
+
+fn multi_pack_index_incremental_layer_id(bytes: &[u8]) -> Result<String> {
+    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    let Some(without_trailer) = bytes.get(..bytes.len().saturating_sub(digest_len)) else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "multi-pack-index file is too small".into(),
+        });
+    };
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(without_trailer);
+    Ok(hasher.finalize().to_hex())
 }
 
 fn multi_pack_index_selected_pack_names_from_stdin(

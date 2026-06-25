@@ -604,6 +604,10 @@ fn multi_pack_index_bytes(repo: &std::path::Path) -> Vec<u8> {
     fs::read(repo.join(".git/objects/pack/multi-pack-index")).expect("read multi-pack-index")
 }
 
+fn multi_pack_index_dir_exists(repo: &std::path::Path) -> bool {
+    repo.join(".git/objects/pack/multi-pack-index.d").is_dir()
+}
+
 fn pack_index_names(repo: &std::path::Path) -> Vec<String> {
     let mut names = pack_file_names(repo)
         .into_iter()
@@ -1042,6 +1046,125 @@ fn multi_pack_index_write_option_family_matches_stock_git() {
             assert_repository_state_matches(zmin_repo.path(), git_repo.path());
         }
     }
+}
+
+#[test]
+fn multi_pack_index_incremental_and_refs_snapshot_match_stock_git() {
+    for label in ["incremental fresh"] {
+        let git_repo = two_pack_midx_fixture();
+        let zmin_repo = two_pack_midx_fixture();
+        let args: Vec<&str> = match label {
+            "incremental fresh" => vec!["multi-pack-index", "write", "--incremental"],
+            _ => unreachable!(),
+        };
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "{label}"
+        );
+        assert_eq!(
+            zmin_repo
+                .path()
+                .join(".git/objects/pack/multi-pack-index")
+                .exists(),
+            git_repo
+                .path()
+                .join(".git/objects/pack/multi-pack-index")
+                .exists(),
+            "{label} midx presence"
+        );
+        assert_eq!(
+            multi_pack_index_dir_exists(zmin_repo.path()),
+            multi_pack_index_dir_exists(git_repo.path()),
+            "{label} incremental dir presence"
+        );
+        assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+    }
+
+    let git_repo = two_pack_midx_fixture();
+    let zmin_repo = two_pack_midx_fixture();
+    git(git_repo.path(), ["multi-pack-index", "write"]);
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["multi-pack-index", "write"]),
+        ""
+    );
+    let git_before = multi_pack_index_bytes(git_repo.path());
+    let zmin_before = multi_pack_index_bytes(zmin_repo.path());
+    assert_eq!(git_before, zmin_before, "seeded midx bytes");
+
+    let args = ["multi-pack-index", "write", "--incremental"];
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+        command_any_output("git", git_repo.path(), &args, "git"),
+        "incremental existing"
+    );
+    assert_eq!(
+        multi_pack_index_bytes(zmin_repo.path()),
+        multi_pack_index_bytes(git_repo.path()),
+        "incremental existing midx bytes"
+    );
+    assert_eq!(
+        multi_pack_index_dir_exists(zmin_repo.path()),
+        multi_pack_index_dir_exists(git_repo.path()),
+        "incremental existing dir presence"
+    );
+    assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+
+    let git_repo = two_pack_midx_fixture();
+    let zmin_repo = two_pack_midx_fixture();
+    let git_refs_snapshot = git_repo.path().join("refs.snapshot");
+    let zmin_refs_snapshot = zmin_repo.path().join("refs.snapshot");
+    fs::write(
+        &git_refs_snapshot,
+        git(git_repo.path(), ["show-ref", "--head", "--hash"]),
+    )
+    .expect("write git refs snapshot");
+    fs::write(
+        &zmin_refs_snapshot,
+        git(zmin_repo.path(), ["show-ref", "--head", "--hash"]),
+    )
+    .expect("write zmin refs snapshot");
+
+    let git_arg = format!("--refs-snapshot={}", git_refs_snapshot.display());
+    let zmin_arg = format!("--refs-snapshot={}", zmin_refs_snapshot.display());
+    let git_args = ["multi-pack-index", "write", git_arg.as_str()];
+    let zmin_args = ["multi-pack-index", "write", zmin_arg.as_str()];
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &zmin_args, "zmin"),
+        command_any_output("git", git_repo.path(), &git_args, "git"),
+        "refs-snapshot accepted without bitmap"
+    );
+    assert_eq!(
+        multi_pack_index_bytes(zmin_repo.path()),
+        multi_pack_index_bytes(git_repo.path()),
+        "refs-snapshot accepted midx bytes"
+    );
+    assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+
+    let git_repo = two_pack_midx_fixture();
+    let zmin_repo = two_pack_midx_fixture();
+    let missing_dir = TempDir::new().expect("temp missing snapshot dir");
+    let missing_snapshot = missing_dir.path().join("missing.snapshot");
+    let missing_arg = format!("--refs-snapshot={}", missing_snapshot.display());
+    let git_args = ["multi-pack-index", "write", "--bitmap", missing_arg.as_str()];
+    let zmin_args = ["multi-pack-index", "write", "--bitmap", missing_arg.as_str()];
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &zmin_args, "zmin"),
+        command_any_output("git", git_repo.path(), &git_args, "git"),
+        "refs-snapshot missing with bitmap"
+    );
+    assert_eq!(
+        zmin_repo
+            .path()
+            .join(".git/objects/pack/multi-pack-index")
+            .exists(),
+        git_repo
+            .path()
+            .join(".git/objects/pack/multi-pack-index")
+            .exists(),
+        "refs-snapshot missing midx presence"
+    );
 }
 
 #[test]

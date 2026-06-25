@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`94/151 complete command matrices / 1425/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1433/3156 represented doc-option pairs / 5385 written rows / 4686/5385 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`94/151 complete command matrices / 1427/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1436/3156 represented doc-option pairs / 5390 written rows / 4689/5390 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,18 +300,18 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is the helper-free `git mergetool`
-`--tool-help` plus `-O` closure and command promotion. Zmin now matches stock
-Git for host-local tool-help listing with configured user-defined tools, for
-multi-path orderfile ordering, and for the stock backup-file naming plus
-inter-conflict blank-line output details that those lanes exposed. With those
-rows closed, `mergetool` is now command-complete at `10/10`
-reviewed-complete documented option pairs, `10/10` represented documented
-option pairs, `16/16` classified rows, and `0` exact-open written rows. The
-next bounded high-throughput follow-up should return to the heavier local
-`multi-pack-index` `--bitmap` / `--incremental` / `--refs-snapshot` family,
-which remains the biggest compact tail at `6/9` reviewed-complete documented
-option pairs and `23/23` classified rows.
+The latest completed slice is a helper-free `git multi-pack-index`
+`--incremental` plus `--refs-snapshot` family batch. Zmin now matches stock
+Git for fresh and existing incremental-write side effects on the current
+two-pack local lane, including incremental-layer file naming and chain-file
+contents, and for the current refs-snapshot behaviors where the option is
+accepted and ignored without bitmap but fails with stock-shaped missing-file
+stderr when bitmap is requested. With those rows closed, `multi-pack-index`
+now sits at `8/9` reviewed-complete documented option pairs, `9/9`
+represented documented option pairs, `28/28` classified rows, and `0`
+exact-open written rows. The next bounded high-throughput follow-up should
+stay on the remaining positive `--bitmap` writer lane, which is now the sole
+review-incomplete documented option family for `multi-pack-index`.
 
 The latest completed slice after that closure is a zero-row census-accounting
 correction for reviewed-complete commands. `tools/git-compat-census.py` now
