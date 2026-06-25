@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1328	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1330	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -118,7 +118,7 @@ refs	4	4	4	100.0	15	15	100.0	11	73.3	0	0	4	yes
 remote	2	2	2	100.0	34	34	100.0	27	79.4	0	0	7	yes
 repack	33	33	33	100.0	116	116	100.0	116	100.0	0	0	0	yes
 replace	11	11	11	100.0	19	19	100.0	19	100.0	0	0	0	yes
-replay	122	0	2	1.6	5	5	100.0	4	80.0	0	0	1	no
+replay	122	2	2	1.6	5	5	100.0	4	80.0	0	0	1	no
 request-pull	1	1	1	100.0	6	6	100.0	5	83.3	0	0	1	yes
 rerere	0	0	0	0.0	8	8	100.0	7	87.5	0	0	1	yes
 reset	6	0	0	0.0	11	11	100.0	6	54.5	0	0	5	no
