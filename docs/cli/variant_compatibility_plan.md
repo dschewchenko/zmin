@@ -314,6 +314,21 @@ return to the heavier local `multi-pack-index`
 `--bitmap` / `--incremental` / `--refs-snapshot` family instead of another
 micro-slice.
 
+The latest completed slice after that closure is a zero-row census-accounting
+correction for reviewed-complete commands. `tools/git-compat-census.py` now
+stops emitting schema-only `implemented but unverified` leftovers for commands
+already promoted into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`, which removes the
+stale `archive <positional:args>` and `ls-tree --long` rows without changing
+runtime behavior or stock-Git evidence. Current counts stay at
+`90/151` complete command matrices, `1418/3156` complete documented option
+pairs, `1426/3156` represented documented option pairs, `5375` written rows,
+`4678` verified rows, `12` open rows, and `682` invalid-input rows, while
+`implemented_but_unverified_rows` drops to `0`. The next bounded
+high-throughput follow-up remains the local `multi-pack-index`
+`--bitmap` / `--incremental` / `--refs-snapshot` family, since that is now the
+real remaining command-tail backlog instead of a census artifact.
+
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
 `git_clone_ref_format_compat.rs`, `git_scalar_compat.rs`,

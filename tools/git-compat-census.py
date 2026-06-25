@@ -669,6 +669,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     for (command, option), arg_refs in sorted(zmin_options.items()):
         if command not in command_set:
             continue
+        if command in complete_commands:
+            continue
         if (command, option) in extension_options:
             continue
         statuses = matrix_options_by_status.get((command, option), Counter())

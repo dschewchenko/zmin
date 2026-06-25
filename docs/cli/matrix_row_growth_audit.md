@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a zero-row census-accounting correction for
+reviewed-complete commands. The selected change teaches
+`tools/git-compat-census.py` to suppress residual schema-only
+`implemented but unverified` rows once a command has already been promoted into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`, which removes the
+stale `archive <positional:args>` and `ls-tree --long` leftovers without
+changing Rust runtime behavior or row-level stock-Git evidence. Expected delta
+is `+0` matrix rows, `+0` complete documented option pairs, `+0` represented
+documented option pairs, `+0` complete command matrices, `+0` verified rows,
+`+0` invalid-input rows, and `-2` implemented-but-unverified schema rows.
+Actual delta matched, and the census now reports
+`implemented_but_unverified_rows=0`.
+
 As of 2026-06-25 the next batch is the final helper-backed plus helper-free
 `git fetch-pack` tail closure and command promotion. The selected change keeps
 the existing local fetch-pack oracle lane, adds durable stock-Git evidence for

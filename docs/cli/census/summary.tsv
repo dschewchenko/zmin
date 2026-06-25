@@ -11,10 +11,10 @@ verified_rows	4678	closed exact behavior rows
 invalid_input_rows	682	stock-compatible rejection rows
 open_or_partial_matrix_rows	12	exact rows still open or partial
 exact_open_local_oracle_unavailable_rows	12	exact open rows blocked by missing local stock Git oracle command/tool
-implemented_but_unverified_rows	2	schema args without exact matrix evidence
+implemented_but_unverified_rows	0	schema args without exact matrix evidence
 remaining_to_fix_or_verify_rows	1750	doc-option expansion, exact opens and unclassified guards
 extension_or_deferred_rows	69	Zmin-only or deferred/non-Git scope items
 oracle_evidence_layer_rows	969	existing oracle inventory rows, not primary backlog
 hard_fail_scan_rows	92	source guard hits
 hard_fail_scan_unclassified_rows	0	source guard hits not matched to classification docs
-all_census_rows	8242	union of generated census output rows
+all_census_rows	8240	union of generated census output rows
