@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1268	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1276	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -86,7 +86,7 @@ ls-tree	13	0	3	23.1	9	9	100.0	8	88.9	0	0	1	no
 mailinfo	10	10	10	100.0	13	13	100.0	13	100.0	0	0	0	yes
 mailsplit	6	6	6	100.0	11	11	100.0	9	81.8	0	0	2	yes
 maintenance	5	5	5	100.0	49	49	100.0	32	65.3	0	0	17	yes
-merge	51	0	8	15.7	22	22	100.0	14	63.6	0	0	8	no
+merge	51	8	8	15.7	22	22	100.0	14	63.6	0	0	8	no
 merge-base	2	2	2	100.0	19	19	100.0	17	89.5	0	0	2	yes
 merge-file	10	10	10	100.0	50	50	100.0	36	72.0	0	0	14	yes
 merge-index	3	3	3	100.0	8	8	100.0	8	100.0	0	0	0	yes

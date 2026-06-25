@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1268/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
+`82/151 complete command matrices / 1276/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,35 +343,35 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `pull` doc-option promotion, `pull`
-adds another `14` durable reviewed-complete documented option pairs without
-changing Rust behavior and is up to `14/99` documented options complete with
-`14/99` represented documented option pairs and `37/37` classified rows.
+After the latest zero-code `merge` doc-option promotion, `merge`
+adds another `8` durable reviewed-complete documented option pairs without
+changing Rust behavior and is up to `8/51` documented options complete with
+`8/51` represented documented option pairs and `22/22` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
 represented family or zero-code command-promotion cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `pull` surface. The
-existing exact stock-Git evidence already closed fourteen `pull` option
-families across local/file and HTTP fast-forward/rebase, merge-mode,
-strategy, upload-pack, and shallow-fetch lanes, so this slice only promotes
-those documented option pairs into
+promotion cluster for the represented helper-free `merge` surface. The
+existing exact stock-Git evidence already closed eight `merge` option
+families across local fast-forward, merge-commit, squash, strategy,
+continue, and abort lanes, so this slice only promotes those documented
+option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(pull|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(merge|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1268/3175` complete documented option pairs, and `1933`
-remaining checklist rows. `pull` now reads `99` documented option
-pairs with `14` reviewed complete, `14` represented documented option pairs,
-and `37/37` classified written rows with `0` open.
+matrices, `1276/3175` complete documented option pairs, and `1925`
+remaining checklist rows. `merge` now reads `51` documented option
+pairs with `8` reviewed complete, `8` represented documented option pairs,
+and `22/22` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1181,11 +1181,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code reviewed-complete `pull`
+Current durable census after the zero-code reviewed-complete `merge`
 documented-option promotion cluster:
 
 - complete command matrices: `82 / 151`
-- complete documented command-option pairs: `1268 / 3175`
+- complete documented command-option pairs: `1276 / 3175`
 - matrix rows: `5332`
 - verified rows: `4624`
 - invalid-input rows: `679`
@@ -1193,22 +1193,21 @@ documented-option promotion cluster:
 
 Latest completed batch:
 
-- `pull` now has fourteen represented helper-free documented option families
+- `merge` now has eight represented helper-free documented option families
   promoted into the reviewed-complete doc-option census list, bringing the
-  command to `14/99` reviewed-complete documented option pairs.
+  command to `8/51` reviewed-complete documented option pairs.
 - The slice adds no new behavior rows; it only makes already closed exact
-  stock-Git local/file and HTTP fast-forward/rebase, merge-mode, strategy,
-  upload-pack, and shallow-fetch evidence durable in the reviewed doc-option
-  source list.
+  stock-Git local fast-forward, merge-commit, squash, strategy, continue,
+  and abort evidence durable in the reviewed doc-option source list.
 - Focused verification was
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(pull|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(merge|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `pull` now has `14/99` documented option pairs reviewed complete with
-  `14/99` represented documented option pairs, `37/37` classified rows, and
+- `merge` now has `8/51` documented option pairs reviewed complete with
+  `8/51` represented documented option pairs, `22/22` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
