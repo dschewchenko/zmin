@@ -1179,6 +1179,37 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
+Current durable census after the zero-code reviewed-complete `fetch-pack`
+documented-option promotion cluster:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `1105 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `fetch-pack` now has eleven represented documented option families
+  promoted into the reviewed-complete doc-option census list, bringing the
+  command to `12/18` reviewed-complete documented option pairs.
+- The slice adds no new behavior rows; it only makes already closed exact
+  stock-Git local repository, depth, tag, keep, quiet, stdin, thin-pack, and
+  invalid-input evidence durable in the reviewed doc-option source list.
+- Focused verification was
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(fetch-pack|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `fetch-pack` now has `12/18` documented option pairs reviewed complete with
+  `12/18` represented documented option pairs, `19/19` classified rows, and
+  `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed represented family or zero-code command-promotion cluster.
+
 Current durable census after the zero-code reviewed-complete `daemon`
 documented-option promotion cluster:
 
