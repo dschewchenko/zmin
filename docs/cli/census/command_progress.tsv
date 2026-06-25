@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1205	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1215	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -75,7 +75,7 @@ http-backend	0	0	0	0.0	15	15	100.0	14	93.3	0	0	1	yes
 http-fetch	9	8	8	88.9	12	12	100.0	10	83.3	0	0	2	no
 http-push	6	0	4	66.7	8	8	100.0	8	100.0	0	0	0	no
 imap-send	6	6	6	100.0	7	7	100.0	7	100.0	0	0	0	yes
-index-pack	16	0	10	62.5	17	17	100.0	11	64.7	0	0	6	no
+index-pack	16	10	10	62.5	17	17	100.0	11	64.7	0	0	6	no
 init	0	0	0	0.0	12	12	100.0	10	83.3	0	0	2	yes
 instaweb	13	0	11	84.6	14	0	0.0	0	0.0	0	14	0	no
 interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes

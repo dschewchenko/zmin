@@ -12,6 +12,18 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free `index-pack`
+surface. The selected rows do not add new behavior evidence; they promote ten
+exact stock-Git `index-pack` option families with existing local stdin pack
+indexing, reverse-index toggles, keep/index-version side effects, strict/fsck
+validation, thin-pack repair, and standalone output-path/verbose matrix
+coverage into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+Expected delta is `+0` matrix rows, `+10` complete documented option pairs,
+`+0` complete command matrices, `+0` verified rows, `+0` invalid-input rows,
+and `-10` remaining checklist rows. Rust behavior changes are not expected.
+Actual delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `format-patch`
 surface. The selected rows do not add new behavior evidence; they promote
 twelve exact stock-Git `format-patch` option families with existing local
