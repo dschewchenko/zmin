@@ -316,11 +316,12 @@ complete, the supported `gc` documented family is now reviewed complete too
 documented family is now reviewed complete across its current schema surface
 (`3/3` represented documented option pairs). The supported `checkout-index`
 documented family is now reviewed complete across its current schema surface
-too (`8/8` represented documented option pairs). The next helper-free family
-should now move to another census-backed supported subgroup such as
-`check-ignore` (`9/9` represented documented options) or `column`
-(`7/7` represented documented options), unless work intentionally opens
-unsupported `checkout-index`, `read-tree`, `gc`, or `repack` surfaces.
+too (`8/8` represented documented option pairs), and both `check-ignore`
+(`9/9`) and `column` (`7/7`) are now reviewed-complete commands. The next
+helper-free family should now move to another census-backed supported subgroup
+such as `archive` (`13/14` represented documented options) or `clean`
+(`11/13` represented documented options), unless work intentionally opens
+unsupported surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -329,34 +330,28 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a focused helper-free `git checkout-index`
-documented-option family batch. This follow-up fixed two parser/diagnostic
-compatibility gaps in the supported surface: repeated documented boolean flags
-`-a`, `-f`, and `-q` now parse like stock Git, and the invalid mixing shapes
-`--stdin` plus explicit paths and `--all --stdin` now return stock-compatible
-fatal diagnostics. With those fixes in place, the batch added exact stock-Git
-evidence for repeated all/force/quiet forms, `--all --quiet --force`,
-`--stdin --prefix=out/`, and the two invalid mixing rows, then promoted all
-currently supported `checkout-index` documented option pairs into the
-reviewed-complete census artifact. The broader `checkout-index` command still
-stays out of reviewed-complete command status because documented surfaces such
-as `--index`, `--no-create`, `--stage`, `--temp`, `--ignore-skip-worktree-bits`,
-`-u`, `-n`, and `-z` remain outside the current Zmin schema.
+The latest completed slice is a zero-row reviewed-complete closure cluster for
+helper-free commands `check-ignore` and `column`. Their behavior matrices,
+stock evidence, and documented option coverage already existed in focused
+tests, oracle smokes, and matrix rows; this follow-up only promotes them into
+the reviewed-complete command and doc-option census artifacts. `check-ignore`
+is now reviewed complete across all `9/9` documented options with `23/23`
+classified rows and `0` open, and `column` is now reviewed complete across
+all `7/7` documented options with `54/54` classified rows and `0` open.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_worktree_state_compat checkout_index_documented_option_combinations_match_stock_git -- --nocapture`,
-`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(checkout-index|read-tree|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(check-ignore|column|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5145` matrix rows, `4444` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `59/151` complete command matrices, `244/3175`
-complete documented option pairs, and `2957` remaining checklist rows.
-The promoted command now reads:
-- `checkout-index` `8/8` represented supported documented options reviewed complete, `17/17` classified rows, `16/17` matching stock Git rows, `0` open
+open-or-partial rows, `61/151` complete command matrices, `260/3175`
+complete documented option pairs, and `2941` remaining checklist rows.
+The promoted commands now read:
+- `check-ignore` `9/9` represented documented options reviewed complete, `23/23` classified rows, `13/23` matching stock Git rows, `0` open
+- `column` `7/7` represented documented options reviewed complete, `54/54` classified rows, `46/54` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 
