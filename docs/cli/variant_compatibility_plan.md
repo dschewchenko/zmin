@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1385/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1393/3175 represented doc-option pairs / 5342 written rows / 4648/5342 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`82/151 complete command matrices / 1392/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1393/3175 represented doc-option pairs / 5342 written rows / 4648/5342 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -353,37 +353,40 @@ option pairs, and the remaining `instaweb` documented backlog is only the real
 Git `--module-path` surface plus the Zmin-only internal flags tracked in the
 extension inventory. The primary `remaining_to_fix_or_verify.tsv` backlog
 still has no real implemented-but-unverified family beyond the lone schema-only
-`archive <positional:args>` parser surface. `describe` is now fully reviewed
-complete across all `14/14` documented option pairs with `19/19` classified
-rows and `0` open rows, so the next highest-throughput helper-free follow-up
-should be the eligible zero-row reviewed-complete command cluster `clone`,
-`stage`, `push`, `init`, `sparse-checkout`, and `shell` instead of another
+`archive <positional:args>` parser surface. `notes` is now fully reviewed
+complete across all `28/28` documented option pairs, but the command still
+shows only `21/28` represented documented option pairs because the current
+census does not yet attribute the remaining schema-less notes subcommand
+families to represented coverage. The next highest-throughput helper-free
+follow-up should therefore reconcile that represented-count/accounting gap if
+`notes` command promotion is desired; otherwise move to the next larger
+implementation family from `remaining_to_fix_or_verify.tsv` instead of another
 single-row cleanup.
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `git describe` documented-option
-family closure for `--broken`, `--candidates`, `--contains`, `--debug`, and
-`--first-parent`. Zmin now matches stock Git `2.47.1` for descendant-tag
-selection with `--contains`, first-parent-only traversal, `--candidates=0`
-exact-match failure shape, `--debug` search tracing, and corrupt-index
-`--broken` fallback behavior, including the stock traversal depth used for
-merge-history describe output.
+The latest completed slice is a zero-code reviewed-complete documented option
+promotion cluster for the helper-free `git notes` surfaces `--dry-run`,
+`--quiet`, `--strategy`, `--verbose`, `-f`, `-n`, and `-q`. The existing
+exact stock-Git notes evidence now promotes the remaining documented prune,
+merge, and overwrite-toggle families into the durable reviewed-complete
+doc-option list without changing Rust runtime behavior.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat describe_ -- --nocapture`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(describe|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(notes|summary)\t'`,
 `tools/git-compat-audit-summary.sh --tsv`,
 and `git diff --check`.
 
 Current census counts are `5342` matrix rows, `4648` verified rows, `679`
 invalid-input rows, `12` exact-open rows, `82/151` complete command
-matrices, `1385/3175` complete documented option pairs, and `1802`
-remaining checklist rows. `describe` is now `14/14` reviewed-complete
-documented option pairs with `14/14` represented documented option pairs,
-`19/19` classified rows, and `0` exact-open written rows. The exact-open
+matrices, `1392/3175` complete documented option pairs, and `1795`
+remaining checklist rows. `notes` is now `28/28` reviewed-complete
+documented option pairs with `69/69` classified rows and `0` exact-open
+written rows, while its represented documented option count still reads
+`21/28` because the current census does not yet treat the remaining
+schema-less notes subcommand families as represented coverage. The exact-open
 queue remains limited to the helper-oracle-unavailable commands `citool`,
 `cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and `scalar`.
 
