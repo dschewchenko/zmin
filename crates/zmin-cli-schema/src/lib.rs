@@ -656,6 +656,8 @@ pub enum Command {
         all: bool,
         #[arg(long = "tags", action = ArgAction::SetTrue)]
         tags: bool,
+        #[arg(long = "contains", action = ArgAction::SetTrue)]
+        contains: bool,
         #[arg(long = "long", action = ArgAction::SetTrue)]
         long: bool,
         #[arg(
@@ -676,6 +678,19 @@ pub enum Command {
             require_equals = true
         )]
         dirty: Option<String>,
+        #[arg(
+            long = "broken",
+            num_args = 0..=1,
+            default_missing_value = "-broken",
+            require_equals = true
+        )]
+        broken: Option<String>,
+        #[arg(long = "candidates")]
+        candidates: Option<usize>,
+        #[arg(long = "debug", action = ArgAction::SetTrue)]
+        debug: bool,
+        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+        first_parent: bool,
         #[arg(long = "match")]
         matches: Vec<String>,
         #[arg(long = "exclude")]

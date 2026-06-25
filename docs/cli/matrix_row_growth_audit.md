@@ -11,6 +11,16 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git describe` documented
+option family closure for `--broken`, `--candidates`, `--contains`, `--debug`,
+and `--first-parent`. The selected change expands the describe schema and
+runtime to match stock Git on descendant-tag selection, first-parent-only
+traversal, exact-match-only `--candidates=0` failure output, `--debug` search
+trace stderr, and corrupt-index `--broken` fallback behavior. Expected delta
+is `+5` matrix rows, `+5` complete documented option pairs, `+0` complete
+command matrices, `+5` verified rows, `+0` invalid-input rows, and `-5`
+remaining checklist rows. Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free upstream-oracle `instaweb`
 lighttpd family closure plus internal-surface reclassification. The selected
 change closes the stock Git `instaweb` start, stop, restart, browser-ignore,

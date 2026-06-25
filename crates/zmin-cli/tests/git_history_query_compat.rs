@@ -2,14 +2,15 @@ mod common;
 
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::fs;
 
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_output, command_output_with_env, configure_identity, git, git_args,
-    git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
-    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, stock_git_bin, write_file,
-    zmin_bin,
+    clone_repo_fixture, command_any_output, command_output, command_output_with_env,
+    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
+    run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
+    stock_git_bin, write_file, zmin_bin,
 };
 
 fn commit_empty_as(cwd: &std::path::Path, name: &str, email: &str, message: &str) {
@@ -1080,6 +1081,54 @@ fn describe_always_matches_stock_git_without_names() {
         run_zmin_status(repo.path(), ["describe"]),
         git_status(repo.path(), ["describe"])
     );
+}
+
+#[test]
+fn describe_additional_documented_options_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "base"]);
+    let base = git(repo.path(), ["rev-parse", "HEAD"]);
+    git(repo.path(), ["checkout", "-b", "side"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "side1"]);
+    git_with_env(repo.path(), ["tag", "-a", "v2.0.0", "-m", "version2"]);
+    git(repo.path(), ["checkout", "main"]);
+    git(repo.path(), ["merge", "--no-ff", "-m", "merge", "side"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "after"]);
+
+    for args in [
+        ["describe", "--contains", &base].as_slice(),
+        ["describe", "--first-parent", "HEAD~1"].as_slice(),
+        ["describe", "--candidates=0", "HEAD"].as_slice(),
+        ["describe", "--debug", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), args, "zmin"),
+            command_any_output("git", repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn describe_broken_matches_stock_git_for_corrupt_index() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "base"]);
+    git_with_env(repo.path(), ["tag", "-a", "v1.0.0", "-m", "version"]);
+    let index_path = repo.path().join(".git/index");
+    let backup = repo.path().join(".git/index.bak");
+    fs::copy(&index_path, &backup).expect("backup index");
+    fs::write(&index_path, b"broken").expect("corrupt index");
+
+    assert_eq!(
+        command_any_output(zmin_bin(), repo.path(), &["describe", "--broken"], "zmin"),
+        command_any_output("git", repo.path(), &["describe", "--broken"], "git")
+    );
+
+    fs::rename(&backup, &index_path).expect("restore index");
 }
 
 #[test]

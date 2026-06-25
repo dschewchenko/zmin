@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1380/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1388/3175 represented doc-option pairs / 5337 written rows / 4643/5337 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`82/151 complete command matrices / 1385/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1393/3175 represented doc-option pairs / 5342 written rows / 4648/5342 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,8 +343,9 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `instaweb` lighttpd-family closure, the exact-open queue in
-this environment is down to helper-oracle-unavailable rows only:
+After the latest `describe` documented-option family closure, the exact-open
+queue in this environment is still down to helper-oracle-unavailable rows
+only:
 `citool` (`5`), `cvsimport` (`2`), `svn` (`2`), `archimport` (`1`),
 `cvsexportcommit` (`1`) and `scalar` (`1`). `instaweb` now has `11/13`
 reviewed-complete documented option pairs with `11/13` represented documented
@@ -352,38 +353,39 @@ option pairs, and the remaining `instaweb` documented backlog is only the real
 Git `--module-path` surface plus the Zmin-only internal flags tracked in the
 extension inventory. The primary `remaining_to_fix_or_verify.tsv` backlog
 still has no real implemented-but-unverified family beyond the lone schema-only
-`archive <positional:args>` parser surface, so the next iteration should
-prefer another larger census-backed family or a reviewed-complete promotion
-cluster instead of that one-row cleanup.
+`archive <positional:args>` parser surface. `describe` is now fully reviewed
+complete across all `14/14` documented option pairs with `19/19` classified
+rows and `0` open rows, so the next highest-throughput helper-free follow-up
+should be the eligible zero-row reviewed-complete command cluster `clone`,
+`stage`, `push`, `init`, `sparse-checkout`, and `shell` instead of another
+single-row cleanup.
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free upstream-oracle `instaweb`
-lighttpd family closure plus internal-surface reclassification. The
-`instaweb` runtime now matches stock Git `2.47.1` on explicit lighttpd start,
-stop and restart shape by staying silent on success, recording pid state in
-`.git/pid`, generating stock-style lighttpd config files, normalizing
-`lighttpd -f` command invocation, and ignoring browser launching for explicit
-`--start` and `--restart`. The internal Zmin-only `--daemon-internal`,
-`--git-dir` and `--work-tree` surfaces are now tracked outside the Git
-compatibility denominator in `docs/cli/zmin_extensions_inventory.md`.
+The latest completed slice is a helper-free `git describe` documented-option
+family closure for `--broken`, `--candidates`, `--contains`, `--debug`, and
+`--first-parent`. Zmin now matches stock Git `2.47.1` for descendant-tag
+selection with `--contains`, first-parent-only traversal, `--candidates=0`
+exact-match failure shape, `--debug` search tracing, and corrupt-index
+`--broken` fallback behavior, including the stock traversal depth used for
+merge-history describe output.
 
 Focused gates were
-`tools/git-instaweb-local-oracle-gap-probe.sh`,
-`cargo test -p zmin-cli --test git_admin_tools_compat instaweb_ -- --nocapture`,
-`cargo check -p zmin-cli --bin zmin --profile compat`,
+`cargo test -p zmin-cli --test git_history_query_compat describe_ -- --nocapture`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(instaweb|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(describe|summary)\t'`,
 `tools/git-compat-audit-summary.sh --tsv`,
 and `git diff --check`.
 
-Current census counts are `5337` matrix rows, `4643` verified rows, `679`
+Current census counts are `5342` matrix rows, `4648` verified rows, `679`
 invalid-input rows, `12` exact-open rows, `82/151` complete command
-matrices, `1380/3175` complete documented option pairs, and `1818`
-remaining checklist rows. `instaweb` now has exact stock-Git evidence for the
-documented lighttpd start/stop/restart family and short aliases, while the
-only remaining `instaweb` Git-scope doc gap is `--module-path`.
+matrices, `1385/3175` complete documented option pairs, and `1802`
+remaining checklist rows. `describe` is now `14/14` reviewed-complete
+documented option pairs with `14/14` represented documented option pairs,
+`19/19` classified rows, and `0` exact-open written rows. The exact-open
+queue remains limited to the helper-oracle-unavailable commands `citool`,
+`cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and `scalar`.
 
 ### No-Skip Rule
 

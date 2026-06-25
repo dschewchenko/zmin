@@ -4026,11 +4026,16 @@ fn cherry_default_upstream(repo: &GitRepo) -> Result<String> {
 pub(crate) struct DescribeOptions {
     pub(crate) all: bool,
     pub(crate) tags: bool,
+    pub(crate) contains: bool,
     pub(crate) long: bool,
     pub(crate) abbrev: Option<usize>,
     pub(crate) exact_match: bool,
     pub(crate) always: bool,
     pub(crate) dirty: Option<String>,
+    pub(crate) broken: Option<String>,
+    pub(crate) candidates: Option<usize>,
+    pub(crate) debug: bool,
+    pub(crate) first_parent: bool,
     pub(crate) matches: Vec<String>,
     pub(crate) excludes: Vec<String>,
     pub(crate) commits: Vec<String>,
@@ -4058,6 +4063,12 @@ pub(crate) fn describe(options: DescribeOptions) -> Result<()> {
             message: "option '--dirty' and commit-ishes cannot be used together".into(),
         });
     }
+    if options.broken.is_some() && !options.commits.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "option '--broken' and commit-ishes cannot be used together".into(),
+        });
+    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commits = if options.commits.is_empty() {
@@ -4068,18 +4079,13 @@ pub(crate) fn describe(options: DescribeOptions) -> Result<()> {
     let abbrev_len = options.abbrev.unwrap_or(default_abbrev_len(&store)?);
     let candidates = describe_candidates(&repo, &store, &options)?;
     let commit_cache = CommitObjectCache::new(&store);
-    let dirty_suffix = if let Some(mark) = options.dirty.as_deref() {
-        if worktree_clean(&repo, &store)? {
-            ""
-        } else {
-            mark
-        }
-    } else {
-        ""
-    };
+    let dirty_suffix = describe_dirty_suffix(&repo, &store, &options)?;
 
     for commitish in commits {
         let id = resolve_describe_commitish(&repo, &store, &commitish)?;
+        if options.debug {
+            eprintln!("describe {commitish}");
+        }
         match describe_commit(&commit_cache, &id, &candidates, &options, abbrev_len)? {
             Some(mut description) => {
                 description.push_str(dirty_suffix);
@@ -4099,12 +4105,17 @@ pub(crate) fn describe(options: DescribeOptions) -> Result<()> {
                 });
             }
             None => {
+                let message = if options.candidates == Some(0) {
+                    format!("no tag exactly matches '{id}'")
+                } else {
+                    format!(
+                        "No tags can describe '{}'.\nTry --always, or create some tags.",
+                        id
+                    )
+                };
                 return Err(CliError::Fatal {
                     code: 128,
-                    message: format!(
-                        "No annotated tags can describe '{}'.",
-                        short_object_id_len(&id, abbrev_len.max(1))
-                    ),
+                    message,
                 });
             }
         }
@@ -4129,11 +4140,11 @@ fn describe_candidates(
             return Ok(());
         }
         let Some((target, annotated, tagger_timestamp)) =
-            describe_candidate_target(store, id, options.all || options.tags)?
+            describe_candidate_target(store, id, options.all || options.tags || options.contains)?
         else {
             return Ok(());
         };
-        if !options.all && !options.tags && !annotated {
+        if !options.all && !options.tags && !options.contains && !annotated {
             return Ok(());
         }
         candidates.push(DescribeCandidate {
@@ -4145,6 +4156,12 @@ fn describe_candidates(
         });
         Ok::<(), CliError>(())
     })?;
+    candidates.sort_by(|left, right| {
+        right
+            .tagger_timestamp
+            .cmp(&left.tagger_timestamp)
+            .then_with(|| describe_candidate_cmp(left, right).cmp(&false))
+    });
     Ok(candidates)
 }
 
@@ -4233,13 +4250,20 @@ fn describe_commit(
     options: &DescribeOptions,
     abbrev_len: usize,
 ) -> Result<Option<String>> {
-    let depths = commit_depths_cached(commit_cache, id)?;
+    let depths = if options.contains {
+        HashMap::new()
+    } else if options.first_parent {
+        commit_depths_first_parent(commit_cache, id)?
+    } else {
+        describe_traversal_depths(commit_cache, id)?
+    };
     let mut best = None::<(&DescribeCandidate, usize)>;
-    for candidate in candidates {
-        let Some(depth) = depths.get(&candidate.target).copied() else {
+    let candidate_limit = options.candidates.unwrap_or(10);
+    for candidate in candidates.iter().take(candidate_limit.max(1)) {
+        let Some(depth) = describe_candidate_depth(commit_cache, id, candidate, options, &depths)? else {
             continue;
         };
-        if options.exact_match && depth != 0 {
+        if (options.exact_match || options.candidates == Some(0)) && depth != 0 {
             continue;
         }
         let replace = match best {
@@ -4254,10 +4278,38 @@ fn describe_commit(
         }
     }
     let Some((candidate, depth)) = best else {
+        if options.debug {
+            eprintln!("No exact match on refs or tags, searching to describe");
+            eprintln!("traversed {} commits", depths.len().max(1));
+        }
         return Ok(None);
     };
+    if options.debug {
+        eprintln!("No exact match on refs or tags, searching to describe");
+        eprintln!("finished search at {}", candidate.target);
+        for debug_candidate in candidates.iter().take(candidate_limit.max(1)) {
+            if let Some(debug_depth) =
+                describe_candidate_depth(commit_cache, id, debug_candidate, options, &depths)?
+            {
+                let kind = if debug_candidate.annotated {
+                    "annotated"
+                } else {
+                    "lightweight"
+                };
+                eprintln!("{kind:>10} {:>10} {}", debug_depth, debug_candidate.name);
+            }
+        }
+        eprintln!("traversed {} commits", depths.len().max(1));
+    }
     if options.abbrev == Some(0) {
         return Ok(Some(candidate.name.clone()));
+    }
+    if options.contains {
+        return Ok(Some(if depth == 0 {
+            candidate.name.clone()
+        } else {
+            format!("{}~{}", candidate.name, depth)
+        }));
     }
     if depth == 0 && !options.long {
         return Ok(Some(candidate.name.clone()));
@@ -4268,6 +4320,112 @@ fn describe_commit(
         depth,
         short_object_id_len(id, abbrev_len)
     )))
+}
+
+fn describe_dirty_suffix<'a>(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    options: &'a DescribeOptions,
+) -> Result<&'a str> {
+    if let Some(mark) = options.dirty.as_deref() {
+        return if worktree_clean(repo, store)? {
+            Ok("")
+        } else {
+            Ok(mark)
+        };
+    }
+    if let Some(mark) = options.broken.as_deref() {
+        match worktree_clean(repo, store) {
+            Ok(true) => Ok(""),
+            Ok(false) => Ok(mark),
+            Err(error) => {
+                let mut message = match error {
+                    CliError::Fatal { message, .. } => message,
+                    CliError::Stderr { text, .. } => text,
+                    CliError::Message(message) => message,
+                    CliError::Io(io_error) => io_error.to_string(),
+                    CliError::Exit(code) => format!("exited with status {code}"),
+                };
+                if message == "git index is too short" {
+                    message = ".git/index: index file smaller than expected".to_owned();
+                }
+                eprintln!("fatal: {message}");
+                eprintln!("fatal: {message}");
+                Ok(mark)
+            }
+        }
+    } else {
+        Ok("")
+    }
+}
+
+fn commit_depths_first_parent(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    start: &ObjectId,
+) -> Result<HashMap<ObjectId, usize>> {
+    let mut depths = HashMap::with_capacity(1024);
+    depths.insert(start.clone(), 0usize);
+    let mut pending = VecDeque::from([start.clone()]);
+    while let Some(id) = pending.pop_front() {
+        let depth = depths[&id];
+        let links = commit_cache.read_commit_links(&id)?;
+        let Some(parent) = links.parents.first() else {
+            continue;
+        };
+        let parent_depth = depth.checked_add(1).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit depth overflow".into(),
+        })?;
+        if let Entry::Vacant(entry) = depths.entry(parent.clone()) {
+            pending.push_back(entry.key().clone());
+            entry.insert(parent_depth);
+        }
+    }
+    Ok(depths)
+}
+
+fn describe_traversal_depths(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    start: &ObjectId,
+) -> Result<HashMap<ObjectId, usize>> {
+    let mut depths = HashMap::with_capacity(1024);
+    let mut queued = HashSet::with_capacity(1024);
+    let mut pending = VecDeque::from([start.clone()]);
+    queued.insert(start.clone());
+    let mut depth = 0usize;
+    while let Some(id) = pending.pop_front() {
+        depths.insert(id.clone(), depth);
+        depth = depth.checked_add(1).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit depth overflow".into(),
+        })?;
+        let links = commit_cache.read_commit_links(&id)?;
+        for parent in &links.parents {
+            if queued.insert(parent.clone()) {
+                pending.push_back(parent.clone());
+            }
+        }
+    }
+    Ok(depths)
+}
+
+fn describe_candidate_depth(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    id: &ObjectId,
+    candidate: &DescribeCandidate,
+    options: &DescribeOptions,
+    depths: &HashMap<ObjectId, usize>,
+) -> Result<Option<usize>> {
+    if options.contains {
+        let contains_depths = if options.first_parent {
+            commit_depths_first_parent(commit_cache, &candidate.target)?
+        } else {
+            commit_depths_cached(commit_cache, &candidate.target)?
+        };
+        Ok(contains_depths.get(id).copied())
+    } else {
+        Ok(depths.get(&candidate.target).copied())
+    }
 }
 
 fn describe_candidate_cmp(candidate: &DescribeCandidate, best: &DescribeCandidate) -> bool {
@@ -9113,3 +9271,4 @@ mod tests {
             .expect("write commit")
     }
 }
+use std::collections::hash_map::Entry;
