@@ -6,7 +6,7 @@ use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    clone_repo_fixture, command_any_output_with_stdin_bytes, command_stdout_bytes,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin_bytes, command_stdout_bytes,
     configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
     git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_failure_output,
     run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
@@ -1357,6 +1357,55 @@ fn read_tree_matches_stock_git_for_tree_empty_and_prefix() {
         run_zmin(zmin_repo.path(), ["write-tree"]),
         git(git_repo.path(), ["write-tree"])
     );
+}
+
+#[test]
+fn read_tree_documented_option_forms_match_stock_git() {
+    let tree_repo = two_commit_repo();
+    let tree = git(tree_repo.path(), ["rev-parse", "HEAD~1^{tree}"]);
+
+    for args in [
+        ["read-tree", "--empty", "--prefix=import/"].as_slice(),
+        ["read-tree", "--empty", &tree].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(tree_repo.path());
+        let zmin_repo = clone_repo_fixture(tree_repo.path());
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["ls-files", "-s"]),
+            git(git_repo.path(), ["ls-files", "-s"]),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["read-tree", "--empty"].as_slice(),
+        ["read-tree", "--prefix", "import/", &tree].as_slice(),
+        ["read-tree", "--prefix=import", &tree].as_slice(),
+        ["read-tree", "-m", "-m", &tree].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(tree_repo.path());
+        let zmin_repo = clone_repo_fixture(tree_repo.path());
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["ls-files", "-s"]),
+            git(git_repo.path(), ["ls-files", "-s"]),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["write-tree"]),
+            git(git_repo.path(), ["write-tree"]),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]

@@ -311,12 +311,13 @@ are now fully represented or classified. The next recommended batch still
 keeps the exact-open queue visible, but the smallest local no-helper follow-up
 is no longer `git column`; that local subgroup is closed. `git pack-refs` now
 has all `5/5` documented options represented, `interpret-trailers` is reviewed
-complete, and the supported `gc` documented family is now reviewed complete
-too (`5/5` represented documented option pairs). The next highest-throughput
-helper-free family is therefore `read-tree` (`3/17` represented documented
-options), unless work intentionally opens unsupported `gc` surfaces like
-`--cruft`, `--detach`, or `--force`, or broader unsupported `repack` surfaces
-like cruft, filter, or geometric modes.
+complete, the supported `gc` documented family is now reviewed complete too
+(`5/5` represented documented option pairs), and the supported `read-tree`
+documented family is now reviewed complete across its current schema surface
+(`3/3` represented documented option pairs). The next helper-free family
+should now move to another census-backed supported subgroup such as
+`checkout-index` (`8/16` represented documented options) unless work
+intentionally opens unsupported `read-tree`, `gc`, or `repack` surfaces.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -325,28 +326,33 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a focused helper-free `git gc`
-documented-option family batch. This follow-up added exact stock-Git evidence
-for long `--quiet`, bare `--prune` with its default-missing-value `now`
-behavior, and `--auto --quiet`, then promoted all currently supported `gc`
-documented option pairs into the reviewed-complete census artifact. The
-broader `gc` command still stays out of reviewed-complete command status
-because unsupported documented surfaces like `--cruft`, `--detach`, `--force`
+The latest completed slice is a focused helper-free `git read-tree`
+documented-option family batch. This follow-up fixed two real compatibility
+gaps in the supported surface: `--prefix` now retains existing index entries
+instead of replacing the index, and repeated `-m` now parses like stock Git.
+With those fixes in place, the batch added exact stock-Git evidence for
+separate and normalized `--prefix` value forms, repeated `-m`, and `--empty`
+contradiction failures with treeish and prefix combinations, then promoted all
+currently supported `read-tree` documented option pairs into the
+reviewed-complete census artifact. The broader `read-tree` command still stays
+out of reviewed-complete command status because documented surfaces such as
+`--reset`, `-u`, `-i`, `--index-output`, `--trivial`, `--aggressive`, `-q`
 and related options remain outside the current Zmin schema.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat gc_supported_documented_option_combinations_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_object_plumbing_compat read_tree_documented_option_forms_match_stock_git -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(gc|repack|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|gc|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5133` matrix rows, `4432` verified rows, `672`
+Current census counts are `5138` matrix rows, `4437` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `59/151` complete command matrices, `233/3175`
-complete documented option pairs, and `2968` remaining checklist rows.
+open-or-partial rows, `59/151` complete command matrices, `236/3175`
+complete documented option pairs, and `2965` remaining checklist rows.
 The promoted command now reads:
-- `gc` `5/5` represented supported documented options reviewed complete, `9/9` classified rows, `9/9` matching stock Git rows, `0` open
+- `read-tree` `3/3` represented supported documented options reviewed complete, `10/10` classified rows, `10/10` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 

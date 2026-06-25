@@ -3811,10 +3811,16 @@ pub(crate) fn read_tree_command(
     prefix: Option<&str>,
     treeish: Option<&str>,
 ) -> Result<()> {
-    if empty && (prefix.is_some() || treeish.is_some()) {
+    if empty && treeish.is_some() {
         return Err(CliError::Fatal {
             code: 128,
             message: "passing trees as arguments contradicts --empty".into(),
+        });
+    }
+    if empty && prefix.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "you must specify at least one tree to merge".into(),
         });
     }
     let repo = find_repo()?;
@@ -3831,11 +3837,18 @@ pub(crate) fn read_tree_command(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let tree_id = resolve_treeish_or_invalid_object(&repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
-    let mut index = tree_cache.read_tree_to_index(&tree_id)?;
+    let imported_index = tree_cache.read_tree_to_index(&tree_id)?;
     if let Some(prefix) = prefix {
-        index = prefix_index(index, prefix)?;
+        let existing = if repo.index_path.exists() {
+            read_index(&repo.index_path).map_err(CliError::Io)?
+        } else {
+            GitIndex::new()
+        };
+        prefix_index_onto_existing(existing, imported_index, prefix)?
+            .write_to_path(&repo.index_path)?;
+        return Ok(());
     }
-    index.write_to_path(&repo.index_path)?;
+    imported_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
 
@@ -3855,6 +3868,12 @@ fn prefix_index(index: GitIndex, prefix: &str) -> Result<GitIndex> {
             entry
         })
         .collect::<Vec<_>>();
+    Ok(GitIndex::from_entries(entries)?)
+}
+
+fn prefix_index_onto_existing(existing: GitIndex, imported: GitIndex, prefix: &str) -> Result<GitIndex> {
+    let mut entries = existing.entries().to_vec();
+    entries.extend(prefix_index(imported, prefix)?.entries().iter().cloned());
     Ok(GitIndex::from_entries(entries)?)
 }
 

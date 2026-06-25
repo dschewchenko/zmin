@@ -11,6 +11,16 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `read-tree`
+documented-option family closure. The selected rows add exact stock-Git
+evidence for `--prefix` separate and normalized value forms, repeated `-m`,
+and `--empty` contradiction failures with treeish and prefix combinations,
+while the product fix makes `--prefix` retain existing index entries and makes
+repeated `-m` parse like stock Git. Expected delta is `+5` matrix rows, `+5`
+verified rows, `+3` complete documented option pairs, `0` invalid-input rows
+and `-3` remaining checklist rows. Rust behavior changes are expected.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `gc` documented-option family
 closure. The selected rows add exact stock-Git evidence for long `--quiet`,
 bare `--prune` default-missing-value behavior, and `--auto --quiet`, then

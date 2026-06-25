@@ -422,11 +422,16 @@ pub(crate) fn run_status(
 
 pub(crate) fn run_read_tree(
     empty: bool,
-    merge: bool,
+    merge: u8,
     prefix: Option<String>,
     treeish: Option<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::read_tree_command(empty, merge, prefix.as_deref(), treeish.as_deref())
+    super::worktree_commands::read_tree_command(
+        empty,
+        merge > 0,
+        prefix.as_deref(),
+        treeish.as_deref(),
+    )
 }
 
 pub(crate) fn run_checkout_index(

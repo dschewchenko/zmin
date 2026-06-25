@@ -1768,8 +1768,8 @@ pub enum Command {
     ReadTree {
         #[arg(long = "empty", action = ArgAction::SetTrue)]
         empty: bool,
-        #[arg(short = 'm', action = ArgAction::SetTrue)]
-        merge: bool,
+        #[arg(short = 'm', action = ArgAction::Count)]
+        merge: u8,
         #[arg(long = "prefix")]
         prefix: Option<String>,
         treeish: Option<String>,
