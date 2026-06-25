@@ -148,7 +148,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             always,
             commits,
         }),
-        runtime::Command::Reflog { args } => super::history_commands::reflog(args),
+        runtime::Command::Reflog { command, args } => {
+            super::history_commands::reflog(serialize_reflog_args(command, args))
+        }
         runtime::Command::Log {
             oneline,
             zero,
@@ -392,6 +394,77 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         ),
         _ => unreachable!("non-history command dispatched to history"),
     }
+}
+
+fn serialize_reflog_args(command: Option<runtime::ReflogCommand>, mut args: Vec<String>) -> Vec<String> {
+    let Some(command) = command else {
+        return args;
+    };
+    let mut out = Vec::new();
+    match command {
+        runtime::ReflogCommand::Expire(expire) => {
+            out.push("expire".to_owned());
+            if expire.help {
+                out.push("--help".to_owned());
+            }
+            if let Some(value) = expire.expire {
+                out.push(format!("--expire={value}"));
+            }
+            if let Some(value) = expire.expire_unreachable {
+                out.push(format!("--expire-unreachable={value}"));
+            }
+            if expire.rewrite {
+                out.push("--rewrite".to_owned());
+            }
+            if expire.updateref {
+                out.push("--updateref".to_owned());
+            }
+            if expire.stale_fix {
+                out.push("--stale-fix".to_owned());
+            }
+            if expire.dry_run {
+                out.push("--dry-run".to_owned());
+            }
+            if expire.verbose {
+                out.push("--verbose".to_owned());
+            }
+            if expire.all {
+                out.push("--all".to_owned());
+            }
+            if expire.single_worktree {
+                out.push("--single-worktree".to_owned());
+            }
+            out.extend(expire.refs);
+        }
+        runtime::ReflogCommand::Delete(delete) => {
+            out.push("delete".to_owned());
+            if delete.rewrite {
+                out.push("--rewrite".to_owned());
+            }
+            if delete.updateref {
+                out.push("--updateref".to_owned());
+            }
+            if delete.dry_run {
+                out.push("--dry-run".to_owned());
+            }
+            if delete.verbose {
+                out.push("--verbose".to_owned());
+            }
+            out.extend(delete.selectors);
+        }
+        runtime::ReflogCommand::Drop(drop) => {
+            out.push("drop".to_owned());
+            if drop.all {
+                out.push("--all".to_owned());
+            }
+            if drop.single_worktree {
+                out.push("--single-worktree".to_owned());
+            }
+            out.extend(drop.refs);
+        }
+    }
+    out.append(&mut args);
+    out
 }
 
 pub(crate) fn run_replay(

@@ -338,15 +338,15 @@ Do not collapse these layers into one percentage.
 
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
-| Fully complete command matrices | `98/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
-| Fully complete command-option matrices | `1437/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
+| Fully complete command matrices | `99/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
+| Fully complete command-option matrices | `1443/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | no | audit rows now span the Git baseline plus nested command families represented in focused matrices |
-| Git doc option pairs represented by rows | `1445/3156` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `5406` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `4701/5406` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/5406` | no | written rows with incomplete parity |
-| Open written rows | `12/5406` | no | written rows that still do not match stock Git |
-| Invalid input rows | `679/5337` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Git doc option pairs represented by rows | `1451/3156` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `5412` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `4707/5412` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/5412` | no | written rows with incomplete parity |
+| Open written rows | `12/5412` | no | written rows that still do not match stock Git |
+| Invalid input rows | `690/5412` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -492,7 +492,7 @@ variants.
 | `range-diff` | `15` | `0` | `1` | `docs/cli/matrices/range_diff_v2_47.tsv` | `3` | `3` | `0` | `0` | `0` | no |
 | `read-tree` | `22` | `0` | `3` | `docs/cli/matrices/read_tree_v2_47.tsv` | `5` | `5` | `0` | `0` | `0` | no |
 | `rebase` | `103` | `0` | `1` | `docs/cli/matrices/rebase_v2_47.tsv` | `1` | `0` | `0` | `0` | `1` | no |
-| `reflog` | `13` | `0` | `0` | `docs/cli/matrices/reflog_v2_47.tsv` | `15` | `13` | `0` | `0` | `2` | no |
+| `reflog` | `10` | `10` | `10` | `docs/cli/matrices/reflog_v2_47.tsv` | `27` | `24` | `0` | `0` | `2` | yes |
 | `remote` | `23` | `0` | `1` | `docs/cli/matrices/remote_v2_47.tsv` | `32` | `26` | `0` | `0` | `6` | no |
 | `replace` | `13` | `0` | `3` | `docs/cli/matrices/replace_v2_47.tsv` | `6` | `6` | `0` | `0` | `0` | no |
 | `replay` | `160` | `0` | `3` | `docs/cli/matrices/replay_v2_47.tsv` | `4` | `3` | `0` | `0` | `1` | no |

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`98/151 complete command matrices / 1437/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1445/3156 represented doc-option pairs / 5406 written rows / 4701/5406 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`99/151 complete command matrices / 1443/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1451/3156 represented doc-option pairs / 5412 written rows / 4707/5412 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,26 +300,25 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git cat-file` documented
-mailmap family plus `--allow-unknown-type` closure and command promotion.
-Zmin now accepts the remaining documented parser surface, rewrites commit and
-annotated-tag identities through `.mailmap` for `-s`, `-p`, `--batch-check`,
-and `--batch-command`, preserves stock last-one-wins ordering across
-`--use-mailmap` / `--mailmap` and their negations, and matches the current
-stock invalid-object-type rejection on the modeled corrupt loose-object lane
-even when `--allow-unknown-type` is present. With those rows closed,
-`cat-file` now sits at `21/21` reviewed-complete documented option pairs,
-`21/21` represented documented option pairs, `51/51` classified rows, and `0`
-exact-open written rows, and is promoted into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`.
+The latest completed slice is a helper-free `git reflog` expire-family
+closure plus command promotion. Zmin now exposes the documented expire-family
+schema surface for census accounting, preserves stock `reflog expire -h`
+shape under the typed expire subcommand, matches stock special policy values
+for `--expire=all` and `--expire=never --expire-unreachable=all`, respects
+`--all --single-worktree` linked-worktree scope on the modeled expire-all
+lane, and matches stock stale-fix pruning for the modeled broken trailing
+reflog-entry lane. With those rows closed, `reflog` now sits at `10/10`
+reviewed-complete documented option pairs, `10/10` represented documented
+option pairs, `27` written rows, `24` verified rows, `2` invalid-input rows,
+and is promoted into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
-Current counts are `98/151` complete command matrices,
-`1437/3156` complete documented option pairs,
-`1445/3156` represented documented option pairs, `5406` written rows,
-`4701` verified rows, `12` open rows, and `690` invalid-input rows. The next
-bounded high-throughput follow-up should move to another compact census-backed
-schema tail such as `reflog` before revisiting heavier commands with larger
-documented-option gaps.
+Current counts are `99/151` complete command matrices,
+`1443/3156` complete documented option pairs,
+`1451/3156` represented documented option pairs, `5412` written rows,
+`4707` verified rows, `12` open rows, and `690` invalid-input rows. The next
+bounded high-throughput follow-up should return to another compact
+census-backed explicit-schema tail such as `show-branch` or `difftool`
+before revisiting heavier commands with broader documented-option gaps.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

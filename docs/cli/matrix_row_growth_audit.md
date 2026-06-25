@@ -11,6 +11,22 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git reflog`
+expire-family closure plus command promotion. The selected change exposes the
+documented expire-family options in the schema for census accounting, adds
+exact stock-Git evidence for `--expire=all`, `--expire-unreachable=all` with
+`--expire=never`, `--all`, `--single-worktree`, `--stale-fix`, and `-n`,
+fixes the runtime special-policy handling for `all` and `never`, preserves
+stock `reflog expire -h` exit shape under the typed expire subcommand, and
+then promotes those six documented option pairs plus `reflog` itself into the
+reviewed-complete census lists. Expected delta was `+6` matrix rows, `+6`
+complete documented option pairs, `+6` represented documented option pairs,
+`+1` complete command matrix, `+6` verified rows, and `+0` invalid-input
+rows. Actual delta matched, and `reflog` is now command-complete at `10/10`
+reviewed-complete documented option pairs with `10/10` represented documented
+option pairs, `27` written rows, `24` verified rows, `2` invalid-input rows,
+and `0` exact-open written rows.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git cat-file`
 documented mailmap family plus `--allow-unknown-type` closure and command
 promotion. The selected change adds exact stock-Git evidence for

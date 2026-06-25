@@ -741,6 +741,8 @@ pub enum Command {
         arguments: Vec<String>,
     },
     Reflog {
+        #[command(subcommand)]
+        command: Option<ReflogCommand>,
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -3846,6 +3848,64 @@ pub enum HistoryCommand {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         pathspecs: Vec<String>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReflogCommand {
+    #[command(disable_help_flag = true)]
+    Expire(ReflogExpireArgs),
+    Delete(ReflogDeleteArgs),
+    Drop(ReflogDropArgs),
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct ReflogExpireArgs {
+    #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+    pub help: bool,
+    #[arg(long = "expire")]
+    pub expire: Option<String>,
+    #[arg(long = "expire-unreachable")]
+    pub expire_unreachable: Option<String>,
+    #[arg(long = "rewrite", action = ArgAction::SetTrue)]
+    pub rewrite: bool,
+    #[arg(long = "updateref", action = ArgAction::SetTrue)]
+    pub updateref: bool,
+    #[arg(long = "stale-fix", action = ArgAction::SetTrue)]
+    pub stale_fix: bool,
+    #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
+    pub dry_run: bool,
+    #[arg(long = "verbose", action = ArgAction::SetTrue)]
+    pub verbose: bool,
+    #[arg(long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
+    pub single_worktree: bool,
+    #[arg(allow_hyphen_values = true)]
+    pub refs: Vec<String>,
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct ReflogDeleteArgs {
+    #[arg(long = "rewrite", action = ArgAction::SetTrue)]
+    pub rewrite: bool,
+    #[arg(long = "updateref", action = ArgAction::SetTrue)]
+    pub updateref: bool,
+    #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
+    pub dry_run: bool,
+    #[arg(long = "verbose", action = ArgAction::SetTrue)]
+    pub verbose: bool,
+    #[arg(allow_hyphen_values = true)]
+    pub selectors: Vec<String>,
+}
+
+#[derive(ClapArgs, Debug)]
+pub struct ReflogDropArgs {
+    #[arg(long = "all", action = ArgAction::SetTrue)]
+    pub all: bool,
+    #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
+    pub single_worktree: bool,
+    #[arg(allow_hyphen_values = true)]
+    pub refs: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]

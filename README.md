@@ -167,22 +167,22 @@ Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete command matrices | `98/151` | commands whose current documented and discovered behavior matrix is fully closed |
-| Fully complete documented option matrices | `1437/3156` | documented command-option pairs whose current behavior matrix is fully closed |
+| Fully complete command matrices | `99/151` | commands whose current documented and discovered behavior matrix is fully closed |
+| Fully complete documented option matrices | `1443/3156` | documented command-option pairs whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `1445/3156` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `5406` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `4701/5406` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/5337` | written rows with incomplete parity |
-| Open written rows | `12/5337` | written rows that still do not match stock Git |
-| Invalid input rows | `679/5337` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `1451/3156` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `5412` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `4707/5412` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/5412` | written rows with incomplete parity |
+| Open written rows | `12/5412` | written rows that still do not match stock Git |
+| Invalid input rows | `690/5412` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `4643/5337` as Git compatibility. It only means `4643` of the `5337`
+Do not read `4707/5412` as Git compatibility. It only means `4707` of the `5412`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/5337` rows are partially matching,
-`12/5337` rows are known open mismatches, and `679/5337` additional rows are
-stock-compatible invalid inputs. Do not read `1388/3175` as option support
+unexpanded surface is not counted yet, `0/5412` rows are partially matching,
+`12/5412` rows are known open mismatches, and `690/5412` additional rows are
+stock-compatible invalid inputs. Do not read `1451/3156` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -307,7 +307,7 @@ Current command-level matrices:
 | `range-diff` | `15` | `0` | `1` | `3` | `3` | `0` | `0` | `0` | no |
 | `read-tree` | `22` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
 | `rebase` | `103` | `0` | `1` | `1` | `0` | `0` | `0` | `1` | no |
-| `reflog` | `13` | `0` | `0` | `15` | `13` | `0` | `0` | `2` | no |
+| `reflog` | `10` | `10` | `10` | `27` | `24` | `0` | `0` | `2` | yes |
 | `remote` | `23` | `0` | `1` | `32` | `26` | `0` | `0` | `6` | no |
 | `replay` | `160` | `0` | `3` | `4` | `3` | `0` | `0` | `1` | no |
 | `request-pull` | `1` | `0` | `0` | `1` | `1` | `0` | `0` | `0` | no |

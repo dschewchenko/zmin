@@ -1,5 +1,8 @@
 mod common;
 
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use common::{
     command_any_output, command_output_with_env, configure_identity, git, git_args,
     git_failure_output, git_init, git_status, git_with_env, run_zmin_args, run_zmin_failure_output,
@@ -493,11 +496,173 @@ fn reflog_expire_pattern_config_matches_stock_git() {
     assert_eq!(actual, ["root1/branch1@{0}", "root1/branch2@{0}"]);
 }
 
+#[test]
+fn reflog_expire_special_policy_values_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    reflog_expire_default_fixture(git_repo.path());
+    reflog_expire_default_fixture(zmin_repo.path());
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["reflog", "expire", "--expire=all", "main"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["reflog", "expire", "--expire=all", "main"],
+            "git",
+        )
+    );
+    assert_eq!(
+        run_zmin_args(zmin_repo.path(), &["reflog", "show", "main"]),
+        git_args(git_repo.path(), &["reflog", "show", "main"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    reflog_expire_unreachable_fixture(git_repo.path());
+    reflog_expire_unreachable_fixture(zmin_repo.path());
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "reflog",
+                "expire",
+                "--expire=never",
+                "--expire-unreachable=all",
+                "main",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &[
+                "reflog",
+                "expire",
+                "--expire=never",
+                "--expire-unreachable=all",
+                "main",
+            ],
+            "git",
+        )
+    );
+    assert_eq!(
+        run_zmin_args(zmin_repo.path(), &["reflog", "show", "main"]),
+        git_args(git_repo.path(), &["reflog", "show", "main"])
+    );
+}
+
+#[test]
+fn reflog_expire_scope_and_short_alias_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    reflog_expire_default_fixture(git_repo.path());
+    reflog_expire_default_fixture(zmin_repo.path());
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["reflog", "expire", "-n", "main"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["reflog", "expire", "-n", "main"],
+            "git",
+        )
+    );
+    assert_eq!(
+        run_zmin_args(zmin_repo.path(), &["reflog", "show", "main"]),
+        git_args(git_repo.path(), &["reflog", "show", "main"])
+    );
+
+    for args in [
+        ["reflog", "expire", "--all", "--expire=all"].as_slice(),
+        ["reflog", "expire", "--all", "--single-worktree", "--expire=all"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_worktree = reflog_expire_linked_worktree_fixture(git_repo.path());
+        let zmin_worktree = reflog_expire_linked_worktree_fixture(zmin_repo.path());
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            read_optional_lines(&zmin_repo.path().join(".git/logs/refs/heads/main")),
+            read_optional_lines(&git_repo.path().join(".git/logs/refs/heads/main")),
+            "main reflog after args: {args:?}"
+        );
+        assert_eq!(
+            read_optional_lines(&linked_worktree_head_log(&zmin_worktree)),
+            read_optional_lines(&linked_worktree_head_log(&git_worktree)),
+            "linked worktree HEAD reflog after args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn reflog_expire_stale_fix_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    reflog_expire_stale_fix_fixture(git_repo.path());
+    reflog_expire_stale_fix_fixture(zmin_repo.path());
+    reflog_append_broken_entry(git_repo.path());
+    reflog_append_broken_entry(zmin_repo.path());
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["reflog", "expire", "--stale-fix", "main"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["reflog", "expire", "--stale-fix", "main"],
+            "git",
+        )
+    );
+    assert_eq!(
+        read_optional_lines(&zmin_repo.path().join(".git/logs/refs/heads/main")),
+        read_optional_lines(&git_repo.path().join(".git/logs/refs/heads/main"))
+    );
+}
+
 fn reflog_expire_default_fixture(repo: &std::path::Path) {
     configure_identity(repo);
     git(repo, ["checkout", "-b", "main"]);
     git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
     git_with_env(repo, ["commit", "--allow-empty", "-m", "two"]);
+}
+
+fn reflog_expire_unreachable_fixture(repo: &Path) {
+    configure_identity(repo);
+    git(repo, ["checkout", "-b", "main"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "two"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "three"]);
+    git(repo, ["reset", "--hard", "HEAD~1"]);
+}
+
+fn reflog_expire_stale_fix_fixture(repo: &Path) {
+    configure_identity(repo);
+    git(repo, ["checkout", "-b", "main"]);
+    git(repo, ["commit", "--allow-empty", "-m", "one"]);
+    git(repo, ["commit", "--allow-empty", "-m", "two"]);
+    git(repo, ["commit", "--allow-empty", "-m", "three"]);
 }
 
 fn reflog_expire_pattern_config_fixture(repo: &std::path::Path) {
@@ -513,4 +678,41 @@ fn reflog_expire_pattern_config_fixture(repo: &std::path::Path) {
         repo,
         ["config", "gc.refs/heads/root2/*.reflogExpire", "now"],
     );
+}
+
+fn reflog_expire_linked_worktree_fixture(repo: &Path) -> PathBuf {
+    configure_identity(repo);
+    git(repo, ["checkout", "-b", "main"]);
+    git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
+    let worktree = repo.join("linked-worktree");
+    git(repo, ["worktree", "add", "-b", "side", worktree.to_str().unwrap()]);
+    configure_identity(&worktree);
+    git_with_env(&worktree, ["commit", "--allow-empty", "-m", "side1"]);
+    worktree
+}
+
+fn linked_worktree_head_log(worktree: &Path) -> PathBuf {
+    let dot_git = fs::read_to_string(worktree.join(".git")).expect("read linked worktree .git");
+    let git_dir = dot_git
+        .trim()
+        .strip_prefix("gitdir: ")
+        .expect("linked worktree gitdir header");
+    worktree.join(git_dir).join("logs/HEAD")
+}
+
+fn read_optional_lines(path: &Path) -> Vec<String> {
+    fs::read_to_string(path)
+        .map(|content| content.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
+}
+
+fn reflog_append_broken_entry(repo: &Path) {
+    let path = repo.join(".git/logs/refs/heads/main");
+    let mut lines = read_optional_lines(&path);
+    lines.push(format!(
+        "{} {} Oracle <oracle@example.com> 1700000000 +0000\tbroken entry",
+        "0".repeat(40),
+        "1".repeat(40)
+    ));
+    fs::write(path, format!("{}\n", lines.join("\n"))).expect("write broken reflog entry");
 }

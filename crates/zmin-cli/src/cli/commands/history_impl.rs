@@ -777,8 +777,23 @@ fn reflog_expire(args: Vec<String>) -> Result<()> {
         }
         return Ok(());
     }
-    if let Some(expire_timestamp) = reflog_expire_timestamp(&args)? {
-        return reflog_expire_by_timestamp(&repo, &args, expire_timestamp);
+    let explicit_policy = reflog_expire_explicit_policy(&args)?;
+    if let Some(ref policy) = explicit_policy {
+        if policy.expire == Some(ReflogExpireAge::All) {
+            return reflog_expire_by_timestamp(&repo, &args, i64::MAX);
+        }
+        if policy.has_unreachable_pruning() {
+            return reflog_expire_with_unreachable_policy(&repo, &args, policy);
+        }
+        if let Some(expire_age) = policy.expire {
+            return match expire_age {
+                ReflogExpireAge::All => reflog_expire_by_timestamp(&repo, &args, i64::MAX),
+                ReflogExpireAge::Never => reflog_expire_noop(&repo, &args),
+                ReflogExpireAge::Timestamp(timestamp) => {
+                    reflog_expire_by_timestamp(&repo, &args, timestamp)
+                }
+            };
+        }
     }
     if args.iter().any(|arg| arg == "--all") {
         return Ok(());
@@ -861,6 +876,25 @@ fn reflog_expire_has_explicit_policy_arg(args: &[String]) -> bool {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReflogExpireAge {
+    All,
+    Never,
+    Timestamp(i64),
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ReflogExpirePolicy {
+    expire: Option<ReflogExpireAge>,
+    expire_unreachable: Option<ReflogExpireAge>,
+}
+
+impl ReflogExpirePolicy {
+    fn has_unreachable_pruning(self) -> bool {
+        self.expire_unreachable.is_some()
+    }
+}
+
 fn reflog_expire_canonical_ref_name(repo: &GitRepo, ref_name: &str) -> Result<String> {
     if ref_name == "HEAD" || ref_name.starts_with("refs/") {
         return Ok(ref_name.to_owned());
@@ -904,23 +938,47 @@ fn reflog_expire_config_pattern_matches(pattern: &str, ref_name: &str) -> bool {
     }
 }
 
-fn reflog_expire_timestamp(args: &[String]) -> Result<Option<i64>> {
-    let mut expire = None::<String>;
+fn reflog_expire_explicit_policy(args: &[String]) -> Result<Option<ReflogExpirePolicy>> {
+    let mut policy = ReflogExpirePolicy::default();
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--expire" => expire = iter.next().cloned(),
+            "--expire" => {
+                if let Some(value) = iter.next() {
+                    policy.expire = Some(parse_reflog_expire_age(value)?);
+                }
+            }
+            "--expire-unreachable" => {
+                if let Some(value) = iter.next() {
+                    policy.expire_unreachable = Some(parse_reflog_expire_age(value)?);
+                }
+            }
             value if value.starts_with("--expire=") => {
-                expire = Some(value["--expire=".len()..].to_owned());
+                policy.expire = Some(parse_reflog_expire_age(&value["--expire=".len()..])?);
+            }
+            value if value.starts_with("--expire-unreachable=") => {
+                policy.expire_unreachable = Some(parse_reflog_expire_age(
+                    &value["--expire-unreachable=".len()..],
+                )?);
             }
             _ => {}
         }
     }
-    let Some(expire) = expire else {
+    if policy.expire.is_none() && policy.expire_unreachable.is_none() {
         return Ok(None);
-    };
-    let (timestamp, _) = parse_git_date(&expire)?;
-    Ok(Some(timestamp))
+    }
+    Ok(Some(policy))
+}
+
+fn parse_reflog_expire_age(value: &str) -> Result<ReflogExpireAge> {
+    if reflog_expire_policy_value_is_now(value) {
+        return Ok(ReflogExpireAge::All);
+    }
+    if reflog_expire_policy_value_is_never(value) {
+        return Ok(ReflogExpireAge::Never);
+    }
+    let (timestamp, _) = parse_git_date(value)?;
+    Ok(ReflogExpireAge::Timestamp(timestamp))
 }
 
 fn reflog_expire_default_timestamp(repo: &GitRepo) -> Result<Option<i64>> {
@@ -969,6 +1027,19 @@ fn reflog_expire_by_timestamp(repo: &GitRepo, args: &[String], timestamp: i64) -
     let verbose = args.iter().any(|arg| arg == "--verbose");
     for path in paths {
         reflog_expire_path_by_timestamp(&path, timestamp, verbose)?;
+    }
+    Ok(())
+}
+
+fn reflog_expire_with_unreachable_policy(
+    repo: &GitRepo,
+    args: &[String],
+    policy: &ReflogExpirePolicy,
+) -> Result<()> {
+    let verbose = args.iter().any(|arg| arg == "--verbose");
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    for ref_name in reflog_expire_refs(repo, args)? {
+        reflog_expire_ref_with_policy(repo, &store, &ref_name, policy, verbose)?;
     }
     Ok(())
 }
@@ -1057,6 +1128,137 @@ fn reflog_expire_path_by_timestamp(path: &Path, timestamp: i64, verbose: bool) -
         }
     }
     fs::write(path, kept).map_err(CliError::Io)
+}
+
+fn reflog_expire_ref_with_policy(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    ref_name: &str,
+    policy: &ReflogExpirePolicy,
+    verbose: bool,
+) -> Result<()> {
+    let path = reflog_path(repo, ref_name)?;
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(CliError::Io(error)),
+    };
+    let reachable_tip = reflog_expire_reachable_tip(repo, store, ref_name);
+    let mut seen = HashMap::<ObjectId, bool>::new();
+    let mut kept = String::new();
+    for line in content.lines() {
+        let expire = parse_reflog_entry(line)
+            .map(|entry| {
+                reflog_entry_matches_expire_policy(
+                    store,
+                    reachable_tip.as_ref(),
+                    &mut seen,
+                    &entry,
+                    policy,
+                )
+            })
+            .unwrap_or(false);
+        if expire {
+            if verbose {
+                println!("prune {}", reflog_expire_verbose_message(line));
+            }
+        } else {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    fs::write(path, kept).map_err(CliError::Io)
+}
+
+fn reflog_expire_reachable_tip(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    ref_name: &str,
+) -> Option<ObjectId> {
+    resolve_commitish(repo, store, ref_name).ok()
+}
+
+fn reflog_entry_matches_expire_policy(
+    store: &LooseObjectStore,
+    reachable_tip: Option<&ObjectId>,
+    seen: &mut HashMap<ObjectId, bool>,
+    entry: &ReflogEntry,
+    policy: &ReflogExpirePolicy,
+) -> bool {
+    match policy.expire {
+        Some(ReflogExpireAge::All) => return true,
+        Some(ReflogExpireAge::Timestamp(timestamp)) if entry.timestamp <= timestamp => return true,
+        _ => {}
+    }
+    let Some(unreachable_policy) = policy.expire_unreachable else {
+        return false;
+    };
+    let old_reachable = entry.old_id == zero_object_id()
+        || reflog_entry_is_reachable(store, reachable_tip, seen, &entry.old_id);
+    let new_reachable = entry.new_id == zero_object_id()
+        || reflog_entry_is_reachable(store, reachable_tip, seen, &entry.new_id);
+    if old_reachable && new_reachable {
+        return false;
+    }
+    match unreachable_policy {
+        ReflogExpireAge::All => true,
+        ReflogExpireAge::Never => false,
+        ReflogExpireAge::Timestamp(timestamp) => entry.timestamp <= timestamp,
+    }
+}
+
+fn reflog_entry_is_reachable(
+    store: &LooseObjectStore,
+    reachable_tip: Option<&ObjectId>,
+    seen: &mut HashMap<ObjectId, bool>,
+    target: &ObjectId,
+) -> bool {
+    let Some(tip) = reachable_tip else {
+        return false;
+    };
+    reflog_object_reachable_from(store, tip, target, seen)
+}
+
+fn reflog_object_reachable_from(
+    store: &LooseObjectStore,
+    start: &ObjectId,
+    target: &ObjectId,
+    seen: &mut HashMap<ObjectId, bool>,
+) -> bool {
+    if start == target {
+        return true;
+    }
+    if *target == zero_object_id() {
+        return false;
+    }
+    if let Some(reachable) = seen.get(target) {
+        return *reachable;
+    }
+    let mut pending = vec![start.clone()];
+    let mut visited = HashSet::new();
+    while let Some(current) = pending.pop() {
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        if current == *target {
+            seen.insert(target.clone(), true);
+            return true;
+        }
+        let object = match store.packed_first().read_object(&current) {
+            Ok(object) => object,
+            Err(_) => continue,
+        };
+        if object.kind != GitObjectKind::Commit {
+            continue;
+        }
+        let commit = match decode_commit(current.algorithm(), &object.content) {
+            Ok(commit) => commit,
+            Err(_) => continue,
+        };
+        pending.extend(commit.parents);
+    }
+    seen.insert(target.clone(), false);
+    false
 }
 
 fn reflog_expire_policy_value_is_never(value: &str) -> bool {
