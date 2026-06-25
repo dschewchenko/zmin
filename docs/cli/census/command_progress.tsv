@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1362	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1365	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -27,7 +27,7 @@ check-attr	6	6	6	100.0	17	17	100.0	17	100.0	0	0	0	yes
 check-ignore	9	9	9	100.0	23	23	100.0	13	56.5	0	0	10	yes
 check-mailmap	3	3	3	100.0	30	30	100.0	27	90.0	0	0	3	yes
 check-ref-format	4	4	4	100.0	27	27	100.0	16	59.3	0	0	11	yes
-checkout	34	9	12	35.3	36	35	97.2	34	94.4	0	0	1	no
+checkout	34	12	12	35.3	36	35	97.2	34	94.4	0	0	1	no
 checkout-index	16	16	16	100.0	29	29	100.0	28	96.6	0	0	1	yes
 cherry	1	1	1	100.0	14	14	100.0	12	85.7	0	0	2	yes
 cherry-pick	24	4	4	16.7	7	7	100.0	5	71.4	0	0	2	no
