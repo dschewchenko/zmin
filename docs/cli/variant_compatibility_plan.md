@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1297/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
+`82/151 complete command matrices / 1328/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,34 +343,36 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `ls-tree` doc-option promotion, `ls-tree`
-adds another `3` durable reviewed-complete documented option pairs without
-changing Rust behavior and is up to `3/13` documented options complete with
-`3/13` represented documented option pairs and `9/9` classified rows.
+After the latest zero-code `for-each-ref` doc-option promotion, `for-each-ref`
+adds another `2` durable reviewed-complete documented option pairs without
+changing Rust behavior and is up to `2/18` documented options complete with
+`2/18` represented documented option pairs and `34/34` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
-represented family or zero-code command-promotion cluster.
+represented family, with `replay` now the cleanest fully classified promotion-
+only candidate.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `ls-tree` surface. The
-existing exact stock-Git evidence already closed three `ls-tree` option
-families across recursive, tree-entry, and name-only lanes, so this slice
-only promotes those documented option pairs into
+promotion cluster for the represented helper-free `for-each-ref` surface. The
+existing exact stock-Git evidence already closed two `for-each-ref` option
+families across format-atom, upstream-tracking, date, bare-repository,
+sort-order, and invalid-value lanes, so this slice only promotes those
+documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(ls-tree|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(for-each-ref|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1326/3175` complete documented option pairs, and `1875`
-remaining checklist rows. `ls-tree` now reads `13` documented option
-pairs with `3` reviewed complete, `3` represented documented option pairs,
-and `9/9` classified written rows with `0` open.
+matrices, `1328/3175` complete documented option pairs, and `1873`
+remaining checklist rows. `for-each-ref` now reads `18` documented option
+pairs with `2` reviewed complete, `2` represented documented option pairs,
+and `34/34` classified written rows with `0` open.
 
 ### No-Skip Rule
 
