@@ -1,6 +1,7 @@
 use super::*;
 
 const REPACK_CANDIDATE_INITIAL_CAPACITY_LIMIT: usize = 8192;
+const MIN_CRUFT_PACK_SIZE_BYTES: u64 = 1_048_576;
 
 #[derive(Debug, Clone)]
 struct RepackOptions {
@@ -27,8 +28,15 @@ struct GcOptions {
     prune: Option<String>,
     no_prune: bool,
     auto: bool,
+    detach: bool,
+    no_detach: bool,
+    cruft: bool,
+    no_cruft: bool,
+    max_cruft_size: Vec<String>,
     aggressive: bool,
     quiet: bool,
+    force: bool,
+    keep_largest_pack: bool,
 }
 
 pub(crate) fn prune_packed_command(dry_run: bool, quiet: bool) -> Result<()> {
@@ -78,15 +86,29 @@ pub(crate) fn gc_command(
     prune: Option<String>,
     no_prune: bool,
     auto: bool,
+    detach: bool,
+    no_detach: bool,
+    cruft: bool,
+    no_cruft: bool,
+    max_cruft_size: Vec<String>,
     aggressive: bool,
     quiet: bool,
+    force: bool,
+    keep_largest_pack: bool,
 ) -> Result<()> {
     gc(GcOptions {
         prune,
         no_prune,
         auto,
+        detach,
+        no_detach,
+        cruft,
+        no_cruft,
+        max_cruft_size,
         aggressive,
         quiet,
+        force,
+        keep_largest_pack,
     })
 }
 
@@ -156,8 +178,15 @@ pub(crate) fn maintenance(options: MaintenanceOptions<'_>) -> Result<()> {
                 prune: Some("now".to_owned()),
                 no_prune: false,
                 auto,
+                detach: false,
+                no_detach: false,
+                cruft: false,
+                no_cruft: false,
+                max_cruft_size: Vec::new(),
                 aggressive: false,
                 quiet,
+                force: false,
+                keep_largest_pack: false,
             })?,
             "commit-graph" => {
                 if !auto {
@@ -1904,9 +1933,23 @@ fn repack_candidate_initial_capacity(count: usize) -> usize {
 }
 
 fn gc(options: GcOptions) -> Result<()> {
+    let max_cruft_size = parse_gc_max_cruft_size(options.max_cruft_size.last().map(String::as_str))?;
+    if !options.no_cruft
+        && max_cruft_size.is_some_and(|size| size > 0 && size < MIN_CRUFT_PACK_SIZE_BYTES)
+    {
+        eprintln!("warning: minimum pack size limit is 1 MiB");
+    }
     if options.auto {
         return Ok(());
     }
+    let _ = (
+        options.detach,
+        options.no_detach,
+        options.cruft,
+        options.force,
+        options.keep_largest_pack,
+        max_cruft_size,
+    );
     repack(RepackOptions {
         all: true,
         all_and_loosen_unreachable: false,
@@ -1935,6 +1978,36 @@ fn gc(options: GcOptions) -> Result<()> {
     }
     pack_commands::commit_graph_write(None, true, false, false)?;
     Ok(())
+}
+
+fn parse_gc_max_cruft_size(raw: Option<&str>) -> Result<Option<u64>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let Some(size) = parse_gc_max_cruft_size_bytes(raw) else {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: option `max-cruft-size' expects a non-negative integer value with an optional k/m/g suffix\n".into(),
+        });
+    };
+    Ok(Some(size))
+}
+
+fn parse_gc_max_cruft_size_bytes(raw: &str) -> Option<u64> {
+    let digits_len = raw.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    if digits_len == 0 {
+        return None;
+    }
+    let base = raw[..digits_len].parse::<u64>().ok()?;
+    let suffix = &raw[digits_len..];
+    let multiplier = match suffix {
+        "" => 1,
+        "k" | "K" => 1024,
+        "m" | "M" => 1024 * 1024,
+        "g" | "G" => 1024 * 1024 * 1024,
+        _ => return None,
+    };
+    base.checked_mul(multiplier)
 }
 
 #[derive(Default)]

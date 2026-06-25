@@ -1714,10 +1714,24 @@ pub enum Command {
         no_prune: bool,
         #[arg(long = "auto", action = ArgAction::SetTrue)]
         auto: bool,
+        #[arg(long = "detach", action = ArgAction::SetTrue, overrides_with = "no_detach")]
+        detach: bool,
+        #[arg(long = "no-detach", action = ArgAction::SetTrue, overrides_with = "detach")]
+        no_detach: bool,
+        #[arg(long = "cruft", action = ArgAction::SetTrue, overrides_with = "no_cruft")]
+        cruft: bool,
+        #[arg(long = "no-cruft", action = ArgAction::SetTrue, overrides_with = "cruft")]
+        no_cruft: bool,
+        #[arg(long = "max-cruft-size")]
+        max_cruft_size: Vec<String>,
         #[arg(long = "aggressive", action = ArgAction::SetTrue)]
         aggressive: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
+        #[arg(long = "force", action = ArgAction::SetTrue)]
+        force: bool,
+        #[arg(long = "keep-largest-pack", action = ArgAction::SetTrue)]
+        keep_largest_pack: bool,
     },
     Maintenance {
         operation: String,

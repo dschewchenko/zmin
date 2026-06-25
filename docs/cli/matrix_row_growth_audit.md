@@ -133,6 +133,17 @@ complete option list. Expected delta is `+3` matrix rows, `+3` verified rows,
 remaining checklist rows. Rust behavior changes are not expected. Actual delta
 matched.
 
+As of 2026-06-25 the next batch is a helper-free `gc` schema-tail plus
+reviewed-complete closure. The selected rows add the remaining documented
+parser surface `--[no-]detach`, `--[no-]cruft`, `--max-cruft-size`,
+`--force`, and `--keep-largest-pack`, while the product changes add
+stock-compatible max-cruft-size parsing with the 1 MiB minimum-size warning,
+warning suppression under `--no-cruft`, last-one-wins repeated value
+selection, and stock invalid-value rejection. Expected delta is `+12` matrix
+rows, `+12` verified rows, `+7` complete documented option pairs, `+1`
+complete command matrix, `0` invalid-input rows and `-7` remaining checklist
+rows. Rust behavior changes are expected. Actual delta matched.
+
 As of 2026-06-25 the `git_foreign_scm_compat.rs` `p4 submit` follow-up is a
 zero-row closure slice. The selected row already existed in
 `docs/cli/matrices/p4_v2_47.tsv`; the work closes it by matching stock Git's

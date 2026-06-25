@@ -1185,36 +1185,38 @@ Largest raw clusters:
 Current durable census after the `checkout-index` documented-surface closure:
 
 - complete command matrices: `76 / 151`
-- complete documented command-option pairs: `411 / 3175`
-- matrix rows: `5200`
-- verified rows: `4492`
+- complete documented command-option pairs: `418 / 3175`
+- matrix rows: `5212`
+- verified rows: `4504`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `unpack-objects` is now reviewed complete at both the command and
-  documented option-pair levels.
+- `gc` is now reviewed complete at both the command and documented
+  option-pair levels.
 - The closed family added the remaining documented parser surface
-  `--max-input-size=<size>`, made repeated documented booleans parse like stock
-  Git, and closed exact rows for repeated `-n`, `-q`, `-r`, and `--strict`,
-  `--max-input-size=0`, `--max-input-size=1500`, `--max-input-size=bogus`,
-  repeated `--max-input-size` last-one-wins, and stock-Git fatal rejections
-  for too-small limits and leading-digit-only suffix forms like `1m`.
+  `--[no-]detach`, `--[no-]cruft`, `--max-cruft-size`, `--force`, and
+  `--keep-largest-pack`, plus exact stock-Git evidence for auto no-op
+  detach/no-detach rows, quiet force/keep-largest-pack/cruft/no-cruft rows,
+  `--max-cruft-size` equals and separate forms, last-one-wins ordering,
+  the 1 MiB minimum-size warning and its no-cruft suppression path, and
+  invalid max-cruft-size rejection.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_pack_integrity_compat unpack_objects_documented_option_combinations_match_stock_git -- --nocapture`,
-  `ZMIN_BIN=target/debug/zmin bash tools/git-unpack-objects-schema-oracle-smoke.sh`,
+  `cargo test -p zmin-cli --test git_maintenance_compat gc_supported_documented_option_combinations_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat gc_invalid_max_cruft_size_matches_stock_git -- --nocapture`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(unpack-objects|summary)\t'`.
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(gc|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `read-tree` remains the largest recently expanded helper-free plumbing lane,
-  but it is no longer the best next closure target.
-- The next efficient family now shifts back to unsupported documented surfaces,
-  with `gc` as the smallest remaining schema-missing helper-free candidate and
-  `repack` still the largest unresolved supported-option cluster.
+- `read-tree` remains the largest recently expanded helper-free plumbing lane
+  because its documented options are all represented but the command is still
+  blocked on expansion-required rows inside already-modeled surfaces.
+- The next efficient schema-tail closure now shifts to `repack`, which remains
+  the largest unresolved helper-free documented-option cluster.
 
 Latest zero-code closure:
 
@@ -1226,4 +1228,4 @@ Latest zero-code closure:
 Next helper-free family candidates by schema-missing size now remain:
 
 - `repack`: `16`
-- `gc`: `7`
+- `read-tree` expansion-required rows: `4`

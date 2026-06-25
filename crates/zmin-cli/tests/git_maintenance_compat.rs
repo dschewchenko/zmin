@@ -1687,6 +1687,17 @@ fn gc_supported_documented_option_combinations_match_stock_git() {
         ["gc", "--prune", "--quiet"].as_slice(),
         ["gc", "--no-prune", "--quiet"].as_slice(),
         ["gc", "--auto", "--quiet"].as_slice(),
+        ["gc", "--detach", "--auto"].as_slice(),
+        ["gc", "--no-detach", "--auto"].as_slice(),
+        ["gc", "--force", "--quiet"].as_slice(),
+        ["gc", "--keep-largest-pack", "--quiet"].as_slice(),
+        ["gc", "--cruft", "--quiet"].as_slice(),
+        ["gc", "--no-cruft", "--quiet"].as_slice(),
+        ["gc", "--max-cruft-size=1", "--quiet"].as_slice(),
+        ["gc", "--max-cruft-size", "1", "--quiet"].as_slice(),
+        ["gc", "--no-cruft", "--max-cruft-size=1", "--quiet"].as_slice(),
+        ["gc", "--max-cruft-size=1", "--max-cruft-size=2m", "--quiet"].as_slice(),
+        ["gc", "--max-cruft-size=2m", "--max-cruft-size=1", "--quiet"].as_slice(),
     ] {
         let git_repo = commit_graph_fixture_repo();
         let zmin_repo = commit_graph_fixture_repo();
@@ -1696,6 +1707,23 @@ fn gc_supported_documented_option_combinations_match_stock_git() {
             "args: {args:?}"
         );
         assert_gc_observables_match(zmin_repo.path(), git_repo.path());
+    }
+}
+
+#[test]
+fn gc_invalid_max_cruft_size_matches_stock_git() {
+    for args in [
+        ["gc", "--max-cruft-size=bogus", "--quiet"].as_slice(),
+        ["gc", "--cruft", "--max-cruft-size=bogus", "--quiet"].as_slice(),
+        ["gc", "--no-cruft", "--max-cruft-size=bogus", "--quiet"].as_slice(),
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
     }
 }
 

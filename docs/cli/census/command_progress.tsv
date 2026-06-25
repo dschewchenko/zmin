@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	78	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	411	3175	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	79	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	418	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1362	3175	documented command-option pairs with at least one behavior row
-behavior_rows_written	5200	5200	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4492	5200	closed written rows only
-behavior_rows_classified	5171	5200	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5200	written rows with incomplete parity
-behavior_rows_open	26	5200	written rows not implemented or not matching yet
-invalid_input_rows	679	5200	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1369	3175	documented command-option pairs with at least one behavior row
+behavior_rows_written	5212	5212	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4504	5212	closed written rows only
+behavior_rows_classified	5183	5212	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5212	written rows with incomplete parity
+behavior_rows_open	26	5212	written rows not implemented or not matching yet
+invalid_input_rows	679	5212	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	31	0	27	87.1	126	126	100.0	110	87.3	0	0	16	no
@@ -64,7 +64,7 @@ for-each-ref	18	0	2	11.1	34	34	100.0	23	67.6	0	0	11	no
 for-each-repo	2	2	2	100.0	5	5	100.0	5	100.0	0	0	0	yes
 format-patch	163	0	12	7.4	15	15	100.0	15	100.0	0	0	0	no
 fsck	15	15	15	100.0	56	56	100.0	21	37.5	0	0	35	yes
-gc	12	5	5	41.7	9	9	100.0	9	100.0	0	0	0	no
+gc	12	12	12	100.0	21	21	100.0	21	100.0	0	0	0	yes
 get-tar-commit-id	0	0	0	0.0	2	2	100.0	1	50.0	0	0	1	yes
 grep	73	0	7	9.6	16	16	100.0	16	100.0	0	0	0	no
 gui	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
