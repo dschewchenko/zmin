@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`91/151 complete command matrices / 1422/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1430/3156 represented doc-option pairs / 5381 written rows / 4684/5381 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`92/151 complete command matrices / 1423/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1431/3156 represented doc-option pairs / 5383 written rows / 4684/5383 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -382,13 +382,13 @@ command-complete at `15/15` reviewed-complete documented option pairs,
 stopping the docs inventory from seeding the prose-only `--ignore-unmatch`
 example token. The smallest raw documented gap is still `http-fetch`, but
 `--index-pack-args` remains blocked on clean local stock-Git evidence, and
-`instaweb` is now command-complete at `13/13` reviewed-complete documented
-option pairs, `13/13` represented documented option pairs, `13/13` classified
-rows, and `0` exact-open written rows after closing the documented
-`--module-path` / `-m` tail on the lighttpd lane. The next bounded helper-free
-follow-up should therefore move to another small supported subgroup with clear
-semantics, with `mergetool` (`8/10`) or `http-fetch` (`8/9`) as the current
-best local candidates. The primary
+`http-fetch` is now command-complete at `9/9` reviewed-complete documented
+option pairs, `9/9` represented documented option pairs, `14/14` classified
+rows, and `0` exact-open written rows after closing the documented plural
+`--index-pack-args` lane with exact stock-Git rejection evidence. The next
+bounded helper-free follow-up should therefore move to another small supported
+subgroup with clear semantics, with `mergetool` (`8/10`) as the current best
+compact candidate before returning to the heavier `multi-pack-index` tail. The primary
 `remaining_to_fix_or_verify.tsv` backlog still has no real
 implemented-but-unverified family beyond the lone schema-only
 `archive <positional:args>` parser surface. `notes` is fully reviewed complete
@@ -406,29 +406,32 @@ short `-S` and `-p` aliases durable.
 
 ### Latest Completed Slice
 
-The latest completed slice closes the documented `git instaweb`
-`--module-path` / `-m` tail on the lighttpd lane, adds exact stock-Git parity
-for both spellings where upstream Git accepts them silently and leaves the
-generated lighttpd config plus daemon argv unchanged, and then promotes
-`instaweb` into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
-Zmin now accepts both spellings in schema and matches the stock non-Apache
-ignored-option behavior on explicit lighttpd start without widening the
-runtime surface.
+The latest completed slice closes the documented `git http-fetch`
+`--index-pack-args` lane by matching stock Git's current rejection behavior:
+the documented plural spelling is accepted by argument parsing but ignored on
+the modeled helper path, so packfile mode still fails with the stock fatal
+requiring `--index-pack-args`, and non-packfile mode falls back to the normal
+usage rejection. With those exact invalid-input rows recorded, the slice then
+promotes `http-fetch` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_admin_tools_compat instaweb_ -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat http_fetch_documented_plural_index_pack_args_matches_stock_git_rejections -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat http_fetch_packfile_requires_index_pack_args_like_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat http_fetch_packfile_rejects_bad_index_pack_arg_like_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat http_fetch_packfile_downloads_and_indexes_pack -- --exact --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(instaweb|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(http-fetch|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5381` matrix rows, `4684` verified rows, `682`
-invalid-input rows, `12` exact-open rows, `91/151` complete command
-matrices before command promotion, `1422/3156` complete documented option
-pairs, `1430/3156` represented documented option pairs, and `1746`
-remaining checklist rows. `instaweb` is now fully command-complete at
-`13/13` reviewed-complete documented option pairs with `13/13` represented
-documented option pairs, `13/13` classified rows, and `0` exact-open written
+Current census counts are `5383` matrix rows, `4684` verified rows, `682`
+invalid-input rows, `12` exact-open rows, `92/151` complete command
+matrices before command promotion, `1423/3156` complete documented option
+pairs, `1431/3156` represented documented option pairs, and `1744`
+remaining checklist rows. `http-fetch` is now fully command-complete at
+`9/9` reviewed-complete documented option pairs with `9/9` represented
+documented option pairs, `14/14` classified rows, and `0` exact-open written
 rows. The exact-open queue remains limited to the helper-oracle-unavailable
 commands `citool`, `cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and
 `scalar`.

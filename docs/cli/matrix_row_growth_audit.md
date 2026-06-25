@@ -39,6 +39,20 @@ matched, and `instaweb` is now command-complete at `13/13`
 reviewed-complete documented option pairs with `13/13` classified rows and
 `0` exact-open written rows.
 
+As of 2026-06-25 the next batch is a helper-free `git http-fetch`
+documented-plural rejection closure plus command promotion. The selected
+change adds the documented `--index-pack-args` spelling to schema coverage,
+records exact stock-Git rejection rows for the packfile-helper and
+non-packfile lanes where upstream Git currently ignores that plural spelling,
+and then promotes `http-fetch` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Expected delta is
+`+2` matrix rows, `+1` complete documented option pair, `+1` represented
+documented option pair, `+1` complete command matrix, `+0` verified rows,
+`+2` invalid-input rows, and `-2` remaining checklist rows. Actual delta
+matched, and `http-fetch` is now command-complete at `9/9`
+reviewed-complete documented option pairs with `14/14` classified rows and
+`0` exact-open written rows.
+
 As of 2026-06-25 the next batch is a zero-row census-accounting correction for
 reviewed-complete commands. The selected change teaches
 `tools/git-compat-census.py` to suppress residual schema-only

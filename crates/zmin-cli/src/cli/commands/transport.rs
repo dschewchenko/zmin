@@ -262,6 +262,7 @@ pub(crate) fn dispatch(
             stdin,
             packfile,
             index_pack_args,
+            index_pack_args_plural: _,
             args,
         } => super::transport_commands::http_fetch(super::transport_commands::HttpFetchOptions {
             commit,

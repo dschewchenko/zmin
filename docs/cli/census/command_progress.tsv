@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	92	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1422	3156	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	93	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	1423	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1430	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5381	5381	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4684	5381	closed written rows only
-behavior_rows_classified	5366	5381	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5381	written rows with incomplete parity
-behavior_rows_open	12	5381	written rows not implemented or not matching yet
-invalid_input_rows	682	5381	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1431	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5383	5383	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4684	5383	closed written rows only
+behavior_rows_classified	5368	5383	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5383	written rows with incomplete parity
+behavior_rows_open	12	5383	written rows not implemented or not matching yet
+invalid_input_rows	684	5383	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	26	26	86.7	126	126	100.0	110	87.3	0	0	16	no
@@ -72,7 +72,7 @@ hash-object	7	7	7	100.0	17	17	100.0	14	82.4	0	0	3	yes
 help	17	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 hook	2	2	2	100.0	3	3	100.0	3	100.0	0	0	0	yes
 http-backend	0	0	0	0.0	15	15	100.0	14	93.3	0	0	1	yes
-http-fetch	9	8	8	88.9	12	12	100.0	10	83.3	0	0	2	no
+http-fetch	9	9	9	100.0	14	14	100.0	10	71.4	0	0	4	yes
 http-push	6	4	4	66.7	8	8	100.0	8	100.0	0	0	0	no
 imap-send	6	6	6	100.0	7	7	100.0	7	100.0	0	0	0	yes
 index-pack	16	10	10	62.5	17	17	100.0	11	64.7	0	0	6	no

@@ -2915,6 +2915,8 @@ pub enum Command {
         packfile: Option<String>,
         #[arg(long = "index-pack-arg")]
         index_pack_args: Vec<String>,
+        #[arg(long = "index-pack-args")]
+        index_pack_args_plural: Vec<String>,
         args: Vec<String>,
     },
     HttpPush {
