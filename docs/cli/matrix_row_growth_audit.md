@@ -12,6 +12,18 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free `log` surface. The
+selected rows do not add new behavior evidence; they promote eighteen exact
+stock-Git `log` option families with existing local history-traversal,
+formatting, decoration, reflog-walk, merge-diff, pickaxe, date-format, and
+replacement-shim matrix coverage into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+0` matrix rows, `+18` complete documented option pairs, `+0` complete
+command matrices, `+0` verified rows, `+0` invalid-input rows, and `-18`
+remaining checklist rows. Rust behavior changes are not expected. Actual
+delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `diff` surface. The
 selected rows do not add new behavior evidence; they promote ten exact
 stock-Git `diff` option families with existing local treeish-pair,
