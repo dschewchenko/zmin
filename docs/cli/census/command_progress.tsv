@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1254	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1268	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -106,7 +106,7 @@ pack-refs	5	5	5	100.0	8	8	100.0	8	100.0	0	0	0	yes
 patch-id	3	3	3	100.0	17	17	100.0	9	52.9	0	0	8	yes
 prune	6	6	6	100.0	13	13	100.0	12	92.3	0	0	1	yes
 prune-packed	4	4	4	100.0	13	13	100.0	9	69.2	0	0	4	yes
-pull	99	0	14	14.1	37	37	100.0	36	97.3	0	0	1	no
+pull	99	14	14	14.1	37	37	100.0	36	97.3	0	0	1	no
 push	0	0	0	0.0	16	16	100.0	15	93.8	0	0	1	yes
 quiltimport	6	6	6	100.0	5	5	100.0	5	100.0	0	0	0	yes
 range-diff	6	0	1	16.7	8	8	100.0	6	75.0	0	0	2	no
