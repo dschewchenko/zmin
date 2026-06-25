@@ -1651,7 +1651,6 @@ fn repack(options: RepackOptions) -> Result<()> {
         "window-memory",
     )?;
     let _geometric = parse_repack_geometric_values(&options.geometric)?;
-    validate_repack_filter_spec(options.filter.as_deref())?;
     let unpack_unreachable_expires_now =
         unpack_unreachable_expires_now(options.unpack_unreachable.last().map(String::as_str))?;
     let expire_unreachable_now = write_cruft_pack
@@ -1670,6 +1669,7 @@ fn repack(options: RepackOptions) -> Result<()> {
     );
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    validate_repack_filter_spec(&repo, &store, options.filter.as_deref())?;
     let old_pack_names =
         PackedObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1).pack_names()?;
     let pack_dir = repo.objects_dir.join("pack");
@@ -1965,14 +1965,18 @@ fn parse_repack_geometric(raw: Option<&str>) -> Result<Option<u64>> {
     Ok(Some(size))
 }
 
-fn validate_repack_filter_spec(raw: Option<&str>) -> Result<()> {
+fn validate_repack_filter_spec(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    raw: Option<&str>,
+) -> Result<()> {
     let Some(raw) = raw else {
         return Ok(());
     };
-    parse_repack_filter_spec(raw).map(|_| ())
+    parse_repack_filter_spec(repo, store, raw).map(|_| ())
 }
 
-fn parse_repack_filter_spec(raw: &str) -> Result<()> {
+fn parse_repack_filter_spec(repo: &GitRepo, store: &LooseObjectStore, raw: &str) -> Result<()> {
     if raw == "blob:none" {
         return Ok(());
     }
@@ -1999,6 +2003,13 @@ fn parse_repack_filter_spec(raw: &str) -> Result<()> {
                 message: "expected 'tree:<depth>'".into(),
             });
     }
+    if let Some(path) = raw.strip_prefix("sparse:path=") {
+        let _ = path;
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: sparse:path filters support has been dropped\n".into(),
+        });
+    }
     if let Some(blobish) = raw.strip_prefix("sparse:oid=") {
         if blobish.is_empty() {
             return Err(CliError::Fatal {
@@ -2006,10 +2017,21 @@ fn parse_repack_filter_spec(raw: &str) -> Result<()> {
                 message: "unable to access sparse blob in ''".into(),
             });
         }
-        return Err(CliError::Fatal {
+        let id = resolve_objectish(repo, blobish).map_err(|_| CliError::Fatal {
             code: 128,
             message: format!("unable to access sparse blob in '{blobish}'"),
-        });
+        })?;
+        let object = store.read_object(&id).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("unable to access sparse blob in '{blobish}'"),
+        })?;
+        if object.kind != GitObjectKind::Blob {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("unable to parse sparse filter data in {blobish}"),
+            });
+        }
+        return Ok(());
     }
     if let Some(filters) = raw.strip_prefix("combine:") {
         if filters.is_empty() {
@@ -2020,7 +2042,7 @@ fn parse_repack_filter_spec(raw: &str) -> Result<()> {
         }
         for filter in filters.split('+') {
             let decoded = percent_decode_repack_filter(filter)?;
-            parse_repack_filter_spec(&decoded)?;
+            parse_repack_filter_spec(repo, store, &decoded)?;
         }
         return Ok(());
     }

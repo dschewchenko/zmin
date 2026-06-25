@@ -293,6 +293,26 @@ fn repack_documented_option_fixture_repo() -> TempDir {
     repo
 }
 
+fn repack_filter_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "small.txt", "one\n");
+    write_file(
+        repo.path(),
+        "big.bin",
+        &String::from_utf8(vec![b'x'; 4096]).expect("ascii fixture"),
+    );
+    write_file(repo.path(), "sparse.txt", "small.txt\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    git(repo.path(), ["repack", "-q"]);
+    write_file(repo.path(), "later.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    repo
+}
+
 fn repack_keep_pack_fixture_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -1546,10 +1566,12 @@ fn repack_invalid_documented_size_values_match_stock_git() {
         ["repack", "--geometric=bogus", "-d", "-q"].as_slice(),
         ["repack", "--max-pack-size=bogus", "-a", "-d", "-q"].as_slice(),
         ["repack", "--filter=bogus", "-d", "-q"].as_slice(),
+        ["repack", "--filter=tree:bogus", "-d", "-q"].as_slice(),
+        ["repack", "--filter=sparse:path=sparse.txt", "-d", "-q"].as_slice(),
         ["repack", "--filter-to=filtered", "-d", "-q"].as_slice(),
     ] {
-        let git_repo = repack_documented_option_fixture_repo();
-        let zmin_repo = repack_documented_option_fixture_repo();
+        let git_repo = repack_filter_fixture_repo();
+        let zmin_repo = repack_filter_fixture_repo();
         assert_eq!(
             run_zmin_failure_output(zmin_repo.path(), args),
             git_failure_output(git_repo.path(), args),
@@ -1562,7 +1584,17 @@ fn repack_invalid_documented_size_values_match_stock_git() {
 fn repack_filter_variants_match_stock_git() {
     for args in [
         ["repack", "--filter=blob:none", "-d", "-q"].as_slice(),
+        ["repack", "--filter=blob:limit=1k", "-d", "-q"].as_slice(),
+        ["repack", "--filter=blob:limit=0", "-d", "-q"].as_slice(),
+        ["repack", "--filter=object:type=blob", "-d", "-q"].as_slice(),
+        ["repack", "--filter=object:type=tree", "-d", "-q"].as_slice(),
+        ["repack", "--filter=object:type=commit", "-d", "-q"].as_slice(),
+        ["repack", "--filter=object:type=tag", "-d", "-q"].as_slice(),
+        ["repack", "--filter=tree:0", "-d", "-q"].as_slice(),
+        ["repack", "--filter=tree:2", "-d", "-q"].as_slice(),
+        ["repack", "--filter=sparse:oid=HEAD:sparse.txt", "-d", "-q"].as_slice(),
         ["repack", "--filter=combine:blob:none+tree:1", "-d", "-q"].as_slice(),
+        ["repack", "--filter=combine:tree%3A1+blob%3Anone", "-d", "-q"].as_slice(),
         [
             "repack",
             "--filter=blob:none",
@@ -1580,8 +1612,8 @@ fn repack_filter_variants_match_stock_git() {
         ]
         .as_slice(),
     ] {
-        let git_repo = repack_documented_option_fixture_repo();
-        let zmin_repo = repack_documented_option_fixture_repo();
+        let git_repo = repack_filter_fixture_repo();
+        let zmin_repo = repack_filter_fixture_repo();
         assert_eq!(
             command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
             command_any_output("git", git_repo.path(), args, "git"),
@@ -1611,8 +1643,8 @@ fn repack_filter_to_variants_match_stock_git() {
             "filtered2-",
         ),
     ] {
-        let git_repo = repack_documented_option_fixture_repo();
-        let zmin_repo = repack_documented_option_fixture_repo();
+        let git_repo = repack_filter_fixture_repo();
+        let zmin_repo = repack_filter_fixture_repo();
         assert_eq!(
             command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
             command_any_output("git", git_repo.path(), args, "git"),

@@ -343,34 +343,39 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code reviewed-complete closure, `repack` still has
-`104/104` classified written rows with `0` open and now sits at `33/33`
-represented documented option pairs and `32/33` reviewed-complete documented
-option pairs. Only the documented `--filter` surface still remains expansion-
-required, so the next best helper-free follow-up is the remaining filter value
-family unless another census-backed cluster becomes higher-throughput.
+After the latest `--filter` value-family closure, `repack` now has
+`116/116` classified written rows with `0` open and sits at `33/33`
+represented documented option pairs and `33/33` reviewed-complete documented
+option pairs. `repack` is now a reviewed-complete command matrix, so the next
+best helper-free follow-up should move to another dense census-backed cluster
+unless a zero-code promotion overtakes it on throughput.
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-code `git repack` reviewed-complete
-documented-option closure batch. The existing exact stock-Git evidence now
-promotes `--cruft`, `--cruft-expiration`, `--expire-to`, `--filter-to`,
-`--geometric`, `--max-cruft-size`, `--unpack-unreachable`, and `-g` into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, leaving only the
-documented `--filter` value-family expansion still open inside `repack`.
+The latest completed slice is a helper-free `git repack --filter`
+value-family closure plus reviewed-complete command promotion. Zmin now
+matches stock Git for the remaining documented filter forms on the current
+helper-free local lane: `blob:limit`, all documented `object:type` values,
+documented `tree:<depth>` forms, valid `sparse:oid`, percent-encoded
+`combine`, invalid tree-depth rejection, and the dropped `sparse:path`
+diagnostic. With those rows in place, `--filter` is now reviewed complete and
+`repack` is promoted into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
 Focused gates were
+`cargo test -p zmin-cli --test git_maintenance_compat repack_filter -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5319` matrix rows, `4611` verified rows, `679`
-invalid-input rows, `26` exact-open rows, `79/151` complete command
-matrices, `447/3175` complete documented option pairs, and `2754`
+Current census counts are `5331` matrix rows, `4623` verified rows, `679`
+invalid-input rows, `26` exact-open rows, `80/151` complete command
+matrices, `448/3175` complete documented option pairs, and `2753`
 remaining checklist rows. `repack` now reads `33` documented option pairs,
-`32` reviewed-complete documented option pairs, `33` represented documented
-option pairs, and `104/104` classified written rows with `0` open.
+`33` reviewed-complete documented option pairs, `33` represented documented
+option pairs, and `116/116` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1180,37 +1185,41 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code `repack` reviewed-complete
-option-family closure:
+Current durable census after the helper-free `repack --filter`
+value-family closure:
 
-- complete command matrices: `79 / 151`
-- complete documented command-option pairs: `447 / 3175`
-- matrix rows: `5319`
-- verified rows: `4611`
+- complete command matrices: `80 / 151`
+- complete documented command-option pairs: `448 / 3175`
+- matrix rows: `5331`
+- verified rows: `4623`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `repack` now has nearly all represented documented option families promoted
-  into the reviewed-complete census list without additional Rust changes.
-- The closed subgroup promotes the existing exact stock-Git evidence for
-  `--cruft`, `--cruft-expiration`, `--expire-to`, `--filter-to`,
-  `--geometric`, `--max-cruft-size`, `--unpack-unreachable`, and `-g`.
+- `repack` now has the final remaining documented option family closed on the
+  current helper-free local lane and is promoted into the reviewed-complete
+  command census list.
+- The closed subgroup adds exact stock-Git evidence for the remaining
+  `--filter` value family: `blob:limit`, all documented `object:type` values,
+  documented tree depths, valid `sparse:oid`, encoded `combine`, invalid tree
+  depth rejection, and the dropped `sparse:path` diagnostic.
 - Focused verification was
+  `cargo test -p zmin-cli --test git_maintenance_compat repack_filter --
+  --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat
+  repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
+  `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
   and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `repack` now has `33/33` represented documented option pairs with
-  `104/104` classified rows and `0` open written rows, but the full command is
-  still not reviewed-complete because expansion-only families remain inside the
-  documented surface.
-- The next best helper-free follow-up is now the remaining `--filter`
-  value-family expansion unless another zero-row or dense census-backed
-  cluster overtakes it on throughput.
+- `repack` is now reviewed complete at `33/33` documented option pairs with
+  `116/116` classified rows and `0` open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed family or zero-code command/doc-option promotion cluster.
 
 Latest zero-code closure:
 

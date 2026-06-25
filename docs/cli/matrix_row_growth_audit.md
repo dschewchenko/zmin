@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `repack --filter`
+value-family closure plus reviewed-complete command promotion. The selected
+rows add exact stock-Git evidence for `blob:limit` values, all documented
+`object:type` forms, documented `tree:<depth>` values, valid `sparse:oid`,
+percent-encoded `combine`, invalid tree-depth rejection, and the dropped
+`sparse:path` diagnostic on the helper-free local lane, then promote
+`--filter` and the full `repack` command into the durable reviewed-complete
+census lists. Expected delta is `+12` matrix rows, `+12` verified rows, `+1`
+complete documented option pair, `+1` complete command matrix, `+0`
+invalid-input rows, and `-1` remaining checklist row. Rust behavior changes
+are expected because `repack` must accept valid sparse oid filters and emit
+the stock dropped sparse-path diagnostic. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-code `repack`
 reviewed-complete documented-option closure. The selected rows do not add new
 behavior evidence; they promote the existing exact stock-Git evidence for
