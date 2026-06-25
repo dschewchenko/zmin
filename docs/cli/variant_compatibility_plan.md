@@ -343,37 +343,36 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `p4 --branch` doc-option promotion, `p4` adds
-another `1` durable reviewed-complete documented option pair without changing
-Rust behavior and is up to `1/29` documented options complete with `4/29`
-represented documented option pairs and `4/4` classified rows. The next best
-helper-free follow-up should move to another dense census-backed represented
-family. The current census now points at `rebase` as the only
-represented-vs-reviewed delta with zero exact-open rows, but that review needs
-an explicit evidence pass instead of automatic promotion.
+After the latest zero-code `reflog expire` doc-option promotion cluster,
+`reflog` adds `4` durable reviewed-complete documented option pairs without
+changing Rust behavior and is up to `4/10` documented options complete with
+`4/10` represented documented option pairs. The next best helper-free
+follow-up should move to another dense census-backed represented family. The
+current largest pure promotion-only cluster is `submodule`, where `11`
+documented option surfaces already sit at `status_counts={'closed': 1}` in the
+census and can be reviewed as one helper-free local-family batch.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `p4 --branch` surface. The
-existing exact stock-Git evidence already closed the represented
-`git p4 clone --branch master //depot/project <target>` family on the current
-fake-Perforce local lane, so this slice only promotes that documented option
-pair into
+promotion cluster for the represented helper-free `reflog expire` surfaces
+`--dry-run`, `--rewrite`, `--updateref`, and `--verbose`. The existing exact
+stock-Git evidence already closed those represented `reflog expire` families
+on the current local helper-free lanes, so this slice only promotes the four
+documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(p4|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(reflog|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1335/3175` complete documented option pairs, and `1866`
-remaining checklist rows. `p4` now reads `29` documented option pairs with
-`1` reviewed complete, `4` represented documented option pairs, and `4/4`
-classified written rows with `0` open.
+matrices, `1339/3175` complete documented option pairs, and `1862`
+remaining checklist rows. `reflog` now reads `10` documented option pairs
+with `4` reviewed complete and `4` represented documented option pairs.
 
 ### No-Skip Rule
 

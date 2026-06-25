@@ -12,6 +12,17 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free `reflog expire`
+surfaces `--dry-run`, `--rewrite`, `--updateref`, and `--verbose`. The
+selected rows do not add new behavior evidence; they promote four exact
+stock-Git `reflog expire` documented option families with existing dry-run
+non-mutation and current-entry expiry parity coverage into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+0` matrix rows, `+4` complete documented option pairs, `+0` complete command
+matrices, `+0` verified rows, `+0` invalid-input rows, and `-4` remaining
+checklist rows. Rust behavior changes are not expected. Actual delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `p4 --branch`
 surface. The selected rows do not add new behavior evidence; they promote one
 exact stock-Git `git p4 clone --branch master //depot/project <target>`
