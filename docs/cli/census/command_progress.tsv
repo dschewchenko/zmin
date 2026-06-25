@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	900	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	927	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -11,7 +11,7 @@ behavior_rows_open	26	5332	written rows not implemented or not matching yet
 invalid_input_rows	679	5332	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
-add	31	0	27	87.1	126	126	100.0	110	87.3	0	0	16	no
+add	31	27	27	87.1	126	126	100.0	110	87.3	0	0	16	no
 am	54	0	0	0.0	2	2	100.0	2	100.0	0	0	0	no
 annotate	25	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 apply	38	0	5	13.2	22	22	100.0	21	95.5	0	0	1	no
