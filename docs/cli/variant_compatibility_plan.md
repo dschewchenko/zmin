@@ -320,10 +320,14 @@ too (`8/8` represented documented option pairs), and both `check-ignore`
 (`9/9`) and `column` (`7/7`) are now reviewed-complete commands. `clean` is
 now reviewed complete too across all `13/13` documented options with `68/68`
 classified rows and `0` open after closing the last alias-only gaps for
-`--force` and `-i`. The next helper-free family should now move to another
-census-backed supported subgroup such as `archive` (`13/14` represented
-documented options), unless work intentionally opens unsupported surfaces in
-`checkout-index`, `read-tree`, `gc`, or `repack`.
+`--force` and `-i`. `archive` now has its full documented option family
+reviewed complete too (`14/14` represented documented option pairs) after
+closing output-format inference, repeated prefix and add-file ordering, and
+`--worktree-attributes` parity; the full command is still not promoted because
+backend extra compression-level options remain outside the reviewed-complete
+command matrix. The next helper-free family should now move to another
+census-backed supported subgroup unless work intentionally opens unsupported
+surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -332,15 +336,16 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `clean` documented-family and
-reviewed-complete closure batch. The runtime already matched stock Git across
-the supported `clean` surface; this follow-up adds explicit stock-Git evidence
-for the remaining documented aliases `--force` and `-i`, then promotes
-`clean` into both reviewed-complete census artifacts. `clean` is now reviewed
-complete across all `13/13` documented options with `68/68` classified rows,
-`0` open rows, and exact stock-Git parity for dry-run, force, interactive,
-quiet, exclude, x/X, path-limited, nested-repository, config, and invalid
-input behavior.
+The latest completed slice is a helper-free `archive` documented-option family
+closure. This batch replaces the flat archive parser with ordered handling for
+documented `--prefix`, `--add-file`, and `--add-virtual-file` forms, adds
+filename-based output-format inference, and matches stock Git for
+`--worktree-attributes` export-ignore behavior. With that evidence in place,
+`archive` is now reviewed complete across all `14/14` documented options with
+`24/24` classified rows and `0` open rows, but the full command is not yet
+promoted into the reviewed-complete command list because backend extra
+compression-level options under `<extra>` still need a deliberate command-level
+matrix decision.
 
 Focused gates were
 `python3 tools/git-compat-census.py`,

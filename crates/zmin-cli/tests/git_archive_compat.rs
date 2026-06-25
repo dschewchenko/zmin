@@ -363,6 +363,147 @@ fn archive_mtime_invalid_text_falls_back_to_current_time_like_stock_git() {
 }
 
 #[test]
+fn archive_documented_option_order_and_output_inference_match_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::write(repo.path().join("dir/a.txt"), b"hello\n").expect("write tracked file");
+    fs::write(repo.path().join("root.txt"), b"root\n").expect("write tracked root");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "archive order fixture"]);
+    fs::write(repo.path().join("extra-one.txt"), b"extra one\n").expect("write extra one");
+    fs::write(repo.path().join("extra-two.txt"), b"extra two\n").expect("write extra two");
+
+    run_zmin(
+        repo.path(),
+        [
+            "archive",
+            "--prefix=old/",
+            "--add-file=extra-one.txt",
+            "--add-virtual-file=virt/one.txt:one",
+            "--prefix=new/",
+            "--add-file=extra-two.txt",
+            "--add-virtual-file=virt/two.txt:two",
+            "-o",
+            "zmin-inferred.zip",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        [
+            "archive",
+            "--prefix=old/",
+            "--add-file=extra-one.txt",
+            "--add-virtual-file=virt/one.txt:one",
+            "--prefix=new/",
+            "--add-file=extra-two.txt",
+            "--add-virtual-file=virt/two.txt:two",
+            "-o",
+            "git-inferred.zip",
+            "HEAD",
+        ],
+    );
+    assert_eq!(
+        zip_listing(repo.path(), "zmin-inferred.zip"),
+        zip_listing(repo.path(), "git-inferred.zip")
+    );
+    for path in [
+        "old/extra-one.txt",
+        "new/dir/a.txt",
+        "new/root.txt",
+        "new/extra-two.txt",
+        "virt/one.txt",
+        "virt/two.txt",
+    ] {
+        assert_eq!(
+            command_stdout_bytes("unzip", repo.path(), &["-p", "zmin-inferred.zip", path]),
+            command_stdout_bytes("unzip", repo.path(), &["-p", "git-inferred.zip", path]),
+            "zip path: {path}"
+        );
+    }
+
+    run_zmin(
+        repo.path(),
+        [
+            "archive",
+            "--prefix=pkg/",
+            "--output=zmin-output.tar.gz",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        [
+            "archive",
+            "--prefix=pkg/",
+            "--output=git-output.tar.gz",
+            "HEAD",
+        ],
+    );
+    assert_eq!(
+        tar_listing(repo.path(), "zmin-output.tar.gz"),
+        tar_listing(repo.path(), "git-output.tar.gz")
+    );
+}
+
+#[test]
+fn archive_worktree_attributes_match_stock_git_export_ignore() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join(".gitattributes"), b"").expect("write committed attributes");
+    fs::write(repo.path().join("keep.txt"), b"keep\n").expect("write keep");
+    fs::write(repo.path().join("ignored.txt"), b"ignored\n").expect("write ignored");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "archive attributes fixture"]);
+    fs::write(
+        repo.path().join(".gitattributes"),
+        b"ignored.txt export-ignore\n",
+    )
+    .expect("write worktree attributes");
+
+    run_zmin(
+        repo.path(),
+        ["archive", "--format=tar", "-o", "zmin-default.tar", "HEAD"],
+    );
+    git(
+        repo.path(),
+        ["archive", "--format=tar", "-o", "git-default.tar", "HEAD"],
+    );
+    assert_eq!(
+        tar_listing(repo.path(), "zmin-default.tar"),
+        tar_listing(repo.path(), "git-default.tar")
+    );
+
+    run_zmin(
+        repo.path(),
+        [
+            "archive",
+            "--worktree-attributes",
+            "--format=tar",
+            "-o",
+            "zmin-worktree.tar",
+            "HEAD",
+        ],
+    );
+    git(
+        repo.path(),
+        [
+            "archive",
+            "--worktree-attributes",
+            "--format=tar",
+            "-o",
+            "git-worktree.tar",
+            "HEAD",
+        ],
+    );
+    assert_eq!(
+        tar_listing(repo.path(), "zmin-worktree.tar"),
+        tar_listing(repo.path(), "git-worktree.tar")
+    );
+}
+
+#[test]
 fn upload_archive_serves_stock_git_archive_remote_tar() {
     let repo = common::git_init();
     configure_identity(repo.path());

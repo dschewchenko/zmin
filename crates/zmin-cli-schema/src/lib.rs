@@ -456,25 +456,8 @@ pub enum Command {
     },
     GetTarCommitId,
     Archive {
-        #[arg(long = "format")]
-        format: Option<String>,
-        #[arg(long = "prefix")]
-        prefix: Option<String>,
-        #[arg(short = 'o', long = "output", value_hint = ValueHint::FilePath)]
-        output: Option<PathBuf>,
-        #[arg(long = "add-file", value_hint = ValueHint::FilePath)]
-        add_files: Vec<PathBuf>,
-        #[arg(long = "add-virtual-file")]
-        add_virtual_files: Vec<String>,
-        #[arg(long = "mtime")]
-        mtime: Option<String>,
-        #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
-        list: bool,
-        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
-        verbose: bool,
-        treeish: Option<String>,
-        #[arg(value_hint = ValueHint::AnyPath)]
-        paths: Vec<String>,
+        #[arg(allow_hyphen_values = true, trailing_var_arg = true)]
+        args: Vec<String>,
     },
     Credential {
         operation: String,

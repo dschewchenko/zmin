@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `archive`
+documented-option family closure. The selected rows add exact stock-Git
+evidence for filename-based format inference through `-o` and `--output`,
+repeated `--prefix` rightmost-wins behavior with per-add-file prefix capture,
+repeated `--add-file` and `--add-virtual-file` ordering, and
+`--worktree-attributes` export-ignore parity, then promote the full
+documented `archive` option family into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+7` matrix rows, `+7` verified rows, `+14` complete documented option pairs,
+`0` complete command matrices, `0` invalid-input rows and `-14` remaining
+checklist rows. Rust behavior changes are expected because the archive parser
+must preserve documented option ordering. Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `clean` documented-family
 and reviewed-complete closure. The selected rows add exact stock-Git evidence
 for the remaining documented alias-only surfaces `--force`, repeated

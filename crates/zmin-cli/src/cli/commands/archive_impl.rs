@@ -6,13 +6,152 @@ pub(crate) struct ArchiveOptions {
     pub(crate) format: Option<String>,
     pub(crate) prefix: Option<String>,
     pub(crate) output: Option<PathBuf>,
-    pub(crate) add_files: Vec<PathBuf>,
-    pub(crate) add_virtual_files: Vec<String>,
+    pub(crate) extras: Vec<ArchiveExtra>,
     pub(crate) mtime: Option<String>,
     pub(crate) list: bool,
     pub(crate) verbose: bool,
+    pub(crate) worktree_attributes: bool,
     pub(crate) treeish: Option<String>,
     pub(crate) paths: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ArchiveAddFile {
+    pub(crate) path: PathBuf,
+    pub(crate) prefix: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ArchiveExtra {
+    AddFile(ArchiveAddFile),
+    AddVirtualFile(String),
+}
+
+pub(crate) fn parse_archive_args(args: Vec<String>) -> Result<ArchiveOptions> {
+    let mut options = ArchiveOptions {
+        format: None,
+        prefix: None,
+        output: None,
+        extras: Vec::new(),
+        mtime: None,
+        list: false,
+        verbose: false,
+        worktree_attributes: false,
+        treeish: None,
+        paths: Vec::new(),
+    };
+    let mut cursor = 0usize;
+    let mut positional_only = false;
+    let mut current_prefix = String::new();
+    while cursor < args.len() {
+        let arg = &args[cursor];
+        if positional_only {
+            if options.treeish.is_none() {
+                options.treeish = Some(arg.clone());
+            } else {
+                options.paths.push(arg.clone());
+            }
+            cursor += 1;
+            continue;
+        }
+        if options.treeish.is_some() {
+            if arg == "--" {
+                positional_only = true;
+            } else {
+                options.paths.push(arg.clone());
+            }
+            cursor += 1;
+            continue;
+        }
+        match arg.as_str() {
+            "--" => positional_only = true,
+            "-l" | "--list" => options.list = true,
+            "-v" | "--verbose" => options.verbose = true,
+            "--worktree-attributes" => options.worktree_attributes = true,
+            "--format" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(archive_option_requires_value(arg));
+                };
+                ArchiveFormat::parse(value)?;
+                options.format = Some(value.clone());
+            }
+            "--prefix" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(archive_option_requires_value(arg));
+                };
+                current_prefix = value.clone();
+                options.prefix = Some(value.clone());
+            }
+            "-o" | "--output" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(archive_option_requires_value(arg));
+                };
+                options.output = Some(PathBuf::from(value));
+            }
+            "--add-file" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(archive_option_requires_value(arg));
+                };
+                options.extras.push(ArchiveExtra::AddFile(ArchiveAddFile {
+                    path: PathBuf::from(value),
+                    prefix: current_prefix.clone(),
+                }));
+            }
+            "--add-virtual-file" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(archive_option_requires_value(arg));
+                };
+                options
+                    .extras
+                    .push(ArchiveExtra::AddVirtualFile(value.clone()));
+            }
+            "--mtime" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(archive_option_requires_value(arg));
+                };
+                parse_archive_mtime(value)?;
+                options.mtime = Some(value.clone());
+            }
+            _ => {
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    ArchiveFormat::parse(value)?;
+                    options.format = Some(value.to_owned());
+                } else if let Some(value) = arg.strip_prefix("--prefix=") {
+                    current_prefix = value.to_owned();
+                    options.prefix = Some(value.to_owned());
+                } else if let Some(value) = arg.strip_prefix("--output=") {
+                    options.output = Some(PathBuf::from(value));
+                } else if let Some(value) = arg.strip_prefix("--add-file=") {
+                    options.extras.push(ArchiveExtra::AddFile(ArchiveAddFile {
+                        path: PathBuf::from(value),
+                        prefix: current_prefix.clone(),
+                    }));
+                } else if let Some(value) = arg.strip_prefix("--add-virtual-file=") {
+                    options
+                        .extras
+                        .push(ArchiveExtra::AddVirtualFile(value.to_owned()));
+                } else if let Some(value) = arg.strip_prefix("--mtime=") {
+                    parse_archive_mtime(value)?;
+                    options.mtime = Some(value.to_owned());
+                } else if arg.starts_with('-') {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: format!("unknown option `{}`", arg.trim_start_matches('-')),
+                    });
+                } else {
+                    options.treeish = Some(arg.clone());
+                }
+            }
+        }
+        cursor += 1;
+    }
+    Ok(options)
 }
 
 pub(crate) fn get_tar_commit_id() -> Result<()> {
@@ -97,13 +236,13 @@ pub(crate) fn archive(options: ArchiveOptions) -> Result<()> {
         println!("zip");
         return Ok(());
     }
-    let format = ArchiveFormat::parse(options.format.as_deref().unwrap_or("tar"))?;
     let Some(treeish) = options.treeish.as_deref() else {
         return Err(CliError::Fatal {
             code: 129,
             message: "archive requires a tree-ish".into(),
         });
     };
+    let format = archive_format_from_options(&options)?;
     let repo = find_repo_or_bare()?;
     let out = archive_to_bytes(&repo, &options, treeish, format)?;
     if let Some(path) = options.output {
@@ -124,6 +263,18 @@ enum ArchiveFormat {
     Zip,
 }
 
+fn archive_format_from_options(options: &ArchiveOptions) -> Result<ArchiveFormat> {
+    if let Some(value) = options.format.as_deref() {
+        return ArchiveFormat::parse(value);
+    }
+    if let Some(path) = options.output.as_deref()
+        && let Some(inferred) = ArchiveFormat::infer_from_output_path(path)
+    {
+        return Ok(inferred);
+    }
+    Ok(ArchiveFormat::Tar)
+}
+
 impl ArchiveFormat {
     fn parse(value: &str) -> Result<Self> {
         match value {
@@ -134,6 +285,19 @@ impl ArchiveFormat {
                 code: 128,
                 message: format!("Unknown archive format '{other}'"),
             }),
+        }
+    }
+
+    fn infer_from_output_path(path: &Path) -> Option<Self> {
+        let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+        if name.ends_with(".tar.gz") || name.ends_with(".tgz") {
+            Some(Self::Tgz)
+        } else if name.ends_with(".zip") {
+            Some(Self::Zip)
+        } else if name.ends_with(".tar") {
+            Some(Self::Tar)
+        } else {
+            None
         }
     }
 }
@@ -164,6 +328,7 @@ fn archive_to_tar_bytes(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let source = archive_tree_source(repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
+    let attributes = load_archive_attributes(repo, &store, &source.tree_id, options.worktree_attributes)?;
     let mtime = match options.mtime.as_deref() {
         Some(value) => parse_archive_mtime(value)?,
         None => source.mtime,
@@ -187,6 +352,7 @@ fn archive_to_tar_bytes(
         store: &store,
         tree_cache: &tree_cache,
         checkout_metadata: &checkout_metadata,
+        attributes: &attributes,
         prefix: &prefix,
         mtime,
         verbose: options.verbose,
@@ -205,11 +371,19 @@ fn archive_to_tar_bytes(
             archive_entry(&context, &entry, &path, &mut out)?;
         }
     }
-    for path in &options.add_files {
-        archive_add_file(path.as_path(), &prefix, mtime, options.verbose, &mut out)?;
-    }
-    for value in &options.add_virtual_files {
-        archive_add_virtual_file(value.as_str(), mtime, options.verbose, &mut out)?;
+    for extra in &options.extras {
+        match extra {
+            ArchiveExtra::AddFile(add_file) => archive_add_file(
+                add_file.path.as_path(),
+                normalize_archive_prefix(&add_file.prefix).as_str(),
+                mtime,
+                options.verbose,
+                &mut out,
+            )?,
+            ArchiveExtra::AddVirtualFile(value) => {
+                archive_add_virtual_file(value.as_str(), mtime, options.verbose, &mut out)?
+            }
+        }
     }
     out.extend_from_slice(&[0u8; 1024]);
     Ok(out)
@@ -223,6 +397,7 @@ fn archive_to_zip_bytes(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let source = archive_tree_source(repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
+    let attributes = load_archive_attributes(repo, &store, &source.tree_id, options.worktree_attributes)?;
     let mtime = match options.mtime.as_deref() {
         Some(value) => parse_archive_mtime(value)?,
         None => source.mtime,
@@ -243,6 +418,7 @@ fn archive_to_zip_bytes(
         store: &store,
         tree_cache: &tree_cache,
         checkout_metadata: &checkout_metadata,
+        attributes: &attributes,
         prefix: &prefix,
         mtime,
         verbose: options.verbose,
@@ -261,11 +437,19 @@ fn archive_to_zip_bytes(
             archive_entry_zip(&context, &entry, &path, &mut zip)?;
         }
     }
-    for path in &options.add_files {
-        archive_add_file_zip(path.as_path(), &prefix, mtime, options.verbose, &mut zip)?;
-    }
-    for value in &options.add_virtual_files {
-        archive_add_virtual_file_zip(value.as_str(), mtime, options.verbose, &mut zip)?;
+    for extra in &options.extras {
+        match extra {
+            ArchiveExtra::AddFile(add_file) => archive_add_file_zip(
+                add_file.path.as_path(),
+                normalize_archive_prefix(&add_file.prefix).as_str(),
+                mtime,
+                options.verbose,
+                &mut zip,
+            )?,
+            ArchiveExtra::AddVirtualFile(value) => {
+                archive_add_virtual_file_zip(value.as_str(), mtime, options.verbose, &mut zip)?
+            }
+        }
     }
     zip.finish()
 }
@@ -421,6 +605,7 @@ struct ArchiveTreeContext<'a> {
     store: &'a LooseObjectStore,
     tree_cache: &'a TreeObjectCache<'a, LooseObjectStore>,
     checkout_metadata: &'a WorktreeCheckoutMetadata,
+    attributes: &'a GitAttributes,
     prefix: &'a str,
     mtime: u64,
     verbose: bool,
@@ -450,6 +635,9 @@ fn archive_entry(
     path: &str,
     out: &mut Vec<u8>,
 ) -> Result<()> {
+    if context.attributes.is_set(path.as_bytes(), "export-ignore") {
+        return Ok(());
+    }
     let archive_path = format!("{}{}", context.prefix, path);
     match entry.mode {
         TreeMode::Tree => {
@@ -472,8 +660,9 @@ fn archive_entry(
                 eprintln!("{archive_path}");
             }
             let object = context.store.read_object(&entry.id)?;
-            let content = smudge_worktree_filter_content(
+            let content = smudge_worktree_filter_content_with_attributes(
                 context.repo,
+                context.attributes,
                 path.as_bytes(),
                 &entry.id,
                 context.checkout_metadata,
@@ -530,6 +719,9 @@ fn archive_entry_zip(
     path: &str,
     zip: &mut ZipArchiveWriter,
 ) -> Result<()> {
+    if context.attributes.is_set(path.as_bytes(), "export-ignore") {
+        return Ok(());
+    }
     let archive_path = format!("{}{}", context.prefix, path);
     match entry.mode {
         TreeMode::Tree => {
@@ -545,8 +737,9 @@ fn archive_entry_zip(
                 eprintln!("{archive_path}");
             }
             let object = context.store.read_object(&entry.id)?;
-            let content = smudge_worktree_filter_content(
+            let content = smudge_worktree_filter_content_with_attributes(
                 context.repo,
+                context.attributes,
                 path.as_bytes(),
                 &entry.id,
                 context.checkout_metadata,
@@ -691,6 +884,35 @@ fn archive_add_virtual_file_zip(
         eprintln!("{path}");
     }
     zip.add_file(path, content.as_bytes(), 0o100644, mtime)
+}
+
+fn archive_option_requires_value(option: &str) -> CliError {
+    CliError::Fatal {
+        code: 129,
+        message: format!("option `{option}` requires a value"),
+    }
+}
+
+fn load_archive_attributes(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    tree_id: &ObjectId,
+    worktree_attributes: bool,
+) -> Result<GitAttributes> {
+    if worktree_attributes {
+        return GitAttributes::load_from_root(&repo.root).map_err(CliError::Io);
+    }
+    let Some(entry) = find_tree_entry(store, tree_id, b".gitattributes").map_err(CliError::Io)? else {
+        return Ok(GitAttributes::default());
+    };
+    let object = store.read_object(&entry.id)?;
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "tree-ish .gitattributes is not a blob".into(),
+        });
+    }
+    Ok(GitAttributes::parse(&String::from_utf8_lossy(&object.content)))
 }
 
 #[cfg(unix)]
@@ -1071,11 +1293,11 @@ fn parse_upload_archive_arguments(arguments: Vec<String>) -> Result<ArchiveOptio
         format: None,
         prefix: None,
         output: None,
-        add_files: Vec::new(),
-        add_virtual_files: Vec::new(),
+        extras: Vec::new(),
         mtime: None,
         list: false,
         verbose: false,
+        worktree_attributes: false,
         treeish: None,
         paths: Vec::new(),
     };
@@ -1096,11 +1318,16 @@ fn parse_upload_archive_arguments(arguments: Vec<String>) -> Result<ArchiveOptio
                 continue;
             }
             if let Some(path) = argument.strip_prefix("--add-file=") {
-                options.add_files.push(PathBuf::from(path));
+                options.extras.push(ArchiveExtra::AddFile(ArchiveAddFile {
+                    path: PathBuf::from(path),
+                    prefix: options.prefix.clone().unwrap_or_default(),
+                }));
                 continue;
             }
             if let Some(value) = argument.strip_prefix("--add-virtual-file=") {
-                options.add_virtual_files.push(value.to_owned());
+                options
+                    .extras
+                    .push(ArchiveExtra::AddVirtualFile(value.to_owned()));
                 continue;
             }
             if let Some(value) = argument.strip_prefix("--mtime=") {
