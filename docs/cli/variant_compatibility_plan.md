@@ -343,32 +343,34 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code command promotion, `read-tree` is now also a
-reviewed-complete command matrix at `17/17` reviewed-complete documented
-option pairs with `84/84` classified rows and `0` open. The next best
-helper-free follow-up should move to another dense census-backed cluster unless
-another zero-code promotion overtakes it on throughput.
+After the latest zero-code doc-option promotion cluster, `bugreport`,
+`fmt-merge-msg`, and `describe` now add another `22` durable
+reviewed-complete documented option pairs without changing Rust behavior. The
+next best helper-free follow-up should move to another dense census-backed
+cluster unless another zero-code promotion overtakes it on throughput.
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-code `git read-tree`
-reviewed-complete command promotion. The existing exact stock-Git evidence and
-reviewed-complete documented option coverage already closed the full current
-helper-free `read-tree` matrix, so this slice only promotes the command into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`.
+The latest completed slice is a zero-code reviewed-complete documented-option
+promotion cluster for `bugreport`, `fmt-merge-msg`, and `describe`. The
+existing exact stock-Git evidence already closed six `bugreport` option
+families, seven `fmt-merge-msg` option families, and nine `describe` option
+families, so this slice only promotes those documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(bugreport|fmt-merge-msg|describe|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5331` matrix rows, `4623` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `81/151` complete command
-matrices, `448/3175` complete documented option pairs, and `2753`
-remaining checklist rows. `read-tree` now reads `17` documented option pairs,
-`17` reviewed-complete documented option pairs, `17` represented documented
-option pairs, and `84/84` classified written rows with `0` open.
+matrices, `470/3175` complete documented option pairs, and `2731`
+remaining checklist rows. `bugreport` now reads `7` documented option pairs
+with `6` reviewed complete, `fmt-merge-msg` reads `9` documented option pairs
+with `7` reviewed complete, and `describe` reads `14` documented option pairs
+with `9` reviewed complete.
 
 ### No-Skip Rule
 
@@ -1178,11 +1180,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code `read-tree`
-command promotion:
+Current durable census after the zero-code `bugreport` / `fmt-merge-msg` /
+`describe` reviewed-complete doc-option promotion cluster:
 
 - complete command matrices: `81 / 151`
-- complete documented command-option pairs: `448 / 3175`
+- complete documented command-option pairs: `470 / 3175`
 - matrix rows: `5331`
 - verified rows: `4623`
 - invalid-input rows: `679`
@@ -1190,20 +1192,24 @@ command promotion:
 
 Latest completed batch:
 
-- `read-tree` now has its full current helper-free command matrix promoted
-  into the reviewed-complete command census list.
-- The closed subgroup adds no new behavior rows; it only makes the already
-  complete `read-tree` command closure durable in the reviewed command source
-  list.
+- `bugreport` now has six documented option pairs promoted into the
+  reviewed-complete doc-option census list.
+- `fmt-merge-msg` now has seven documented option pairs promoted into the
+  reviewed-complete doc-option census list.
+- `describe` now has nine documented option pairs promoted into the
+  reviewed-complete doc-option census list.
+- The closed subgroup adds no new behavior rows; it only makes already closed
+  option-family evidence durable in the reviewed doc-option source list.
 - Focused verification was
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(bugreport|fmt-merge-msg|describe|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `read-tree` is now reviewed complete at `17/17` documented option pairs with
-  `84/84` classified rows and `0` open written rows.
+- `bugreport` now has `6/7` documented option pairs reviewed complete.
+- `fmt-merge-msg` now has `7/9` documented option pairs reviewed complete.
+- `describe` now has `9/14` documented option pairs reviewed complete.
 - The next best helper-free follow-up should move to another dense
   census-backed family or zero-code command/doc-option promotion cluster.
 
