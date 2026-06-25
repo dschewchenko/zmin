@@ -5657,6 +5657,46 @@ missing-or-unclassified oracle functions, `+0` commands with rows, `+4`
 represented doc-option pairs, `+0` implemented-but-unverified schema rows and
 `+0` remaining checklist rows.
 
+## 2026-06-25 - read-tree repeated parser and evidence closure
+
+Expected movement:
+
+- behavior rows: `+25`
+- closed rows: `+25`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-13`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- repeated and reordered `--dry-run`, `-n`, `--quiet`, `-q`, `-v`
+- repeated and reordered `--trivial` and `--aggressive`
+- repeated `--reset` and reordered `--index-output` plus `--reset`
+- repeated `--no-sparse-checkout`
+- repeated and triple-order `--recurse-submodules` / `--no-recurse-submodules`
+- repeated `-i`, separate `--index-output` value form, and repeated
+  `--index-output` last-one-wins
+
+This batch closes the remaining helper-free parser/evidence tail for the
+current `git read-tree` schema surface instead of adding another small
+evidence-only slice. The parser now accepts stock-compatible repeats for the
+documented long booleans and for `-i`, plus repeated `--index-output` with
+last-one-wins semantics. The focused oracle test then proves the repeated and
+reordered read-tree rows against stock Git and promotes the covered documented
+option pairs into reviewed-complete census state.
+
+Actual post-import movement matched the declaration: `+25` behavior rows, `+25`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `-13` remaining checklist rows.
+
 ## 2026-06-25 - checkout-index remaining documented surface closure
 
 Expected movement:

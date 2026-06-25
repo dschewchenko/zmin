@@ -1185,41 +1185,39 @@ Current durable census after the `repack` cruft-family helper-free closure:
 - complete command matrices: `79 / 151`
 - complete documented command-option pairs: `425 / 3175`
 - matrix rows: `5243`
-- verified rows: `4535`
+- verified rows: `4560`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `repack` now has another helper-free schema-tail subgroup closed inside the
-  documented cruft family.
-- The closed subgroup added exact stock-Git evidence for `--cruft -d -q`,
-  `--cruft --cruft-expiration=now -d -q`, `--cruft --expire-to=out
-  --cruft-expiration=now -d -q`, `--cruft --max-cruft-size=1 -d -q`,
-  `--cruft --max-cruft-size=2m -d -q`, invalid
-  `--cruft --max-cruft-size=bogus -d -q`, and the stock fatal guard for
-  `--cruft -k -d -q`.
+- `read-tree` now has a parser-plus-evidence closure batch across the
+  remaining helper-free documented surface.
+- The closed subgroup added stock-compatible repeated parsing for long
+  `--trivial`, `--aggressive`, `--reset`, `--dry-run`, `--quiet`,
+  `--recurse-submodules`, `--no-recurse-submodules`,
+  `--no-sparse-checkout`, repeated short `-i`, and repeated
+  `--index-output` last-one-wins handling.
+- Exact stock-Git evidence now also covers repeated and reordered dry-run,
+  quiet, verbose, trivial, aggressive, reset, no-sparse-checkout, recurse
+  toggles, index-only compositions, and repeated index-output selection.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_maintenance_compat
-  repack_cruft_variants_match_stock_git -- --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat
-  repack_cruft_expire_to_now_matches_stock_git -- --nocapture`,
-  `cargo test -p zmin-cli --test git_maintenance_compat
-  repack_invalid_cruft_variants_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_object_plumbing_compat
+  read_tree_documented_option_forms_match_stock_git -- --nocapture`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `repack` now has `28/33` represented documented option pairs with `68/68`
-  classified rows and `0` exact-open written rows, but the cruft family still
-  has expansion-required rows for more value/order/state coverage and the
-  remaining schema-missing tail is now only `5` options:
-  `--filter`, `--filter-to`, `--geometric`, `--unpack-unreachable`, and `-g`.
-- `read-tree` still remains the best immediate no-parser expansion lane for
-  dense row additions inside already-represented documented surfaces.
+- `read-tree` now has `16/17` reviewed-complete documented option pairs with
+  `69/69` classified rows and `0` open written rows; only `-u` still remains
+  expansion-required inside the current schema surface.
+- `repack` still remains the largest unresolved helper-free documented cluster
+  by schema-missing count, with `28/33` represented documented option pairs
+  and the remaining tail at `--filter`, `--filter-to`, `--geometric`,
+  `--unpack-unreachable`, and `-g`.
 
 Latest zero-code closure:
 
@@ -1230,7 +1228,7 @@ Latest zero-code closure:
 
 Next helper-free family candidates now remain:
 
+- `read-tree -u` expansion-required rows inside the already-represented
+  documented surface
 - `repack` expansion-required rows inside the cruft family plus the remaining
   five schema-missing documented options
-- `read-tree` expansion-required rows inside already-represented documented
-  surfaces

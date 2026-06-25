@@ -1787,20 +1787,20 @@ pub enum Command {
         args: Vec<String>,
     },
     ReadTree {
-        #[arg(long = "empty", action = ArgAction::SetTrue)]
-        empty: bool,
+        #[arg(long = "empty", action = ArgAction::Count)]
+        empty: u8,
         #[arg(short = 'm', action = ArgAction::Count)]
         merge: u8,
-        #[arg(long = "trivial", action = ArgAction::SetTrue)]
-        trivial: bool,
-        #[arg(long = "aggressive", action = ArgAction::SetTrue)]
-        aggressive: bool,
-        #[arg(long = "reset", action = ArgAction::SetTrue)]
-        reset: bool,
-        #[arg(short = 'u', action = ArgAction::SetTrue)]
-        update_worktree: bool,
-        #[arg(short = 'i', action = ArgAction::SetTrue)]
-        index_only: bool,
+        #[arg(long = "trivial", action = ArgAction::Count)]
+        trivial: u8,
+        #[arg(long = "aggressive", action = ArgAction::Count)]
+        aggressive: u8,
+        #[arg(long = "reset", action = ArgAction::Count)]
+        reset: u8,
+        #[arg(short = 'u', action = ArgAction::Count)]
+        update_worktree: u8,
+        #[arg(short = 'i', action = ArgAction::Count)]
+        index_only: u8,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
         #[arg(short = 'v', action = ArgAction::Count)]
@@ -1808,15 +1808,15 @@ pub enum Command {
         #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
         quiet: u8,
         #[arg(long = "index-output")]
-        index_output: Option<PathBuf>,
+        index_output: Vec<PathBuf>,
         #[arg(long = "prefix")]
         prefix: Option<String>,
-        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
-        recurse_submodules: bool,
-        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
-        no_recurse_submodules: bool,
-        #[arg(long = "no-sparse-checkout", action = ArgAction::SetTrue)]
-        no_sparse_checkout: bool,
+        #[arg(long = "recurse-submodules", action = ArgAction::Count)]
+        recurse_submodules: u8,
+        #[arg(long = "no-recurse-submodules", action = ArgAction::Count)]
+        no_recurse_submodules: u8,
+        #[arg(long = "no-sparse-checkout", action = ArgAction::Count)]
+        no_sparse_checkout: u8,
         treeish: Option<String>,
     },
     Checkout {
