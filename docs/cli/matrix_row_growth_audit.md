@@ -12,6 +12,17 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free `apply` surface.
+The selected rows do not add new behavior evidence; they promote five exact
+stock-Git `apply` option families with existing check, cached, index, reverse,
+and short-reverse matrix coverage into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+0` matrix rows, `+5` complete documented option pairs, `+0` complete
+command matrices, `+0` verified rows, `+0` invalid-input rows, and `-5`
+remaining checklist rows. Rust behavior changes are not expected.
+Actual delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `difftool` surface.
 The selected rows do not add new behavior evidence; they promote seven exact
 stock-Git `difftool` option families with existing extcmd, configured-tool,
