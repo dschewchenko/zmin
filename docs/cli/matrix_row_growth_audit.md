@@ -11,6 +11,20 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git multi-pack-index`
+positive `--bitmap` writer-lane closure plus command promotion. The selected
+change expands the local two-pack writer path to emit stock-shaped MIDX
+`RIDX` and `BTMP` chunks, create a checksum-valid bitmap sidecar named from
+the MIDX checksum, promotes `--bitmap` into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, and then promotes
+`multi-pack-index` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Expected delta was
+`+1` matrix row, `+1` complete documented option pair, `+0` represented
+documented option pairs, `+1` complete command matrix, `+1` verified row, and
+`+0` invalid-input rows. Actual delta matched, and `multi-pack-index` is now
+command-complete at `9/9` reviewed-complete documented option pairs with
+`29/29` classified rows and `0` exact-open written rows.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git http-push`
 short-delete family closure plus command promotion. The selected change adds
 schema coverage and stock-Git evidence for the documented `-d` and `-D`

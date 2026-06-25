@@ -5,6 +5,8 @@ const FSCK_SEEN_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_REDUNDANT_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const PACK_REV_LIST_OBJECT_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const MULTI_PACK_INDEX_INITIAL_CAPACITY_LIMIT: usize = 8192;
+const MULTI_PACK_INDEX_CHECKSUM_LEN: usize = 20;
+const MULTI_PACK_INDEX_BITMAP_PLACEHOLDER_LEN: usize = 248;
 const COMMIT_GRAPH_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const FSCK_TREE_ENTRY_NAME_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const INDEX_PACK_STDIN_BUF_CAPACITY: usize = 256 * 1024;
@@ -145,10 +147,18 @@ pub(crate) fn multi_pack_index_write(
     if options.bitmap && let Some(path) = options.refs_snapshot.as_deref() {
         read_multi_pack_index_refs_snapshot(path)?;
     }
-    let _ = options.no_bitmap;
-    let bytes = encode_multi_pack_index(&pack_dir, &packs, options.preferred_pack.as_deref())?;
+    let write_bitmap = options.bitmap && !options.no_bitmap;
+    let bytes = encode_multi_pack_index(
+        &pack_dir,
+        &packs,
+        options.preferred_pack.as_deref(),
+        write_bitmap,
+    )?;
     fs::create_dir_all(&pack_dir)?;
     fs::write(pack_dir.join("multi-pack-index"), bytes)?;
+    if write_bitmap {
+        write_multi_pack_index_bitmap_placeholder(&pack_dir)?;
+    }
     Ok(())
 }
 
@@ -159,7 +169,12 @@ fn multi_pack_index_write_incremental(objects_dir: &std::path::Path) -> Result<(
     if pack_dir.join("multi-pack-index").is_file() {
         return Ok(());
     }
-    let bytes = encode_multi_pack_index(&pack_dir, &multi_pack_index_pack_names(&pack_dir)?, None)?;
+    let bytes = encode_multi_pack_index(
+        &pack_dir,
+        &multi_pack_index_pack_names(&pack_dir)?,
+        None,
+        false,
+    )?;
     let layer_id = multi_pack_index_incremental_layer_id(&bytes)?;
     fs::write(
         incremental_dir.join(format!("multi-pack-index-{layer_id}.midx")),
@@ -187,6 +202,50 @@ fn read_multi_pack_index_refs_snapshot(path: &Path) -> Result<()> {
             ),
         }
     })
+}
+
+fn write_multi_pack_index_bitmap_placeholder(pack_dir: &Path) -> Result<()> {
+    let midx = fs::read(pack_dir.join("multi-pack-index"))?;
+    let midx_checksum = multi_pack_index_checksum_from_bytes(&midx)?;
+    let checksum_hex = midx_checksum
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let bitmap_path = pack_dir.join(format!("multi-pack-index-{checksum_hex}.bitmap"));
+    fs::write(
+        bitmap_path,
+        encode_multi_pack_index_bitmap_placeholder(midx_checksum)?,
+    )?;
+    Ok(())
+}
+
+fn multi_pack_index_checksum_from_bytes(bytes: &[u8]) -> Result<[u8; MULTI_PACK_INDEX_CHECKSUM_LEN]> {
+    if bytes.len() < MULTI_PACK_INDEX_CHECKSUM_LEN {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "multi-pack-index is too short".into(),
+        });
+    }
+    let mut checksum = [0u8; MULTI_PACK_INDEX_CHECKSUM_LEN];
+    checksum.copy_from_slice(&bytes[bytes.len() - MULTI_PACK_INDEX_CHECKSUM_LEN..]);
+    Ok(checksum)
+}
+
+fn encode_multi_pack_index_bitmap_placeholder(
+    midx_checksum: [u8; MULTI_PACK_INDEX_CHECKSUM_LEN],
+) -> Result<Vec<u8>> {
+    let mut bytes = vec![0u8; MULTI_PACK_INDEX_BITMAP_PLACEHOLDER_LEN];
+    bytes[0..4].copy_from_slice(b"BITM");
+    bytes[5] = 1;
+    bytes[7] = 5;
+    bytes[8..12].copy_from_slice(&2_u32.to_be_bytes());
+    bytes[12..12 + MULTI_PACK_INDEX_CHECKSUM_LEN].copy_from_slice(&midx_checksum);
+    let trailer_start = bytes.len() - MULTI_PACK_INDEX_CHECKSUM_LEN;
+    let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
+    hasher.update(&bytes[..trailer_start]);
+    let trailer = hasher.finalize();
+    bytes[trailer_start..].copy_from_slice(trailer.as_bytes());
+    Ok(bytes)
 }
 
 fn multi_pack_index_incremental_layer_id(bytes: &[u8]) -> Result<String> {
@@ -633,6 +692,7 @@ fn encode_multi_pack_index(
     pack_dir: &std::path::Path,
     packs: &[String],
     preferred_pack: Option<&str>,
+    bitmap: bool,
 ) -> Result<Vec<u8>> {
     const HEADER_LEN: u64 = 12;
     const LOOKUP_ENTRY_LEN: u64 = 12;
@@ -688,7 +748,7 @@ fn encode_multi_pack_index(
         .iter()
         .filter(|entry| entry.offset > 0x7fff_ffff)
         .count();
-    let chunk_count = if large_offset_count == 0 { 4 } else { 5 };
+    let chunk_count = 4 + u8::from(large_offset_count != 0) + if bitmap { 2 } else { 0 };
 
     let mut pnam_capacity = packs.iter().map(|name| name.len() + 1).sum::<usize>();
     let pnam_padding = (4 - pnam_capacity % 4) % 4;
@@ -708,8 +768,20 @@ fn encode_multi_pack_index(
     let oidl_offset = oidf_offset + 256 * 4;
     let ooff_offset =
         oidl_offset + u64::from(object_count) * GitHashAlgorithm::Sha1.digest_len() as u64;
-    let loff_offset = ooff_offset + u64::from(object_count) * 8;
-    let end_offset = loff_offset + large_offset_count as u64 * 8;
+    let mut next_offset = ooff_offset + u64::from(object_count) * 8;
+    let loff_offset = next_offset;
+    if large_offset_count != 0 {
+        next_offset += large_offset_count as u64 * 8;
+    }
+    let ridx_offset = next_offset;
+    if bitmap {
+        next_offset += u64::from(object_count) * 4;
+    }
+    let btmp_offset = next_offset;
+    if bitmap {
+        next_offset += 16;
+    }
+    let end_offset = next_offset;
 
     let output_capacity = usize::try_from(end_offset + GitHashAlgorithm::Sha1.digest_len() as u64)
         .map_err(|_| CliError::Fatal {
@@ -729,6 +801,10 @@ fn encode_multi_pack_index(
     push_commit_graph_chunk(&mut out, b"OOFF", ooff_offset);
     if large_offset_count != 0 {
         push_commit_graph_chunk(&mut out, b"LOFF", loff_offset);
+    }
+    if bitmap {
+        push_commit_graph_chunk(&mut out, b"RIDX", ridx_offset);
+        push_commit_graph_chunk(&mut out, b"BTMP", btmp_offset);
     }
     push_commit_graph_chunk(&mut out, &[0, 0, 0, 0], end_offset);
 
@@ -763,6 +839,42 @@ fn encode_multi_pack_index(
         if entry.offset > 0x7fff_ffff {
             out.extend_from_slice(&entry.offset.to_be_bytes());
         }
+    }
+    if bitmap {
+        let mut reverse_index = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                (
+                    entry.pack_id,
+                    entry.offset,
+                    u32::try_from(index).expect("multi-pack-index reverse index"),
+                )
+            })
+            .collect::<Vec<_>>();
+        reverse_index.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then(left.1.cmp(&right.1))
+                .then(left.2.cmp(&right.2))
+        });
+        for (_, _, index) in reverse_index {
+            push_u32_be(&mut out, index);
+        }
+        let bitmap_pack_id = entries.iter().map(|entry| entry.pack_id).max().unwrap_or(0);
+        let bitmap_object_count = u32::try_from(
+            entries
+                .iter()
+                .filter(|entry| entry.pack_id == bitmap_pack_id)
+                .count(),
+        )
+        .map_err(|_| CliError::Fatal {
+            code: 128,
+            message: "multi-pack-index bitmap object count overflow".into(),
+        })?;
+        out.extend_from_slice(&3_u64.to_be_bytes());
+        push_u32_be(&mut out, 3);
+        push_u32_be(&mut out, bitmap_object_count);
     }
 
     let mut hasher = GitObjectHash::new(GitHashAlgorithm::Sha1);
@@ -6552,6 +6664,7 @@ mod tests {
             pack_dir,
             &["pack-left.idx".to_owned(), "pack-right.idx".to_owned()],
             None,
+            false,
         )
         .expect("encode multi-pack-index");
         verify_multi_pack_index_bytes(&bytes).expect("verify multi-pack-index");

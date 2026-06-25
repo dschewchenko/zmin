@@ -608,6 +608,27 @@ fn multi_pack_index_dir_exists(repo: &std::path::Path) -> bool {
     repo.join(".git/objects/pack/multi-pack-index.d").is_dir()
 }
 
+fn multi_pack_index_bitmap_name(repo: &std::path::Path) -> Option<String> {
+    let pack_dir = repo.join(".git/objects/pack");
+    let mut names = fs::read_dir(&pack_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| {
+            name.starts_with("multi-pack-index-") && name.ends_with(".bitmap")
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names.into_iter().next()
+}
+
+fn multi_pack_index_bitmap_size(repo: &std::path::Path) -> Option<u64> {
+    let name = multi_pack_index_bitmap_name(repo)?;
+    fs::metadata(repo.join(".git/objects/pack").join(name))
+        .ok()
+        .map(|metadata| metadata.len())
+}
+
 fn pack_index_names(repo: &std::path::Path) -> Vec<String> {
     let mut names = pack_file_names(repo)
         .into_iter()
@@ -956,7 +977,10 @@ fn multi_pack_index_progress_flags_match_stock_git() {
 
 #[test]
 fn multi_pack_index_write_option_family_matches_stock_git() {
-    for args in [["multi-pack-index", "write", "--no-bitmap"].as_slice()] {
+    for args in [
+        ["multi-pack-index", "write", "--no-bitmap"].as_slice(),
+        ["multi-pack-index", "write", "--bitmap"].as_slice(),
+    ] {
         let git_repo = two_pack_midx_fixture();
         let zmin_repo = two_pack_midx_fixture();
 
@@ -970,7 +994,40 @@ fn multi_pack_index_write_option_family_matches_stock_git() {
             multi_pack_index_bytes(git_repo.path()),
             "{args:?} multi-pack-index bytes"
         );
-        assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+        assert_eq!(
+            multi_pack_index_bitmap_name(zmin_repo.path()),
+            multi_pack_index_bitmap_name(git_repo.path()),
+            "{args:?} bitmap name"
+        );
+        assert_eq!(
+            multi_pack_index_bitmap_size(zmin_repo.path()).map(|size| size > 0),
+            multi_pack_index_bitmap_size(git_repo.path()).map(|size| size > 0),
+            "{args:?} bitmap presence"
+        );
+        if args.contains(&"--bitmap") {
+            assert_eq!(
+                pack_file_names(zmin_repo.path()),
+                pack_file_names(git_repo.path()),
+                "{args:?} pack dir names"
+            );
+            assert_eq!(
+                command_any_output(
+                    zmin_bin(),
+                    zmin_repo.path(),
+                    &["multi-pack-index", "verify"],
+                    "zmin verify",
+                ),
+                command_any_output("git", git_repo.path(), &["multi-pack-index", "verify"], "git verify"),
+                "{args:?} verify output"
+            );
+            assert_eq!(
+                git_status(zmin_repo.path(), ["fsck", "--strict"]),
+                git_status(git_repo.path(), ["fsck", "--strict"]),
+                "{args:?} fsck status"
+            );
+        } else {
+            assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+        }
     }
 
     for label in ["preferred-pack recognized", "preferred-pack missing"] {

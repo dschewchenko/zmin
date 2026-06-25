@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`96/151 complete command matrices / 1431/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1440/3156 represented doc-option pairs / 5396 written rows / 4693/5396 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`97/151 complete command matrices / 1432/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1440/3156 represented doc-option pairs / 5397 written rows / 4694/5397 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,24 +300,23 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git http-push` short-delete
-family closure plus command promotion. Zmin now matches stock Git for the
-documented `-d` and `-D` short aliases on the current writable HTTP lane,
-where stock Git currently fails with the URL-access error instead of following
-the `:ref` delete-refspec success path, while keeping the existing long-option
-outside-repository rejection rows and local writable push/delete-refspec rows.
-With those rows closed, `http-push` now sits at `6/6` reviewed-complete
-documented option pairs, `6/6` represented documented option pairs,
-`10/10` classified rows, and `0` exact-open written rows, and is promoted into
+The latest completed slice is a helper-free `git multi-pack-index --bitmap`
+writer-lane closure plus command promotion. Zmin now matches stock Git for the
+positive local two-pack `write --bitmap` lane by emitting stock-shaped MIDX
+`RIDX` and `BTMP` chunks, creating a checksum-valid bitmap sidecar with the
+stock basename derived from the MIDX checksum, and preserving the existing
+invalid-input parity for unreadable `--refs-snapshot` under bitmap. With those
+rows closed, `multi-pack-index` now sits at `9/9` reviewed-complete
+documented option pairs, `9/9` represented documented option pairs,
+`29/29` classified rows, and `0` exact-open written rows, and is promoted into
 `docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
-Current counts are `96/151` complete command matrices,
-`1431/3156` complete documented option pairs,
-`1440/3156` represented documented option pairs, `5396` written rows,
-`4693` verified rows, `12` open rows, and `688` invalid-input rows. The next
-bounded high-throughput follow-up should return to the heavier local
-`multi-pack-index --bitmap` writer lane, which is now the clearest remaining
-review-incomplete maintenance batch after the compact `http-push` tail.
+Current counts are `97/151` complete command matrices,
+`1432/3156` complete documented option pairs,
+`1440/3156` represented documented option pairs, `5397` written rows,
+`4694` verified rows, `12` open rows, and `688` invalid-input rows. The next
+bounded high-throughput follow-up should move to the next dense census-backed
+batch instead of revisiting `multi-pack-index`, which is now command-complete.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
