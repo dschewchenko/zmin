@@ -33,6 +33,17 @@ complete documented option pairs, `0` verified rows, `0` invalid-input rows,
 and `-2` remaining checklist rows. Rust behavior changes are not expected.
 Actual delta matched.
 
+As of 2026-06-25 the next batch is a zero-row command-only reviewed-complete
+closure cluster for `clone`, `stage`, `push`, `init`, `sparse-checkout`, and
+`shell`. None of these commands currently contribute documented option seed
+rows in the tightened extractor, and all six already have zero remaining
+census rows plus `100%` classified written-row coverage. This slice only
+promotes them into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
+Expected delta is `+0` matrix rows, `+6` complete command matrices, `+0`
+complete documented option pairs, `0` verified rows, `0` invalid-input rows,
+and `0` remaining checklist rows. Rust behavior changes are not expected.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `archive`
 documented-option family closure. The selected rows add exact stock-Git
 evidence for filename-based format inference through `-o` and `--output`,

@@ -334,7 +334,11 @@ surfaces `--first-parent` and `--no-checkout` already have exact stock-Git
 evidence in the sequencer matrix. The next helper-free family should now move
 to another
 census-backed supported subgroup unless work intentionally opens unsupported
-surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`.
+surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`. The largest
+remaining zero-row command-only cluster is now `clone`, `stage`, `push`,
+`init`, `sparse-checkout`, and `shell`: each has `0` documented option seed
+rows, `0` remaining census rows, and `100%` classified written-row coverage,
+so they can be promoted without changing Rust behavior.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -343,26 +347,32 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-row reviewed-complete closure for
-`bisect`. Its behavior matrix already had `2/2` represented documented
-options, `0` exact-open rows, `0` implemented-but-unverified rows, and
-`21/21` classified written-row coverage, so this batch promotes the command
-plus `--first-parent` and `--no-checkout` into the durable reviewed command
-and doc-option census source lists without changing Rust behavior.
+The latest completed slice is a zero-row command-only reviewed-complete
+closure cluster for `clone`, `stage`, `push`, `init`, `sparse-checkout`, and
+`shell`. None of these commands currently contribute documented option seed
+rows in the tightened extractor, and all six already had `0` remaining census
+rows plus `100%` classified written-row coverage, so this batch promotes them
+into the durable reviewed command census source list without changing Rust
+behavior.
 
 Focused gates were
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(bisect|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(clone|stage|push|init|sparse-checkout|shell|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are expected to move to `5155` matrix rows, `4454`
 verified rows, `672` invalid-input rows, `26`
 exact-open local-oracle-unavailable rows, `26` open-or-partial rows,
-`69/151` complete command matrices, `398/3175` complete documented option
+`75/151` complete command matrices, `398/3175` complete documented option
 pairs, and `2803` remaining checklist rows.
 The promoted commands now read:
-- `bisect` `2/2` represented documented options reviewed complete, `21/21` classified rows, `20/21` matching stock Git rows, `0` open
+- `clone` command-only reviewed complete, `96/96` classified rows, `86/96` matching stock Git rows, `0` open
+- `stage` command-only reviewed complete, `84/84` classified rows, `80/84` matching stock Git rows, `0` open
+- `push` command-only reviewed complete, `16/16` classified rows, `15/16` matching stock Git rows, `0` open
+- `init` command-only reviewed complete, `12/12` classified rows, `10/12` matching stock Git rows, `0` open
+- `sparse-checkout` command-only reviewed complete, `11/11` classified rows, `6/11` matching stock Git rows, `0` open
+- `shell` command-only reviewed complete, `5/5` classified rows, `2/5` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 
