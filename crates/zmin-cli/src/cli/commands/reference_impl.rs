@@ -4433,62 +4433,459 @@ struct TagOptions {
     format: Option<String>,
     args: Vec<String>,
 }
-fn ls_tree(
+struct LsTreeOptions<'a> {
+    directory_only: bool,
     recursive: bool,
     show_trees: bool,
+    long: bool,
+    nul_terminated: bool,
     name_only: bool,
-    treeish: &str,
+    name_status: bool,
+    object_only: bool,
+    full_name: bool,
+    full_tree: bool,
+    abbrev: Option<usize>,
+    format: Option<&'a str>,
+    treeish: &'a str,
     paths: Vec<String>,
-) -> Result<()> {
+}
+
+#[derive(Clone, Copy)]
+struct LsTreeRenderOptions<'a> {
+    long: bool,
+    nul_terminated: bool,
+    name_only: bool,
+    object_only: bool,
+    full_name: bool,
+    abbrev: Option<usize>,
+    format: Option<&'a str>,
+}
+
+fn ls_tree(options: LsTreeOptions<'_>) -> Result<()> {
+    if options.object_only && (options.name_only || options.name_status) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "options '--object-only' and '--name-only/--name-status' cannot be used together"
+                    .into(),
+        });
+    }
+    if options.format.is_some()
+        && (options.long || options.name_only || options.name_status || options.object_only)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "option '--format' cannot be combined with '--long', '--name-only', '--name-status' or '--object-only'"
+                    .into(),
+        });
+    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let tree_id = resolve_treeish_or_invalid_object(&repo, &store, treeish)?;
+    let tree_id = resolve_treeish_or_invalid_object(&repo, &store, options.treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
-    if paths.is_empty() {
-        print_tree_entries(
+    let cwd_prefix = if options.full_tree {
+        Vec::new()
+    } else {
+        repo_relative_path(&repo.root, &std::env::current_dir()?)?
+    };
+    let render_options = LsTreeRenderOptions {
+        long: options.long,
+        nul_terminated: options.nul_terminated,
+        name_only: options.name_only || options.name_status,
+        object_only: options.object_only,
+        full_name: options.full_name || options.full_tree,
+        abbrev: options.abbrev,
+        format: options.format,
+    };
+    if options.paths.is_empty() && !cwd_prefix.is_empty() && !options.full_tree {
+        let Some(entry) = find_tree_entry(&store, &tree_id, &cwd_prefix)? else {
+            return Ok(());
+        };
+        if entry.mode == TreeMode::Tree {
+            ls_tree_print_entries(
+                &store,
+                &tree_cache,
+                &entry.id,
+                cwd_prefix.clone(),
+                options.recursive,
+                options.show_trees || options.directory_only,
+                options.directory_only,
+                &cwd_prefix,
+                render_options,
+            )?;
+            return Ok(());
+        }
+    }
+    let effective_paths = ls_tree_effective_paths(&options.paths, &cwd_prefix, options.full_tree)?;
+    if effective_paths.is_empty() {
+        ls_tree_print_entries(
+            &store,
             &tree_cache,
             &tree_id,
             Vec::new(),
-            recursive,
-            show_trees,
-            name_only,
+            options.recursive,
+            options.show_trees || options.directory_only,
+            options.directory_only,
+            &cwd_prefix,
+            render_options,
         )?;
         return Ok(());
     }
 
-    for path in paths {
-        let path = normalize_git_path(&path)?;
+    for path in effective_paths {
         if path.is_empty() {
-            print_tree_entries(
+            ls_tree_print_entries(
+                &store,
                 &tree_cache,
                 &tree_id,
                 Vec::new(),
-                recursive,
-                show_trees,
-                name_only,
+                options.recursive,
+                options.show_trees || options.directory_only,
+                options.directory_only,
+                &cwd_prefix,
+                render_options,
             )?;
             continue;
         }
         let Some(entry) = find_tree_entry(&store, &tree_id, path.as_bytes())? else {
             continue;
         };
-        if recursive && entry.mode == TreeMode::Tree {
-            if show_trees {
-                print_tree_entry(&entry, path.as_bytes(), name_only)?;
+        if options.recursive && entry.mode == TreeMode::Tree {
+            if options.show_trees || options.directory_only {
+                ls_tree_print_entry(&store, &entry, path.as_bytes(), &cwd_prefix, render_options)?;
             }
-            print_tree_entries(
-                &tree_cache,
-                &entry.id,
-                path.into_bytes(),
-                true,
-                show_trees,
-                name_only,
-            )?;
-        } else {
-            print_tree_entry(&entry, path.as_bytes(), name_only)?;
+            if !options.directory_only {
+                ls_tree_print_entries(
+                    &store,
+                    &tree_cache,
+                    &entry.id,
+                    path.into_bytes(),
+                    true,
+                    options.show_trees || options.directory_only,
+                    options.directory_only,
+                    &cwd_prefix,
+                    render_options,
+                )?;
+            }
+        } else if !options.directory_only || entry.mode == TreeMode::Tree {
+            ls_tree_print_entry(&store, &entry, path.as_bytes(), &cwd_prefix, render_options)?;
         }
     }
     Ok(())
+}
+
+fn ls_tree_effective_paths(
+    paths: &[String],
+    cwd_prefix: &[u8],
+    full_tree: bool,
+) -> Result<Vec<String>> {
+    if paths.is_empty() {
+        return if cwd_prefix.is_empty() || full_tree {
+            Ok(Vec::new())
+        } else {
+            Ok(vec![String::from_utf8_lossy(cwd_prefix).into_owned()])
+        };
+    }
+
+    paths
+        .iter()
+        .map(|path| {
+            let normalized = normalize_git_path(path)?;
+            if normalized.is_empty() || cwd_prefix.is_empty() || full_tree {
+                return Ok(normalized);
+            }
+            Ok(format!("{}/{}", String::from_utf8_lossy(cwd_prefix), normalized))
+        })
+        .collect()
+}
+
+fn ls_tree_print_entries(
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    tree_id: &ObjectId,
+    prefix: Vec<u8>,
+    recursive: bool,
+    show_trees: bool,
+    directory_only: bool,
+    cwd_prefix: &[u8],
+    render_options: LsTreeRenderOptions<'_>,
+) -> Result<()> {
+    if recursive {
+        return ls_tree_print_entries_recursive(
+            store,
+            tree_cache,
+            tree_id,
+            prefix,
+            show_trees,
+            directory_only,
+            cwd_prefix,
+            render_options,
+        );
+    }
+    for entry in tree_cache.read_tree(tree_id)?.iter() {
+        if directory_only && entry.mode != TreeMode::Tree {
+            continue;
+        }
+        let path = tree_entry_path(&prefix, &entry.name);
+        ls_tree_print_entry(store, entry, &path, cwd_prefix, render_options)?;
+    }
+    Ok(())
+}
+
+fn ls_tree_print_entries_recursive(
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    tree_id: &ObjectId,
+    mut path: Vec<u8>,
+    show_trees: bool,
+    directory_only: bool,
+    cwd_prefix: &[u8],
+    render_options: LsTreeRenderOptions<'_>,
+) -> Result<()> {
+    struct PendingTreePrint {
+        id: ObjectId,
+        path_len: usize,
+        entries: Option<Arc<[TreeEntry]>>,
+        next: usize,
+    }
+
+    let initial_path_len = path.len();
+    let mut pending = vec![PendingTreePrint {
+        id: tree_id.clone(),
+        path_len: initial_path_len,
+        entries: None,
+        next: 0,
+    }];
+    while !pending.is_empty() {
+        let Some(frame) = pending.last_mut() else {
+            break;
+        };
+        if frame.entries.is_none() {
+            frame.entries = Some(tree_cache.read_tree(&frame.id)?);
+            continue;
+        }
+
+        let Some((entry, child_path_len)) = (|| {
+            let frame = pending.last_mut()?;
+            let entries = frame.entries.as_ref()?;
+            if frame.next == entries.len() {
+                return None;
+            }
+            let entry = &entries[frame.next];
+            frame.next += 1;
+            path.truncate(frame.path_len);
+            if !path.is_empty() {
+                path.push(b'/');
+            }
+            path.extend_from_slice(&entry.name);
+            Some((entry.clone(), path.len()))
+        })() else {
+            let frame = pending.last().expect("pending ls-tree frame");
+            path.truncate(frame.path_len);
+            pending.pop();
+            continue;
+        };
+
+        if entry.mode == TreeMode::Tree {
+            if show_trees {
+                ls_tree_print_entry(store, &entry, &path, cwd_prefix, render_options)?;
+            }
+            if !directory_only {
+                pending.push(PendingTreePrint {
+                    id: entry.id,
+                    path_len: child_path_len,
+                    entries: None,
+                    next: 0,
+                });
+            }
+        } else if !directory_only {
+            ls_tree_print_entry(store, &entry, &path, cwd_prefix, render_options)?;
+        }
+    }
+    path.truncate(initial_path_len);
+    Ok(())
+}
+
+fn ls_tree_print_entry(
+    store: &LooseObjectStore,
+    entry: &TreeEntry,
+    path: &[u8],
+    cwd_prefix: &[u8],
+    options: LsTreeRenderOptions<'_>,
+) -> Result<()> {
+    let display_path = ls_tree_display_path(path, cwd_prefix, options.full_name);
+    let record = if let Some(format) = options.format {
+        ls_tree_render_format(format, store, entry, &display_path, options.abbrev)?
+    } else if options.object_only {
+        ls_tree_object_name(&entry.id, options.abbrev).into_bytes()
+    } else if options.name_only {
+        display_path
+    } else if options.long {
+        let size = ls_tree_object_size_field(store, entry)?;
+        format!(
+            "{} {} {} {:>7}\t{}",
+            tree_mode_display(entry.mode),
+            tree_entry_kind(entry.mode).as_str(),
+            ls_tree_object_name(&entry.id, options.abbrev),
+            size,
+            String::from_utf8_lossy(&display_path)
+        )
+        .into_bytes()
+    } else {
+        format!(
+            "{} {} {}\t{}",
+            tree_mode_display(entry.mode),
+            tree_entry_kind(entry.mode).as_str(),
+            ls_tree_object_name(&entry.id, options.abbrev),
+            String::from_utf8_lossy(&display_path)
+        )
+        .into_bytes()
+    };
+    let terminator = if options.nul_terminated { b'\0' } else { b'\n' };
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(&record)?;
+    stdout.write_all(&[terminator])?;
+    Ok(())
+}
+
+fn ls_tree_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Vec<u8> {
+    if full_name || cwd_prefix.is_empty() {
+        return path.to_vec();
+    }
+    if path == cwd_prefix {
+        return Vec::new();
+    }
+    if let Some(rest) = path
+        .strip_prefix(cwd_prefix)
+        .and_then(|rest| rest.strip_prefix(b"/"))
+    {
+        return rest.to_vec();
+    }
+    relative_pathspec_bytes(cwd_prefix, path)
+}
+
+fn relative_pathspec_bytes(from: &[u8], to: &[u8]) -> Vec<u8> {
+    let from_components = from
+        .split(|byte| *byte == b'/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let to_components = to
+        .split(|byte| *byte == b'/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let common = from_components
+        .iter()
+        .zip(&to_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut out = Vec::new();
+    for _ in common..from_components.len() {
+        if !out.is_empty() {
+            out.push(b'/');
+        }
+        out.extend_from_slice(b"..");
+    }
+    for component in &to_components[common..] {
+        if !out.is_empty() {
+            out.push(b'/');
+        }
+        out.extend_from_slice(component);
+    }
+    out
+}
+
+fn ls_tree_object_name(id: &ObjectId, abbrev: Option<usize>) -> String {
+    match abbrev {
+        Some(len) => short_object_id_len(id, len.max(1)),
+        None => id.to_hex(),
+    }
+}
+
+fn ls_tree_object_size_field(store: &LooseObjectStore, entry: &TreeEntry) -> Result<String> {
+    if !matches!(
+        entry.mode,
+        TreeMode::File | TreeMode::Executable | TreeMode::Symlink
+    ) {
+        return Ok("-".into());
+    }
+    Ok(store.read_object(&entry.id)?.content.len().to_string())
+}
+
+fn ls_tree_render_format(
+    format: &str,
+    store: &LooseObjectStore,
+    entry: &TreeEntry,
+    display_path: &[u8],
+    abbrev: Option<usize>,
+) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut chars = format.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            let mut buf = [0_u8; 4];
+            out.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('%') => {
+                chars.next();
+                out.push(b'%');
+            }
+            Some('x') => {
+                chars.next();
+                let hi = chars.next().ok_or_else(|| bad_ls_tree_format(format))?;
+                let lo = chars.next().ok_or_else(|| bad_ls_tree_format(format))?;
+                let value =
+                    ls_tree_hex_pair_value(hi, lo).ok_or_else(|| bad_ls_tree_format(format))?;
+                out.push(value);
+            }
+            Some('(') => {
+                chars.next();
+                let mut atom = String::new();
+                loop {
+                    match chars.next() {
+                        Some(')') => break,
+                        Some(ch) => atom.push(ch),
+                        None => return Err(bad_ls_tree_format(format)),
+                    }
+                }
+                match atom.as_str() {
+                    "objectmode" => out.extend_from_slice(tree_mode_display(entry.mode).as_bytes()),
+                    "objecttype" => {
+                        out.extend_from_slice(tree_entry_kind(entry.mode).as_str().as_bytes())
+                    }
+                    "objectname" => {
+                        out.extend_from_slice(ls_tree_object_name(&entry.id, abbrev).as_bytes())
+                    }
+                    "objectsize" => {
+                        out.extend_from_slice(ls_tree_object_size_field(store, entry)?.as_bytes())
+                    }
+                    "objectsize:padded" => {
+                        let size = ls_tree_object_size_field(store, entry)?;
+                        out.extend_from_slice(format!("{size:>7}").as_bytes());
+                    }
+                    "path" => out.extend_from_slice(display_path),
+                    _ => return Err(bad_ls_tree_format(format)),
+                }
+            }
+            _ => return Err(bad_ls_tree_format(format)),
+        }
+    }
+    Ok(out)
+}
+
+fn bad_ls_tree_format(format: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("bad ls-tree format: {format}"),
+    }
+}
+
+fn ls_tree_hex_pair_value(hi: char, lo: char) -> Option<u8> {
+    let hi = hi.to_digit(16)?;
+    let lo = lo.to_digit(16)?;
+    Some(((hi << 4) | lo) as u8)
 }
 
 fn branch(options: BranchOptions) -> Result<()> {
@@ -6806,13 +7203,37 @@ Tag listing options
 }
 
 pub(crate) fn ls_tree_command(
+    directory_only: bool,
     recursive: bool,
     show_trees: bool,
+    long: bool,
+    nul_terminated: bool,
     name_only: bool,
+    name_status: bool,
+    object_only: bool,
+    full_name: bool,
+    full_tree: bool,
+    abbrev: Option<usize>,
+    format: Option<&str>,
     treeish: &str,
     paths: Vec<String>,
 ) -> Result<()> {
-    ls_tree(recursive, show_trees, name_only, treeish, paths)
+    ls_tree(LsTreeOptions {
+        directory_only,
+        recursive,
+        show_trees,
+        long,
+        nul_terminated,
+        name_only,
+        name_status,
+        object_only,
+        full_name,
+        full_tree,
+        abbrev,
+        format,
+        treeish,
+        paths,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

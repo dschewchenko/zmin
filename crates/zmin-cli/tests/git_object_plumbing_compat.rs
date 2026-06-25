@@ -897,6 +897,66 @@ fn treeish_path_resolution_and_ls_tree_match_stock_git() {
 }
 
 #[test]
+fn ls_tree_extended_options_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("src/deep")).expect("create nested dirs");
+    fs::write(repo.path().join("README.md"), b"hello\n").expect("write readme");
+    fs::write(repo.path().join("src/main.rs"), b"fn main() {}\n").expect("write source");
+    fs::write(repo.path().join("src/deep/lib.rs"), b"pub fn lib() {}\n").expect("write nested");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    for args in [
+        ["ls-tree", "-d", "HEAD", "src"].as_slice(),
+        ["ls-tree", "-l", "HEAD"].as_slice(),
+        ["ls-tree", "--object-only", "HEAD"].as_slice(),
+        ["ls-tree", "--abbrev=10", "HEAD"].as_slice(),
+        ["ls-tree", "--name-status", "HEAD"].as_slice(),
+        ["ls-tree", "--format=%(objectname) %(path)", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        command_stdout_bytes(zmin_bin(), repo.path(), &["ls-tree", "-z", "HEAD"]),
+        command_stdout_bytes("git", repo.path(), &["ls-tree", "-z", "HEAD"])
+    );
+}
+
+#[test]
+fn ls_tree_subdir_full_name_and_full_tree_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir/sub")).expect("create nested dirs");
+    fs::write(repo.path().join("README.md"), b"root\n").expect("write root");
+    fs::write(repo.path().join("dir/file.txt"), b"child\n").expect("write child");
+    fs::write(repo.path().join("dir/sub/nested.txt"), b"nested\n").expect("write nested");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    let cwd = repo.path().join("dir");
+    for args in [
+        ["ls-tree", "HEAD"].as_slice(),
+        ["ls-tree", "--full-name", "HEAD"].as_slice(),
+        ["ls-tree", "--full-tree", "HEAD"].as_slice(),
+        ["ls-tree", "-r", "HEAD"].as_slice(),
+        ["ls-tree", "-r", "--full-name", "HEAD"].as_slice(),
+        ["ls-tree", "-r", "--full-tree", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_stdout_bytes(zmin_bin(), &cwd, args),
+            command_stdout_bytes("git", &cwd, args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn unpack_file_matches_stock_git_blob_behavior() {
     let repo = git_init();
     configure_identity(repo.path());

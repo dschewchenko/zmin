@@ -83,3 +83,46 @@ run_case ls_tree_positional_path ls-tree HEAD src/main.rs
 run_case ls_tree_recursive_short ls-tree -r HEAD
 run_case ls_tree_recursive_tree_entries ls-tree -r -t HEAD
 run_case ls_tree_name_only_long ls-tree --name-only HEAD
+run_case ls_tree_directory_only ls-tree -d HEAD src
+run_case ls_tree_long ls-tree -l HEAD
+run_case ls_tree_object_only ls-tree --object-only HEAD
+run_case ls_tree_abbrev ls-tree --abbrev=10 HEAD
+run_case ls_tree_name_status ls-tree --name-status HEAD
+run_case ls_tree_format ls-tree "--format=%(objectname) %(path)" HEAD
+run_case ls_tree_nul_terminated ls-tree -z HEAD
+
+run_subdir_case() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_status="$tmpdir/${name}.git.status"
+  local zmin_status="$tmpdir/${name}.zmin.status"
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_repo "$git_work"
+  seed_repo "$zmin_work"
+
+  set +e
+  "$GIT_BIN" -C "$git_work/src" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  "$ZMIN_BIN" -C "$zmin_work/src" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  "$GIT_BIN" -C "$git_work" status --short >"$git_status"
+  "$GIT_BIN" -C "$zmin_work" status --short >"$zmin_status"
+  compare_files worktree_status "$git_status" "$zmin_status"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
+run_subdir_case ls_tree_full_name_subdir ls-tree --full-name HEAD
+run_subdir_case ls_tree_full_tree_subdir ls-tree --full-tree HEAD

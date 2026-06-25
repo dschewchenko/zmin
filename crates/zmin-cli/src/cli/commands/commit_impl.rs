@@ -1088,7 +1088,22 @@ fn gui(args: Vec<String>) -> Result<()> {
         "citool" => gui_citool(&args[1..]),
         "browser" => {
             let treeish = args.get(1).map(String::as_str).unwrap_or("HEAD");
-            reference_commands::ls_tree_command(true, false, true, treeish, Vec::new())
+            reference_commands::ls_tree_command(
+                false,
+                true,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                None,
+                None,
+                treeish,
+                Vec::new(),
+            )
         }
         "blame" => blame(false, false, false, args[1..].to_vec()),
         _ => Err(CliError::Fatal {

@@ -300,6 +300,16 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
+The latest completed slice is helper-free `git ls-tree`: it now closes the
+remaining schema-tail for `-d`, `-l`, `-z`, `--name-status`, `--object-only`,
+`--abbrev[=<n>]`, `--full-name`, `--full-tree`, and `--format`, promotes
+`ls-tree` to `13/13` reviewed-complete documented option pairs, and moves the
+command to reviewed-complete at `13/13` represented documented option pairs,
+`18/18` classified rows, and `0` exact-open rows. The next bounded helper-free
+follow-up should move away from `ls-tree`; the smallest remaining supported
+schema-tail candidate is now `send-pack`, while `fmt-merge-msg` and
+`http-fetch` still need more careful evidence selection before promotion.
+
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
 `git_clone_ref_format_compat.rs`, `git_scalar_compat.rs`,

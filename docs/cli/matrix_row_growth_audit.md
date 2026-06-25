@@ -11,6 +11,16 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git ls-tree` schema-tail
+closure plus command promotion. The selected change expands `ls-tree` to cover
+the documented `-d`, `-l`, `-z`, `--name-status`, `--object-only`,
+`--abbrev[=<n>]`, `--full-name`, `--full-tree`, and `--format` surfaces while
+matching stock Git for repository-subdirectory scope and full-tree traversal.
+Expected delta is `+9` matrix rows, `+10` complete documented option pairs,
+`+10` represented documented option pairs, `+1` complete command matrix, `+9`
+verified rows, `+0` invalid-input rows, and `-10` remaining checklist rows.
+Actual delta matched, and `ls-tree` is now command-complete at `13/13`.
+
 As of 2026-06-25 the next batch is a helper-free `git filter-branch`
 `--prune-empty` closure plus docs-option inventory correction. The selected
 change adds exact stock-Git evidence for pruning a single-parent empty commit

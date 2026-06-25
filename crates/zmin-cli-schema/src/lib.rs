@@ -3419,12 +3419,30 @@ pub enum Command {
         patterns: Vec<String>,
     },
     LsTree {
+        #[arg(short = 'd', action = ArgAction::SetTrue)]
+        directory_only: bool,
         #[arg(short = 'r', action = ArgAction::SetTrue)]
         recursive: bool,
         #[arg(short = 't', action = ArgAction::SetTrue)]
         show_trees: bool,
+        #[arg(short = 'l', long = "long", action = ArgAction::SetTrue)]
+        long: bool,
+        #[arg(short = 'z', action = ArgAction::SetTrue)]
+        nul_terminated: bool,
         #[arg(long = "name-only", action = ArgAction::SetTrue)]
         name_only: bool,
+        #[arg(long = "name-status", action = ArgAction::SetTrue)]
+        name_status: bool,
+        #[arg(long = "object-only", action = ArgAction::SetTrue)]
+        object_only: bool,
+        #[arg(long = "full-name", action = ArgAction::SetTrue)]
+        full_name: bool,
+        #[arg(long = "full-tree", action = ArgAction::SetTrue)]
+        full_tree: bool,
+        #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "7")]
+        abbrev: Option<usize>,
+        #[arg(long = "format")]
+        format: Option<String>,
         treeish: String,
         paths: Vec<String>,
     },

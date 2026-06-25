@@ -110,12 +110,36 @@ pub(crate) fn dispatch(
             patterns,
         } => run_for_each_ref(format, sort, patterns),
         runtime::Command::LsTree {
+            directory_only,
             recursive,
             show_trees,
+            long,
+            nul_terminated,
             name_only,
+            name_status,
+            object_only,
+            full_name,
+            full_tree,
+            abbrev,
+            format,
             treeish,
             paths,
-        } => run_ls_tree(recursive, show_trees, name_only, treeish, paths),
+        } => run_ls_tree(
+            directory_only,
+            recursive,
+            show_trees,
+            long,
+            nul_terminated,
+            name_only,
+            name_status,
+            object_only,
+            full_name,
+            full_tree,
+            abbrev,
+            format,
+            treeish,
+            paths,
+        ),
         runtime::Command::Branch {
             help,
             remotes,
@@ -546,13 +570,37 @@ pub(crate) fn run_for_each_ref(
 }
 
 pub(crate) fn run_ls_tree(
+    directory_only: bool,
     recursive: bool,
     show_trees: bool,
+    long: bool,
+    nul_terminated: bool,
     name_only: bool,
+    name_status: bool,
+    object_only: bool,
+    full_name: bool,
+    full_tree: bool,
+    abbrev: Option<usize>,
+    format: Option<String>,
     treeish: String,
     paths: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::reference_commands::ls_tree_command(recursive, show_trees, name_only, &treeish, paths)
+    super::reference_commands::ls_tree_command(
+        directory_only,
+        recursive,
+        show_trees,
+        long,
+        nul_terminated,
+        name_only,
+        name_status,
+        object_only,
+        full_name,
+        full_tree,
+        abbrev,
+        format.as_deref(),
+        &treeish,
+        paths,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
