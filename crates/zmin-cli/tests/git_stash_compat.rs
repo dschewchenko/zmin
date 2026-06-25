@@ -1794,6 +1794,43 @@ fn stash_push_staged_matches_stock_git() {
 }
 
 #[test]
+fn stash_push_short_staged_alias_matches_stock_git() {
+    let git_repo = stash_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "b.txt", "base\n");
+        git(repo, ["add", "b.txt"]);
+        git_with_env(repo, ["commit", "-m", "add b"]);
+        write_file(repo, "a.txt", "one\nstaged\n");
+        git(repo, ["add", "a.txt"]);
+        write_file(repo, "b.txt", "base\nunstaged\n");
+    }
+
+    assert_eq!(
+        run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-S", "-m", "staged-short"]),
+        git_with_env(git_repo.path(), ["stash", "push", "-S", "-m", "staged-short"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--short"]),
+        git(git_repo.path(), ["status", "--short"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+        fs::read_to_string(git_repo.path().join("a.txt")).expect("read git a")
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join("b.txt")).expect("read zmin b"),
+        fs::read_to_string(git_repo.path().join("b.txt")).expect("read git b")
+    );
+    assert_eq!(
+        run_zmin_args(zmin_repo.path(), &["stash", "show", "--patch", "--stat"]),
+        git_args(git_repo.path(), &["stash", "show", "--patch", "--stat"])
+    );
+}
+
+#[test]
 fn stash_push_keep_index_matches_stock_git() {
     let git_repo = stash_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());
@@ -3046,6 +3083,51 @@ fn stash_patch_selects_hunks_and_leaves_rejected_hunks_like_stock_git() {
     run_zmin_with_stdin(
         zmin_repo.path(),
         ["stash", "push", "--patch", "-m", "patchy"],
+        "y\nn\n",
+    );
+
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+        fs::read_to_string(git_repo.path().join("a.txt")).expect("read git a")
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--short"]),
+        git(git_repo.path(), ["status", "--short"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["stash", "list"]),
+        git(git_repo.path(), ["stash", "list"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["stash", "show", "--patch"]),
+        git(git_repo.path(), ["stash", "show", "--patch"])
+    );
+}
+
+#[test]
+fn stash_push_short_patch_alias_matches_stock_git() {
+    let git_repo = git_init();
+    configure_identity(git_repo.path());
+    git(git_repo.path(), ["checkout", "-b", "main"]);
+    let base = (1..=12)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    write_file(git_repo.path(), "a.txt", &base);
+    git(git_repo.path(), ["add", "a.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    let changed = base
+        .replace("line 2\n", "line 2 changed\n")
+        .replace("line 10\n", "line 10 changed\n");
+    write_file(git_repo.path(), "a.txt", &changed);
+    write_file(zmin_repo.path(), "a.txt", &changed);
+
+    git_with_stdin(git_repo.path(), ["stash", "push", "-p", "-m", "patchy-short"], "y\nn\n");
+    run_zmin_with_stdin(
+        zmin_repo.path(),
+        ["stash", "push", "-p", "-m", "patchy-short"],
         "y\nn\n",
     );
 

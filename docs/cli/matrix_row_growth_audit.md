@@ -5507,6 +5507,33 @@ implemented-but-unverified schema rows.
 
 ## Latest Declared Import
 
+Source bucket: census documented-option gap for `stash -S` and `stash -p`,
+using existing helper-free local stash compat lanes.
+
+Evidence commands:
+
+- `cargo test -p zmin-cli --test git_stash_compat stash_push_short_staged_alias_matches_stock_git -- --exact`
+- `cargo test -p zmin-cli --test git_stash_compat stash_push_short_patch_alias_matches_stock_git -- --exact`
+
+Expected movement:
+
+- behavior rows: `+2`
+- closed rows: `+2`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+2`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+2`
+- complete command matrices: `+1` after promotion
+
+Actual post-import movement matched the declaration: `+2` behavior rows,
+`+2` closed rows, `+0` open rows, `+0` invalid-input rows, `+0` commands with
+rows, `+2` complete documented option pairs, and `+1` reviewed-complete
+command matrix after promoting `stash`.
+
+## Previous Declared Import
+
 Source bucket: census documented-option gap for `bugreport --no-diagnose`,
 using the existing focused stock-vs-Zmin oracle test lane.
 
@@ -5531,7 +5558,7 @@ Actual post-import movement matched the declaration: `+3` behavior rows,
 rows, `+1` complete documented option pair, and `+1` reviewed-complete
 command matrix after promoting `bugreport`.
 
-## Previous Declared Import
+## Earlier Declared Import
 
 Source bucket: census implemented-but-unverified `cat-file --no-filter`
 schema surface, with focused stock-oracle smoke evidence.

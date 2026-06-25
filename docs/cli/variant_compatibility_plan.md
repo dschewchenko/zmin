@@ -343,7 +343,7 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `bugreport` command promotion, the exact-open queue in this
+After the latest `stash` command promotion, the exact-open queue in this
 environment is still down to helper-oracle-unavailable rows only:
 `citool` (`5`), `cvsimport` (`2`), `svn` (`2`), `archimport` (`1`),
 `cvsexportcommit` (`1`) and `scalar` (`1`). `instaweb` now has `11/13`
@@ -360,40 +360,45 @@ pairs, `14/14` represented documented option pairs, `19/19` classified rows,
 and `0` exact-open written rows; `bugreport` is now command-complete at
 `7/7` documented option pairs, `7/7` represented documented option pairs,
 `13/13` classified rows, and `0` exact-open written rows after closing the
-`--no-diagnose` ordering family. The next compact real batch is no longer the
-three-way parser-alias cluster: `bugreport --no-diagnose` is closed, while
-`fmt-merge-msg --summary/--no-summary` still exposes a real `--log` parity gap
-and `http-fetch --index-pack-args` still lacks clean local stock-Git evidence,
-so the next high-throughput follow-up should move to another census-backed
-supported subgroup or a larger zero-row command-promotion cluster.
+`--no-diagnose` ordering family; `stash` is now command-complete at
+`18/18` documented option pairs, `18/18` represented documented option pairs,
+`211/211` classified rows, and `0` exact-open written rows after making the
+short `-S` and `-p` aliases durable. The next compact helper-free follow-up is
+no longer another stash or bugreport alias slice. `fmt-merge-msg
+--summary/--no-summary` still exposes a real `--log` parity gap, and
+`http-fetch --index-pack-args` still lacks clean local stock-Git evidence, so
+the next high-throughput follow-up should move either to another bounded
+census-backed supported subgroup or to the next small command-unlocking
+documented gap with clear semantics.
 
 ### Latest Completed Slice
 
-The latest completed slice closes the helper-free `git bugreport
---no-diagnose` family and promotes `bugreport` into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`. Zmin now accepts
-`--no-diagnose`, matches stock Git on standalone report-only behavior, and
-follows last-one-wins ordering against `--diagnose=stats`, so the command is
-now fully reviewed complete at `7/7` documented option pairs and `13/13`
+The latest completed slice closes the helper-free `git stash` short-alias
+family for `-S` and `-p`, then promotes `stash` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Zmin already matched
+stock Git for the long `--staged` and `--patch` lanes; this slice makes the
+short aliases durable with exact stock-Git evidence, bringing `stash` to full
+command-complete status at `18/18` documented option pairs and `211/211`
 classified rows.
 
 Focused gates were
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`cargo test -p zmin-cli --test git_stash_compat stash_push_short_staged_alias_matches_stock_git -- --exact`,
+`cargo test -p zmin-cli --test git_stash_compat stash_push_short_patch_alias_matches_stock_git -- --exact`,
+`python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`cargo test -p zmin-cli --test git_admin_tools_compat bugreport_no_diagnose_modes_match_stock_git -- --exact`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(bugreport|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(stash|summary)\t'`,
 `tools/git-compat-audit-summary.sh --tsv`,
 and `git diff --check`.
 
-Current census counts are `5342` matrix rows, `4648` verified rows, `679`
-invalid-input rows, `12` exact-open rows, `84/151` complete command
-matrices, `1392/3175` complete documented option pairs, `1400/3175`
-represented documented option pairs, and `1795` remaining checklist rows.
-`describe` is now fully command-complete at `14/14` reviewed-complete
-documented option pairs with `14/14` represented documented option pairs,
-`19/19` classified rows, and `0` exact-open written rows. The exact-open queue
-remains limited to the helper-oracle-unavailable commands `citool`,
-`cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and `scalar`.
+Current census counts are `5347` matrix rows, `4653` verified rows, `679`
+invalid-input rows, `12` exact-open rows, `86/151` complete command
+matrices, `1395/3175` complete documented option pairs, `1403/3175`
+represented documented option pairs, and `1792` remaining checklist rows.
+`stash` is now fully command-complete at `18/18` reviewed-complete documented
+option pairs with `18/18` represented documented option pairs, `211/211`
+classified rows, and `0` exact-open written rows. The exact-open queue remains
+limited to the helper-oracle-unavailable commands `citool`, `cvsimport`,
+`svn`, `archimport`, `cvsexportcommit`, and `scalar`.
 
 ### No-Skip Rule
 
