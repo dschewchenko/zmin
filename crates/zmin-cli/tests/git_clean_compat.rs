@@ -135,6 +135,87 @@ fn clean_exclude_patterns_match_stock_git_modes() {
 }
 
 #[test]
+fn clean_documented_aliases_match_stock_git() {
+    let git_repo = clean_fixture_repo();
+    let zmin_repo = clean_fixture_repo();
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["clean", "--force", "-d"],
+            "zmin",
+        ),
+        command_any_output("git", git_repo.path(), &["clean", "--force", "-d"], "git")
+    );
+    for path in [
+        "dir",
+        "untracked.txt",
+        "ignored.log",
+        "ignored_dir/ignored.txt",
+        "tracked_dir/tracked.txt",
+        "tracked_dir/untracked.txt",
+    ] {
+        assert_eq!(
+            zmin_repo.path().join(path).exists(),
+            git_repo.path().join(path).exists(),
+            "path state should match for clean --force -d: {path}"
+        );
+    }
+
+    let git_repo = clean_fixture_repo();
+    let zmin_repo = clean_fixture_repo();
+    fs::create_dir_all(git_repo.path().join("nested")).expect("create git nested");
+    fs::create_dir_all(zmin_repo.path().join("nested")).expect("create zmin nested");
+    git(git_repo.path().join("nested").as_path(), ["init"]);
+    git(zmin_repo.path().join("nested").as_path(), ["init"]);
+    fs::write(git_repo.path().join("nested/file.txt"), b"nested\n").expect("write git nested");
+    fs::write(zmin_repo.path().join("nested/file.txt"), b"nested\n").expect("write zmin nested");
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["clean", "--force", "--force", "-d"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["clean", "--force", "--force", "-d"],
+            "git",
+        )
+    );
+    assert_eq!(
+        zmin_repo.path().join("nested/.git").exists(),
+        git_repo.path().join("nested/.git").exists(),
+        "nested repo existence should match for clean --force --force -d"
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    fs::write(git_repo.path().join("untracked.txt"), b"untracked\n").expect("write git file");
+    fs::write(zmin_repo.path().join("untracked.txt"), b"untracked\n").expect("write zmin file");
+
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["clean", "-i"],
+            "q\n",
+            "zmin",
+        ),
+        command_any_output_with_stdin("git", git_repo.path(), &["clean", "-i"], "q\n", "git")
+    );
+    assert!(zmin_repo.path().join("untracked.txt").exists());
+    assert_eq!(
+        zmin_repo.path().join("untracked.txt").exists(),
+        git_repo.path().join("untracked.txt").exists(),
+        "untracked file state should match for clean -i"
+    );
+}
+
+#[test]
 fn clean_no_option_toggles_match_stock_git_order() {
     for args in [
         vec!["clean", "-n", "--no-dry-run"],

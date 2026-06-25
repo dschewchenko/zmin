@@ -317,11 +317,13 @@ documented family is now reviewed complete across its current schema surface
 (`3/3` represented documented option pairs). The supported `checkout-index`
 documented family is now reviewed complete across its current schema surface
 too (`8/8` represented documented option pairs), and both `check-ignore`
-(`9/9`) and `column` (`7/7`) are now reviewed-complete commands. The next
-helper-free family should now move to another census-backed supported subgroup
-such as `archive` (`13/14` represented documented options) or `clean`
-(`11/13` represented documented options), unless work intentionally opens
-unsupported surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`.
+(`9/9`) and `column` (`7/7`) are now reviewed-complete commands. `clean` is
+now reviewed complete too across all `13/13` documented options with `68/68`
+classified rows and `0` open after closing the last alias-only gaps for
+`--force` and `-i`. The next helper-free family should now move to another
+census-backed supported subgroup such as `archive` (`13/14` represented
+documented options), unless work intentionally opens unsupported surfaces in
+`checkout-index`, `read-tree`, `gc`, or `repack`.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -330,14 +332,15 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-row reviewed-complete closure cluster for
-helper-free commands `check-ignore` and `column`. Their behavior matrices,
-stock evidence, and documented option coverage already existed in focused
-tests, oracle smokes, and matrix rows; this follow-up only promotes them into
-the reviewed-complete command and doc-option census artifacts. `check-ignore`
-is now reviewed complete across all `9/9` documented options with `23/23`
-classified rows and `0` open, and `column` is now reviewed complete across
-all `7/7` documented options with `54/54` classified rows and `0` open.
+The latest completed slice is a helper-free `clean` documented-family and
+reviewed-complete closure batch. The runtime already matched stock Git across
+the supported `clean` surface; this follow-up adds explicit stock-Git evidence
+for the remaining documented aliases `--force` and `-i`, then promotes
+`clean` into both reviewed-complete census artifacts. `clean` is now reviewed
+complete across all `13/13` documented options with `68/68` classified rows,
+`0` open rows, and exact stock-Git parity for dry-run, force, interactive,
+quiet, exclude, x/X, path-limited, nested-repository, config, and invalid
+input behavior.
 
 Focused gates were
 `python3 tools/git-compat-census.py`,

@@ -11,6 +11,17 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `clean` documented-family
+and reviewed-complete closure. The selected rows add exact stock-Git evidence
+for the remaining documented alias-only surfaces `--force`, repeated
+`--force`, and `-i`, then promote `clean` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` and
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+3` matrix rows, `+3` verified rows, `+1` complete command matrix, `+13`
+complete documented option pairs, `0` invalid-input rows and `-13`
+remaining checklist rows. Rust behavior changes are not expected. Actual
+delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for helper-free commands `check-ignore` and `column`. Their behavior
 rows, stock evidence, and documented option coverage already exist in the
