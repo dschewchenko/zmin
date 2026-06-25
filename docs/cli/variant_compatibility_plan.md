@@ -1179,6 +1179,37 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
+Current durable census after the zero-code reviewed-complete `daemon`
+documented-option promotion cluster:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `1094 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `daemon` now has thirteen represented documented option families promoted
+  into the reviewed-complete doc-option census list, bringing the command to
+  `13/27` reviewed-complete documented option pairs.
+- The slice adds no new behavior rows; it only makes already closed exact
+  stock-Git local git-daemon listen, export, timeout, inetd, and path-serving
+  evidence durable in the reviewed doc-option source list.
+- Focused verification was
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(daemon|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `daemon` now has `13/27` documented option pairs reviewed complete with
+  `13/27` represented documented option pairs, `14/14` classified rows, and
+  `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed represented family or zero-code command-promotion cluster.
+
 Current durable census after the zero-code reviewed-complete `filter-branch`
 documented-option promotion cluster:
 
