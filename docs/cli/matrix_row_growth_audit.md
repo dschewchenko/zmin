@@ -23,6 +23,18 @@ pairs, `+0` complete command matrices, and `-6` remaining checklist rows.
 Rust behavior changes are expected because repeated cruft-family options must
 parse like stock Git. Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `repack` cruft-expiration
+value-family closure inside the existing schema surface. The selected rows add
+exact stock-Git evidence for `all`, `tomorrow`, `yesterday`, `1970-01-01`,
+`2 weeks ago`, and `bogus` on the helper-free `--cruft -d -q` lane, while the
+product change teaches `repack` to classify future, past absolute, past
+relative, and now-like unparseable expiration values like stock Git. Expected
+delta is `+6` matrix rows, `+6` verified rows, `+0` invalid-input rows, `+0`
+complete documented option pairs, `+0` complete command matrices, and `0`
+remaining checklist rows. Rust behavior changes are expected because the
+cruft-expiration parser must match stock Git's date-like cutoff behavior.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for `branch`, `status`, `rm`, `fsck`, `maintenance`, and
 `merge-tree`. Their behavior rows, stock evidence, and documented option

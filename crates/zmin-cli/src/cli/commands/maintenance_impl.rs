@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::{current_unix_timestamp, parse_git_date};
 
 const REPACK_CANDIDATE_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const MIN_CRUFT_PACK_SIZE_BYTES: u64 = 1_048_576;
@@ -1632,7 +1633,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         "window-memory",
     )?;
     let expire_unreachable_now = write_cruft_pack
-        && matches!(options.cruft_expiration.as_deref(), Some("now" | "all"));
+        && cruft_expiration_expires_unreachable_now(options.cruft_expiration.as_deref())?;
     let _ = (
         options.no_reuse_delta,
         options.no_reuse_object,
@@ -1880,6 +1881,53 @@ fn parse_repack_size_limit_values(values: &[String], option: &str) -> Result<Opt
         last = parse_repack_size_limit(Some(value.as_str()), option)?;
     }
     Ok(last)
+}
+
+fn cruft_expiration_expires_unreachable_now(value: Option<&str>) -> Result<bool> {
+    let Some(value) = value else {
+        return Ok(false);
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "never" => return Ok(false),
+        "now" | "all" | "tomorrow" => return Ok(true),
+        "yesterday" => return Ok(false),
+        _ => {}
+    }
+
+    let now = current_unix_timestamp()?;
+    if let Some(timestamp) = parse_repack_relative_ago(&normalized)? {
+        return Ok(timestamp >= now);
+    }
+    if let Ok((timestamp, _)) = parse_git_date(value) {
+        return Ok(timestamp >= now);
+    }
+
+    // Stock Git's approxidate parser treats many unknown tokens as "now".
+    Ok(true)
+}
+
+fn parse_repack_relative_ago(value: &str) -> Result<Option<i64>> {
+    let normalized = value.replace('.', " ");
+    let parts = normalized.split_whitespace().collect::<Vec<_>>();
+    let [amount, unit, "ago"] = parts.as_slice() else {
+        return Ok(None);
+    };
+    let amount = amount.parse::<i64>().map_err(|error| CliError::Fatal {
+        code: 128,
+        message: format!("invalid cruft expiration value '{value}': {error}"),
+    })?;
+    let seconds = match *unit {
+        "second" | "seconds" => amount,
+        "minute" | "minutes" => amount * 60,
+        "hour" | "hours" => amount * 60 * 60,
+        "day" | "days" => amount * 24 * 60 * 60,
+        "week" | "weeks" => amount * 7 * 24 * 60 * 60,
+        "month" | "months" => amount * 30 * 24 * 60 * 60,
+        "year" | "years" => amount * 365 * 24 * 60 * 60,
+        _ => return Ok(None),
+    };
+    Ok(Some(current_unix_timestamp()? - seconds))
 }
 
 fn parse_size_with_optional_suffix(raw: &str) -> Option<u64> {

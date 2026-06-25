@@ -1644,6 +1644,36 @@ fn repack_cruft_variants_match_stock_git() {
             true,
         ),
         (
+            ["repack", "--cruft", "--cruft-expiration=all", "-d", "-q"].as_slice(),
+            1usize,
+            true,
+        ),
+        (
+            ["repack", "--cruft", "--cruft-expiration=tomorrow", "-d", "-q"].as_slice(),
+            1usize,
+            true,
+        ),
+        (
+            ["repack", "--cruft", "--cruft-expiration=yesterday", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            ["repack", "--cruft", "--cruft-expiration=1970-01-01", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            ["repack", "--cruft", "--cruft-expiration=2 weeks ago", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            ["repack", "--cruft", "--cruft-expiration=bogus", "-d", "-q"].as_slice(),
+            1usize,
+            true,
+        ),
+        (
             [
                 "repack",
                 "--cruft",

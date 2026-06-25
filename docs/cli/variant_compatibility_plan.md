@@ -343,7 +343,7 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest repeat/order closure, `repack` now has `74/74` classified
+After the latest value-family closure, `repack` now has `80/80` classified
 written rows with `0` open and still sits at `28/33` represented documented
 option pairs and `24/33` reviewed-complete documented option pairs. The next
 best high-throughput helper-free follow-up stays inside the remaining
@@ -353,16 +353,14 @@ schema-missing tail `--filter`, `--filter-to`, `--geometric`,
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `git repack` cruft-family
-repeat/order expansion batch. The `repack` parser now accepts repeated
-`--cruft`, repeated `--cruft-expiration`, repeated `--expire-to`, and
-repeated `--max-cruft-size` forms like stock Git. The local runtime now
-matches stock Git for repeated `--cruft`, last-one-wins
-`--cruft-expiration=now|never`, last-one-wins `--expire-to` prefix selection
-for root side-pack artifacts, the ignored `--expire-to` lane when
-`--cruft-expiration=never` keeps the cruft pack in the object store, and
-repeated `--max-cruft-size=2m --max-cruft-size=1` with the stock 1 MiB
-warning.
+The latest completed slice is a helper-free `git repack` cruft-expiration
+value-family batch. The local runtime now matches stock Git for
+`--cruft-expiration=all`, `tomorrow`, `yesterday`, `1970-01-01`,
+`2 weeks ago`, and even `bogus` on the covered helper-free `--cruft -d -q`
+lane. This keeps future and now-like values expiring current unreachable
+objects out of the object-store cruft pack, keeps past absolute and relative
+values in the object-store cruft pack, and matches stock Git's now-like
+treatment of unparseable `bogus` input for this lane.
 
 Focused gates were
 `cargo test -p zmin-cli --test git_maintenance_compat repack_cruft_variants_match_stock_git -- --nocapture`,
@@ -374,12 +372,12 @@ Focused gates were
 `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5289` matrix rows, `4581` verified rows, `679`
+Current census counts are `5295` matrix rows, `4587` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `79/151` complete command
 matrices, `439/3175` complete documented option pairs, and `2762`
 remaining checklist rows. `repack` now reads `33` documented option pairs,
 `24` reviewed-complete documented option pairs, `28` represented documented
-option pairs, and `74/74` classified written rows with `0` open.
+option pairs, and `80/80` classified written rows with `0` open.
 
 ### No-Skip Rule
 
