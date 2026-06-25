@@ -47,7 +47,6 @@ python3 - "$option_seed" "$repo_root"/docs/cli/matrices/*.tsv >"$represented_opt
 import csv
 import re
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 LONG_OPTION_PATTERN = re.compile(r"(?<!\S)(--[A-Za-z0-9][A-Za-z0-9-]*)(?:[=\s]|$)")
@@ -77,12 +76,8 @@ for matrix_path in matrix_paths:
                 if (command, option) in seed:
                     represented.add((command, option))
 
-counts = defaultdict(int)
-for command, _option in represented:
-    counts[command] += 1
-
-for command in sorted(counts):
-    print(f"{command}\t{counts[command]}")
+for command, option in sorted(represented):
+    print(f"{command}\t{option}")
 PY
 
 if [[ ! -f "$complete_commands" ]]; then
@@ -126,8 +121,11 @@ awk -F'\t' -v format="$format" '
     next
   }
   FILENAME ~ /represented-options/ {
-    represented[$1] = $2
-    represented_total += $2
+    if (!represented_pair[$1, $2]) {
+      represented_pair[$1, $2] = 1
+      represented[$1]++
+      represented_total++
+    }
     next
   }
   FILENAME ~ /complete-options|reviewed_complete_doc_option_pairs/ {
@@ -135,6 +133,11 @@ awk -F'\t' -v format="$format" '
       if (($1, $2) in seed_pair) {
         complete_options[$1]++
         complete_option_total++
+        if (!represented_pair[$1, $2]) {
+          represented_pair[$1, $2] = 1
+          represented[$1]++
+          represented_total++
+        }
       }
     }
     next
