@@ -1,6 +1,6 @@
 metric	count	total	note
-complete_command_matrices	68	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	396	3175	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	69	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	398	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1339	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5155	5155	current written command option value combination state transport platform rows
@@ -17,7 +17,7 @@ annotate	25	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 apply	38	0	5	13.2	22	22	100.0	21	95.5	0	0	1	no
 archimport	8	0	1	12.5	1	0	0.0	0	0.0	0	1	0	no
 archive	14	14	14	100.0	24	24	100.0	23	95.8	0	0	1	no
-bisect	2	0	2	100.0	21	21	100.0	20	95.2	0	0	1	no
+bisect	2	2	2	100.0	21	21	100.0	20	95.2	0	0	1	yes
 blame	36	0	28	77.8	172	172	100.0	92	53.5	0	0	80	no
 branch	48	48	48	100.0	94	94	100.0	76	80.9	0	0	18	yes
 bugreport	7	0	6	85.7	10	10	100.0	10	100.0	0	0	0	no

@@ -23,6 +23,16 @@ option pairs, `0` verified rows, `0` invalid-input rows, and `-109`
 remaining checklist rows. Rust behavior changes are not expected. Actual delta
 matched.
 
+As of 2026-06-25 the next batch is a zero-row reviewed-complete closure for
+`bisect`. Its behavior rows, stock evidence, and both documented option
+surfaces already exist in the matrix and focused sequencer and invalid-input
+tests; this slice only promotes the command plus `--first-parent` and
+`--no-checkout` into the durable reviewed-complete census source lists.
+Expected delta is `+0` matrix rows, `+1` complete command matrix, `+2`
+complete documented option pairs, `0` verified rows, `0` invalid-input rows,
+and `-2` remaining checklist rows. Rust behavior changes are not expected.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `archive`
 documented-option family closure. The selected rows add exact stock-Git
 evidence for filename-based format inference through `-o` and `--output`,

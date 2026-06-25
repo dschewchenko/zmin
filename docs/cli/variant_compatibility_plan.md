@@ -329,7 +329,10 @@ command matrix. `branch`, `status`, `rm`, `fsck`, `maintenance`, and
 `merge-tree` are now also eligible zero-row reviewed-complete commands because
 they already have `100%` represented documented options, `0` exact-open rows,
 `0` implemented-but-unverified rows, and `100%` classified written-row
-coverage. The next helper-free family should now move to another
+coverage. `bisect` is now also eligible because its only two documented option
+surfaces `--first-parent` and `--no-checkout` already have exact stock-Git
+evidence in the sequencer matrix. The next helper-free family should now move
+to another
 census-backed supported subgroup unless work intentionally opens unsupported
 surfaces in `checkout-index`, `read-tree`, `gc`, or `repack`.
 The exact helper-backed
@@ -340,31 +343,26 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-row reviewed-complete closure cluster for
-`branch`, `status`, `rm`, `fsck`, `maintenance`, and `merge-tree`. Their
-behavior matrices already had `100%` represented documented options, `0`
-exact-open rows, `0` implemented-but-unverified rows, and `100%` classified
-written-row coverage, so this batch promotes them into the durable reviewed
-command and doc-option census source lists without changing Rust behavior.
+The latest completed slice is a zero-row reviewed-complete closure for
+`bisect`. Its behavior matrix already had `2/2` represented documented
+options, `0` exact-open rows, `0` implemented-but-unverified rows, and
+`21/21` classified written-row coverage, so this batch promotes the command
+plus `--first-parent` and `--no-checkout` into the durable reviewed command
+and doc-option census source lists without changing Rust behavior.
 
 Focused gates were
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(branch|status|rm|fsck|maintenance|merge-tree|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(bisect|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are expected to move to `5155` matrix rows, `4454`
 verified rows, `672` invalid-input rows, `26`
 exact-open local-oracle-unavailable rows, `26` open-or-partial rows,
-`68/151` complete command matrices, `396/3175` complete documented option
-pairs, and `2805` remaining checklist rows.
+`69/151` complete command matrices, `398/3175` complete documented option
+pairs, and `2803` remaining checklist rows.
 The promoted commands now read:
-- `branch` `48/48` represented documented options reviewed complete, `94/94` classified rows, `76/94` matching stock Git rows, `0` open
-- `status` `21/21` represented documented options reviewed complete, `183/183` classified rows, `170/183` matching stock Git rows, `0` open
-- `rm` `12/12` represented documented options reviewed complete, `50/50` classified rows, `41/50` matching stock Git rows, `0` open
-- `fsck` `15/15` represented documented options reviewed complete, `56/56` classified rows, `21/56` matching stock Git rows, `0` open
-- `maintenance` `5/5` represented documented options reviewed complete, `49/49` classified rows, `32/49` matching stock Git rows, `0` open
-- `merge-tree` `8/8` represented documented options reviewed complete, `37/37` classified rows, `22/37` matching stock Git rows, `0` open
+- `bisect` `2/2` represented documented options reviewed complete, `21/21` classified rows, `20/21` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 
