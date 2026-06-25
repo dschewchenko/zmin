@@ -343,34 +343,34 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `apply` doc-option promotion, `apply`
-adds another `5` durable reviewed-complete documented option pairs without
-changing Rust behavior and is up to `5/38` documented options complete with
-`5/38` represented documented option pairs and `22/22` classified rows.
+After the latest zero-code `http-push` doc-option promotion, `http-push`
+adds another `4` durable reviewed-complete documented option pairs without
+changing Rust behavior and is up to `4/6` documented options complete with
+`4/6` represented documented option pairs and `8/8` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
 represented family or zero-code command-promotion cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `apply` surface. The
-existing exact stock-Git evidence already closed five `apply` option
-families across check, cached, index, reverse, and short-reverse lanes, so
-this slice only promotes those documented option pairs into
+promotion cluster for the represented helper-free `http-push` surface. The
+existing exact stock-Git evidence already closed four `http-push` option
+families across the represented outside-repository rejection lanes, so this
+slice only promotes those documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(apply|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(http-push|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1309/3175` complete documented option pairs, and `1892`
-remaining checklist rows. `apply` now reads `38` documented option
-pairs with `5` reviewed complete, `5` represented documented option pairs,
-and `22/22` classified written rows with `0` open.
+matrices, `1313/3175` complete documented option pairs, and `1888`
+remaining checklist rows. `http-push` now reads `6` documented option
+pairs with `4` reviewed complete, `4` represented documented option pairs,
+and `8/8` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1180,11 +1180,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code reviewed-complete `apply`
+Current durable census after the zero-code reviewed-complete `http-push`
 documented-option promotion cluster:
 
 - complete command matrices: `82 / 151`
-- complete documented command-option pairs: `1309 / 3175`
+- complete documented command-option pairs: `1313 / 3175`
 - matrix rows: `5332`
 - verified rows: `4624`
 - invalid-input rows: `679`
@@ -1192,21 +1192,21 @@ documented-option promotion cluster:
 
 Latest completed batch:
 
-- `apply` now has five represented helper-free documented option families
+- `http-push` now has four represented helper-free documented option families
   promoted into the reviewed-complete doc-option census list, bringing the
-  command to `5/38` reviewed-complete documented option pairs.
+  command to `4/6` reviewed-complete documented option pairs.
 - The slice adds no new behavior rows; it only makes already closed exact
-  stock-Git check, cached, index, reverse, and short-reverse evidence durable
-  in the reviewed doc-option source list.
+  stock-Git outside-repository rejection evidence durable in the reviewed
+  doc-option source list for the represented helper-free option families.
 - Focused verification was
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(apply|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(http-push|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `apply` now has `5/38` documented option pairs reviewed complete with
-  `5/38` represented documented option pairs, `22/22` classified rows, and
+- `http-push` now has `4/6` documented option pairs reviewed complete with
+  `4/6` represented documented option pairs, `8/8` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
