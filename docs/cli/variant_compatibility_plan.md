@@ -343,34 +343,34 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `commit-tree` doc-option promotion, `commit-tree`
+After the latest zero-code `cherry-pick` doc-option promotion, `cherry-pick`
 adds another `4` durable reviewed-complete documented option pairs without
-changing Rust behavior and is up to `4/6` documented options complete with
-`4/6` represented documented option pairs and `58/58` classified rows.
+changing Rust behavior and is up to `4/24` documented options complete with
+`4/24` represented documented option pairs and `7/7` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
 represented family or zero-code command-promotion cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `commit-tree` surface. The
-existing exact stock-Git evidence already closed four `commit-tree` option
-families across message, message-file, parent, and no-gpg-sign lanes, so this
-slice only promotes those documented option pairs into
+promotion cluster for the represented helper-free `cherry-pick` surface. The
+existing exact stock-Git evidence already closed four `cherry-pick` option
+families across mainline and no-commit lanes, so this slice only promotes
+those documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(commit-tree|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(cherry-pick|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1317/3175` complete documented option pairs, and `1884`
-remaining checklist rows. `commit-tree` now reads `6` documented option
+matrices, `1321/3175` complete documented option pairs, and `1880`
+remaining checklist rows. `cherry-pick` now reads `24` documented option
 pairs with `4` reviewed complete, `4` represented documented option pairs,
-and `58/58` classified written rows with `0` open.
+and `7/7` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1180,11 +1180,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code reviewed-complete `commit-tree`
+Current durable census after the zero-code reviewed-complete `cherry-pick`
 documented-option promotion cluster:
 
 - complete command matrices: `82 / 151`
-- complete documented command-option pairs: `1317 / 3175`
+- complete documented command-option pairs: `1321 / 3175`
 - matrix rows: `5332`
 - verified rows: `4624`
 - invalid-input rows: `679`
@@ -1192,21 +1192,21 @@ documented-option promotion cluster:
 
 Latest completed batch:
 
-- `commit-tree` now has four represented helper-free documented option
+- `cherry-pick` now has four represented helper-free documented option
   families promoted into the reviewed-complete doc-option census list,
-  bringing the command to `4/6` reviewed-complete documented option pairs.
+  bringing the command to `4/24` reviewed-complete documented option pairs.
 - The slice adds no new behavior rows; it only makes already closed exact
-  stock-Git message, message-file, parent, and no-gpg-sign evidence durable
-  in the reviewed doc-option source list.
+  stock-Git mainline and no-commit evidence durable in the reviewed
+  doc-option source list.
 - Focused verification was
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(commit-tree|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(cherry-pick|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `commit-tree` now has `4/6` documented option pairs reviewed complete with
-  `4/6` represented documented option pairs, `58/58` classified rows, and
+- `cherry-pick` now has `4/24` documented option pairs reviewed complete with
+  `4/24` represented documented option pairs, `7/7` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
