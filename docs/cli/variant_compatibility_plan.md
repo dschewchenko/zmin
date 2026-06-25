@@ -1185,22 +1185,18 @@ Current durable census after the `repack` cruft-family helper-free closure:
 - complete command matrices: `79 / 151`
 - complete documented command-option pairs: `425 / 3175`
 - matrix rows: `5243`
-- verified rows: `4560`
+- verified rows: `4575`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `read-tree` now has a parser-plus-evidence closure batch across the
-  remaining helper-free documented surface.
-- The closed subgroup added stock-compatible repeated parsing for long
-  `--trivial`, `--aggressive`, `--reset`, `--dry-run`, `--quiet`,
-  `--recurse-submodules`, `--no-recurse-submodules`,
-  `--no-sparse-checkout`, repeated short `-i`, and repeated
-  `--index-output` last-one-wins handling.
-- Exact stock-Git evidence now also covers repeated and reordered dry-run,
-  quiet, verbose, trivial, aggressive, reset, no-sparse-checkout, recurse
-  toggles, index-only compositions, and repeated index-output selection.
+- `read-tree` now has the last remaining helper-free documented option family
+  in the current schema surface closed.
+- The closed subgroup adds exact stock-Git evidence for `-u` repeated usage,
+  quiet ordering, reset and prefix order variants, trivial/aggressive reset
+  compositions, and index-output order variants while preserving the same
+  worktree, main-index, and alternate-index side effects as stock Git.
 - Focused verification was
   `cargo test -p zmin-cli --test git_object_plumbing_compat
   read_tree_documented_option_forms_match_stock_git -- --nocapture`,
@@ -1211,9 +1207,10 @@ Latest completed batch:
 
 Latest in-progress family follow-up:
 
-- `read-tree` now has `16/17` reviewed-complete documented option pairs with
-  `69/69` classified rows and `0` open written rows; only `-u` still remains
-  expansion-required inside the current schema surface.
+- `read-tree` now has `17/17` reviewed-complete documented option pairs with
+  `84/84` classified rows and `0` open written rows, but the full command is
+  still not command-complete because the broader denominator still includes
+  surfaces outside the current helper-free schema slice.
 - `repack` still remains the largest unresolved helper-free documented cluster
   by schema-missing count, with `28/33` represented documented option pairs
   and the remaining tail at `--filter`, `--filter-to`, `--geometric`,
@@ -1228,7 +1225,7 @@ Latest zero-code closure:
 
 Next helper-free family candidates now remain:
 
-- `read-tree -u` expansion-required rows inside the already-represented
-  documented surface
 - `repack` expansion-required rows inside the cruft family plus the remaining
   five schema-missing documented options
+- another dense evidence-import or reviewed-complete closure batch from the
+  census once `repack` is no longer the best safe high-throughput move

@@ -1533,8 +1533,19 @@ fn read_tree_documented_option_forms_match_stock_git() {
 
     for args in [
         ["read-tree", "-m", "-u", &tree].as_slice(),
+        ["read-tree", "-m", "-u", "-u", &tree].as_slice(),
         ["read-tree", "--reset", "-u", &tree].as_slice(),
+        ["read-tree", "-u", "-u", "--reset", &tree].as_slice(),
+        ["read-tree", "--reset", "-u", "-u", &tree].as_slice(),
+        ["read-tree", "-u", "--quiet", "--reset", &tree].as_slice(),
+        ["read-tree", "--quiet", "-u", "--reset", &tree].as_slice(),
+        ["read-tree", "-u", "--trivial", "--reset", &tree].as_slice(),
+        ["read-tree", "-u", "--aggressive", "--reset", &tree].as_slice(),
         ["read-tree", "--prefix=import/", "-u", &tree].as_slice(),
+        ["read-tree", "-u", "-u", "--prefix=import/", &tree].as_slice(),
+        ["read-tree", "--prefix=import/", "-u", "-u", &tree].as_slice(),
+        ["read-tree", "-u", "--quiet", "--prefix=import/", &tree].as_slice(),
+        ["read-tree", "--quiet", "-u", "--prefix=import/", &tree].as_slice(),
         ["read-tree", "-m", "--trivial", "-u", &tree].as_slice(),
         ["read-tree", "-m", "--aggressive", "-u", &tree].as_slice(),
     ] {
@@ -1575,37 +1586,53 @@ fn read_tree_documented_option_forms_match_stock_git() {
     }
 
     {
-        let git_repo = clone_repo_fixture(tree_repo.path());
-        let zmin_repo = clone_repo_fixture(tree_repo.path());
-        git(git_repo.path(), ["read-tree", "--empty"]);
-        run_zmin(zmin_repo.path(), ["read-tree", "--empty"]);
-        let args = ["read-tree", "--index-output=alt.index", &tree];
-        assert_eq!(
-            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
-            command_any_output("git", git_repo.path(), &args, "git")
-        );
-        assert_eq!(
-            run_zmin(zmin_repo.path(), ["write-tree"]),
-            git(git_repo.path(), ["write-tree"])
-        );
-        assert_eq!(
-            command_output_with_env(
-                "git",
-                zmin_repo.path(),
-                &["write-tree"],
-                &[("GIT_INDEX_FILE", "alt.index")],
-                "git write-tree zmin alt index",
-            )
-            .1,
-            command_output_with_env(
-                "git",
-                git_repo.path(),
-                &["write-tree"],
-                &[("GIT_INDEX_FILE", "alt.index")],
-                "git write-tree alt index",
-            )
-            .1
-        );
+        for args in [
+            ["read-tree", "--index-output=alt.index", &tree].as_slice(),
+            ["read-tree", "-u", "--index-output=alt.index", "--reset", &tree].as_slice(),
+            ["read-tree", "--index-output=alt.index", "-u", "--reset", &tree].as_slice(),
+            ["read-tree", "-u", "--index-output=alt.index", "--prefix=import/", &tree].as_slice(),
+            ["read-tree", "--index-output=alt.index", "-u", "--prefix=import/", &tree].as_slice(),
+        ] {
+            let git_repo = clone_repo_fixture(tree_repo.path());
+            let zmin_repo = clone_repo_fixture(tree_repo.path());
+            git(git_repo.path(), ["read-tree", "--empty"]);
+            run_zmin(zmin_repo.path(), ["read-tree", "--empty"]);
+            if args.contains(&"-u") {
+                let _ = fs::remove_file(git_repo.path().join("a.txt"));
+                let _ = fs::remove_file(git_repo.path().join("b.txt"));
+                let _ = fs::remove_file(zmin_repo.path().join("a.txt"));
+                let _ = fs::remove_file(zmin_repo.path().join("b.txt"));
+            }
+            assert_eq!(
+                command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+                command_any_output("git", git_repo.path(), args, "git"),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                run_zmin(zmin_repo.path(), ["write-tree"]),
+                git(git_repo.path(), ["write-tree"]),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                command_output_with_env(
+                    "git",
+                    zmin_repo.path(),
+                    &["ls-files", "-s"],
+                    &[("GIT_INDEX_FILE", "alt.index")],
+                    "git ls-files zmin alt index",
+                )
+                .1,
+                command_output_with_env(
+                    "git",
+                    git_repo.path(),
+                    &["ls-files", "-s"],
+                    &[("GIT_INDEX_FILE", "alt.index")],
+                    "git ls-files git alt index",
+                )
+                .1,
+                "args: {args:?}"
+            );
+        }
     }
 
     {

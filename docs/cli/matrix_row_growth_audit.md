@@ -5697,6 +5697,41 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
 schema rows and `-13` remaining checklist rows.
 
+## 2026-06-25 - read-tree update-worktree completion batch
+
+Expected movement:
+
+- behavior rows: `+15`
+- closed rows: `+15`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-1`
+- Rust behavior changes: no
+
+Expected rows:
+
+- repeated `-u` with `-m`, `--reset`, and `--prefix=import/`
+- quiet ordering with `-u --reset` and `-u --prefix=import/`
+- `-u` with `--trivial --reset` and `--aggressive --reset`
+- `-u` plus `--index-output` ordering with `--reset` and `--prefix=import/`
+
+This batch closes the last expansion-required documented `read-tree -u`
+surface inside the current helper-free schema lane. No runtime change is
+required because the parser already accepts repeated `-u`; the work is purely
+focused stock-Git evidence plus durable matrix/census promotion for the now
+complete documented option family.
+
+Actual post-import movement matched the declaration: `+15` behavior rows, `+15`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `-1` remaining checklist row.
+
 ## 2026-06-25 - checkout-index remaining documented surface closure
 
 Expected movement:
