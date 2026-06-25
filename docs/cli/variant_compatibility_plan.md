@@ -343,36 +343,37 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `checkout` doc-option promotion cluster, `checkout`
-adds another `3` durable reviewed-complete documented option pairs without
-changing Rust behavior and is now up to `12/34` documented options complete
-with `12/34` represented documented option pairs. The next best helper-free
-follow-up should move to another dense census-backed represented family. The
-current largest pure promotion-only follow-up is now `rebase`, where `2`
-represented-but-not-yet-reviewed documented option surfaces remain in the
-census and there are no exact-open written rows in that promoted subgroup.
+After the latest zero-code `rebase` doc-option promotion cluster, `rebase`
+adds another `2` durable reviewed-complete documented option pairs without
+changing Rust behavior and is now up to `3/57` documented options complete
+with `3/57` represented documented option pairs. The next best helper-free
+follow-up can no longer be another pure promotion-only documented-option
+cluster: the census currently shows no remaining commands with a positive
+represented-vs-reviewed delta and zero exact-open/implemented-but-unverified
+rows in that subgroup. The next iteration should therefore move to a larger
+evidence or implementation slice from `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `checkout` surfaces
-`--detach`, `-B`, and `-b`. The existing exact stock-Git evidence already
-closed those represented `checkout` families on the current helper-free local
-detach, branch-create, and branch-reset lanes, so this slice only promotes the
-three documented option pairs into
+promotion cluster for the represented helper-free `rebase` surfaces
+`--interactive` and `-i`. The existing exact stock-Git evidence already closed
+those represented `rebase --interactive` families on the current helper-free
+invalid-todo lane, so this slice only promotes the two documented option pairs
+into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(checkout|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(rebase|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1365/3175` complete documented option pairs, and `1836`
-remaining checklist rows. `checkout` now reads `34` documented option pairs
-with `12` reviewed complete and `12` represented documented option pairs.
+matrices, `1367/3175` complete documented option pairs, and `1834`
+remaining checklist rows. `rebase` now reads `57` documented option pairs
+with `3` reviewed complete and `3` represented documented option pairs.
 
 ### No-Skip Rule
 
