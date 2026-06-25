@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`90/151 complete command matrices / 1418/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1426/3156 represented doc-option pairs / 5375 written rows / 4678/5375 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`91/151 complete command matrices / 1420/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1428/3156 represented doc-option pairs / 5379 written rows / 4682/5379 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -382,10 +382,13 @@ command-complete at `15/15` reviewed-complete documented option pairs,
 stopping the docs inventory from seeding the prose-only `--ignore-unmatch`
 example token. The smallest raw documented gap is still `http-fetch`, but
 `--index-pack-args` remains blocked on clean local stock-Git evidence, and
-`fmt-merge-msg --summary/--no-summary` still exposes a real `--log` parity
-gap. The next bounded helper-free follow-up should therefore move to another
-small supported subgroup with clear semantics, with `instaweb` (`11/13`) or
-`mergetool` (`8/10`) as the current best local candidates. The primary
+`fmt-merge-msg` is now command-complete at `9/9` reviewed-complete documented
+option pairs, `9/9` represented documented option pairs, `12/12` classified
+rows, and `0` exact-open written rows after closing the real
+`--summary/--no-summary` summary-alias lane against stock Git on a fetched
+branch. The next bounded helper-free follow-up should therefore move to
+another small supported subgroup with clear semantics, with `instaweb`
+(`11/13`) or `mergetool` (`8/10`) as the current best local candidates. The primary
 `remaining_to_fix_or_verify.tsv` backlog still has no real
 implemented-but-unverified family beyond the lone schema-only
 `archive <positional:args>` parser surface. `notes` is fully reviewed complete
@@ -403,33 +406,33 @@ short `-S` and `-p` aliases durable.
 
 ### Latest Completed Slice
 
-The latest completed slice closes the real `git filter-branch --prune-empty`
-gap, records exact stock-Git parity for pruning a single-parent empty commit
-plus the documented `--commit-filter` conflict, fixes the docs option inventory
-to only seed AsciiDoc option-definition lines, and then promotes
-`filter-branch` into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`. This removes the
-false prose-derived `--ignore-unmatch` seed, keeps the Git `2.47.1`
-denominator honest, and brings `filter-branch` to full command-complete status
-at `15/15` documented option pairs and `19/19` classified rows.
+The latest completed slice closes the real `git fmt-merge-msg`
+`--summary/--no-summary` gap, adds exact stock-Git parity for summary-alias
+rendering on a real fetched-branch `FETCH_HEAD` lane including last-one-wins
+ordering against `--no-log`, and then promotes `fmt-merge-msg` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. The runtime now
+resolves `--summary` as a synonym for `--log`, honors `--no-summary` as a
+synonym for `--no-log`, and renders the stock title plus summary body from the
+current fetched commit metadata instead of a simplified placeholder.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_filter_branch_compat filter_branch_prune_empty_ -- --nocapture`,
-`cargo test -p zmin-cli --test git_filter_branch_compat filter_branch_temp_dir_option_matches_stock_git -- --exact`,
-`python3 tools/git-compat-census.py --root .`,
+`cargo test -p zmin-cli --test git_mail_tools_compat fmt_merge_msg_ -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(filter-branch|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fmt-merge-msg|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5349` matrix rows, `4655` verified rows, `679`
-invalid-input rows, `12` exact-open rows, `87/151` complete command
-matrices, `1395/3156` complete documented option pairs, `1403/3156`
-represented documented option pairs, and `1773` remaining checklist rows.
-`filter-branch` is now fully command-complete at `15/15`
-reviewed-complete documented option pairs with `15/15` represented documented
-option pairs, `19/19` classified rows, and `0` exact-open written rows. The
-exact-open queue remains limited to the helper-oracle-unavailable commands
-`citool`, `cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and `scalar`.
+Current census counts are `5379` matrix rows, `4682` verified rows, `682`
+invalid-input rows, `12` exact-open rows, `91/151` complete command
+matrices, `1420/3156` complete documented option pairs, `1428/3156`
+represented documented option pairs, and `1748` remaining checklist rows.
+`fmt-merge-msg` is now fully command-complete at
+`9/9` reviewed-complete documented option pairs with `9/9` represented
+documented option pairs, `12/12` classified rows, and `0` exact-open written
+rows. The exact-open queue remains limited to the helper-oracle-unavailable
+commands `citool`, `cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and
+`scalar`.
 
 ### No-Skip Rule
 

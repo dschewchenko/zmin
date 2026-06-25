@@ -559,6 +559,10 @@ pub enum Command {
         log: Option<usize>,
         #[arg(long = "no-log", action = ArgAction::SetTrue)]
         no_log: bool,
+        #[arg(long = "summary", num_args = 0..=1, default_missing_value = "20")]
+        summary: Option<usize>,
+        #[arg(long = "no-summary", action = ArgAction::SetTrue)]
+        no_summary: bool,
         #[arg(short = 'm', long = "message")]
         message: Option<String>,
         #[arg(long = "into-name")]

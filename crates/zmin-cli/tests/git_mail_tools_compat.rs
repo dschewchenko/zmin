@@ -521,6 +521,38 @@ fn fmt_merge_msg_matches_stock_git_for_fetch_head_titles() {
 }
 
 #[test]
+fn fmt_merge_msg_summary_synonyms_match_stock_git() {
+    let origin = git_init();
+    git(origin.path(), ["checkout", "-b", "main"]);
+    configure_identity(origin.path());
+    git_with_env(origin.path(), ["commit", "--allow-empty", "-m", "init"]);
+    git(origin.path(), ["checkout", "-b", "feature"]);
+    git_with_env(origin.path(), ["commit", "--allow-empty", "-m", "feature"]);
+    git(origin.path(), ["checkout", "main"]);
+
+    let work = TempDir::new().expect("temp work");
+    git(
+        work.path(),
+        ["clone", origin.path().to_str().expect("origin path"), "."],
+    );
+    git(work.path(), ["fetch", "origin", "feature"]);
+    let fetch_head =
+        fs::read_to_string(work.path().join(".git/FETCH_HEAD")).expect("read FETCH_HEAD");
+
+    for args in [
+        ["fmt-merge-msg", "--summary"].as_slice(),
+        ["fmt-merge-msg", "--summary=3"].as_slice(),
+        ["fmt-merge-msg", "--no-summary"].as_slice(),
+        ["fmt-merge-msg", "--summary", "--no-log"].as_slice(),
+        ["fmt-merge-msg", "--no-summary", "--summary"].as_slice(),
+    ] {
+        let zmin_output = run_zmin_with_stdin_args(work.path(), args, &fetch_head);
+        let git_output = git_with_stdin_args(work.path(), args, &fetch_head);
+        assert_eq!(zmin_output, git_output, "args: {args:?}");
+    }
+}
+
+#[test]
 fn request_pull_matches_stock_git_for_local_pushed_branch() {
     let remote = TempDir::new().expect("temp remote");
     git(remote.path(), ["init", "--bare"]);

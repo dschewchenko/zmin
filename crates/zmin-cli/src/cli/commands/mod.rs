@@ -290,7 +290,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::Am { .. }
         | crate::runtime::Command::FormatPatch { .. }
         | crate::runtime::Command::SendEmail { .. }
-        | crate::runtime::Command::ImapSend { .. }) => mail::dispatch(command),
+        | crate::runtime::Command::ImapSend { .. }) => mail::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Quiltimport { .. }
         | crate::runtime::Command::FastExport { .. }
         | crate::runtime::Command::FastImport { .. }) => import::dispatch(command),

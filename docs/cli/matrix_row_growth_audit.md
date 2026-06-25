@@ -11,6 +11,21 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git fmt-merge-msg`
+summary-alias closure plus command promotion. The selected change expands the
+schema to cover `--summary` and `--no-summary`, resolves them against
+`--log/--no-log` with last-one-wins ordering, upgrades the runtime summary
+body to read fetched commit metadata from real `FETCH_HEAD` entries, adds a
+focused fetched-branch stock-Git oracle lane, and then promotes
+`fmt-merge-msg` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Expected delta is
+`+4` matrix rows, `+2` complete documented option pairs, `+2` represented
+documented option pairs, `+1` complete command matrix, `+4` verified rows,
+`+0` invalid-input rows, and `-2` remaining checklist rows. Actual delta
+matched at row and doc-option level, and `fmt-merge-msg` is now
+command-complete at `9/9` reviewed-complete documented option pairs with
+`12/12` classified rows and `0` exact-open written rows.
+
 As of 2026-06-25 the next batch is a zero-row census-accounting correction for
 reviewed-complete commands. The selected change teaches
 `tools/git-compat-census.py` to suppress residual schema-only

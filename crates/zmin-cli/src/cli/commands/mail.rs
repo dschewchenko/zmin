@@ -1,6 +1,9 @@
 use crate::runtime;
 
-pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
+pub(crate) fn dispatch(
+    command: runtime::Command,
+    raw_args: &[String],
+) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::InterpretTrailers {
             in_place,
@@ -65,16 +68,22 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::FmtMergeMsg {
             log,
             no_log,
+            summary,
+            no_summary,
             message,
             into_name,
             file,
-        } => super::mail_commands::fmt_merge_msg(
-            log,
-            no_log,
-            message.as_deref(),
-            into_name.as_deref(),
-            file,
-        ),
+        } => {
+            let (log, no_log) =
+                resolve_fmt_merge_msg_summary_aliases(raw_args, log, no_log, summary, no_summary);
+            super::mail_commands::fmt_merge_msg(
+                log,
+                no_log,
+                message.as_deref(),
+                into_name.as_deref(),
+                file,
+            )
+        }
         runtime::Command::Am { patches } => super::mail_commands::am(patches),
         runtime::Command::FormatPatch {
             output_directory,
@@ -125,4 +134,46 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }),
         _ => unreachable!("non-mail command dispatched to mail"),
     }
+}
+
+fn resolve_fmt_merge_msg_summary_aliases(
+    raw_args: &[String],
+    log: Option<usize>,
+    no_log: bool,
+    summary: Option<usize>,
+    no_summary: bool,
+) -> (Option<usize>, bool) {
+    if log.is_none() && !no_log && summary.is_none() && !no_summary {
+        return (None, false);
+    }
+
+    let mut resolved_log = log;
+    let mut resolved_no_log = no_log;
+    for arg in raw_args {
+        if let Some(value) = arg.strip_prefix("--log=") {
+            resolved_log = value.parse().ok();
+            resolved_no_log = false;
+            continue;
+        }
+        if arg == "--log" {
+            resolved_log = log.or(Some(20));
+            resolved_no_log = false;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--summary=") {
+            resolved_log = value.parse().ok();
+            resolved_no_log = false;
+            continue;
+        }
+        if arg == "--summary" {
+            resolved_log = summary.or(Some(20));
+            resolved_no_log = false;
+            continue;
+        }
+        if arg == "--no-log" || arg == "--no-summary" {
+            resolved_log = None;
+            resolved_no_log = true;
+        }
+    }
+    (resolved_log, resolved_no_log)
 }

@@ -1595,9 +1595,19 @@ pub(crate) fn fmt_merge_msg(
     }
     println!("{title}");
     if log.is_some() && !no_log {
+        let store = LooseObjectStore::new(repo.objects_dir, GitHashAlgorithm::Sha1);
         println!();
         for source in entries {
-            println!("* {}:", source.description);
+            let object = store.read_object(&source.oid)?;
+            let commit = decode_commit(GitHashAlgorithm::Sha1, object.content.as_slice())?;
+            println!("# By {}", signature_name(&commit.author));
+            println!("# Via {}", signature_name(&commit.committer));
+            println!("* {}:", fmt_merge_log_description(&source.description));
+            if let Some(subject) = commit.message.split(|byte| *byte == b'\n').next() {
+                if !subject.is_empty() {
+                    println!("  {}", String::from_utf8_lossy(subject));
+                }
+            }
         }
     }
     Ok(())
@@ -1605,6 +1615,7 @@ pub(crate) fn fmt_merge_msg(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FetchHeadMergeEntry {
+    oid: ObjectId,
     description: String,
 }
 
@@ -1613,13 +1624,14 @@ fn parse_fetch_head_for_merge(input: &str) -> Vec<FetchHeadMergeEntry> {
         .lines()
         .filter_map(|line| {
             let mut parts = line.splitn(3, '\t');
-            let _oid = parts.next()?;
+            let oid = ObjectId::from_hex(GitHashAlgorithm::Sha1, parts.next()?).ok()?;
             let marker = parts.next().unwrap_or_default();
             let description = parts.next().unwrap_or_default().trim();
             if marker == "not-for-merge" || description.is_empty() {
                 return None;
             }
             Some(FetchHeadMergeEntry {
+                oid,
                 description: description.to_owned(),
             })
         })
@@ -1635,6 +1647,10 @@ fn fmt_merge_title(entries: &[FetchHeadMergeEntry]) -> String {
         .map(|entry| entry.description.as_str())
         .collect::<Vec<_>>();
     format!("Merge {}", join_english_list(&descriptions))
+}
+
+fn fmt_merge_log_description(description: &str) -> &str {
+    description.strip_prefix("branch ").unwrap_or(description)
 }
 
 fn join_english_list(items: &[&str]) -> String {
