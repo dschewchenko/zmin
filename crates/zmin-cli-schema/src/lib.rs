@@ -1728,6 +1728,10 @@ pub enum Command {
         max_pack_size: Option<String>,
         #[arg(long = "max-cruft-size")]
         max_cruft_size: Vec<String>,
+        #[arg(long = "filter")]
+        filter: Vec<String>,
+        #[arg(long = "filter-to", value_hint = ValueHint::DirPath)]
+        filter_to: Vec<PathBuf>,
         #[arg(long = "unpack-unreachable")]
         unpack_unreachable: Vec<String>,
         #[arg(long = "keep-pack")]

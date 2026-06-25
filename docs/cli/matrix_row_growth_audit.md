@@ -11,6 +11,20 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `repack`
+`--filter` / `--filter-to` schema-tail closure. The selected rows add exact
+stock-Git evidence for `--filter=blob:none`, `--filter=combine:blob:none+tree:1`,
+repeated last-one-wins filter ordering in both directions, `--filter-to`
+root-side pack artifact creation with repeated rightmost prefix selection, the
+stock invalid `--filter=bogus` diagnostic, and the stock fatal guard for
+`--filter-to` without `--filter`. Expected delta is `+8` matrix rows, `+8`
+verified rows, `+2` represented documented option pairs, `+0` complete
+documented option pairs, `+0` complete command matrices, and `0` remaining
+checklist rows. Rust behavior changes are expected because `repack` must add
+the missing `--filter` / `--filter-to` schema tail, validate stock-like filter
+specs for the covered helper-free lane, and write stock-shaped root-side
+filtered pack artifacts. Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `repack` cruft-family
 repeat/order closure inside the existing schema surface. The selected rows add
 exact stock-Git evidence for repeated `--cruft`, last-one-wins

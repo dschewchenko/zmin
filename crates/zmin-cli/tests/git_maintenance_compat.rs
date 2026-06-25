@@ -393,6 +393,43 @@ fn root_artifact_names_with_prefix(
         .collect()
 }
 
+fn root_artifact_extensions_with_prefix(
+    repo: &std::path::Path,
+    prefix: &str,
+) -> BTreeSet<String> {
+    root_artifact_names_with_prefix(repo, prefix)
+        .into_iter()
+        .filter_map(|name| name.rsplit_once('.').map(|(_, ext)| ext.to_owned()))
+        .collect()
+}
+
+fn normalize_filter_to_status(text: String) -> String {
+    text.lines()
+        .map(normalize_filter_to_status_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_filter_to_status_line(line: &str) -> String {
+    let parts = line.split_whitespace().collect::<Vec<_>>();
+    if let Some(last) = parts.last() {
+        for prefix in ["filtered-", "filtered2-"] {
+            if let Some(rest) = last.strip_prefix(prefix)
+                && let Some((_, ext)) = rest.rsplit_once('.')
+            {
+                let mut normalized = parts[..parts.len().saturating_sub(1)]
+                    .join(" ");
+                if !normalized.is_empty() {
+                    normalized.push(' ');
+                }
+                normalized.push_str(&format!("{prefix}<hash>.{ext}"));
+                return normalized;
+            }
+        }
+    }
+    line.to_owned()
+}
+
 fn assert_repack_observables_match(left: &std::path::Path, right: &std::path::Path) {
     assert_eq!(
         git_args(left, &["status", "--porcelain=v2", "--branch"]),
@@ -445,6 +482,51 @@ fn assert_gc_observables_match(left: &std::path::Path, right: &std::path::Path) 
         right.join(".git/objects/info/commit-graph").exists(),
         "commit-graph presence diverged"
     );
+}
+
+fn assert_repack_filter_to_observables_match(left: &std::path::Path, right: &std::path::Path) {
+    assert_eq!(
+        normalize_filter_to_status(git_args(left, &["status", "--porcelain=v2", "--branch"])),
+        normalize_filter_to_status(git_args(right, &["status", "--porcelain=v2", "--branch"])),
+        "status diverged"
+    );
+    assert_eq!(
+        git_args(left, &["ls-files", "--stage"]),
+        git_args(right, &["ls-files", "--stage"]),
+        "index entries diverged"
+    );
+    assert_eq!(
+        git_args(left, &["show-ref", "--head", "--dereference"]),
+        git_args(right, &["show-ref", "--head", "--dereference"]),
+        "refs diverged"
+    );
+    assert_eq!(
+        git_args(
+            left,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)"
+            ],
+        ),
+        git_args(
+            right,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname) %(objecttype) %(objectsize)"
+            ],
+        ),
+        "object inventories diverged"
+    );
+    assert_eq!(pack_file_count(left), pack_file_count(right), "pack counts diverged");
+    assert_eq!(
+        left.join(".git/objects/pack/multi-pack-index").exists(),
+        right.join(".git/objects/pack/multi-pack-index").exists(),
+        "multi-pack-index presence diverged"
+    );
+    assert_eq!(git_status(left, ["fsck", "--strict"]), 0, "left repo fsck failed");
+    assert_eq!(git_status(right, ["fsck", "--strict"]), 0, "right repo fsck failed");
 }
 
 fn two_pack_midx_fixture() -> TempDir {
@@ -1453,7 +1535,7 @@ fn repack_documented_option_aliases_and_value_forms_match_stock_git() {
             command_any_output("git", git_repo.path(), args, "git"),
             "args: {args:?}"
         );
-        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+        assert_repack_filter_to_observables_match(git_repo.path(), zmin_repo.path());
     }
 }
 
@@ -1463,6 +1545,8 @@ fn repack_invalid_documented_size_values_match_stock_git() {
         ["repack", "--window-memory=bogus", "-q"].as_slice(),
         ["repack", "--geometric=bogus", "-d", "-q"].as_slice(),
         ["repack", "--max-pack-size=bogus", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--filter=bogus", "-d", "-q"].as_slice(),
+        ["repack", "--filter-to=filtered", "-d", "-q"].as_slice(),
     ] {
         let git_repo = repack_documented_option_fixture_repo();
         let zmin_repo = repack_documented_option_fixture_repo();
@@ -1471,6 +1555,80 @@ fn repack_invalid_documented_size_values_match_stock_git() {
             git_failure_output(git_repo.path(), args),
             "args: {args:?}"
         );
+    }
+}
+
+#[test]
+fn repack_filter_variants_match_stock_git() {
+    for args in [
+        ["repack", "--filter=blob:none", "-d", "-q"].as_slice(),
+        ["repack", "--filter=combine:blob:none+tree:1", "-d", "-q"].as_slice(),
+        [
+            "repack",
+            "--filter=blob:none",
+            "--filter=combine:blob:none+tree:1",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
+        [
+            "repack",
+            "--filter=combine:blob:none+tree:1",
+            "--filter=blob:none",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
+    ] {
+        let git_repo = repack_documented_option_fixture_repo();
+        let zmin_repo = repack_documented_option_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_repack_filter_to_observables_match(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
+fn repack_filter_to_variants_match_stock_git() {
+    for (args, expected_prefix) in [
+        (
+            ["repack", "--filter=blob:none", "--filter-to=filtered", "-d", "-q"].as_slice(),
+            "filtered-",
+        ),
+        (
+            [
+                "repack",
+                "--filter=blob:none",
+                "--filter-to=filtered",
+                "--filter-to=filtered2",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
+            "filtered2-",
+        ),
+    ] {
+        let git_repo = repack_documented_option_fixture_repo();
+        let zmin_repo = repack_documented_option_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            root_artifact_names_with_prefix(zmin_repo.path(), expected_prefix).len(),
+            root_artifact_names_with_prefix(git_repo.path(), expected_prefix).len(),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            root_artifact_extensions_with_prefix(zmin_repo.path(), expected_prefix),
+            root_artifact_extensions_with_prefix(git_repo.path(), expected_prefix),
+            "args: {args:?}"
+        );
+        assert_repack_filter_to_observables_match(git_repo.path(), zmin_repo.path());
     }
 }
 

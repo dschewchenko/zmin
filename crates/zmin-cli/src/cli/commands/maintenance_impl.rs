@@ -32,6 +32,8 @@ struct RepackOptions {
     threads: Option<usize>,
     max_pack_size: Option<String>,
     max_cruft_size: Vec<String>,
+    filter: Option<String>,
+    filter_to: Option<PathBuf>,
     unpack_unreachable: Vec<String>,
     keep_pack: Vec<String>,
 }
@@ -83,6 +85,8 @@ pub(crate) fn repack_command(
     threads: Option<usize>,
     max_pack_size: Option<String>,
     max_cruft_size: Vec<String>,
+    filter: Option<String>,
+    filter_to: Option<PathBuf>,
     unpack_unreachable: Vec<String>,
     keep_pack: Vec<String>,
 ) -> Result<()> {
@@ -112,6 +116,8 @@ pub(crate) fn repack_command(
         threads,
         max_pack_size,
         max_cruft_size,
+        filter,
+        filter_to,
         unpack_unreachable,
         keep_pack,
     })
@@ -1614,6 +1620,12 @@ fn repack(options: RepackOptions) -> Result<()> {
             text: "fatal: options '-k/--keep-unreachable' and '--cruft' cannot be used together\n".into(),
         });
     }
+    if options.filter.is_none() && options.filter_to.is_some() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: option '--filter-to' can only be used along with '--filter'\n".into(),
+        });
+    }
     let write_cruft_pack = options.cruft && options.delete_redundant;
     let write_bitmap_index = options.write_bitmap_index && !options.no_write_bitmap_index;
     let write_midx = options.write_midx && !options.no_write_midx;
@@ -1639,6 +1651,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         "window-memory",
     )?;
     let _geometric = parse_repack_geometric_values(&options.geometric)?;
+    validate_repack_filter_spec(options.filter.as_deref())?;
     let unpack_unreachable_expires_now =
         unpack_unreachable_expires_now(options.unpack_unreachable.last().map(String::as_str))?;
     let expire_unreachable_now = write_cruft_pack
@@ -1748,6 +1761,9 @@ fn repack(options: RepackOptions) -> Result<()> {
             options.window,
             options.depth,
         )?;
+    }
+    if let Some(filter_to) = options.filter_to.as_deref() {
+        write_filter_to_pack(repo.root.as_path(), filter_to, &pack_dir, &pack_name)?;
     }
     let replace_old_packs = options.delete_redundant && all_reachable;
     if options.delete_redundant {
@@ -1877,6 +1893,34 @@ fn write_expire_to_pack(
     Ok(())
 }
 
+fn write_filter_to_pack(
+    repo_root: &std::path::Path,
+    filter_to: &std::path::Path,
+    pack_dir: &std::path::Path,
+    pack_name: &str,
+) -> Result<()> {
+    let prefix = filter_to
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("pack");
+    let source_base = pack_dir.join(pack_name);
+    let destination_base = repo_root.join(format!("{prefix}-{}", &pack_name["pack-".len()..]));
+    fs::copy(
+        source_base.with_extension("pack"),
+        destination_base.with_extension("pack"),
+    )?;
+    fs::copy(
+        source_base.with_extension("idx"),
+        destination_base.with_extension("idx"),
+    )?;
+    fs::copy(
+        source_base.with_extension("rev"),
+        destination_base.with_extension("rev"),
+    )?;
+    Ok(())
+}
+
 fn parse_repack_size_limit(raw: Option<&str>, option: &str) -> Result<Option<u64>> {
     let Some(raw) = raw else {
         return Ok(None);
@@ -1919,6 +1963,130 @@ fn parse_repack_geometric(raw: Option<&str>) -> Result<Option<u64>> {
         });
     };
     Ok(Some(size))
+}
+
+fn validate_repack_filter_spec(raw: Option<&str>) -> Result<()> {
+    let Some(raw) = raw else {
+        return Ok(());
+    };
+    parse_repack_filter_spec(raw).map(|_| ())
+}
+
+fn parse_repack_filter_spec(raw: &str) -> Result<()> {
+    if raw == "blob:none" {
+        return Ok(());
+    }
+    if let Some(limit) = raw.strip_prefix("blob:limit=") {
+        return parse_repack_filter_size(limit)
+            .ok_or_else(|| invalid_repack_filter_spec(raw))
+            .map(|_| ());
+    }
+    if let Some(kind) = raw.strip_prefix("object:type=") {
+        return match kind {
+            "blob" | "tree" | "commit" | "tag" => Ok(()),
+            _ => Err(CliError::Fatal {
+                code: 128,
+                message: format!("'{kind}' for 'object:type=<type>' is not a valid object type"),
+            }),
+        };
+    }
+    if let Some(depth) = raw.strip_prefix("tree:") {
+        return depth
+            .parse::<usize>()
+            .map(|_| ())
+            .map_err(|_| CliError::Fatal {
+                code: 128,
+                message: "expected 'tree:<depth>'".into(),
+            });
+    }
+    if let Some(blobish) = raw.strip_prefix("sparse:oid=") {
+        if blobish.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "unable to access sparse blob in ''".into(),
+            });
+        }
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("unable to access sparse blob in '{blobish}'"),
+        });
+    }
+    if let Some(filters) = raw.strip_prefix("combine:") {
+        if filters.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "expected something after combine:".into(),
+            });
+        }
+        for filter in filters.split('+') {
+            let decoded = percent_decode_repack_filter(filter)?;
+            parse_repack_filter_spec(&decoded)?;
+        }
+        return Ok(());
+    }
+    Err(invalid_repack_filter_spec(raw))
+}
+
+fn invalid_repack_filter_spec(raw: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("invalid filter-spec '{raw}'"),
+    }
+}
+
+fn percent_decode_repack_filter(value: &str) -> Result<String> {
+    let mut out = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] == b'%' {
+            let high = *bytes.get(idx + 1).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("upload-pack filter percent escape is invalid: {value}"),
+            })?;
+            let low = *bytes.get(idx + 2).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!("upload-pack filter percent escape is invalid: {value}"),
+            })?;
+            out.push(
+                decode_percent_hex_byte(high, low).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: format!("upload-pack filter percent escape is invalid: {value}"),
+                })?,
+            );
+            idx += 3;
+        } else {
+            out.push(bytes[idx]);
+            idx += 1;
+        }
+    }
+    String::from_utf8(out).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("upload-pack filter is not utf-8: {value}"),
+    })
+}
+
+fn decode_percent_hex_byte(high: u8, low: u8) -> Option<u8> {
+    Some((hex_value(high)? << 4) | hex_value(low)?)
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn parse_repack_filter_size(value: &str) -> Option<u64> {
+    let (number, multiplier) = match value.as_bytes().last().copied() {
+        Some(b'k' | b'K') => (&value[..value.len() - 1], 1024_u64),
+        Some(b'm' | b'M') => (&value[..value.len() - 1], 1024_u64 * 1024),
+        Some(b'g' | b'G') => (&value[..value.len() - 1], 1024_u64 * 1024 * 1024),
+        _ => (value, 1),
+    };
+    number.parse::<u64>().ok()?.checked_mul(multiplier)
 }
 
 fn unpack_unreachable_expires_now(value: Option<&str>) -> Result<bool> {
@@ -2321,6 +2489,8 @@ fn gc(options: GcOptions) -> Result<()> {
         threads: None,
         max_pack_size: None,
         max_cruft_size: options.max_cruft_size.clone(),
+        filter: None,
+        filter_to: None,
         unpack_unreachable: Vec::new(),
         keep_pack: Vec::new(),
     })?;

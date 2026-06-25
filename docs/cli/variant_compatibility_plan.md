@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`0/151 complete command matrices / 0/4632 complete doc-option matrices / 108/151 commands with matrix rows / 729/4632 represented doc-option pairs / 2846 written rows / 2457/2846 written rows matching stock Git / 0 partial written rows / 1 open written rows`
+`79/151 complete command matrices / 439/3175 complete doc-option matrices / 108/151 commands with matrix rows / 753/3175 represented doc-option pairs / 5319 written rows / 4611/5319 written rows matching stock Git / 0 partial written rows / 26 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,37 +343,38 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest schema-tail closure, `repack` now has `96/96` classified
-written rows with `0` open and sits at `31/33` represented documented option
-pairs and `24/33` reviewed-complete documented option pairs. The next best
-high-throughput helper-free follow-up still stays inside the remaining
-`repack` cruft-family expansion surface, unless we intentionally move into the
-last schema tail `--filter` and `--filter-to`.
+After the latest schema-tail closure, `repack` now has `104/104` classified
+written rows with `0` open and sits at `33/33` represented documented option
+pairs and `24/33` reviewed-complete documented option pairs. The schema tail
+is now fully represented, so the next best helper-free follow-up stays inside
+the remaining `repack` expansion-only families unless another census-backed
+cluster becomes higher-throughput.
 
 ### Latest Completed Slice
 
 The latest completed slice is a helper-free `git repack`
-`--unpack-unreachable` schema-tail batch. Zmin now accepts
-`--unpack-unreachable=<when>` and matches stock Git for now-like, future,
-past absolute, past relative, bogus, and repeated last-one-wins value forms
-across the covered helper-free `-a -d -q` and `-A -d -q` lanes. This closes
-the stock split between prune-like now/future/bogus cutoffs and loosen-like
-past cutoffs for packed unreachable commits after reflog expiry.
+`--filter` / `--filter-to` schema-tail batch. Zmin now accepts
+`--filter=<spec>` for the covered helper-free local lanes, matches stock Git
+for `blob:none`, `combine:blob:none+tree:1`, repeated last-one-wins filter
+ordering, the invalid `bogus` diagnostic, the stock fatal guard for
+`--filter-to` without `--filter`, and root-side filtered pack artifact
+creation with rightmost prefix selection for repeated `--filter-to`.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat repack_unpack_unreachable_value_forms_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_filter -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5311` matrix rows, `4603` verified rows, `679`
+Current census counts are `5319` matrix rows, `4611` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `79/151` complete command
 matrices, `439/3175` complete documented option pairs, and `2762`
 remaining checklist rows. `repack` now reads `33` documented option pairs,
-`24` reviewed-complete documented option pairs, `31` represented documented
-option pairs, and `96/96` classified written rows with `0` open.
+`24` reviewed-complete documented option pairs, `33` represented documented
+option pairs, and `104/104` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1183,52 +1184,53 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the `repack` cruft-family helper-free closure:
+Current durable census after the `repack --filter/--filter-to` helper-free
+closure:
 
 - complete command matrices: `79 / 151`
-- complete documented command-option pairs: `425 / 3175`
-- matrix rows: `5243`
-- verified rows: `4575`
+- complete documented command-option pairs: `439 / 3175`
+- matrix rows: `5319`
+- verified rows: `4611`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `read-tree` now has the last remaining helper-free documented option family
-  in the current schema surface closed.
-- The closed subgroup adds exact stock-Git evidence for `-u` repeated usage,
-  quiet ordering, reset and prefix order variants, trivial/aggressive reset
-  compositions, and index-output order variants while preserving the same
-  worktree, main-index, and alternate-index side effects as stock Git.
+- `repack` now has the last remaining helper-free schema-tail documented
+  options represented in the current local lane surface.
+- The closed subgroup adds exact stock-Git evidence for `--filter=blob:none`,
+  `--filter=combine:blob:none+tree:1`, repeated last-one-wins filter and
+  filter-to ordering, the stock invalid `--filter=bogus` diagnostic, the stock
+  fatal guard for `--filter-to` without `--filter`, and root-side filtered
+  pack artifact creation.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_object_plumbing_compat
-  read_tree_documented_option_forms_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat repack_filter --
+  --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat
+  repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `read-tree` now has `17/17` reviewed-complete documented option pairs with
-  `84/84` classified rows and `0` open written rows, but the full command is
-  still not command-complete because the broader denominator still includes
-  surfaces outside the current helper-free schema slice.
-- `repack` still remains the largest unresolved helper-free documented cluster
-  by schema-missing count, with `28/33` represented documented option pairs
-  and the remaining tail at `--filter`, `--filter-to`, `--geometric`,
-  `--unpack-unreachable`, and `-g`.
+- `repack` now has `33/33` represented documented option pairs with
+  `104/104` classified rows and `0` open written rows, but the full command is
+  still not reviewed-complete because expansion-only families remain inside the
+  documented surface.
+- The next best helper-free follow-up stays inside the remaining `repack`
+  expansion-required families unless another zero-row or dense census-backed
+  cluster overtakes it on throughput.
 
 Latest zero-code closure:
 
-- `archive` is now promoted into the reviewed-complete command list.
-- The current census already had `14/14` documented option pairs complete,
-  `24/24` classified rows, and no remaining checklist items for `archive`, so
-  the command-level promotion is now durable.
+- `archive` remains promoted in the reviewed-complete command list.
+- The current census still has `14/14` documented option pairs complete,
+  `24/24` classified rows, and no remaining checklist items for `archive`.
 
 Next helper-free family candidates now remain:
 
-- `repack` expansion-required rows inside the cruft family plus the remaining
-  five schema-missing documented options
+- `repack` expansion-required rows inside the represented documented families
 - another dense evidence-import or reviewed-complete closure batch from the
   census once `repack` is no longer the best safe high-throughput move
