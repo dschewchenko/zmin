@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 948/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
+`82/151 complete command matrices / 969/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -1178,6 +1178,37 @@ Largest raw clusters:
 7. Platform variants: macOS, Linux, Windows path/process behavior.
 
 ## 2026-06-25 Census Snapshot
+
+Current durable census after the zero-code reviewed-complete `notes`
+documented-option promotion cluster:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `969 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `notes` now has twenty-one represented helper-free local documented option
+  families promoted into the reviewed-complete doc-option census list,
+  bringing the command to `21/28` reviewed-complete documented option pairs.
+- The slice adds no new behavior rows; it only makes already closed exact
+  stock-Git local add, append, edit, copy, merge, prune, remove, and
+  ref-selection evidence durable in the reviewed doc-option source list.
+- Focused verification was
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(notes|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `notes` now has `21/28` documented option pairs reviewed complete with
+  `21/28` represented documented option pairs, `69/69` classified rows, and
+  `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed represented family or zero-code command-promotion cluster.
 
 Current durable census after the zero-code reviewed-complete `tag`
 documented-option promotion cluster:
