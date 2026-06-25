@@ -11,17 +11,15 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-25 the next batch is a census-accounting fix plus zero-code
-command promotion for helper-free `git notes`. The selected change updates
-`tools/git-compat-command-summary.sh` so represented documented option
-coverage becomes the union of matrix-detected spellings and reviewed-complete
-documented option pairs, then promotes `notes` into
-`docs/cli/census/reviewed_complete_command_matrices.tsv` once its represented
-count reaches the already-proven `28/28`. Expected delta is `+0` matrix rows,
-`+0` complete documented option pairs, `+1` complete command matrix, `+7`
-represented documented option pairs, `+0` verified rows, `+0` invalid-input
-rows, and `+0` remaining checklist rows. Rust behavior changes are not
-expected. Actual delta matched.
+As of 2026-06-25 the next batch is a zero-code command promotion for
+helper-free `git describe`. The selected change promotes `describe` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` once its already-
+reviewed `14/14` documented option pairs, `14/14` represented documented
+option pairs, and `19/19` classified rows are made durable at command level.
+Expected delta is `+0` matrix rows, `+0` complete documented option pairs,
+`+1` complete command matrix, `+0` represented documented option pairs, `+0`
+verified rows, `+0` invalid-input rows, and `+0` remaining checklist rows.
+Rust behavior changes are not expected. Actual delta matched.
 
 As of 2026-06-25 the next batch is a helper-free `git describe` documented
 option family closure for `--broken`, `--candidates`, `--contains`, `--debug`,

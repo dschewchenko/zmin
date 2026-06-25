@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`83/151 complete command matrices / 1392/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1400/3175 represented doc-option pairs / 5342 written rows / 4648/5342 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`84/151 complete command matrices / 1392/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1400/3175 represented doc-option pairs / 5342 written rows / 4648/5342 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -356,39 +356,39 @@ still has no real implemented-but-unverified family beyond the lone schema-only
 `archive <positional:args>` parser surface. `notes` is now fully reviewed
 complete as a command at `28/28` documented option pairs, `28/28`
 represented documented option pairs, `69/69` classified rows, and `0`
-exact-open written rows. The next highest-throughput helper-free follow-up is
-again the eligible reviewed-complete command cluster `clone`, `stage`, `push`,
-`init`, `sparse-checkout`, and `shell` rather than another accounting-only
-cleanup.
+exact-open written rows; `describe` is now likewise command-complete at
+`14/14` documented option pairs, `14/14` represented documented option pairs,
+`19/19` classified rows, and `0` exact-open written rows. The next highest-
+throughput helper-free follow-up is no longer another zero-code command
+promotion cluster: the current stock probe shows the next compact real batch
+is parser-alias parity for `fmt-merge-msg --summary/--no-summary`,
+`bugreport --no-diagnose`, and `http-fetch --index-pack-args`.
 
 ### Latest Completed Slice
 
-The latest completed slice is a census-accounting fix plus zero-code command
-promotion for helper-free `git notes`. `tools/git-compat-command-summary.sh`
-now treats represented documented option coverage as the union of matrix-
-detected spellings and reviewed-complete documented option pairs, so schema-
-less notes subcommand families inherit their already-proven representation
-instead of dropping to short-form-only counts. With that accounting repaired,
-`notes` promotes cleanly into
+The latest completed slice is a zero-code command promotion for helper-free
+`git describe`. The existing exact stock-Git describe evidence was already
+fully reviewed complete at `14/14` documented option pairs and `19/19`
+classified rows, so this slice promotes `describe` into
 `docs/cli/census/reviewed_complete_command_matrices.tsv` without changing Rust
 runtime behavior.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(notes|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(describe|summary)\t'`,
 `tools/git-compat-audit-summary.sh --tsv`,
 and `git diff --check`.
 
 Current census counts are `5342` matrix rows, `4648` verified rows, `679`
-invalid-input rows, `12` exact-open rows, `83/151` complete command
+invalid-input rows, `12` exact-open rows, `84/151` complete command
 matrices, `1392/3175` complete documented option pairs, `1400/3175`
 represented documented option pairs, and `1795` remaining checklist rows.
-`notes` is now fully command-complete at `28/28` reviewed-complete documented
-option pairs with `28/28` represented documented option pairs, `69/69`
-classified rows, and `0` exact-open written rows. The exact-open queue remains
-limited to the helper-oracle-unavailable commands `citool`, `cvsimport`,
-`svn`, `archimport`, `cvsexportcommit`, and `scalar`.
+`describe` is now fully command-complete at `14/14` reviewed-complete
+documented option pairs with `14/14` represented documented option pairs,
+`19/19` classified rows, and `0` exact-open written rows. The exact-open queue
+remains limited to the helper-oracle-unavailable commands `citool`,
+`cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and `scalar`.
 
 ### No-Skip Rule
 
@@ -1696,12 +1696,12 @@ Latest completed batch:
 
 Latest in-progress family follow-up:
 
-- `notes` is now fully command-complete at `28/28` reviewed-complete
-  documented option pairs, `28/28` represented documented option pairs,
-  `69/69` classified rows, and `0` exact-open written rows.
-- The next best helper-free follow-up is the eligible zero-code reviewed-
-  complete command cluster `clone`, `stage`, `push`, `init`,
-  `sparse-checkout`, and `shell`.
+- `describe` is now fully command-complete at `14/14` reviewed-complete
+  documented option pairs, `14/14` represented documented option pairs,
+  `19/19` classified rows, and `0` exact-open written rows.
+- The next best helper-free follow-up is the compact parser-alias parity batch
+  for `fmt-merge-msg --summary/--no-summary`, `bugreport --no-diagnose`, and
+  `http-fetch --index-pack-args`.
 
 Current durable census after the zero-code reviewed-complete `tag`
 documented-option promotion cluster:
