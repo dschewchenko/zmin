@@ -1141,6 +1141,8 @@ pub enum Command {
         port: u16,
         #[arg(short = 'd', long = "httpd")]
         httpd: Option<String>,
+        #[arg(short = 'm', long = "module-path")]
+        module_path: Option<String>,
         #[arg(short = 'b', long = "browser")]
         browser: Option<String>,
         #[arg(long = "daemon-internal", hide = true, action = ArgAction::SetTrue)]

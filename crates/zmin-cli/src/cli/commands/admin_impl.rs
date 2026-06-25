@@ -127,6 +127,7 @@ pub(crate) struct InstawebCommandOptions {
     pub(crate) local: bool,
     pub(crate) port: u16,
     pub(crate) httpd: Option<String>,
+    pub(crate) module_path: Option<String>,
     pub(crate) browser: Option<String>,
     pub(crate) daemon_internal: bool,
     pub(crate) git_dir: Option<PathBuf>,
@@ -3581,6 +3582,7 @@ fn instaweb(options: InstawebCommandOptions) -> Result<()> {
 }
 
 fn instaweb_start(repo: &GitRepo, options: &InstawebCommandOptions) -> Result<()> {
+    let _ = &options.module_path;
     let gitweb_dir = repo.git_dir.join("gitweb");
     fs::create_dir_all(&gitweb_dir)?;
     instaweb_stop(repo)?;

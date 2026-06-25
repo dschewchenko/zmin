@@ -2652,6 +2652,76 @@ fn instaweb_short_aliases_match_stock_start_shape() {
     assert!(!browser_log.exists(), "browser should be ignored for --start");
 }
 
+#[cfg(unix)]
+#[test]
+fn instaweb_module_path_spellings_match_stock_start_shape() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "README.md", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "instaweb module-path"]);
+    let temp = TempDir::new().expect("temp lighttpd");
+    let server_log = temp.path().join("lighttpd.log");
+    let lighttpd = temp.path().join("lighttpd");
+    fs::write(
+        &lighttpd,
+        format!(
+            "#!/bin/sh\nconf=\"${{2:-$1}}\"\npid_file=\"$(sed -n 's/^server.pid-file = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nport=\"$(sed -n 's/^server.port = \\([0-9][0-9]*\\)$/\\1/p' \"$conf\")\"\nbind=\"$(sed -n 's/^server.bind = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nprintf 'argv=%s\\nconf=%s\\nport=%s\\nbind=%s\\n' \"$*\" \"$conf\" \"$port\" \"$bind\" > '{}'\nsleep 60 &\nprintf '%s\\n' \"$!\" > \"$pid_file\"\n",
+            server_log.display()
+        ),
+    )
+    .expect("write fake lighttpd");
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&lighttpd, fs::Permissions::from_mode(0o755)).expect("chmod lighttpd");
+    let path_env = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    for args in [
+        [
+            "instaweb",
+            "--start",
+            "--httpd",
+            "lighttpd",
+            "--local",
+            "--port",
+            "12349",
+            "--module-path",
+            "/tmp/apachemods",
+        ]
+        .as_slice(),
+        [
+            "instaweb",
+            "--start",
+            "-d",
+            "lighttpd",
+            "-l",
+            "-p",
+            "12349",
+            "-m",
+            "/tmp/apachemods",
+        ]
+        .as_slice(),
+    ] {
+        let start = command_output_with_env_overrides(zmin_bin(), repo.path(), args, &[("PATH", &path_env)]);
+        assert_eq!(start.0, 0, "{args:?} stderr={}", start.2);
+        assert_eq!(start.1, "");
+        assert_eq!(start.2, "");
+        let logged = fs::read_to_string(&server_log).expect("fake lighttpd log");
+        let conf = fs::read_to_string(repo.path().join(".git/gitweb/lighttpd.conf"))
+            .expect("read lighttpd conf");
+        assert!(logged.contains("argv=-f "));
+        assert!(logged.contains("port=12349"));
+        assert!(logged.contains("bind=127.0.0.1"));
+        assert!(conf.contains("server.port = 12349"));
+        assert!(conf.contains("server.bind = \"127.0.0.1\""));
+        assert!(!conf.contains("/tmp/apachemods"));
+        run_zmin(repo.path(), ["instaweb", "--stop"]);
+    }
+}
+
 #[test]
 fn remote_config_commands_match_stock_git() {
     let git_repo = git_init();
