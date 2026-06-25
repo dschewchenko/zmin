@@ -124,11 +124,16 @@ def nested_schema_refs(
     parent_command: str,
     option: str,
     schema_options: dict[tuple[str, str], list[dict[str, str]]],
+    command_set: set[str],
 ) -> list[dict[str, str]]:
     refs: list[dict[str, str]] = []
     prefix = f"{parent_command}-"
     for (command, schema_option), arg_refs in schema_options.items():
-        if schema_option != option or not command.startswith(prefix):
+        if (
+            schema_option != option
+            or not command.startswith(prefix)
+            or command in command_set
+        ):
             continue
         refs.extend(arg_refs)
     return refs
@@ -753,7 +758,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
         spelling = option["option"]
         statuses = matrix_options_by_status.get((command, spelling), Counter())
         schema_refs = zmin_options.get((command, spelling), []) or nested_schema_refs(
-            command, spelling, zmin_options
+            command, spelling, zmin_options, command_set
         )
         if (command, spelling) in complete_option_pairs and not (statuses["open"] or statuses["partial"]):
             continue

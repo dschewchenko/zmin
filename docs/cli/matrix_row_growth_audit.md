@@ -11,6 +11,18 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a census-only classification correction for
+top-level hyphen-prefix commands. The selected change does not add new
+behavior evidence or change Rust runtime behavior; it fixes
+`tools/git-compat-census.py` so nested schema refs only come from additional
+nested commands outside the baseline Git command list. Expected delta is `+0`
+matrix rows, `+0` complete documented option pairs, `+0` complete command
+matrices, `+0` verified rows, `+0` invalid-input rows, and `+0` remaining
+checklist rows, while removing false `implemented but unverified` backlog
+items for top-level families such as `merge`, `diff`, `fetch`, and
+`checkout`. Actual delta matched; the real remaining implemented-without-
+matrix-evidence family is now `multi-pack-index --progress/--no-progress`.
+
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `rebase` surfaces
 `--interactive` and `-i`. The selected rows do not add new behavior evidence;
