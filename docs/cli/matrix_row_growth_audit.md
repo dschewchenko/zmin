@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git multi-pack-index`
+write-option family closure for `--no-bitmap`, `--preferred-pack`, and
+`--stdin-packs`. The selected change expands the write subcommand schema and
+runtime to match stock Git for suppressing bitmap sidecar creation, selecting a
+preferred duplicate-object pack, warning on an unknown preferred pack, and
+reading pack index basenames from stdin including the no-match failure case on
+the existing local two-pack oracle lane. Expected delta is `+5` matrix rows,
+`+3` complete documented option pairs, `+3` represented documented option
+pairs, `+0` complete command matrices, `+4` verified rows, `+1` invalid-input
+row, and `-3` remaining checklist rows. Actual delta matched, and
+`multi-pack-index` now sits at `6/9` reviewed-complete documented option pairs
+with only `--bitmap`, `--incremental`, and `--refs-snapshot` still open.
+
 As of 2026-06-25 the next batch is a helper-free `git send-pack` schema-tail
 closure plus command promotion. The selected change expands `send-pack` to
 cover `--exec`, `--no-signed`, `--signed[=<mode>]`, and `--push-option`,

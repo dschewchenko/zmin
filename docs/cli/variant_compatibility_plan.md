@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`89/151 complete command matrices / 1409/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1417/3156 represented doc-option pairs / 5364 written rows / 4668/5364 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`89/151 complete command matrices / 1412/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1420/3156 represented doc-option pairs / 5369 written rows / 4672/5369 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,20 +300,20 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is helper-free `git send-pack`: it closes the
-remaining schema-tail for `--exec`, `--no-signed`, `--signed[=<mode>]`, and
-`--push-option=<value>`, matches stock Git for signed-push fatal and warning
-paths, keeps `--exec` aligned with `--receive-pack`, and fixes local no-op
-status reporting to print `Everything up-to-date` like stock Git. This
-promotes `send-pack` to reviewed-complete at `12/12` documented option pairs,
-`12/12` represented documented option pairs, `22/22` classified rows, and `0`
-exact-open rows. The next bounded helper-free follow-up should move away from
-`send-pack`; the densest local existing-oracle family now is
-`multi-pack-index`, whose remaining documented options
-`--bitmap`, `--no-bitmap`, `--incremental`, `--preferred-pack`,
-`--refs-snapshot`, and `--stdin-packs` can reuse the existing
-`git_maintenance_compat` multi-pack-index lane instead of starting another
-one-off micro-slice.
+The latest completed slice is a helper-free `git multi-pack-index` write-option
+family closure for `--no-bitmap`, `--preferred-pack`, and `--stdin-packs`.
+Zmin now matches stock Git on the local two-pack lane for suppressing bitmap
+sidecar creation, selecting the preferred duplicate-object pack, warning on an
+unknown preferred pack, selecting pack indexes from stdin, and failing when
+stdin selects no pack indexes. This promotes `multi-pack-index` to `6/9`
+reviewed-complete documented option pairs and `6/9` represented documented
+option pairs with `23/23` classified rows and `0` exact-open written rows.
+The remaining `multi-pack-index` tail is now the heavier
+`--bitmap` / `--incremental` / `--refs-snapshot` side-effect family, so the
+next bounded helper-free follow-up should move to another dense local lane
+instead of forcing that larger bitmap layer into this commit. The best current
+candidate is `fetch-pack`, which still has `6` remaining documented options on
+an existing local transport oracle lane.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

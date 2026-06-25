@@ -42,6 +42,22 @@ pub(crate) fn multi_pack_index_command(
     multi_pack_index(object_dir, command)
 }
 
+pub(crate) struct MultiPackIndexWriteOptions {
+    pub(crate) preferred_pack: Option<String>,
+    pub(crate) no_bitmap: bool,
+    pub(crate) stdin_packs: bool,
+}
+
+impl MultiPackIndexWriteOptions {
+    pub(crate) fn plain() -> Self {
+        Self {
+            preferred_pack: None,
+            no_bitmap: false,
+            stdin_packs: false,
+        }
+    }
+}
+
 fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand) -> Result<()> {
     let objects_dir = match object_dir {
         Some(path) if path.is_absolute() => path,
@@ -50,11 +66,22 @@ fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand)
     };
     match command {
         MultiPackIndexCommand::Write {
+            preferred_pack,
+            no_bitmap,
+            stdin_packs,
             progress,
             no_progress,
         } => {
             let _ = (progress, no_progress);
-            multi_pack_index_write(&objects_dir, true)
+            multi_pack_index_write(
+                &objects_dir,
+                true,
+                MultiPackIndexWriteOptions {
+                    preferred_pack,
+                    no_bitmap,
+                    stdin_packs,
+                },
+            )
         }
         MultiPackIndexCommand::Verify {
             progress,
@@ -78,9 +105,14 @@ fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand)
 pub(crate) fn multi_pack_index_write(
     objects_dir: &std::path::Path,
     require_packs: bool,
+    options: MultiPackIndexWriteOptions,
 ) -> Result<()> {
     let pack_dir = objects_dir.join("pack");
-    let packs = multi_pack_index_pack_names(&pack_dir)?;
+    let mut packs = if options.stdin_packs {
+        multi_pack_index_selected_pack_names_from_stdin(&pack_dir)?
+    } else {
+        multi_pack_index_pack_names(&pack_dir)?
+    };
     if packs.is_empty() {
         if require_packs {
             return Err(CliError::Stderr {
@@ -90,10 +122,61 @@ pub(crate) fn multi_pack_index_write(
         }
         return Ok(());
     }
-    let bytes = encode_multi_pack_index(&pack_dir, &packs)?;
+    if let Some(preferred_pack) = options.preferred_pack.as_deref() {
+        if !apply_multi_pack_index_preferred_pack(&mut packs, preferred_pack) {
+            eprintln!("warning: unknown preferred pack: '{preferred_pack}'");
+        }
+    }
+    let _ = options.no_bitmap;
+    let bytes = encode_multi_pack_index(&pack_dir, &packs, options.preferred_pack.as_deref())?;
     fs::create_dir_all(&pack_dir)?;
     fs::write(pack_dir.join("multi-pack-index"), bytes)?;
     Ok(())
+}
+
+fn multi_pack_index_selected_pack_names_from_stdin(
+    pack_dir: &std::path::Path,
+) -> Result<Vec<String>> {
+    let available = multi_pack_index_pack_names(pack_dir)?;
+    let available_set: HashSet<&str> = available.iter().map(String::as_str).collect();
+    let mut selected = Vec::new();
+    for line in io::stdin().lock().lines() {
+        let name = line?;
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(normalized) =
+            normalize_multi_pack_index_pack_name(trimmed).filter(|name| available_set.contains(name.as_str()))
+        {
+            selected.push(normalized);
+        }
+    }
+    Ok(selected)
+}
+
+fn apply_multi_pack_index_preferred_pack(
+    packs: &mut Vec<String>,
+    preferred_pack: &str,
+) -> bool {
+    let Some(preferred_pack) = normalize_multi_pack_index_pack_name(preferred_pack) else {
+        return false;
+    };
+    packs.iter().any(|pack| pack == &preferred_pack)
+}
+
+fn normalize_multi_pack_index_pack_name(pack: &str) -> Option<String> {
+    let trimmed = pack.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.ends_with(".idx") {
+        return Some(trimmed.to_owned());
+    }
+    if trimmed.ends_with(".pack") {
+        return Some(format!("{}.idx", &trimmed[..trimmed.len() - ".pack".len()]));
+    }
+    Some(format!("{trimmed}.idx"))
 }
 
 #[cfg(windows)]
@@ -147,7 +230,7 @@ fn multi_pack_index_expire(objects_dir: &std::path::Path) -> Result<()> {
         remove_pack_family(&pack_dir.join(pack))?;
     }
     if removed {
-        multi_pack_index_write(objects_dir, false)?;
+        multi_pack_index_write(objects_dir, false, MultiPackIndexWriteOptions::plain())?;
     }
     Ok(())
 }
@@ -307,7 +390,7 @@ fn multi_pack_index_repack(
         &pack_dir.join(format!("{pack_name}.rev")),
         &indexed.reverse_index,
     )?;
-    multi_pack_index_write(objects_dir, false)
+    multi_pack_index_write(objects_dir, false, MultiPackIndexWriteOptions::plain())
 }
 
 fn install_temp_pack_file(
@@ -478,7 +561,11 @@ fn multi_pack_index_initial_capacity(object_count: usize) -> usize {
         .max(1)
 }
 
-fn encode_multi_pack_index(pack_dir: &std::path::Path, packs: &[String]) -> Result<Vec<u8>> {
+fn encode_multi_pack_index(
+    pack_dir: &std::path::Path,
+    packs: &[String],
+    preferred_pack: Option<&str>,
+) -> Result<Vec<u8>> {
     const HEADER_LEN: u64 = 12;
     const LOOKUP_ENTRY_LEN: u64 = 12;
 
@@ -494,10 +581,20 @@ fn encode_multi_pack_index(pack_dir: &std::path::Path, packs: &[String]) -> Resu
             code: 128,
             message: "multi-pack-index pack id overflow".into(),
         })?;
+        let pack_matches_preferred = preferred_pack
+            .and_then(normalize_multi_pack_index_pack_name)
+            .is_some_and(|preferred| preferred == *pack_name);
         let mut select_entry = |entry: PackIndexEntry| {
-            selected
-                .entry(entry.object_id)
-                .or_insert((pack_id, entry.offset));
+            match selected.entry(entry.object_id) {
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert((pack_id, entry.offset));
+                }
+                std::collections::hash_map::Entry::Occupied(mut slot) => {
+                    if pack_matches_preferred {
+                        slot.insert((pack_id, entry.offset));
+                    }
+                }
+            }
             Ok(())
         };
         for_each_pack_index_entry_from_path(
@@ -6386,6 +6483,7 @@ mod tests {
         let bytes = encode_multi_pack_index(
             pack_dir,
             &["pack-left.idx".to_owned(), "pack-right.idx".to_owned()],
+            None,
         )
         .expect("encode multi-pack-index");
         verify_multi_pack_index_bytes(&bytes).expect("verify multi-pack-index");

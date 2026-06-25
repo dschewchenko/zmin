@@ -7,10 +7,11 @@ use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    assert_repository_state_matches, command_any_output, command_failure_output_with_env,
-    command_output_with_env, command_stdout_bytes, configure_identity, git, git_failure_output,
-    git_init, git_status, git_args, git_with_env, git_with_stdin, git_with_stdin_args, run_zmin,
-    run_zmin_args, run_zmin_failure_output, write_file, zmin_bin,
+    assert_repository_state_matches, command_any_output, command_any_output_with_stdin,
+    command_failure_output_with_env, command_output_with_env, command_stdout_bytes,
+    configure_identity, git, git_failure_output, git_init, git_status, git_args, git_with_env,
+    git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_args, run_zmin_failure_output,
+    write_file, zmin_bin,
 };
 
 fn pack_refs_fixture_repo() -> TempDir {
@@ -599,6 +600,19 @@ fn packed_object_ids(repo: &std::path::Path) -> BTreeSet<String> {
         .collect()
 }
 
+fn multi_pack_index_bytes(repo: &std::path::Path) -> Vec<u8> {
+    fs::read(repo.join(".git/objects/pack/multi-pack-index")).expect("read multi-pack-index")
+}
+
+fn pack_index_names(repo: &std::path::Path) -> Vec<String> {
+    let mut names = pack_file_names(repo)
+        .into_iter()
+        .filter(|name| name.ends_with(".idx"))
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
 fn ref_file_list(repo: &std::path::Path) -> Vec<String> {
     let mut refs = Vec::new();
     collect_ref_files(&repo.join(".git/refs"), "refs", &mut refs);
@@ -933,6 +947,100 @@ fn multi_pack_index_progress_flags_match_stock_git() {
             "{label}"
         );
         assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+    }
+}
+
+#[test]
+fn multi_pack_index_write_option_family_matches_stock_git() {
+    for args in [["multi-pack-index", "write", "--no-bitmap"].as_slice()] {
+        let git_repo = two_pack_midx_fixture();
+        let zmin_repo = two_pack_midx_fixture();
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "{args:?}"
+        );
+        assert_eq!(
+            multi_pack_index_bytes(zmin_repo.path()),
+            multi_pack_index_bytes(git_repo.path()),
+            "{args:?} multi-pack-index bytes"
+        );
+        assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+    }
+
+    for label in ["preferred-pack recognized", "preferred-pack missing"] {
+        let git_repo = two_pack_midx_fixture();
+        let zmin_repo = two_pack_midx_fixture();
+        let git_pack_names = pack_index_names(git_repo.path());
+        let zmin_pack_names = pack_index_names(zmin_repo.path());
+        assert_eq!(git_pack_names, zmin_pack_names, "{label} pack names");
+        let preferred_arg = match label {
+            "preferred-pack recognized" => {
+                format!("--preferred-pack={}", git_pack_names[1].replace(".idx", ".pack"))
+            }
+            "preferred-pack missing" => "--preferred-pack=missing.pack".to_owned(),
+            _ => unreachable!(),
+        };
+        let args = ["multi-pack-index", "write", preferred_arg.as_str()];
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git"),
+            "{label}"
+        );
+        assert_eq!(
+            multi_pack_index_bytes(zmin_repo.path()),
+            multi_pack_index_bytes(git_repo.path()),
+            "{label} multi-pack-index bytes"
+        );
+        assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+    }
+
+    for label in ["stdin-packs subset", "stdin-packs all", "stdin-packs missing"] {
+        let git_repo = two_pack_midx_fixture();
+        let zmin_repo = two_pack_midx_fixture();
+        let git_pack_names = pack_index_names(git_repo.path());
+        let zmin_pack_names = pack_index_names(zmin_repo.path());
+        assert_eq!(git_pack_names, zmin_pack_names, "{label} pack names");
+        let stdin_data = match label {
+            "stdin-packs subset" => format!("{}\n", git_pack_names[0]),
+            "stdin-packs all" => format!("{}\n{}\n", git_pack_names[0], git_pack_names[1]),
+            "stdin-packs missing" => "missing.idx\n".to_owned(),
+            _ => unreachable!(),
+        };
+        let args = ["multi-pack-index", "write", "--stdin-packs"];
+
+        assert_eq!(
+            command_any_output_with_stdin(
+                zmin_bin(),
+                zmin_repo.path(),
+                &args,
+                &stdin_data,
+                "zmin"
+            ),
+            command_any_output_with_stdin("git", git_repo.path(), &args, &stdin_data, "git"),
+            "{label}"
+        );
+        if label == "stdin-packs missing" {
+            assert_eq!(
+                zmin_repo
+                    .path()
+                    .join(".git/objects/pack/multi-pack-index")
+                    .exists(),
+                git_repo
+                    .path()
+                    .join(".git/objects/pack/multi-pack-index")
+                    .exists()
+            );
+        } else {
+            assert_eq!(
+                multi_pack_index_bytes(zmin_repo.path()),
+                multi_pack_index_bytes(git_repo.path()),
+                "{label} multi-pack-index bytes"
+            );
+            assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+        }
     }
 }
 

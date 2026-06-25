@@ -564,7 +564,11 @@ fn maintenance_incremental_repack() -> Result<()> {
             text: "error: no pack files to index.\nerror: failed to write multi-pack-index\nerror: task 'incremental-repack' failed\n".into(),
         });
     }
-    pack_commands::multi_pack_index_write(&repo.objects_dir, true)
+    pack_commands::multi_pack_index_write(
+        &repo.objects_dir,
+        true,
+        pack_commands::MultiPackIndexWriteOptions::plain(),
+    )
 }
 
 fn maintenance_prefetch() -> Result<()> {
@@ -1724,7 +1728,11 @@ fn repack(options: RepackOptions) -> Result<()> {
     };
     if ids.is_empty() && cruft_ids.is_empty() {
         if write_midx {
-            pack_commands::multi_pack_index_write(&repo.objects_dir, false)?;
+            pack_commands::multi_pack_index_write(
+                &repo.objects_dir,
+                false,
+                pack_commands::MultiPackIndexWriteOptions::plain(),
+            )?;
         }
         return Ok(());
     }
@@ -1783,7 +1791,11 @@ fn repack(options: RepackOptions) -> Result<()> {
         let _ = fresh_store.prune_packed(false)?;
     }
     if write_midx {
-        pack_commands::multi_pack_index_write(&repo.objects_dir, false)?;
+        pack_commands::multi_pack_index_write(
+            &repo.objects_dir,
+            false,
+            pack_commands::MultiPackIndexWriteOptions::plain(),
+        )?;
     } else if replace_old_packs {
         remove_multi_pack_index(&pack_dir)?;
     }

@@ -218,9 +218,15 @@ fn resolve_multi_pack_index_command_toggles(
 ) -> runtime::MultiPackIndexCommand {
     match command {
         runtime::MultiPackIndexCommand::Write {
+            preferred_pack,
+            no_bitmap,
+            stdin_packs,
             progress,
             no_progress,
         } => runtime::MultiPackIndexCommand::Write {
+            preferred_pack,
+            no_bitmap,
+            stdin_packs,
             progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
             no_progress: false,
         },

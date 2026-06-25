@@ -3888,6 +3888,12 @@ pub enum CommitGraphCommand {
 #[derive(Subcommand, Debug)]
 pub enum MultiPackIndexCommand {
     Write {
+        #[arg(long = "preferred-pack")]
+        preferred_pack: Option<String>,
+        #[arg(long = "no-bitmap", action = ArgAction::SetTrue)]
+        no_bitmap: bool,
+        #[arg(long = "stdin-packs", action = ArgAction::SetTrue)]
+        stdin_packs: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
