@@ -343,36 +343,37 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `multi-pack-index --object-dir` doc-option
-promotion, `multi-pack-index` adds another `1` durable reviewed-complete
-documented option pair without changing Rust behavior and is up to `1/9`
-documented options complete with `1/9` represented documented option pairs
-and `10/10` classified rows. The next best helper-free follow-up should move
-to another dense census-backed represented family, with `p4 --branch` now the
-cleanest promotion-only candidate.
+After the latest zero-code `p4 --branch` doc-option promotion, `p4` adds
+another `1` durable reviewed-complete documented option pair without changing
+Rust behavior and is up to `1/29` documented options complete with `4/29`
+represented documented option pairs and `4/4` classified rows. The next best
+helper-free follow-up should move to another dense census-backed represented
+family. The current census now points at `rebase` as the only
+represented-vs-reviewed delta with zero exact-open rows, but that review needs
+an explicit evidence pass instead of automatic promotion.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free
-`multi-pack-index --object-dir` surface. The existing exact stock-Git
-evidence already closed the represented `multi-pack-index` object-dir family
-on the current object-directory write lane, so this slice only promotes that
-documented option pair into
+promotion cluster for the represented helper-free `p4 --branch` surface. The
+existing exact stock-Git evidence already closed the represented
+`git p4 clone --branch master //depot/project <target>` family on the current
+fake-Perforce local lane, so this slice only promotes that documented option
+pair into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
-`python3 tools/git-compat-census.py --root .`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(multi-pack-index|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(p4|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1334/3175` complete documented option pairs, and `1867`
-remaining checklist rows. `multi-pack-index` now reads `9` documented option
-pairs with `1` reviewed complete, `1` represented documented option pairs,
-and `10/10` classified written rows with `0` open.
+matrices, `1335/3175` complete documented option pairs, and `1866`
+remaining checklist rows. `p4` now reads `29` documented option pairs with
+`1` reviewed complete, `4` represented documented option pairs, and `4/4`
+classified written rows with `0` open.
 
 ### No-Skip Rule
 
