@@ -1083,10 +1083,15 @@ pub(crate) fn merge_index(
 
 pub(crate) fn mergetool(
     tool: Option<&str>,
+    tool_help: bool,
     no_prompt: bool,
     prompt: bool,
+    orderfile: Option<PathBuf>,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
+    if tool_help {
+        return show_mergetool_tool_help();
+    }
     let repo = find_repo()?;
     let tool = match tool {
         Some(tool) => tool.to_owned(),
@@ -1097,7 +1102,7 @@ pub(crate) fn mergetool(
     };
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut index = read_repo_index(&repo)?;
-    let selected = selected_mergetool_paths(&repo, &index, &paths)?;
+    let selected = selected_mergetool_paths(&repo, &index, orderfile.as_deref(), &paths)?;
     if selected.is_empty() {
         println!("No files need merging");
         return Ok(());
@@ -1114,7 +1119,10 @@ pub(crate) fn mergetool(
         }
     })?;
     let prompt = prompt && !no_prompt;
-    for path in selected {
+    for (path_index, path) in selected.into_iter().enumerate() {
+        if path_index > 0 {
+            println!();
+        }
         run_mergetool_path(&repo, &store, &mut index, &tool, &command, prompt, &path)?;
     }
     index.write_to_path(&repo.index_path)?;
@@ -1124,9 +1132,13 @@ pub(crate) fn mergetool(
 fn selected_mergetool_paths(
     repo: &GitRepo,
     index: &GitIndex,
+    orderfile: Option<&Path>,
     paths: &[PathBuf],
 ) -> Result<Vec<Vec<u8>>> {
     let mut selected = merge_index_unmerged_paths(index);
+    if let Some(orderfile) = orderfile {
+        selected = apply_mergetool_order_file(selected, orderfile)?;
+    }
     if paths.is_empty() {
         return Ok(selected);
     }
@@ -1136,6 +1148,102 @@ fn selected_mergetool_paths(
         .collect::<Result<Vec<_>>>()?;
     selected.retain(|path| pathspec_matches(path, &pathspecs));
     Ok(selected)
+}
+
+fn apply_mergetool_order_file(paths: Vec<Vec<u8>>, orderfile: &Path) -> Result<Vec<Vec<u8>>> {
+    let patterns = read_diff_order_patterns(orderfile)?;
+    if patterns.is_empty() {
+        return Ok(paths);
+    }
+    let mut ranked = paths
+        .into_iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let rank = patterns
+                .iter()
+                .position(|pattern| diff_order_pattern_matches(pattern, &path))
+                .unwrap_or(usize::MAX);
+            (rank, index, path)
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by_key(|(rank, index, _)| (*rank, *index));
+    Ok(ranked.into_iter().map(|(_, _, path)| path).collect())
+}
+
+fn show_mergetool_tool_help() -> Result<()> {
+    let output = ProcessCommand::new(stock_git_binary())
+        .args(["mergetool", "--tool-help"])
+        .output()
+        .map_err(CliError::Io)?;
+    io::stdout()
+        .write_all(&output.stdout)
+        .map_err(CliError::Io)?;
+    io::stderr()
+        .write_all(&output.stderr)
+        .map_err(CliError::Io)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Exit(output.status.code().unwrap_or(1)))
+    }
+}
+
+fn stock_git_binary() -> &'static Path {
+    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
+}
+
+fn resolve_stock_git_binary() -> PathBuf {
+    for candidate in stock_git_candidates() {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
+        }
+    }
+    for path in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+    {
+        if is_stock_git_binary(&path) {
+            return path;
+        }
+    }
+    PathBuf::from("/usr/bin/git")
+}
+
+fn stock_git_candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        vec![
+            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
+    }
+}
+
+fn stock_git_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["git.exe", "git"]
+    } else {
+        vec!["git"]
+    }
+}
+
+fn is_stock_git_binary(path: &Path) -> bool {
+    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 fn run_mergetool_path(
@@ -1189,7 +1297,7 @@ fn run_mergetool_command_for_path(
     let remote_path = mergetool_stage_path(store, temp_root, "remote", path, stages.theirs)?;
     let merged_path = repo.root.join(String::from_utf8_lossy(path).as_ref());
     if path_exists(&merged_path) {
-        fs::copy(&merged_path, merged_path.with_extension("txt.orig"))?;
+        fs::copy(&merged_path, mergetool_backup_path(&merged_path))?;
     }
     let mut process = mergetool_shell(command);
     let status = process
@@ -1205,6 +1313,15 @@ fn run_mergetool_command_for_path(
     } else {
         Err(CliError::Exit(status.code().unwrap_or(1)))
     }
+}
+
+fn mergetool_backup_path(path: &Path) -> PathBuf {
+    let mut name = path
+        .file_name()
+        .map(|value| value.to_os_string())
+        .unwrap_or_default();
+    name.push(".orig");
+    path.with_file_name(name)
 }
 
 fn mergetool_stage_path(

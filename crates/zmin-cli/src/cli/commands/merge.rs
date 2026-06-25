@@ -24,12 +24,21 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }),
         runtime::Command::Mergetool {
             tool,
+            tool_help,
             no_prompt,
             prompt,
             gui: _,
             no_gui: _,
+            orderfile,
             paths,
-        } => super::merge_commands::mergetool(tool.as_deref(), no_prompt, prompt, paths),
+        } => super::merge_commands::mergetool(
+            tool.as_deref(),
+            tool_help,
+            no_prompt,
+            prompt,
+            orderfile,
+            paths,
+        ),
         runtime::Command::MergeTree {
             write_tree,
             trivial_merge,

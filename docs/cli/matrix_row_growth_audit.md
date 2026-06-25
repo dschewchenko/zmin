@@ -11,6 +11,19 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git mergetool`
+`--tool-help` plus `-O` closure and command promotion. The selected change
+expands the schema and runtime to cover stock-Git host-local tool-help
+listing, orderfile-driven multi-path ordering, stock backup-file naming, and
+the exact blank-line output shape between consecutive conflicts, then promotes
+`mergetool` into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
+Expected delta is `+2` matrix rows, `+2` complete documented option pairs,
+`+2` represented documented option pairs, `+1` complete command matrix, `+2`
+verified rows, `+0` invalid-input rows, and `-2` remaining checklist rows.
+Actual delta matched, and `mergetool` is now command-complete at `10/10`
+reviewed-complete documented option pairs with `16/16` classified rows and
+`0` exact-open written rows.
+
 As of 2026-06-25 the next batch is a helper-free `git fmt-merge-msg`
 summary-alias closure plus command promotion. The selected change expands the
 schema to cover `--summary` and `--no-summary`, resolves them against

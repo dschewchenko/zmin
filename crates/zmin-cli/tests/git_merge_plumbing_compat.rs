@@ -84,6 +84,26 @@ fn mergetool_conflict_fixture() -> TempDir {
     repo
 }
 
+fn mergetool_multi_conflict_fixture() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "base\n");
+    write_file(repo.path(), "b.md", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "a.txt", "feature\n");
+    write_file(repo.path(), "b.md", "feature\n");
+    git_with_env(repo.path(), ["commit", "-am", "feature"]);
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "a.txt", "main\n");
+    write_file(repo.path(), "b.md", "main\n");
+    git_with_env(repo.path(), ["commit", "-am", "main"]);
+    assert_ne!(git_status(repo.path(), ["merge", "feature"]), 0);
+    repo
+}
+
 fn rerere_conflict_fixture() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -415,6 +435,70 @@ fn mergetool_uses_configured_default_tool_like_stock_git() {
     assert_eq!(
         git(zmin_repo.path(), ["status", "--short"]),
         git(git_repo.path(), ["status", "--short"])
+    );
+}
+
+#[test]
+fn mergetool_tool_help_matches_stock_git_with_user_defined_tools() {
+    let git_repo = mergetool_conflict_fixture();
+    let zmin_repo = mergetool_conflict_fixture();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["config", "mergetool.zmintest.cmd", "printf 'resolved\\n' > \"$MERGED\""]);
+    }
+
+    assert_eq!(
+        command_all_output("git", git_repo.path(), &["mergetool", "--tool-help"]),
+        command_all_output(zmin_bin(), zmin_repo.path(), &["mergetool", "--tool-help"])
+    );
+}
+
+#[test]
+fn mergetool_orderfile_matches_stock_git_for_multi_path_ordering() {
+    let git_repo = mergetool_multi_conflict_fixture();
+    let zmin_repo = mergetool_multi_conflict_fixture();
+    let command = "printf 'resolved\\n' > \"$MERGED\"";
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["config", "mergetool.zmintest.cmd", command]);
+        git(repo, ["config", "mergetool.zmintest.trustExitCode", "true"]);
+    }
+
+    let git_orderfile = git_repo.path().join("orderfile");
+    let zmin_orderfile = zmin_repo.path().join("orderfile");
+    fs::write(&git_orderfile, "b.md\na.txt\n").expect("write git orderfile");
+    fs::write(&zmin_orderfile, "b.md\na.txt\n").expect("write zmin orderfile");
+    let git_order_arg = format!("-O{}", git_orderfile.display());
+    let zmin_order_arg = format!("-O{}", zmin_orderfile.display());
+
+    assert_eq!(
+        command_all_output(
+            "git",
+            git_repo.path(),
+            &[
+                "mergetool",
+                git_order_arg.as_str(),
+                "--tool=zmintest",
+                "--no-prompt",
+            ],
+        ),
+        command_all_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "mergetool",
+                zmin_order_arg.as_str(),
+                "--tool=zmintest",
+                "--no-prompt",
+            ],
+        )
+    );
+    assert_eq!(
+        git(git_repo.path(), ["status", "--short"]),
+        git(zmin_repo.path(), ["status", "--short"])
+    );
+    assert_eq!(
+        git(git_repo.path(), ["ls-files", "--stage"]),
+        git(zmin_repo.path(), ["ls-files", "--stage"])
     );
 }
 

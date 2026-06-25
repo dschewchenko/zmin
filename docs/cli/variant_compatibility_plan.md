@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`92/151 complete command matrices / 1423/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1431/3156 represented doc-option pairs / 5383 written rows / 4684/5383 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`94/151 complete command matrices / 1425/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1433/3156 represented doc-option pairs / 5385 written rows / 4686/5385 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,19 +300,18 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is the final helper-backed plus helper-free
-`git fetch-pack` tail closure and command promotion. Zmin now matches stock
-Git on the local fetch-pack lanes for the documented
-`--check-self-contained-and-connected` and `--refetch` surfaces, including the
-current no-op parity lane for connectivity-check output and the helper-backed
-refetch lane that re-downloads the full matching object set after a prior
-fetch while preserving stock-like loose-object side effects without `--keep`.
-With those rows closed, `fetch-pack` is now command-complete at `18/18`
-reviewed-complete documented option pairs, `25/25` classified rows, and `0`
-exact-open written rows. The next bounded high-throughput follow-up should
-return to the heavier local `multi-pack-index`
-`--bitmap` / `--incremental` / `--refs-snapshot` family instead of another
-micro-slice.
+The latest completed slice is the helper-free `git mergetool`
+`--tool-help` plus `-O` closure and command promotion. Zmin now matches stock
+Git for host-local tool-help listing with configured user-defined tools, for
+multi-path orderfile ordering, and for the stock backup-file naming plus
+inter-conflict blank-line output details that those lanes exposed. With those
+rows closed, `mergetool` is now command-complete at `10/10`
+reviewed-complete documented option pairs, `10/10` represented documented
+option pairs, `16/16` classified rows, and `0` exact-open written rows. The
+next bounded high-throughput follow-up should return to the heavier local
+`multi-pack-index` `--bitmap` / `--incremental` / `--refs-snapshot` family,
+which remains the biggest compact tail at `6/9` reviewed-complete documented
+option pairs and `23/23` classified rows.
 
 The latest completed slice after that closure is a zero-row census-accounting
 correction for reviewed-complete commands. `tools/git-compat-census.py` now

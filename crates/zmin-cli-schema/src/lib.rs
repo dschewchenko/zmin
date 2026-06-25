@@ -3180,6 +3180,8 @@ pub enum Command {
     Mergetool {
         #[arg(short = 't', long = "tool")]
         tool: Option<String>,
+        #[arg(long = "tool-help", action = ArgAction::SetTrue)]
+        tool_help: bool,
         #[arg(short = 'y', long = "no-prompt", action = ArgAction::SetTrue)]
         no_prompt: bool,
         #[arg(long = "prompt", action = ArgAction::SetTrue)]
@@ -3188,6 +3190,8 @@ pub enum Command {
         gui: bool,
         #[arg(long = "no-gui", action = ArgAction::SetTrue)]
         no_gui: bool,
+        #[arg(short = 'O')]
+        orderfile: Option<PathBuf>,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },
