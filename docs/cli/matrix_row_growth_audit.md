@@ -84,6 +84,17 @@ command matrices, `+0` verified rows, `+0` invalid-input rows, and `-27`
 remaining checklist rows. Rust behavior changes are not expected. Actual delta
 matched.
 
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free local `tag` surface.
+The selected rows do not add new behavior evidence; they promote twenty-one
+exact stock-Git `tag` option families with existing local create, list,
+filter, sort, format, verify, and delete matrix coverage into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+0` matrix rows, `+21` complete documented option pairs, `+0` complete
+command matrices, `+0` verified rows, `+0` invalid-input rows, and `-21`
+remaining checklist rows. Rust behavior changes are not expected. Actual delta
+matched.
+
 As of 2026-06-25 the next batch is a helper-free `ls-files`
 `--no-empty-directory` closure plus reviewed-complete command promotion. The
 selected row adds the final represented documented `ls-files` option family to
