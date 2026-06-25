@@ -11,6 +11,21 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is the final helper-backed plus helper-free
+`git fetch-pack` tail closure and command promotion. The selected change keeps
+the existing local fetch-pack oracle lane, adds durable stock-Git evidence for
+the documented `--check-self-contained-and-connected` and `--refetch`
+surfaces, wires plain local `--refetch` into the default upload-pack helper
+path so it skips local have negotiation like stock Git after a prior fetch,
+and then promotes `fetch-pack` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Expected delta is
+`+2` matrix rows, `+2` complete documented option pairs, `+2` represented
+documented option pairs, `+1` complete command matrix, `+2` verified rows,
+`+0` invalid-input rows, and `-2` remaining checklist rows. Actual delta
+matched, and `fetch-pack` is now command-complete at `18/18` reviewed-complete
+documented option pairs with `25/25` classified rows and `0` exact-open
+written rows.
+
 As of 2026-06-25 the next batch is a helper-free `git multi-pack-index`
 write-option family closure for `--no-bitmap`, `--preferred-pack`, and
 `--stdin-packs`. The selected change expands the write subcommand schema and

@@ -9516,6 +9516,114 @@ fn fetch_pack_deepen_relative_matches_stock_git() {
 }
 
 #[test]
+fn fetch_pack_check_self_contained_and_connected_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file.txt"), b"hello\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+    );
+
+    let source_path = source.to_str().expect("source path");
+    let args = [
+        "fetch-pack",
+        "--check-self-contained-and-connected",
+        source_path,
+        "refs/heads/main",
+    ];
+    let git_output = command_any_output(
+        "git",
+        &git_client,
+        &args,
+        "git fetch-pack check-self-contained-and-connected",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch-pack check-self-contained-and-connected",
+    );
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(zmin_output.2, git_output.2);
+    let tip = git(&source, ["rev-parse", "HEAD"]);
+    assert_eq!(
+        git_status_args(&zmin_client, &["cat-file", "-e", &tip]),
+        git_status_args(&git_client, &["cat-file", "-e", &tip])
+    );
+}
+
+#[test]
+fn fetch_pack_refetch_matches_stock_git_on_prefetched_client() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    for name in ["base", "next"] {
+        fs::write(source.join("file.txt"), format!("{name}\n")).expect("write source");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", name]);
+    }
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+    );
+
+    let source_path = source.to_str().expect("source path");
+    for (tool, client) in [("git", &git_client), (zmin_bin(), &zmin_client)] {
+        let initial = command_any_output(
+            tool,
+            client,
+            &["fetch-pack", source_path, "refs/heads/main"],
+            tool,
+        );
+        assert_eq!(initial.0, 0);
+    }
+
+    let args = ["fetch-pack", "--refetch", source_path, "refs/heads/main"];
+    let git_output = command_any_output("git", &git_client, &args, "git fetch-pack refetch");
+    let zmin_output =
+        command_any_output(zmin_bin(), &zmin_client, &args, "zmin fetch-pack refetch");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
+    assert_eq!(pack_dir_files(&zmin_client), pack_dir_files(&git_client));
+    let tip = git(&source, ["rev-parse", "HEAD"]);
+    assert_eq!(
+        git_status_args(&zmin_client, &["cat-file", "-e", &tip]),
+        git_status_args(&git_client, &["cat-file", "-e", &tip])
+    );
+}
+
+#[test]
 fn ls_remote_matches_stock_git_for_local_remotes() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`89/151 complete command matrices / 1416/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1424/3156 represented doc-option pairs / 5373 written rows / 4676/5373 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`90/151 complete command matrices / 1418/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1426/3156 represented doc-option pairs / 5375 written rows / 4678/5375 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,18 +300,19 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-backed `git fetch-pack`
-documented-option family batch for `--exec`, `--shallow-since`,
-`--shallow-exclude`, and `--deepen-relative`. Zmin now matches stock Git on
-the local helper lane for explicit upload-pack helper override, date-limited
-history fetch, named-history exclusion, and relative deepening from an already
-shallow destination, with matching stdout, normalized progress stderr and
-resulting shallow/object side effects in focused `git_transport_local_compat`
-rows. This should promote `fetch-pack` to `16/18` reviewed-complete
-documented option pairs, leaving only the lighter
-`--check-self-contained-and-connected` and `--refetch` tail. The next bounded
-follow-up can now either finish `fetch-pack` outright or switch back to the
-heavier `multi-pack-index --bitmap/--incremental/--refs-snapshot` family.
+The latest completed slice is the final helper-backed plus helper-free
+`git fetch-pack` tail closure and command promotion. Zmin now matches stock
+Git on the local fetch-pack lanes for the documented
+`--check-self-contained-and-connected` and `--refetch` surfaces, including the
+current no-op parity lane for connectivity-check output and the helper-backed
+refetch lane that re-downloads the full matching object set after a prior
+fetch while preserving stock-like loose-object side effects without `--keep`.
+With those rows closed, `fetch-pack` is now command-complete at `18/18`
+reviewed-complete documented option pairs, `25/25` classified rows, and `0`
+exact-open written rows. The next bounded high-throughput follow-up should
+return to the heavier local `multi-pack-index`
+`--bitmap` / `--incremental` / `--refs-snapshot` family instead of another
+micro-slice.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

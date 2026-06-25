@@ -5807,6 +5807,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
             if shallow_since.is_some()
                 || !options.shallow_exclude.is_empty()
                 || options.deepen_relative
+                || options.refetch
             {
                 Some("git-upload-pack")
             } else {
