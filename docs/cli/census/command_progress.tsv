@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1333	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1334	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -95,7 +95,7 @@ merge-tree	8	8	8	100.0	37	37	100.0	22	59.5	0	0	15	yes
 mergetool	10	8	8	80.0	14	14	100.0	11	78.6	0	0	3	no
 mktag	1	1	1	100.0	3	3	100.0	3	100.0	0	0	0	yes
 mktree	3	3	3	100.0	25	25	100.0	19	76.0	0	0	6	yes
-multi-pack-index	9	0	1	11.1	10	10	100.0	6	60.0	0	0	4	no
+multi-pack-index	9	1	1	11.1	10	10	100.0	6	60.0	0	0	4	no
 mv	7	7	7	100.0	32	32	100.0	32	100.0	0	0	0	yes
 name-rev	8	8	8	100.0	11	11	100.0	11	100.0	0	0	0	yes
 notes	28	21	21	75.0	69	69	100.0	60	87.0	0	0	9	no
