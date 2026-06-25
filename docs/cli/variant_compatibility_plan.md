@@ -1179,3 +1179,31 @@ Largest raw clusters:
 6. Plumbing variants used by tools: `cat-file`, `rev-parse`, `for-each-ref`,
    `ls-files`, `update-index`, `read-tree`, `write-tree`.
 7. Platform variants: macOS, Linux, Windows path/process behavior.
+
+## 2026-06-25 Census Snapshot
+
+Current durable census after the `checkout-index` documented-surface closure:
+
+- complete command matrices: `76 / 151`
+- complete documented command-option pairs: `406 / 3175`
+- matrix rows: `5167`
+- verified rows: `4466`
+- invalid-input rows: `672`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `checkout-index` is now reviewed complete at both the command and documented
+  option-pair levels.
+- The closed family added the remaining documented parser surface:
+  `--index` / `-u`, `--no-create` / `-n`, `--temp`, `--stage`,
+  `--ignore-skip-worktree-bits`, and `-z`.
+- Focused verification was
+  `cargo test -p zmin-cli --test git_worktree_state_compat checkout_index -- --nocapture`
+  plus `python3 tools/git-compat-census.py --root .`.
+
+Next helper-free family candidates by schema-missing size now remain:
+
+- `repack`: `16`
+- `read-tree`: `14`
+- `gc`: `7`

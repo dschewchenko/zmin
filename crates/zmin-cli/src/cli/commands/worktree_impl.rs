@@ -1,6 +1,7 @@
 use super::*;
 use chrono::{Datelike, Timelike};
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use zmin_git_core::commit::CommitObjectCache;
 use zmin_primitives::git_runtime::GitPrimitiveRuntime;
@@ -3878,13 +3879,22 @@ fn prefix_index_onto_existing(existing: GitIndex, imported: GitIndex, prefix: &s
 }
 
 pub(crate) fn checkout_index_command(
-    all: bool,
-    force: bool,
-    quiet: bool,
-    stdin: bool,
-    prefix: Option<PathBuf>,
-    paths: Vec<PathBuf>,
+    options: CheckoutIndexCommandOptions,
 ) -> Result<()> {
+    let CheckoutIndexCommandOptions {
+        all,
+        force,
+        quiet,
+        update_index,
+        no_create,
+        stage,
+        temp,
+        ignore_skip_worktree_bits,
+        stdin,
+        nul,
+        prefix,
+        paths,
+    } = options;
     if all && stdin {
         return Err(CliError::Fatal {
             code: 128,
@@ -3900,16 +3910,20 @@ pub(crate) fn checkout_index_command(
 
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let index = read_repo_index(&repo)?;
+    let mut index = read_repo_index(&repo)?;
+    let stage_mode = checkout_index_stage_mode(stage.as_deref())?;
+    let use_temp_output = temp || matches!(stage_mode, CheckoutIndexStageMode::All);
     let selected = if all {
         index
             .entries()
             .iter()
-            .filter(|entry| entry.stage == 0)
+            .filter(|entry| {
+                checkout_index_entry_matches(entry, stage_mode, ignore_skip_worktree_bits)
+            })
             .cloned()
             .collect::<Vec<_>>()
     } else {
-        let inputs = checkout_index_inputs(stdin, paths)?;
+        let inputs = checkout_index_inputs(stdin, nul, paths)?;
         if inputs.is_empty() {
             return Err(CliError::Fatal {
                 code: 129,
@@ -3919,23 +3933,67 @@ pub(crate) fn checkout_index_command(
         let mut selected = Vec::new();
         for path in inputs {
             let relative = path_arg_to_repo_relative(&repo, &path)?;
-            match find_index_entry(&index, &relative) {
-                Some(entry) if entry.stage == 0 => selected.push(entry.clone()),
-                _ if quiet => {}
-                _ => {
-                    return Err(CliError::Stderr {
-                        code: 1,
-                        text: format!(
-                            "git checkout-index: {} is not in the cache\n",
-                            String::from_utf8_lossy(&relative)
-                        ),
-                    });
+            match stage_mode {
+                CheckoutIndexStageMode::Normal => match find_index_entry(&index, &relative) {
+                    Some(entry) if entry.stage == 0 => selected.push(entry.clone()),
+                    _ if quiet => {}
+                    _ => {
+                        return Err(CliError::Stderr {
+                            code: 1,
+                            text: format!(
+                                "git checkout-index: {} is not in the cache\n",
+                                String::from_utf8_lossy(&relative)
+                            ),
+                        });
+                    }
+                },
+                CheckoutIndexStageMode::Stage(stage) => match index.entry(&relative, stage) {
+                    Some(entry) => selected.push(entry.clone()),
+                    _ if quiet => {}
+                    _ => {
+                        return Err(CliError::Stderr {
+                            code: 1,
+                            text: format!(
+                                "git checkout-index: {} does not exist at stage {stage}\n",
+                                String::from_utf8_lossy(&relative)
+                            ),
+                        });
+                    }
+                },
+                CheckoutIndexStageMode::All => {
+                    let mut found = false;
+                    for stage in 1..=3 {
+                        if let Some(entry) = index.entry(&relative, stage) {
+                            selected.push(entry.clone());
+                            found = true;
+                        }
+                    }
+                    if !found && !quiet {
+                        return Err(CliError::Stderr {
+                            code: 1,
+                            text: format!(
+                                "git checkout-index: {} is not in the cache\n",
+                                String::from_utf8_lossy(&relative)
+                            ),
+                        });
+                    }
                 }
             }
         }
         selected
     };
+    if use_temp_output {
+        return checkout_index_temp_output(
+            &repo,
+            &store,
+            &selected,
+            stage_mode,
+            quiet,
+            nul,
+        );
+    }
     let original_selected = selected;
+    let prefix_is_none = prefix.is_none();
     let (root, checkout_entries, prefixed_paths) = match prefix {
         Some(prefix) if prefix.is_absolute() => (prefix, original_selected.clone(), Vec::new()),
         Some(prefix) => {
@@ -3956,11 +4014,21 @@ pub(crate) fn checkout_index_command(
         }
         None => (repo.root.clone(), original_selected.clone(), Vec::new()),
     };
+    let checkout_entries = if no_create {
+        checkout_entries
+            .into_iter()
+            .filter(|entry| {
+                let relative = String::from_utf8_lossy(&entry.path);
+                path_exists(&root.join(relative.as_ref()))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        checkout_entries
+    };
     let selected_index = GitIndex::from_entries(checkout_entries)?;
     let materialized_paths = selected_index
         .entries()
         .iter()
-        .filter(|entry| entry.stage == 0)
         .map(|entry| {
             let path = root.join(String::from_utf8_lossy(&entry.path).as_ref());
             let existed = path_exists(&path);
@@ -3995,14 +4063,154 @@ pub(crate) fn checkout_index_command(
         }
         return Err(error);
     }
+    if update_index && prefix_is_none && matches!(stage_mode, CheckoutIndexStageMode::Normal) {
+        let selected_paths = selected_index
+            .entries()
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        refresh_tracked_index_metadata_matching(&repo, &mut index, &selected_paths)?;
+        index.write_to_path(&repo.index_path)?;
+    }
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CheckoutIndexCommandOptions {
+    pub(crate) all: bool,
+    pub(crate) force: bool,
+    pub(crate) quiet: bool,
+    pub(crate) update_index: bool,
+    pub(crate) no_create: bool,
+    pub(crate) stage: Option<String>,
+    pub(crate) temp: bool,
+    pub(crate) ignore_skip_worktree_bits: bool,
+    pub(crate) stdin: bool,
+    pub(crate) nul: bool,
+    pub(crate) prefix: Option<PathBuf>,
+    pub(crate) paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckoutIndexStageMode {
+    Normal,
+    Stage(u8),
+    All,
+}
+
+fn checkout_index_stage_mode(stage: Option<&str>) -> Result<CheckoutIndexStageMode> {
+    let Some(stage) = stage else {
+        return Ok(CheckoutIndexStageMode::Normal);
+    };
+    if stage == "all" {
+        return Ok(CheckoutIndexStageMode::All);
+    }
+    match stage.parse::<u8>() {
+        Ok(stage @ 1..=3) => Ok(CheckoutIndexStageMode::Stage(stage)),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("git checkout-index: stage should be between 1 and 3 or all, not {stage}"),
+        }),
+    }
+}
+
+fn checkout_index_entry_matches(
+    entry: &IndexEntry,
+    stage_mode: CheckoutIndexStageMode,
+    ignore_skip_worktree_bits: bool,
+) -> bool {
+    match stage_mode {
+        CheckoutIndexStageMode::Normal => {
+            entry.stage == 0 && (ignore_skip_worktree_bits || !entry.skip_worktree())
+        }
+        CheckoutIndexStageMode::Stage(stage) => entry.stage == stage,
+        CheckoutIndexStageMode::All => entry.stage != 0,
+    }
+}
+
+fn checkout_index_temp_output(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    selected: &[IndexEntry],
+    stage_mode: CheckoutIndexStageMode,
+    quiet: bool,
+    nul: bool,
+) -> Result<()> {
+    match stage_mode {
+        CheckoutIndexStageMode::All => {
+            let mut grouped = BTreeMap::<Vec<u8>, [Option<IndexEntry>; 3]>::new();
+            for entry in selected {
+                if !(1..=3).contains(&entry.stage) {
+                    continue;
+                }
+                grouped.entry(entry.path.clone()).or_default()[usize::from(entry.stage - 1)] =
+                    Some(entry.clone());
+            }
+            for (path, stages) in grouped {
+                let mut names = Vec::with_capacity(3);
+                for entry in stages {
+                    if let Some(entry) = entry {
+                        names.push(checkout_index_temp_file(repo, store, &entry)?);
+                    } else {
+                        names.push(".".to_owned());
+                    }
+                }
+                print!(
+                    "{} {} {}\t{}{}",
+                    names[0],
+                    names[1],
+                    names[2],
+                    String::from_utf8_lossy(&path),
+                    checkout_index_record_separator(nul)
+                );
+            }
+        }
+        CheckoutIndexStageMode::Normal | CheckoutIndexStageMode::Stage(_) => {
+            for entry in selected {
+                if entry.stage != 0 && quiet {
+                    continue;
+                }
+                let name = checkout_index_temp_file(repo, store, entry)?;
+                print!(
+                    "{}\t{}{}",
+                    name,
+                    String::from_utf8_lossy(&entry.path),
+                    checkout_index_record_separator(nul)
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn checkout_index_temp_file(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    entry: &IndexEntry,
+) -> Result<String> {
+    let object = store.read_object(&entry.id)?;
+    let temp_path = unique_temp_sibling(&repo.root.join(".merge_file"));
+    fs::write(&temp_path, object.content)?;
+    Ok(temp_path
+        .strip_prefix(&repo.root)
+        .unwrap_or(&temp_path)
+        .to_string_lossy()
+        .replace('\\', "/"))
+}
+
+fn checkout_index_record_separator(nul: bool) -> &'static str {
+    if nul {
+        "\0"
+    } else {
+        "\n"
+    }
 }
 
 fn checkout_index_prefix_bytes(prefix: &Path) -> Vec<u8> {
     prefix.to_string_lossy().replace('\\', "/").into_bytes()
 }
 
-fn checkout_index_inputs(stdin: bool, paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
+fn checkout_index_inputs(stdin: bool, nul: bool, paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     if stdin && !paths.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
@@ -4012,9 +4220,23 @@ fn checkout_index_inputs(stdin: bool, paths: Vec<PathBuf>) -> Result<Vec<PathBuf
     if !stdin {
         return Ok(paths);
     }
-    let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer)?;
-    Ok(buffer.lines().map(PathBuf::from).collect())
+    let mut buffer = Vec::new();
+    io::stdin().read_to_end(&mut buffer)?;
+    let parts = if nul {
+        buffer
+            .split(|byte| *byte == b'\0')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+    } else {
+        buffer
+            .split(|byte| *byte == b'\n')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+    };
+    Ok(parts
+        .into_iter()
+        .map(|part| PathBuf::from(String::from_utf8_lossy(part).into_owned()))
+        .collect())
 }
 
 pub(crate) fn restore(

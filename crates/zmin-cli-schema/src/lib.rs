@@ -1788,8 +1788,20 @@ pub enum Command {
         force: u8,
         #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
         quiet: u8,
+        #[arg(short = 'u', long = "index", action = ArgAction::Count)]
+        index: u8,
+        #[arg(short = 'n', long = "no-create", action = ArgAction::Count)]
+        no_create: u8,
+        #[arg(long = "stage")]
+        stage: Option<String>,
+        #[arg(long = "temp", action = ArgAction::SetTrue)]
+        temp: bool,
+        #[arg(long = "ignore-skip-worktree-bits", action = ArgAction::SetTrue)]
+        ignore_skip_worktree_bits: bool,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
+        #[arg(short = 'z', action = ArgAction::SetTrue)]
+        nul: bool,
         #[arg(long = "prefix")]
         prefix: Option<PathBuf>,
         #[arg(value_hint = ValueHint::AnyPath)]

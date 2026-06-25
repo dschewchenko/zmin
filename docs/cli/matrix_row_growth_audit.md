@@ -5554,6 +5554,53 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
 schema rows and `+0` remaining checklist rows.
 
+## 2026-06-25 - checkout-index remaining documented surface closure
+
+Expected movement:
+
+- behavior rows: `+12`
+- closed rows: `+12`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+8`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-8`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git checkout-index -n -a`
+- `git checkout-index --no-create -a`
+- `git checkout-index -n --no-create -a`
+- `git checkout-index -u README.md`
+- `git checkout-index --index README.md`
+- `git checkout-index -u --index README.md`
+- `git checkout-index -a --ignore-skip-worktree-bits`
+- `git checkout-index --temp README.md`
+- `git checkout-index --stage=all f`
+- `git checkout-index --stage=2 --temp f`
+- `printf 'README.md\0' | git checkout-index -z --stdin`
+- `printf 'README.md\0docs/guide.md\0' | git checkout-index -z --stdin --prefix=out/`
+
+This batch closes the remaining local `git checkout-index` documented parser
+surface by wiring `--index` / `-u`, `--no-create` / `-n`, `--temp`,
+`--stage`, `--ignore-skip-worktree-bits`, and `-z`, then proving them against
+stock Git through focused worktree-state parity tests. The new evidence covers
+metadata refresh, skip-worktree selection during `--all`, direct and
+stage-composed temp-file export, and NUL-delimited stdin restore and prefix
+export flows.
+
+Actual post-import movement matched the declaration: `+12` behavior rows, `+12`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+8` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `-8` remaining checklist rows. The reviewed-complete census now
+marks `checkout-index` `16/16` documented option pairs and the full command
+matrix as finished.
+
 ## 2026-06-25 - check-ref-format precedence and branch-history surface
 
 Expected movement:

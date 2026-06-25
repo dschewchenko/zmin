@@ -5,9 +5,9 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, command_output, configure_identity, git, git_args, git_failure_output,
-    git_init, git_with_env, git_with_stdin, run_zmin, run_zmin_failure_output, run_zmin_with_env,
-    run_zmin_with_stdin, zmin_bin,
+    command_any_output, command_any_output_with_stdin_bytes, command_output, configure_identity,
+    git, git_args, git_failure_output, git_init, git_with_env, git_with_stdin, run_zmin,
+    run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin, zmin_bin,
 };
 
 fn committed_repo() -> TempDir {
@@ -41,6 +41,57 @@ fn checkout_index_fixture_repo() -> TempDir {
     fs::remove_file(repo.path().join("README.md")).expect("remove readme");
     fs::remove_file(repo.path().join("docs/guide.md")).expect("remove guide");
     repo
+}
+
+fn checkout_index_skip_worktree_fixture_repo() -> TempDir {
+    let repo = git_init();
+    fs::write(repo.path().join("a.txt"), b"skip\n").expect("write skip-worktree fixture");
+    git(repo.path(), ["add", "a.txt"]);
+    git(repo.path(), ["update-index", "--skip-worktree", "a.txt"]);
+    fs::remove_file(repo.path().join("a.txt")).expect("remove skip-worktree file");
+    repo
+}
+
+fn checkout_index_conflict_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("f"), b"base\n").expect("write base");
+    git(repo.path(), ["add", "f"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    let base_branch = git(repo.path(), ["branch", "--show-current"]);
+    git(repo.path(), ["checkout", "-b", "side"]);
+    fs::write(repo.path().join("f"), b"side\n").expect("write side");
+    git(repo.path(), ["commit", "-am", "side"]);
+    git(repo.path(), ["checkout", &base_branch]);
+    fs::write(repo.path().join("f"), b"main\n").expect("write main");
+    git(repo.path(), ["commit", "-am", "main"]);
+    git_failure_output(repo.path(), &["merge", "side"]);
+    repo
+}
+
+fn parse_checkout_index_temp_row(stdout: &str) -> (Vec<String>, String) {
+    let (left, path) = stdout.split_once('\t').expect("temp listing row");
+    (
+        left.split(' ').map(str::to_owned).collect(),
+        path.to_owned(),
+    )
+}
+
+fn read_checkout_index_temp_files(repo: &std::path::Path, names: &[String]) -> Vec<Option<Vec<u8>>> {
+    names
+        .iter()
+        .map(|name| {
+            if name == "." {
+                None
+            } else {
+                Some(fs::read(repo.join(name)).expect("read checkout-index temp file"))
+            }
+        })
+        .collect()
+}
+
+fn checkout_index_debug_metadata_populated(debug: &str) -> bool {
+    debug.lines().skip(1).take(2).all(|line| !line.ends_with(": 0:0"))
 }
 
 #[cfg(unix)]
@@ -831,6 +882,164 @@ fn checkout_index_documented_option_combinations_match_stock_git() {
             git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
             git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
             "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn checkout_index_missing_documented_options_match_stock_git() {
+    for args in [
+        ["checkout-index", "-n", "-a"].as_slice(),
+        ["checkout-index", "--no-create", "-a"].as_slice(),
+        ["checkout-index", "-n", "--no-create", "-a"].as_slice(),
+    ] {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        for path in ["README.md", "docs/guide.md"] {
+            assert_eq!(
+                zmin_repo.path().join(path).exists(),
+                git_repo.path().join(path).exists(),
+                "args: {args:?}, path: {path}"
+            );
+        }
+    }
+
+    for args in [
+        ["checkout-index", "-u", "README.md"].as_slice(),
+        ["checkout-index", "--index", "README.md"].as_slice(),
+        ["checkout-index", "-u", "--index", "README.md"].as_slice(),
+    ] {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        let git_debug = git(git_repo.path(), ["ls-files", "--debug", "README.md"]);
+        let zmin_debug = git(zmin_repo.path(), ["ls-files", "--debug", "README.md"]);
+        assert!(
+            checkout_index_debug_metadata_populated(&git_debug),
+            "stock git metadata should be populated for args: {args:?}"
+        );
+        assert!(
+            checkout_index_debug_metadata_populated(&zmin_debug),
+            "zmin metadata should be populated for args: {args:?}"
+        );
+    }
+
+    {
+        let git_repo = checkout_index_skip_worktree_fixture_repo();
+        let zmin_repo = checkout_index_skip_worktree_fixture_repo();
+        let args = ["checkout-index", "-a", "--ignore-skip-worktree-bits"];
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git")
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("a.txt")).expect("read zmin skip-worktree file"),
+            fs::read(git_repo.path().join("a.txt")).expect("read git skip-worktree file")
+        );
+    }
+
+    {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        let args = ["checkout-index", "--temp", "README.md"];
+        let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin");
+        let git_output = command_any_output("git", git_repo.path(), &args, "git");
+        assert_eq!(zmin_output.0, git_output.0);
+        assert_eq!(zmin_output.2, git_output.2);
+        let (zmin_names, zmin_path) = parse_checkout_index_temp_row(&zmin_output.1);
+        let (git_names, git_path) = parse_checkout_index_temp_row(&git_output.1);
+        assert_eq!(zmin_path, git_path);
+        assert_eq!(zmin_path, "README.md");
+        assert_eq!(
+            read_checkout_index_temp_files(zmin_repo.path(), &zmin_names),
+            read_checkout_index_temp_files(git_repo.path(), &git_names)
+        );
+        assert!(!zmin_repo.path().join("README.md").exists());
+        assert!(!git_repo.path().join("README.md").exists());
+    }
+
+    {
+        let git_repo = checkout_index_conflict_fixture_repo();
+        let zmin_repo = checkout_index_conflict_fixture_repo();
+        let args = ["checkout-index", "--stage=all", "f"];
+        let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin");
+        let git_output = command_any_output("git", git_repo.path(), &args, "git");
+        assert_eq!(zmin_output.0, git_output.0);
+        assert_eq!(zmin_output.2, git_output.2);
+        let (zmin_names, zmin_path) = parse_checkout_index_temp_row(&zmin_output.1);
+        let (git_names, git_path) = parse_checkout_index_temp_row(&git_output.1);
+        assert_eq!(zmin_path, git_path);
+        assert_eq!(zmin_path, "f");
+        assert_eq!(zmin_names.len(), 3);
+        assert_eq!(git_names.len(), 3);
+        assert_eq!(
+            read_checkout_index_temp_files(zmin_repo.path(), &zmin_names),
+            read_checkout_index_temp_files(git_repo.path(), &git_names)
+        );
+    }
+
+    {
+        let git_repo = checkout_index_conflict_fixture_repo();
+        let zmin_repo = checkout_index_conflict_fixture_repo();
+        let args = ["checkout-index", "--stage=2", "--temp", "f"];
+        let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin");
+        let git_output = command_any_output("git", git_repo.path(), &args, "git");
+        assert_eq!(zmin_output.0, git_output.0);
+        assert_eq!(zmin_output.2, git_output.2);
+        let (zmin_names, zmin_path) = parse_checkout_index_temp_row(&zmin_output.1);
+        let (git_names, git_path) = parse_checkout_index_temp_row(&git_output.1);
+        assert_eq!(zmin_path, git_path);
+        assert_eq!(zmin_path, "f");
+        assert_eq!(zmin_names.len(), 1);
+        assert_eq!(git_names.len(), 1);
+        assert_eq!(
+            read_checkout_index_temp_files(zmin_repo.path(), &zmin_names),
+            read_checkout_index_temp_files(git_repo.path(), &git_names)
+        );
+    }
+
+    {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        let args = ["checkout-index", "-z", "--stdin"];
+        let input = b"README.md\0";
+        assert_eq!(
+            command_any_output_with_stdin_bytes(zmin_bin(), zmin_repo.path(), &args, input, "zmin"),
+            command_any_output_with_stdin_bytes("git", git_repo.path(), &args, input, "git")
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("README.md")).expect("read zmin nul-stdin file"),
+            fs::read(git_repo.path().join("README.md")).expect("read git nul-stdin file")
+        );
+    }
+
+    {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        let args = ["checkout-index", "-z", "--stdin", "--prefix=out/"];
+        let input = b"README.md\0docs/guide.md\0";
+        assert_eq!(
+            command_any_output_with_stdin_bytes(zmin_bin(), zmin_repo.path(), &args, input, "zmin"),
+            command_any_output_with_stdin_bytes("git", git_repo.path(), &args, input, "git")
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("out/README.md")).expect("read zmin nul-prefix readme"),
+            fs::read(git_repo.path().join("out/README.md")).expect("read git nul-prefix readme")
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("out/docs/guide.md"))
+                .expect("read zmin nul-prefix guide"),
+            fs::read(git_repo.path().join("out/docs/guide.md"))
+                .expect("read git nul-prefix guide")
         );
     }
 }

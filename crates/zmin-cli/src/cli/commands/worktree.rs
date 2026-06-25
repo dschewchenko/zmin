@@ -285,10 +285,29 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             all,
             force,
             quiet,
+            index,
+            no_create,
+            stage,
+            temp,
+            ignore_skip_worktree_bits,
             stdin,
+            nul,
             prefix,
             paths,
-        } => run_checkout_index(all > 0, force > 0, quiet > 0, stdin, prefix, paths),
+        } => run_checkout_index(super::worktree_commands::CheckoutIndexCommandOptions {
+            all: all > 0,
+            force: force > 0,
+            quiet: quiet > 0,
+            update_index: index > 0,
+            no_create: no_create > 0,
+            stage,
+            temp,
+            ignore_skip_worktree_bits,
+            stdin,
+            nul,
+            prefix,
+            paths,
+        }),
         runtime::Command::Switch {
             force,
             discard_changes,
@@ -435,14 +454,9 @@ pub(crate) fn run_read_tree(
 }
 
 pub(crate) fn run_checkout_index(
-    all: bool,
-    force: bool,
-    quiet: bool,
-    stdin: bool,
-    prefix: Option<PathBuf>,
-    paths: Vec<PathBuf>,
+    options: super::worktree_commands::CheckoutIndexCommandOptions,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::checkout_index_command(all, force, quiet, stdin, prefix, paths)
+    super::worktree_commands::checkout_index_command(options)
 }
 
 pub(crate) fn run_restore(
