@@ -11,6 +11,15 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `gc` documented-option family
+closure. The selected rows add exact stock-Git evidence for long `--quiet`,
+bare `--prune` default-missing-value behavior, and `--auto --quiet`, then
+promote the supported `gc` documented option pairs into the durable reviewed
+complete option list. Expected delta is `+3` matrix rows, `+3` verified rows,
+`+5` complete documented option pairs, `0` invalid-input rows and `-5`
+remaining checklist rows. Rust behavior changes are not expected. Actual delta
+matched.
+
 As of 2026-06-25 the `git_foreign_scm_compat.rs` `p4 submit` follow-up is a
 zero-row closure slice. The selected row already existed in
 `docs/cli/matrices/p4_v2_47.tsv`; the work closes it by matching stock Git's

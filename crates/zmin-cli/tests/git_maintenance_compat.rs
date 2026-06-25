@@ -411,6 +411,15 @@ fn assert_repack_observables_match(left: &std::path::Path, right: &std::path::Pa
     assert_eq!(git_status(right, ["fsck", "--strict"]), 0, "right repo fsck failed");
 }
 
+fn assert_gc_observables_match(left: &std::path::Path, right: &std::path::Path) {
+    assert_repack_observables_match(left, right);
+    assert_eq!(
+        left.join(".git/objects/info/commit-graph").exists(),
+        right.join(".git/objects/info/commit-graph").exists(),
+        "commit-graph presence diverged"
+    );
+}
+
 fn two_pack_midx_fixture() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -1669,6 +1678,25 @@ fn gc_aggressive_writes_stock_readable_delta_pack() {
     );
     assert_eq!(git_status(zmin_repo.path(), ["fsck", "--strict"]), 0);
     assert!(git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]).contains("\n\nchanged"));
+}
+
+#[test]
+fn gc_supported_documented_option_combinations_match_stock_git() {
+    for args in [
+        ["gc", "--quiet"].as_slice(),
+        ["gc", "--prune", "--quiet"].as_slice(),
+        ["gc", "--no-prune", "--quiet"].as_slice(),
+        ["gc", "--auto", "--quiet"].as_slice(),
+    ] {
+        let git_repo = commit_graph_fixture_repo();
+        let zmin_repo = commit_graph_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_gc_observables_match(zmin_repo.path(), git_repo.path());
+    }
 }
 
 #[test]

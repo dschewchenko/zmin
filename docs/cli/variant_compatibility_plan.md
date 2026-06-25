@@ -310,15 +310,13 @@ all focused oracle buckets in `docs/cli/existing_oracle_test_inventory.tsv`
 are now fully represented or classified. The next recommended batch still
 keeps the exact-open queue visible, but the smallest local no-helper follow-up
 is no longer `git column`; that local subgroup is closed. `git pack-refs` now
-has all `5/5` documented options represented too, and
-`interpret-trailers` is now reviewed complete. The next highest-throughput
-helper-free families
-by current doc-option tail size are `repack` (`17/33` represented documented
-options), `read-tree` (`3/17`), and `gc` (`5/12`). `repack` is now fully
-reviewed complete across its supported documented synopsis tail (`17/17`
-represented documented option pairs), so the next helper-free batch should
-prefer the smaller `gc` documented-option family before opening broader
-unsupported `repack` surfaces like cruft, filter, or geometric modes.
+has all `5/5` documented options represented, `interpret-trailers` is reviewed
+complete, and the supported `gc` documented family is now reviewed complete
+too (`5/5` represented documented option pairs). The next highest-throughput
+helper-free family is therefore `read-tree` (`3/17` represented documented
+options), unless work intentionally opens unsupported `gc` surfaces like
+`--cruft`, `--detach`, or `--force`, or broader unsupported `repack` surfaces
+like cruft, filter, or geometric modes.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -327,28 +325,28 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a focused `git repack` documented-option
-family completion batch. This follow-up added stock-Git evidence for repeated
-`-a`, `-A`, `-d`, `-f`, `-F`, `-l`, and `-n` forms, including repeated and
-reordered short-option combinations for the supported synopsis surface. With
-that evidence in place, all `17/17` represented documented `repack` option
-pairs are now reviewed complete even though the broader command still has
-unsupported documented surfaces outside the current Zmin schema.
+The latest completed slice is a focused helper-free `git gc`
+documented-option family batch. This follow-up added exact stock-Git evidence
+for long `--quiet`, bare `--prune` with its default-missing-value `now`
+behavior, and `--auto --quiet`, then promoted all currently supported `gc`
+documented option pairs into the reviewed-complete census artifact. The
+broader `gc` command still stays out of reviewed-complete command status
+because unsupported documented surfaces like `--cruft`, `--detach`, `--force`
+and related options remain outside the current Zmin schema.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat repack_supported_short_option_repetitions_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat gc_supported_documented_option_combinations_match_stock_git -- --nocapture`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(repack|gc|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(gc|repack|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5130` matrix rows, `4429` verified rows, `672`
+Current census counts are `5133` matrix rows, `4432` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `59/151` complete command matrices, `228/3175`
-complete documented option pairs, and `2973` remaining checklist rows.
-The promoted commands now read:
-- `replace` `11/11` represented documented options, `19/19` classified rows, `19/19` matching stock Git rows, `0` open
-- `merge-file` `10/10` represented documented options, `50/50` classified rows, `36/50` matching stock Git rows, `0` open
+open-or-partial rows, `59/151` complete command matrices, `233/3175`
+complete documented option pairs, and `2968` remaining checklist rows.
+The promoted command now reads:
+- `gc` `5/5` represented supported documented options reviewed complete, `9/9` classified rows, `9/9` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 
