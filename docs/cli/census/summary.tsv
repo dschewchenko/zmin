@@ -1,6 +1,6 @@
 metric	count	note
-complete_command_matrices	56	reviewed commands whose full behavior matrix is finished
-complete_doc_option_pairs	176	reviewed documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	58	reviewed commands whose full behavior matrix is finished
+complete_doc_option_pairs	197	reviewed documented command-option pairs whose full behavior matrix is finished
 git_2_47_commands	151	upstream command-list seed
 git_doc_option_seed_rows	3175	documented option spelling seed, not final denominator
 zmin_schema_commands	203	commands emitted by zmin compat schema
@@ -12,9 +12,9 @@ invalid_input_rows	672	stock-compatible rejection rows
 open_or_partial_matrix_rows	26	exact rows still open or partial
 exact_open_local_oracle_unavailable_rows	26	exact open rows blocked by missing local stock Git oracle command/tool
 implemented_but_unverified_rows	0	schema args without exact matrix evidence
-remaining_to_fix_or_verify_rows	3025	doc-option expansion, exact opens and unclassified guards
+remaining_to_fix_or_verify_rows	3004	doc-option expansion, exact opens and unclassified guards
 extension_or_deferred_rows	65	Zmin-only or deferred/non-Git scope items
 oracle_evidence_layer_rows	969	existing oracle inventory rows, not primary backlog
 hard_fail_scan_rows	92	source guard hits
 hard_fail_scan_unclassified_rows	0	source guard hits not matched to classification docs
-all_census_rows	9228	union of generated census output rows
+all_census_rows	9207	union of generated census output rows

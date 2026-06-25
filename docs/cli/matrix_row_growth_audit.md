@@ -29,6 +29,15 @@ into `docs/cli/census/reviewed_complete_command_matrices.tsv` and
 option pairs, `0` verified rows, `0` invalid-input rows and `-30` remaining
 checklist rows. Rust behavior changes are not expected. Actual delta matched.
 
+As of 2026-06-25 the next batch is another zero-row reviewed-complete closure
+cluster for helper-free commands `replace` and `merge-file`. Their matrices,
+stock evidence and documented option coverage already exist in focused tests
+and schema smoke probes; this slice only promotes them into the reviewed
+complete command and doc-option census artifacts. Expected delta is `+0`
+matrix rows, `+2` complete command matrices, `+21` complete documented option
+pairs, `0` verified rows, `0` invalid-input rows and `-21` remaining checklist
+rows. Rust behavior changes are not expected. Actual delta matched.
+
 As of 2026-06-25 the next `git_maintenance_compat.rs` follow-up is a small
 local parser-plus-evidence `prune` batch. The selected rows add exact
 documented `--dry-run`, `--verbose`, `-v`, `--progress` and `--no-progress`
