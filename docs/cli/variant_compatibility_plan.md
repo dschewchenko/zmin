@@ -347,32 +347,30 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a zero-row command-only reviewed-complete
-closure cluster for `clone`, `stage`, `push`, `init`, `sparse-checkout`, and
-`shell`. None of these commands currently contribute documented option seed
-rows in the tightened extractor, and all six already had `0` remaining census
-rows plus `100%` classified written-row coverage, so this batch promotes them
-into the durable reviewed command census source list without changing Rust
-behavior.
+The latest completed slice is a helper-free `git repack` cruft-family
+schema-tail batch. The parser now accepts `--cruft`,
+`--cruft-expiration`, `--expire-to`, and `--max-cruft-size`, while the local
+runtime matches stock Git for the covered `-d -q` cruft lane, stock-shaped
+`--expire-to=out --cruft-expiration=now` side-pack artifacts, the 1 MiB
+minimum-size warning for `--max-cruft-size=1`, invalid max-cruft-size
+rejection, and the fatal `--cruft -k` conflict.
 
 Focused gates were
-`python3 tools/git-compat-census.py`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_cruft_variants_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_cruft_expire_to_now_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_cruft_variants_match_stock_git -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
+`python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(clone|stage|push|init|sparse-checkout|shell|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are expected to move to `5155` matrix rows, `4454`
-verified rows, `672` invalid-input rows, `26`
-exact-open local-oracle-unavailable rows, `26` open-or-partial rows,
-`75/151` complete command matrices, `398/3175` complete documented option
-pairs, and `2803` remaining checklist rows.
-The promoted commands now read:
-- `clone` command-only reviewed complete, `96/96` classified rows, `86/96` matching stock Git rows, `0` open
-- `stage` command-only reviewed complete, `84/84` classified rows, `80/84` matching stock Git rows, `0` open
-- `push` command-only reviewed complete, `16/16` classified rows, `15/16` matching stock Git rows, `0` open
-- `init` command-only reviewed complete, `12/12` classified rows, `10/12` matching stock Git rows, `0` open
-- `sparse-checkout` command-only reviewed complete, `11/11` classified rows, `6/11` matching stock Git rows, `0` open
-- `shell` command-only reviewed complete, `5/5` classified rows, `2/5` matching stock Git rows, `0` open
+Current census counts are `5243` matrix rows, `4535` verified rows, `679`
+invalid-input rows, `26` exact-open rows, `79/151` complete command
+matrices, `425/3175` complete documented option pairs, and `2776`
+remaining checklist rows. `repack` now reads `33` documented option pairs,
+`24` reviewed-complete documented option pairs, `28` represented documented
+option pairs, and `68/68` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1182,40 +1180,46 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the `checkout-index` documented-surface closure:
+Current durable census after the `repack` cruft-family helper-free closure:
 
-- complete command matrices: `76 / 151`
+- complete command matrices: `79 / 151`
 - complete documented command-option pairs: `425 / 3175`
-- matrix rows: `5223`
-- verified rows: `4527`
+- matrix rows: `5243`
+- verified rows: `4535`
 - invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `read-tree` now has another helper-free expansion batch closed inside the
-  existing schema surface.
-- The closed subgroup added exact stock-Git evidence for repeated `-q` and
-  `-v`, quiet compositions for `--dry-run`, `-n`, `--trivial`,
-  `--aggressive`, and `--no-sparse-checkout`, `--reset` plus
-  `--index-output`, `-i --reset`, `-i --prefix=import/ --index-output`,
-  and both recurse-submodule override orders on repositories without
-  submodules.
+- `repack` now has another helper-free schema-tail subgroup closed inside the
+  documented cruft family.
+- The closed subgroup added exact stock-Git evidence for `--cruft -d -q`,
+  `--cruft --cruft-expiration=now -d -q`, `--cruft --expire-to=out
+  --cruft-expiration=now -d -q`, `--cruft --max-cruft-size=1 -d -q`,
+  `--cruft --max-cruft-size=2m -d -q`, invalid
+  `--cruft --max-cruft-size=bogus -d -q`, and the stock fatal guard for
+  `--cruft -k -d -q`.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_object_plumbing_compat read_tree_documented_option_forms_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat
+  repack_cruft_variants_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat
+  repack_cruft_expire_to_now_matches_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_maintenance_compat
+  repack_invalid_cruft_variants_match_stock_git -- --nocapture`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `read-tree` remains the largest recently expanded helper-free plumbing lane
-  because its documented options are all represented but the command is still
-  blocked on expansion-required rows inside already-modeled surfaces.
-- `repack` remains the largest unresolved helper-free documented-option
-  cluster by schema-missing count, while `read-tree` still has the best
-  immediate no-parser expansion lane for dense row additions.
+- `repack` now has `28/33` represented documented option pairs with `68/68`
+  classified rows and `0` exact-open written rows, but the cruft family still
+  has expansion-required rows for more value/order/state coverage and the
+  remaining schema-missing tail is now only `5` options:
+  `--filter`, `--filter-to`, `--geometric`, `--unpack-unreachable`, and `-g`.
+- `read-tree` still remains the best immediate no-parser expansion lane for
+  dense row additions inside already-represented documented surfaces.
 
 Latest zero-code closure:
 
@@ -1224,7 +1228,9 @@ Latest zero-code closure:
   `24/24` classified rows, and no remaining checklist items for `archive`, so
   the command-level promotion is now durable.
 
-Next helper-free family candidates by schema-missing size now remain:
+Next helper-free family candidates now remain:
 
-- `repack`: `9`
-- `read-tree` expansion-required rows: `4`
+- `repack` expansion-required rows inside the cruft family plus the remaining
+  five schema-missing documented options
+- `read-tree` expansion-required rows inside already-represented documented
+  surfaces

@@ -15,6 +15,9 @@ struct RepackOptions {
     no_reuse_object: bool,
     delta_islands: bool,
     keep_unreachable: bool,
+    cruft: bool,
+    cruft_expiration: Option<String>,
+    expire_to: Option<PathBuf>,
     local: bool,
     pack_kept_objects: bool,
     write_bitmap_index: bool,
@@ -26,6 +29,7 @@ struct RepackOptions {
     depth: Option<usize>,
     threads: Option<usize>,
     max_pack_size: Option<String>,
+    max_cruft_size: Option<String>,
     keep_pack: Vec<String>,
 }
 
@@ -60,6 +64,9 @@ pub(crate) fn repack_command(
     no_reuse_object: bool,
     delta_islands: bool,
     keep_unreachable: bool,
+    cruft: bool,
+    cruft_expiration: Option<String>,
+    expire_to: Option<PathBuf>,
     local: bool,
     pack_kept_objects: bool,
     write_bitmap_index: bool,
@@ -71,6 +78,7 @@ pub(crate) fn repack_command(
     depth: Option<usize>,
     threads: Option<usize>,
     max_pack_size: Option<String>,
+    max_cruft_size: Option<String>,
     keep_pack: Vec<String>,
 ) -> Result<()> {
     repack(RepackOptions {
@@ -83,6 +91,9 @@ pub(crate) fn repack_command(
         no_reuse_object,
         delta_islands,
         keep_unreachable,
+        cruft,
+        cruft_expiration,
+        expire_to,
         local,
         pack_kept_objects,
         write_bitmap_index,
@@ -94,6 +105,7 @@ pub(crate) fn repack_command(
         depth,
         threads,
         max_pack_size,
+        max_cruft_size,
         keep_pack,
     })
 }
@@ -1589,6 +1601,13 @@ fn prune_packed(dry_run: bool, _quiet: bool) -> Result<()> {
 }
 
 fn repack(options: RepackOptions) -> Result<()> {
+    if options.cruft && options.keep_unreachable {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: options '-k/--keep-unreachable' and '--cruft' cannot be used together\n".into(),
+        });
+    }
+    let write_cruft_pack = options.cruft && options.delete_redundant;
     let write_bitmap_index = options.write_bitmap_index && !options.no_write_bitmap_index;
     let write_midx = options.write_midx && !options.no_write_midx;
     let max_pack_size = parse_repack_size_limit(
@@ -1598,17 +1617,31 @@ fn repack(options: RepackOptions) -> Result<()> {
     if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
+    let max_cruft_size = if write_cruft_pack {
+        parse_repack_size_limit(options.max_cruft_size.as_deref(), "max-cruft-size")?
+    } else {
+        None
+    };
+    if write_cruft_pack
+        && max_cruft_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES)
+    {
+        eprintln!("warning: minimum pack size limit is 1 MiB");
+    }
     let _window_memory = parse_repack_size_limit(
         options.window_memory.as_deref(),
         "window-memory",
     )?;
+    let expire_unreachable_now = write_cruft_pack
+        && matches!(options.cruft_expiration.as_deref(), Some("now" | "all"));
     let _ = (
         options.no_reuse_delta,
         options.no_reuse_object,
         options.threads,
         options.delta_islands,
         options.pack_kept_objects,
+        options.expire_to.as_deref(),
         max_pack_size,
+        max_cruft_size,
         write_bitmap_index,
     );
     let repo = find_repo()?;
@@ -1618,20 +1651,20 @@ fn repack(options: RepackOptions) -> Result<()> {
     let pack_dir = repo.objects_dir.join("pack");
     let keep_pack_names = normalize_keep_pack_names(&options.keep_pack);
     let keep_pack_object_ids = kept_pack_object_ids(&pack_dir, &old_pack_names, &keep_pack_names)?;
-    let all_reachable = options.all || options.all_and_loosen_unreachable;
+    let all_reachable = options.all || options.all_and_loosen_unreachable || options.cruft;
+    let reachable = all_reachable.then(|| collect_reachable_objects(&repo, &store, &[])).transpose()?;
     let ids: Vec<ObjectId> = if options.keep_unreachable && all_reachable && options.delete_redundant
     {
         collect_all_repack_candidate_ids(&store, &keep_pack_object_ids)?
-    } else if all_reachable {
-        let reachable = collect_reachable_objects(&repo, &store, &[])?;
+    } else if let Some(reachable) = reachable.as_ref() {
         if options.all_and_loosen_unreachable {
-            loosen_unreachable_packed_objects(&store, &reachable)?;
+            loosen_unreachable_packed_objects(&store, reachable)?;
         }
         collect_repack_candidate_ids(
             &repo,
             &store,
             options.local,
-            &reachable,
+            reachable,
             &keep_pack_object_ids,
         )?
     } else {
@@ -1644,15 +1677,99 @@ fn repack(options: RepackOptions) -> Result<()> {
         })?;
         ids
     };
-    if ids.is_empty() {
+    let unreachable_ids = if write_cruft_pack {
+        collect_unreachable_repack_candidate_ids(
+            &store,
+            reachable.as_ref().expect("reachable ids for cruft repack"),
+            &keep_pack_object_ids,
+        )?
+    } else {
+        Vec::new()
+    };
+    let cruft_ids = if expire_unreachable_now {
+        Vec::new()
+    } else {
+        unreachable_ids.clone()
+    };
+    if ids.is_empty() && cruft_ids.is_empty() {
         if write_midx {
             pack_commands::multi_pack_index_write(&repo.objects_dir, false)?;
         }
         return Ok(());
     }
     fs::create_dir_all(&pack_dir)?;
+    let pack_name = write_repack_pack(
+        &pack_dir,
+        &store,
+        &ids,
+        options.window,
+        options.depth,
+        "pack-repack.pack",
+    )?;
+    let cruft_pack_name = if cruft_ids.is_empty() {
+        None
+    } else {
+        Some(write_repack_pack(
+            &pack_dir,
+            &store,
+            &cruft_ids,
+            options.window,
+            options.depth,
+            "pack-repack-cruft.pack",
+        )?)
+    };
+    if expire_unreachable_now
+        && let Some(expire_to) = options.expire_to.as_deref()
+        && !unreachable_ids.is_empty()
+    {
+        write_expire_to_pack(
+            repo.root.as_path(),
+            expire_to,
+            &store,
+            &unreachable_ids,
+            options.window,
+            options.depth,
+        )?;
+    }
+    let replace_old_packs = options.delete_redundant && all_reachable;
+    if options.delete_redundant {
+        if replace_old_packs {
+            let mut keep_new_pack_names = vec![format!("{pack_name}.pack")];
+            if let Some(cruft_pack_name) = &cruft_pack_name {
+                keep_new_pack_names.push(format!("{cruft_pack_name}.pack"));
+            }
+            remove_replaced_pack_files(
+                &pack_dir,
+                &old_pack_names,
+                &keep_new_pack_names,
+                &keep_pack_names,
+            )?;
+        }
+        let fresh_store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        let _ = fresh_store.prune_packed(false)?;
+    }
+    if write_midx {
+        pack_commands::multi_pack_index_write(&repo.objects_dir, false)?;
+    } else if replace_old_packs {
+        remove_multi_pack_index(&pack_dir)?;
+    }
+    if !options.no_update_server_info {
+        update_server_info()?;
+    }
+    let _ = options.quiet;
+    Ok(())
+}
+
+fn write_repack_pack(
+    pack_dir: &std::path::Path,
+    store: &LooseObjectStore,
+    ids: &[ObjectId],
+    window: Option<usize>,
+    depth: Option<usize>,
+    temp_name: &str,
+) -> Result<String> {
     let packed_first_store = store.packed_first();
-    let temp_pack = unique_temp_sibling(&pack_dir.join("pack-repack.pack"));
+    let temp_pack = unique_temp_sibling(&pack_dir.join(temp_name));
     let result = (|| {
         let mut file = fs::OpenOptions::new()
             .write(true)
@@ -1661,8 +1778,8 @@ fn repack(options: RepackOptions) -> Result<()> {
         write_pack_from_store_with_options(
             &packed_first_store,
             GitHashAlgorithm::Sha1,
-            &ids,
-            pack_encode_options(options.window, options.depth),
+            ids,
+            pack_encode_options(window, depth),
             &mut file,
         )?;
         file.flush()?;
@@ -1690,28 +1807,55 @@ fn repack(options: RepackOptions) -> Result<()> {
         &pack_dir.join(format!("{pack_name}.rev")),
         &indexed.reverse_index,
     )?;
-    let replace_old_packs = options.delete_redundant && all_reachable;
-    if options.delete_redundant {
-        if replace_old_packs {
-            remove_replaced_pack_files(
-                &pack_dir,
-                &old_pack_names,
-                &format!("{pack_name}.pack"),
-                &keep_pack_names,
-            )?;
+    Ok(pack_name)
+}
+
+fn write_expire_to_pack(
+    repo_root: &std::path::Path,
+    expire_to: &std::path::Path,
+    store: &LooseObjectStore,
+    ids: &[ObjectId],
+    window: Option<usize>,
+    depth: Option<usize>,
+) -> Result<()> {
+    let temp_base = unique_temp_sibling(expire_to);
+    let temp_pack = temp_base.with_extension("pack");
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_pack)?;
+        write_pack_from_store_with_options(
+            &store.packed_first(),
+            GitHashAlgorithm::Sha1,
+            ids,
+            pack_encode_options(window, depth),
+            &mut file,
+        )?;
+        file.flush()?;
+        Ok::<_, CliError>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_pack);
+    }
+    result?;
+    let indexed = match index_pack_file(GitHashAlgorithm::Sha1, &temp_pack) {
+        Ok(indexed) => indexed,
+        Err(error) => {
+            let _ = fs::remove_file(&temp_pack);
+            return Err(CliError::Io(error));
         }
-        let fresh_store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-        let _ = fresh_store.prune_packed(false)?;
-    }
-    if write_midx {
-        pack_commands::multi_pack_index_write(&repo.objects_dir, false)?;
-    } else if replace_old_packs {
-        remove_multi_pack_index(&pack_dir)?;
-    }
-    if !options.no_update_server_info {
-        update_server_info()?;
-    }
-    let _ = options.quiet;
+    };
+    let prefix = expire_to
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("pack");
+    let destination_base = repo_root.join(format!("{prefix}-{}", indexed.pack_id.to_hex()));
+    install_temp_repack_file(&destination_base.with_extension("pack"), &temp_pack, &indexed)?;
+    write_content_addressed_file(&destination_base.with_extension("idx"), &indexed.index)?;
+    write_content_addressed_file(&destination_base.with_extension("rev"), &indexed.reverse_index)?;
+    write_content_addressed_file(&destination_base.with_extension("mtimes"), &[])?;
     Ok(())
 }
 
@@ -1816,6 +1960,23 @@ fn collect_all_repack_candidate_ids(
     Ok(ids)
 }
 
+fn collect_unreachable_repack_candidate_ids(
+    store: &LooseObjectStore,
+    reachable: &HashSet<ObjectId>,
+    keep_pack_object_ids: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let mut ids = Vec::new();
+    store.for_each_object_id(&mut |id| {
+        if !reachable.contains(id) && !keep_pack_object_ids.contains(id) {
+            ids.push(id.clone());
+        }
+        Ok(())
+    })?;
+    ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    ids.dedup_by(|left, right| left.as_bytes() == right.as_bytes());
+    Ok(ids)
+}
+
 fn normalize_keep_pack_names(keep_pack: &[String]) -> HashSet<String> {
     keep_pack
         .iter()
@@ -1839,11 +2000,13 @@ fn remove_multi_pack_index(pack_dir: &std::path::Path) -> Result<()> {
 fn remove_replaced_pack_files(
     pack_dir: &std::path::Path,
     old_pack_names: &[String],
-    keep_pack_name: &str,
+    keep_pack_names: &[String],
     keep_old_pack_names: &HashSet<String>,
 ) -> Result<()> {
     for pack_name in old_pack_names {
-        if pack_name == keep_pack_name || keep_old_pack_names.contains(pack_name) {
+        if keep_pack_names.iter().any(|keep| keep == pack_name)
+            || keep_old_pack_names.contains(pack_name)
+        {
             continue;
         }
         let pack_path = pack_dir.join(pack_name);
@@ -2041,6 +2204,9 @@ fn gc(options: GcOptions) -> Result<()> {
         no_reuse_object: false,
         delta_islands: false,
         keep_unreachable: false,
+        cruft: options.cruft && !options.no_cruft,
+        cruft_expiration: None,
+        expire_to: None,
         local: false,
         pack_kept_objects: false,
         write_bitmap_index: false,
@@ -2052,6 +2218,7 @@ fn gc(options: GcOptions) -> Result<()> {
         depth: options.aggressive.then_some(250),
         threads: None,
         max_pack_size: None,
+        max_cruft_size: options.max_cruft_size.last().cloned(),
         keep_pack: Vec::new(),
     })?;
     if !options.no_prune {

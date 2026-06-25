@@ -5614,6 +5614,49 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
 schema rows and `+0` remaining checklist rows.
 
+## 2026-06-25 - repack cruft-family schema-tail closure
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+8`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+4`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git repack --cruft -d -q`
+- `git repack --cruft --cruft-expiration=now -d -q`
+- `git repack --cruft --expire-to=out --cruft-expiration=now -d -q`
+- `git repack --cruft --max-cruft-size=1 -d -q`
+- `git repack --cruft --max-cruft-size=2m -d -q`
+- `git repack --cruft --max-cruft-size=bogus -d -q`
+- `git repack --cruft -k -d -q`
+- `git repack --cruft --cruft-expiration=now --max-cruft-size=1 -d -q` or another focused cruft row if stock evidence diverges
+
+This batch closes the next large helper-free `git repack` schema tail without
+opening filter or geometric complexity. The parser adds `--cruft`,
+`--cruft-expiration`, `--expire-to`, and `--max-cruft-size`; the runtime then
+matches stock Git for the covered local `-d -q` cruft lane, including the
+side-pack artifact shape for `--expire-to=out --cruft-expiration=now`, the
+1 MiB warning floor, invalid size rejection, and the `--cruft -k` fatal
+conflict.
+
+Actual post-import movement matched the declaration except the eighth row was
+used for the stock `--max-cruft-size=2m` acceptance lane instead of a mixed
+cruft-expiration-plus-size row: `+8` behavior rows, `+8` closed rows, `+0`
+open rows, `+0` invalid-input rows, `+0` represented oracle functions, `+0`
+missing-or-unclassified oracle functions, `+0` commands with rows, `+4`
+represented doc-option pairs, `+0` implemented-but-unverified schema rows and
+`+0` remaining checklist rows.
+
 ## 2026-06-25 - checkout-index remaining documented surface closure
 
 Expected movement:

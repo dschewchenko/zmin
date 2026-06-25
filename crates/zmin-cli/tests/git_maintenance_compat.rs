@@ -338,6 +338,21 @@ fn repack_unreachable_fixture_repo() -> TempDir {
     repo
 }
 
+fn repack_cruft_fixture_repo() -> (TempDir, String) {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    let dangling = git_with_stdin(repo.path(), ["hash-object", "-w", "--stdin"], "dangling\n");
+    git(repo.path(), ["repack", "-adq"]);
+    write_file(repo.path(), "b.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    (repo, dangling)
+}
+
 fn repack_shared_clone_fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");
@@ -1583,6 +1598,120 @@ fn repack_keep_unreachable_variants_match_stock_git() {
         assert_eq!(
             git(zmin_repo.path(), ["cat-file", "-t", zmin_dangling]),
             git(git_repo.path(), ["cat-file", "-t", git_dangling])
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
+fn repack_cruft_variants_match_stock_git() {
+    for (args, expected_pack_count, expect_loose_dangling) in [
+        (
+            ["repack", "--cruft", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            ["repack", "--cruft", "--max-cruft-size=1", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            ["repack", "--cruft", "--max-cruft-size=2m", "-d", "-q"].as_slice(),
+            2usize,
+            false,
+        ),
+        (
+            ["repack", "--cruft", "--cruft-expiration=now", "-d", "-q"].as_slice(),
+            1usize,
+            true,
+        ),
+    ] {
+        let (git_repo, git_dangling) = repack_cruft_fixture_repo();
+        let (zmin_repo, zmin_dangling) = repack_cruft_fixture_repo();
+        assert_eq!(zmin_dangling, git_dangling);
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(pack_file_count(zmin_repo.path()), expected_pack_count);
+        assert_eq!(
+            pack_file_count(zmin_repo.path()),
+            pack_file_count(git_repo.path()),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_dangling),
+            expect_loose_dangling,
+            "args: {args:?}"
+        );
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_dangling),
+            loose_object_exists(git_repo.path(), &git_dangling),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-t", &zmin_dangling]),
+            git(git_repo.path(), ["cat-file", "-t", &git_dangling]),
+            "args: {args:?}"
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
+fn repack_cruft_expire_to_now_matches_stock_git() {
+    let (git_repo, git_dangling) = repack_cruft_fixture_repo();
+    let (zmin_repo, zmin_dangling) = repack_cruft_fixture_repo();
+    assert_eq!(zmin_dangling, git_dangling);
+
+    let args = [
+        "repack",
+        "--cruft",
+        "--expire-to=out",
+        "--cruft-expiration=now",
+        "-d",
+        "-q",
+    ];
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+        command_any_output("git", git_repo.path(), &args, "git")
+    );
+    assert_eq!(pack_file_count(zmin_repo.path()), 1);
+    assert_eq!(
+        loose_object_exists(zmin_repo.path(), &zmin_dangling),
+        loose_object_exists(git_repo.path(), &git_dangling)
+    );
+    let git_out = git_repo.path().join("out");
+    let zmin_out = zmin_repo.path().join("out");
+    assert_eq!(zmin_out.exists(), git_out.exists());
+    if zmin_out.exists() {
+        let zmin_entries = fs::read_dir(&zmin_out)
+            .expect("read zmin expire-to dir")
+            .count();
+        let git_entries = fs::read_dir(&git_out)
+            .expect("read git expire-to dir")
+            .count();
+        assert_eq!(zmin_entries, git_entries);
+    }
+    assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+}
+
+#[test]
+fn repack_invalid_cruft_variants_match_stock_git() {
+    for args in [
+        ["repack", "--cruft", "--max-cruft-size=bogus", "-d", "-q"].as_slice(),
+        ["repack", "--cruft", "-k", "-d", "-q"].as_slice(),
+    ] {
+        let (git_repo, _git_dangling) = repack_cruft_fixture_repo();
+        let (zmin_repo, _zmin_dangling) = repack_cruft_fixture_repo();
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
         );
         assert_repack_observables_match(git_repo.path(), zmin_repo.path());
     }

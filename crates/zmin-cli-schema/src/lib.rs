@@ -1696,6 +1696,12 @@ pub enum Command {
         keep_unreachable_short: u8,
         #[arg(long = "keep-unreachable", action = ArgAction::SetTrue)]
         keep_unreachable: bool,
+        #[arg(long = "cruft", action = ArgAction::SetTrue)]
+        cruft: bool,
+        #[arg(long = "cruft-expiration")]
+        cruft_expiration: Option<String>,
+        #[arg(long = "expire-to", value_hint = ValueHint::DirPath)]
+        expire_to: Option<PathBuf>,
         #[arg(short = 'l', long = "local", action = ArgAction::Count)]
         local: u8,
         #[arg(long = "pack-kept-objects", action = ArgAction::SetTrue)]
@@ -1718,6 +1724,8 @@ pub enum Command {
         threads: Option<usize>,
         #[arg(long = "max-pack-size")]
         max_pack_size: Option<String>,
+        #[arg(long = "max-cruft-size")]
+        max_cruft_size: Option<String>,
         #[arg(long = "keep-pack")]
         keep_pack: Vec<String>,
     },
