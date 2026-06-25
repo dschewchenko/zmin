@@ -323,24 +323,29 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is the small focused `git mailinfo --no-scissors`
-parser-plus-evidence batch. Zmin now matches stock Git for the exact
-`git mailinfo --no-scissors git-msg git-patch < patch-mail.txt` flow, covering
-stdout, exit status and the resulting message/patch output files.
+The latest completed slice is a zero-row reviewed-complete closure batch for
+helper-free commands `diagnose`, `imap-send`, `mailsplit`, `mv`, and
+`quiltimport`. Their matrices, stock evidence and documented option coverage
+already existed; this slice promoted them into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` and
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_mail_tools_compat mailinfo_matches_stock_git_for_common_patch_mail -- --nocapture`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(mailinfo|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diagnose|imap-send|mailsplit|mv|quiltimport|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5106` matrix rows, `4405` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `47/151` complete command matrices, `115/3175`
-complete documented option pairs, and `3086` remaining checklist rows.
-`mailinfo` now reads `10/10` represented documented options, `13/13`
-classified rows, `13/13` matching stock Git rows and `0` open rows.
+open-or-partial rows, `56/151` complete command matrices, `176/3175`
+complete documented option pairs, and `3025` remaining checklist rows.
+The promoted commands now read:
+- `diagnose` `5/5` represented documented options, `5/5` classified rows, `5/5` matching stock Git rows, `0` open
+- `imap-send` `6/6` represented documented options, `7/7` classified rows, `7/7` matching stock Git rows, `0` open
+- `mailsplit` `6/6` represented documented options, `11/11` classified rows, `9/11` matching stock Git rows, `0` open
+- `mv` `7/7` represented documented options, `32/32` classified rows, `32/32` matching stock Git rows, `0` open
+- `quiltimport` `6/6` represented documented options, `5/5` classified rows, `5/5` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 

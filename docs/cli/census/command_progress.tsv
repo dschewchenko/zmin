@@ -1,6 +1,6 @@
 metric	count	total	note
-complete_command_matrices	51	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	146	3175	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	56	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	176	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1333	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5106	5106	current written command option value combination state transport platform rows
@@ -48,7 +48,7 @@ cvsimport	20	0	6	30.0	3	1	33.3	1	33.3	0	2	0	no
 cvsserver	8	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 daemon	27	0	13	48.1	14	14	100.0	13	92.9	0	0	1	no
 describe	14	0	9	64.3	14	14	100.0	14	100.0	0	0	0	no
-diagnose	5	0	5	100.0	5	5	100.0	5	100.0	0	0	0	no
+diagnose	5	5	5	100.0	5	5	100.0	5	100.0	0	0	0	yes
 diff	117	0	83	70.9	250	250	100.0	246	98.4	0	0	4	no
 diff-files	118	0	79	66.9	98	98	100.0	98	100.0	0	0	0	no
 diff-index	112	0	78	69.6	105	105	100.0	105	100.0	0	0	0	no
@@ -74,7 +74,7 @@ hook	2	2	2	100.0	3	3	100.0	3	100.0	0	0	0	yes
 http-backend	0	0	0	0.0	15	15	100.0	14	93.3	0	0	1	yes
 http-fetch	9	0	8	88.9	12	12	100.0	10	83.3	0	0	2	no
 http-push	6	0	4	66.7	8	8	100.0	8	100.0	0	0	0	no
-imap-send	6	0	6	100.0	7	7	100.0	7	100.0	0	0	0	no
+imap-send	6	6	6	100.0	7	7	100.0	7	100.0	0	0	0	yes
 index-pack	16	0	10	62.5	17	17	100.0	11	64.7	0	0	6	no
 init	0	0	0	0.0	12	12	100.0	10	83.3	0	0	2	no
 instaweb	13	0	11	84.6	14	0	0.0	0	0.0	0	14	0	no
@@ -84,7 +84,7 @@ ls-files	39	0	38	97.4	158	158	100.0	138	87.3	0	0	20	no
 ls-remote	14	1	3	21.4	37	37	100.0	33	89.2	0	0	4	no
 ls-tree	13	0	3	23.1	9	9	100.0	8	88.9	0	0	1	no
 mailinfo	10	10	10	100.0	13	13	100.0	13	100.0	0	0	0	yes
-mailsplit	6	0	6	100.0	11	11	100.0	9	81.8	0	0	2	no
+mailsplit	6	6	6	100.0	11	11	100.0	9	81.8	0	0	2	yes
 maintenance	5	0	5	100.0	49	49	100.0	32	65.3	0	0	17	no
 merge	51	0	8	15.7	22	22	100.0	14	63.6	0	0	8	no
 merge-base	2	2	2	100.0	19	19	100.0	17	89.5	0	0	2	yes
@@ -96,7 +96,7 @@ mergetool	10	0	8	80.0	14	14	100.0	11	78.6	0	0	3	no
 mktag	1	1	1	100.0	3	3	100.0	3	100.0	0	0	0	yes
 mktree	3	3	3	100.0	25	25	100.0	19	76.0	0	0	6	yes
 multi-pack-index	9	0	1	11.1	10	10	100.0	6	60.0	0	0	4	no
-mv	7	0	7	100.0	32	32	100.0	32	100.0	0	0	0	no
+mv	7	7	7	100.0	32	32	100.0	32	100.0	0	0	0	yes
 name-rev	8	8	8	100.0	11	11	100.0	11	100.0	0	0	0	yes
 notes	28	0	21	75.0	69	69	100.0	60	87.0	0	0	9	no
 p4	29	0	1	3.4	4	4	100.0	4	100.0	0	0	0	no
@@ -108,7 +108,7 @@ prune	6	6	6	100.0	13	13	100.0	12	92.3	0	0	1	yes
 prune-packed	4	4	4	100.0	13	13	100.0	9	69.2	0	0	4	yes
 pull	99	0	14	14.1	37	37	100.0	36	97.3	0	0	1	no
 push	0	0	0	0.0	16	16	100.0	15	93.8	0	0	1	no
-quiltimport	6	0	6	100.0	5	5	100.0	5	100.0	0	0	0	no
+quiltimport	6	6	6	100.0	5	5	100.0	5	100.0	0	0	0	yes
 range-diff	6	0	1	16.7	8	8	100.0	6	75.0	0	0	2	no
 read-tree	17	0	3	17.6	5	5	100.0	5	100.0	0	0	0	no
 rebase	57	0	3	5.3	10	10	100.0	6	60.0	0	0	4	no

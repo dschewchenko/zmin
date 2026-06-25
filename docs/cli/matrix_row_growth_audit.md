@@ -19,6 +19,16 @@ empty stderr, opened edit/add/delete operations and remote-ref advance.
 Expected delta is `+0` matrix rows, `+1` verified row, `-1` open row, `0`
 invalid-input rows and `-1` remaining checklist row. Actual delta matched.
 
+As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
+cluster for helper-free commands `diagnose`, `imap-send`, `mailsplit`, `mv`
+and `quiltimport`. Their behavior rows, stock evidence and documented option
+coverage already exist in matrices/tests/smokes; this slice only promotes them
+into `docs/cli/census/reviewed_complete_command_matrices.tsv` and
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+0` matrix rows, `+5` complete command matrices, `+30` complete documented
+option pairs, `0` verified rows, `0` invalid-input rows and `-30` remaining
+checklist rows. Rust behavior changes are not expected. Actual delta matched.
+
 As of 2026-06-25 the next `git_maintenance_compat.rs` follow-up is a small
 local parser-plus-evidence `prune` batch. The selected rows add exact
 documented `--dry-run`, `--verbose`, `-v`, `--progress` and `--no-progress`
