@@ -12,6 +12,19 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free `checkout` surfaces
+`--force`, `--no-progress`, `--no-recurse-submodules`, `--orphan`,
+`--quiet`, `--recurse-submodules`, `-f`, `-l`, and `-q`. The selected rows do
+not add new behavior evidence; they promote nine exact stock-Git `checkout`
+documented option families with existing helper-free local path checkout,
+forced `HEAD`, current-branch, orphan, and create-reflog parity coverage into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta is
+`+0` matrix rows, `+9` complete documented option pairs, `+0` complete
+command matrices, `+0` verified rows, `+0` invalid-input rows, and `-9`
+remaining checklist rows. Rust behavior changes are not expected. Actual delta
+matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `submodule` surfaces
 `--branch`, `--depth`, `--files`, `--init`, `--name`, `--no-fetch`,
 `--progress`, `--reference`, `--single-branch`, `--summary-limit`, and `-b`.

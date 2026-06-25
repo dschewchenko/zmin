@@ -343,38 +343,39 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `submodule` doc-option promotion cluster,
-`submodule` adds `11` durable reviewed-complete documented option pairs
-without changing Rust behavior and is up to `11/30` documented options
-complete with `14/30` represented documented option pairs. The next best
-helper-free follow-up should move to another dense census-backed represented
-family. The current largest pure promotion-only cluster is `checkout`, where
-`9` documented option surfaces already sit at `status_counts={'closed': 1}` in
-the census and can be reviewed as one helper-free local-family batch.
+After the latest zero-code `checkout` doc-option promotion cluster, `checkout`
+adds `9` durable reviewed-complete documented option pairs without changing
+Rust behavior and is up to `9/34` documented options complete with `12/34`
+represented documented option pairs. The next best helper-free follow-up
+should move to another dense census-backed represented family. The current
+largest pure promotion-only follow-up is now a tie between `checkout` and
+`submodule`, each with `3` represented-but-not-yet-reviewed documented option
+surfaces left in the census and no exact-open written rows in those promoted
+subgroups.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `submodule` surfaces
-`--branch`, `--depth`, `--files`, `--init`, `--name`, `--no-fetch`,
-`--progress`, `--reference`, `--single-branch`, `--summary-limit`, and `-b`.
-The existing exact stock-Git evidence already closed those represented
-`submodule` families on the current local helper-free add, update, summary and
-branch-metadata lanes, so this slice only promotes the eleven documented
-option pairs into
+promotion cluster for the represented helper-free `checkout` surfaces
+`--force`, `--no-progress`, `--no-recurse-submodules`, `--orphan`,
+`--quiet`, `--recurse-submodules`, `-f`, `-l`, and `-q`. The existing exact
+stock-Git evidence already closed those represented `checkout` families on the
+current helper-free local path checkout, forced `HEAD`, current-branch,
+orphan, and create-reflog lanes, so this slice only promotes the nine
+documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(submodule|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(checkout|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1350/3175` complete documented option pairs, and `1851`
-remaining checklist rows. `submodule` now reads `30` documented option pairs
-with `11` reviewed complete and `14` represented documented option pairs.
+matrices, `1359/3175` complete documented option pairs, and `1842`
+remaining checklist rows. `checkout` now reads `34` documented option pairs
+with `9` reviewed complete and `12` represented documented option pairs.
 
 ### No-Skip Rule
 
