@@ -32,6 +32,7 @@ struct RepackOptions {
     threads: Option<usize>,
     max_pack_size: Option<String>,
     max_cruft_size: Vec<String>,
+    unpack_unreachable: Vec<String>,
     keep_pack: Vec<String>,
 }
 
@@ -82,6 +83,7 @@ pub(crate) fn repack_command(
     threads: Option<usize>,
     max_pack_size: Option<String>,
     max_cruft_size: Vec<String>,
+    unpack_unreachable: Vec<String>,
     keep_pack: Vec<String>,
 ) -> Result<()> {
     repack(RepackOptions {
@@ -110,6 +112,7 @@ pub(crate) fn repack_command(
         threads,
         max_pack_size,
         max_cruft_size,
+        unpack_unreachable,
         keep_pack,
     })
 }
@@ -1636,6 +1639,8 @@ fn repack(options: RepackOptions) -> Result<()> {
         "window-memory",
     )?;
     let _geometric = parse_repack_geometric_values(&options.geometric)?;
+    let unpack_unreachable_expires_now =
+        unpack_unreachable_expires_now(options.unpack_unreachable.last().map(String::as_str))?;
     let expire_unreachable_now = write_cruft_pack
         && cruft_expiration_expires_unreachable_now(options.cruft_expiration.as_deref())?;
     let _ = (
@@ -1647,6 +1652,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         options.expire_to.as_deref(),
         max_pack_size,
         max_cruft_size,
+        unpack_unreachable_expires_now,
         write_bitmap_index,
     );
     let repo = find_repo()?;
@@ -1658,11 +1664,18 @@ fn repack(options: RepackOptions) -> Result<()> {
     let keep_pack_object_ids = kept_pack_object_ids(&pack_dir, &old_pack_names, &keep_pack_names)?;
     let all_reachable = options.all || options.all_and_loosen_unreachable || options.cruft;
     let reachable = all_reachable.then(|| collect_reachable_objects(&repo, &store, &[])).transpose()?;
+    let loosen_unreachable = if options.unpack_unreachable.is_empty() {
+        options.all_and_loosen_unreachable
+    } else if options.all || options.all_and_loosen_unreachable {
+        !unpack_unreachable_expires_now
+    } else {
+        false
+    };
     let ids: Vec<ObjectId> = if options.keep_unreachable && all_reachable && options.delete_redundant
     {
         collect_all_repack_candidate_ids(&store, &keep_pack_object_ids)?
     } else if let Some(reachable) = reachable.as_ref() {
-        if options.all_and_loosen_unreachable {
+        if loosen_unreachable {
             loosen_unreachable_packed_objects(&store, reachable)?;
         }
         collect_repack_candidate_ids(
@@ -1906,6 +1919,13 @@ fn parse_repack_geometric(raw: Option<&str>) -> Result<Option<u64>> {
         });
     };
     Ok(Some(size))
+}
+
+fn unpack_unreachable_expires_now(value: Option<&str>) -> Result<bool> {
+    let Some(value) = value else {
+        return Ok(false);
+    };
+    cruft_expiration_expires_unreachable_now(Some(value))
 }
 
 fn cruft_expiration_expires_unreachable_now(value: Option<&str>) -> Result<bool> {
@@ -2301,6 +2321,7 @@ fn gc(options: GcOptions) -> Result<()> {
         threads: None,
         max_pack_size: None,
         max_cruft_size: options.max_cruft_size.clone(),
+        unpack_unreachable: Vec::new(),
         keep_pack: Vec::new(),
     })?;
     if !options.no_prune {

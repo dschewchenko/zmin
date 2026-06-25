@@ -46,6 +46,19 @@ matrix rows, `+8` verified rows, `+2` represented documented option pairs,
 `repack` must add the missing `-g` / `--geometric` schema tail and stock-like
 value parsing. Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `repack`
+`--unpack-unreachable` schema-tail closure. The selected rows add exact
+stock-Git evidence for now-like, future, past absolute, past relative, bogus,
+and repeated last-one-wins `--unpack-unreachable=<when>` values on the
+covered `-a -d -q` and `-A -d -q` lanes, while the product change teaches
+`repack` when to keep the stock prune path and when to switch to stock-like
+loosened unreachable behavior. Expected delta is `+8` matrix rows, `+8`
+verified rows, `+1` represented documented option pair, `+0` complete
+documented option pairs, `+0` complete command matrices, and `0` remaining
+checklist rows. Rust behavior changes are expected because `repack` must add
+the missing `--unpack-unreachable` schema tail and cutoff-based behavior.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for `branch`, `status`, `rm`, `fsck`, `maintenance`, and
 `merge-tree`. Their behavior rows, stock evidence, and documented option

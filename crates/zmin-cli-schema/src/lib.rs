@@ -1728,6 +1728,8 @@ pub enum Command {
         max_pack_size: Option<String>,
         #[arg(long = "max-cruft-size")]
         max_cruft_size: Vec<String>,
+        #[arg(long = "unpack-unreachable")]
+        unpack_unreachable: Vec<String>,
         #[arg(long = "keep-pack")]
         keep_pack: Vec<String>,
     },

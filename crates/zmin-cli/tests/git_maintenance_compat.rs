@@ -1475,6 +1475,45 @@ fn repack_invalid_documented_size_values_match_stock_git() {
 }
 
 #[test]
+fn repack_unpack_unreachable_value_forms_match_stock_git() {
+    for args in [
+        ["repack", "--unpack-unreachable=now", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--unpack-unreachable=tomorrow", "-A", "-d", "-q"].as_slice(),
+        ["repack", "--unpack-unreachable=yesterday", "-A", "-d", "-q"].as_slice(),
+        ["repack", "--unpack-unreachable=1970-01-01", "-A", "-d", "-q"].as_slice(),
+        ["repack", "--unpack-unreachable=2 weeks ago", "-a", "-d", "-q"].as_slice(),
+        ["repack", "--unpack-unreachable=bogus", "-A", "-d", "-q"].as_slice(),
+        [
+            "repack",
+            "--unpack-unreachable=now",
+            "--unpack-unreachable=yesterday",
+            "-A",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
+        [
+            "repack",
+            "--unpack-unreachable=yesterday",
+            "--unpack-unreachable=now",
+            "-A",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
+    ] {
+        let git_repo = repack_unreachable_fixture_repo();
+        let zmin_repo = repack_unreachable_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_repack_observables_match(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
 fn repack_keep_pack_multiple_values_match_stock_git() {
     let git_repo = repack_keep_pack_fixture_repo();
     let zmin_repo = repack_keep_pack_fixture_repo();

@@ -66,6 +66,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             threads,
             max_pack_size,
             max_cruft_size,
+            unpack_unreachable,
             keep_pack,
         } => super::maintenance_commands::repack_command(
             all > 0,
@@ -93,6 +94,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             threads,
             max_pack_size,
             max_cruft_size,
+            unpack_unreachable,
             keep_pack,
         ),
         runtime::Command::Gc {

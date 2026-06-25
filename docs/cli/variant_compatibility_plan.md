@@ -343,39 +343,37 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest schema-tail closure, `repack` now has `88/88` classified
-written rows with `0` open and sits at `30/33` represented documented option
+After the latest schema-tail closure, `repack` now has `96/96` classified
+written rows with `0` open and sits at `31/33` represented documented option
 pairs and `24/33` reviewed-complete documented option pairs. The next best
 high-throughput helper-free follow-up still stays inside the remaining
-`repack` cruft-family expansion surface, unless we intentionally move deeper
-into the remaining schema-missing tail `--filter`, `--filter-to`, and
-`--unpack-unreachable`.
+`repack` cruft-family expansion surface, unless we intentionally move into the
+last schema tail `--filter` and `--filter-to`.
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free `git repack` geometric
-schema-tail batch. Zmin now accepts `-g` / `--geometric`, separate and joined
-values, repeated short/long forms with last-one-wins behavior, and the stock
-invalid-value diagnostic on `--geometric=bogus`. The covered helper-free
-`-d -q` lane matches stock Git for short and long aliases, separate/equal
-value forms, repeated `-g2 -g3`, repeated `--geometric=2 --geometric=3`, and
-mixed `-g2 --geometric=3`.
+The latest completed slice is a helper-free `git repack`
+`--unpack-unreachable` schema-tail batch. Zmin now accepts
+`--unpack-unreachable=<when>` and matches stock Git for now-like, future,
+past absolute, past relative, bogus, and repeated last-one-wins value forms
+across the covered helper-free `-a -d -q` and `-A -d -q` lanes. This closes
+the stock split between prune-like now/future/bogus cutoffs and loosen-like
+past cutoffs for packed unreachable commits after reflog expiry.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat repack_documented_option_aliases_and_value_forms_match_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_maintenance_compat repack_invalid_documented_size_values_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_maintenance_compat repack_unpack_unreachable_value_forms_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(repack|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5303` matrix rows, `4595` verified rows, `679`
+Current census counts are `5311` matrix rows, `4603` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `79/151` complete command
 matrices, `439/3175` complete documented option pairs, and `2762`
 remaining checklist rows. `repack` now reads `33` documented option pairs,
-`24` reviewed-complete documented option pairs, `30` represented documented
-option pairs, and `88/88` classified written rows with `0` open.
+`24` reviewed-complete documented option pairs, `31` represented documented
+option pairs, and `96/96` classified written rows with `0` open.
 
 ### No-Skip Rule
 
