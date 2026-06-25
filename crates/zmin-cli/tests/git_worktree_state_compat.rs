@@ -753,6 +753,88 @@ fn checkout_index_matches_stock_git_for_all_paths_stdin_and_prefix() {
     );
 }
 
+#[test]
+fn checkout_index_documented_option_combinations_match_stock_git() {
+    for args in [
+        ["checkout-index", "-a", "--all"].as_slice(),
+        ["checkout-index", "--all", "--quiet", "--force"].as_slice(),
+        ["checkout-index", "-f", "--force", "README.md"].as_slice(),
+        ["checkout-index", "-q", "--quiet", "docs/guide.md"].as_slice(),
+    ] {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.path().join("README.md")).ok(),
+            fs::read_to_string(git_repo.path().join("README.md")).ok(),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.path().join("docs/guide.md")).ok(),
+            fs::read_to_string(git_repo.path().join("docs/guide.md")).ok(),
+            "args: {args:?}"
+        );
+    }
+
+    {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        assert_eq!(
+            run_zmin_with_stdin(
+                zmin_repo.path(),
+                ["checkout-index", "--stdin", "--prefix=out/"],
+                "README.md\ndocs/guide.md\n",
+            ),
+            git_with_stdin(
+                git_repo.path(),
+                ["checkout-index", "--stdin", "--prefix=out/"],
+                "README.md\ndocs/guide.md\n",
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("out/README.md")).expect("read zmin prefixed readme"),
+            fs::read(git_repo.path().join("out/README.md")).expect("read git prefixed readme")
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("out/docs/guide.md"))
+                .expect("read zmin prefixed guide"),
+            fs::read(git_repo.path().join("out/docs/guide.md"))
+                .expect("read git prefixed guide")
+        );
+    }
+
+    for args in [
+        ["checkout-index", "--stdin", "README.md"].as_slice(),
+        ["checkout-index", "--all", "--stdin"].as_slice(),
+    ] {
+        let git_repo = checkout_index_fixture_repo();
+        let zmin_repo = checkout_index_fixture_repo();
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "args: {args:?}"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn checkout_index_delayed_smudge_process_filter_matches_stock_git_failure() {

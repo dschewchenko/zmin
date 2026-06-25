@@ -1799,12 +1799,12 @@ pub enum Command {
         args: Vec<String>,
     },
     CheckoutIndex {
-        #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
-        all: bool,
-        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
-        force: bool,
-        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
+        #[arg(short = 'a', long = "all", action = ArgAction::Count)]
+        all: u8,
+        #[arg(short = 'f', long = "force", action = ArgAction::Count)]
+        force: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
         #[arg(long = "prefix")]

@@ -314,10 +314,13 @@ has all `5/5` documented options represented, `interpret-trailers` is reviewed
 complete, the supported `gc` documented family is now reviewed complete too
 (`5/5` represented documented option pairs), and the supported `read-tree`
 documented family is now reviewed complete across its current schema surface
-(`3/3` represented documented option pairs). The next helper-free family
+(`3/3` represented documented option pairs). The supported `checkout-index`
+documented family is now reviewed complete across its current schema surface
+too (`8/8` represented documented option pairs). The next helper-free family
 should now move to another census-backed supported subgroup such as
-`checkout-index` (`8/16` represented documented options) unless work
-intentionally opens unsupported `read-tree`, `gc`, or `repack` surfaces.
+`check-ignore` (`9/9` represented documented options) or `column`
+(`7/7` represented documented options), unless work intentionally opens
+unsupported `checkout-index`, `read-tree`, `gc`, or `repack` surfaces.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -326,33 +329,34 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is a focused helper-free `git read-tree`
-documented-option family batch. This follow-up fixed two real compatibility
-gaps in the supported surface: `--prefix` now retains existing index entries
-instead of replacing the index, and repeated `-m` now parses like stock Git.
-With those fixes in place, the batch added exact stock-Git evidence for
-separate and normalized `--prefix` value forms, repeated `-m`, and `--empty`
-contradiction failures with treeish and prefix combinations, then promoted all
-currently supported `read-tree` documented option pairs into the
-reviewed-complete census artifact. The broader `read-tree` command still stays
-out of reviewed-complete command status because documented surfaces such as
-`--reset`, `-u`, `-i`, `--index-output`, `--trivial`, `--aggressive`, `-q`
-and related options remain outside the current Zmin schema.
+The latest completed slice is a focused helper-free `git checkout-index`
+documented-option family batch. This follow-up fixed two parser/diagnostic
+compatibility gaps in the supported surface: repeated documented boolean flags
+`-a`, `-f`, and `-q` now parse like stock Git, and the invalid mixing shapes
+`--stdin` plus explicit paths and `--all --stdin` now return stock-compatible
+fatal diagnostics. With those fixes in place, the batch added exact stock-Git
+evidence for repeated all/force/quiet forms, `--all --quiet --force`,
+`--stdin --prefix=out/`, and the two invalid mixing rows, then promoted all
+currently supported `checkout-index` documented option pairs into the
+reviewed-complete census artifact. The broader `checkout-index` command still
+stays out of reviewed-complete command status because documented surfaces such
+as `--index`, `--no-create`, `--stage`, `--temp`, `--ignore-skip-worktree-bits`,
+`-u`, `-n`, and `-z` remain outside the current Zmin schema.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_object_plumbing_compat read_tree_documented_option_forms_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_worktree_state_compat checkout_index_documented_option_combinations_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|gc|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(checkout-index|read-tree|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5138` matrix rows, `4437` verified rows, `672`
+Current census counts are `5145` matrix rows, `4444` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `59/151` complete command matrices, `236/3175`
-complete documented option pairs, and `2965` remaining checklist rows.
+open-or-partial rows, `59/151` complete command matrices, `244/3175`
+complete documented option pairs, and `2957` remaining checklist rows.
 The promoted command now reads:
-- `read-tree` `3/3` represented supported documented options reviewed complete, `10/10` classified rows, `10/10` matching stock Git rows, `0` open
+- `checkout-index` `8/8` represented supported documented options reviewed complete, `17/17` classified rows, `16/17` matching stock Git rows, `0` open
 
 ### No-Skip Rule
 

@@ -288,7 +288,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             stdin,
             prefix,
             paths,
-        } => run_checkout_index(all, force, quiet, stdin, prefix, paths),
+        } => run_checkout_index(all > 0, force > 0, quiet > 0, stdin, prefix, paths),
         runtime::Command::Switch {
             force,
             discard_changes,

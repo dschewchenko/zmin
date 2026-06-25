@@ -3885,7 +3885,13 @@ pub(crate) fn checkout_index_command(
     prefix: Option<PathBuf>,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
-    if all && (!paths.is_empty() || stdin) {
+    if all && stdin {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "git checkout-index: don't mix '--all' and '--stdin'".into(),
+        });
+    }
+    if all && !paths.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
             message: "git checkout-index: don't mix '--all' and explicit filenames".into(),
@@ -3999,8 +4005,8 @@ fn checkout_index_prefix_bytes(prefix: &Path) -> Vec<u8> {
 fn checkout_index_inputs(stdin: bool, paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     if stdin && !paths.is_empty() {
         return Err(CliError::Fatal {
-            code: 129,
-            message: "checkout-index paths cannot be combined with --stdin".into(),
+            code: 128,
+            message: "git checkout-index: don't mix '--stdin' and explicit filenames".into(),
         });
     }
     if !stdin {

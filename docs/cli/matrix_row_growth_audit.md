@@ -11,6 +11,16 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `checkout-index`
+documented-option family closure. The selected rows add exact stock-Git
+evidence for repeated `-a`/`-f`/`-q`, `--all --quiet --force`,
+`--stdin --prefix=out/`, and the stock-invalid `--stdin` plus explicit-path
+and `--all --stdin` mixes, while the product fixes make repeated documented
+boolean flags parse like stock Git and align the invalid mixing diagnostics.
+Expected delta is `+7` matrix rows, `+7` verified rows, `+8` complete
+documented option pairs, `0` invalid-input rows and `-8` remaining checklist
+rows. Rust behavior changes are expected. Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `read-tree`
 documented-option family closure. The selected rows add exact stock-Git
 evidence for `--prefix` separate and normalized value forms, repeated `-m`,
