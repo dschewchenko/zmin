@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	77	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	406	3175	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	78	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	411	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1361	3175	documented command-option pairs with at least one behavior row
-behavior_rows_written	5189	5189	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4484	5189	closed written rows only
-behavior_rows_classified	5160	5189	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5189	written rows with incomplete parity
-behavior_rows_open	26	5189	written rows not implemented or not matching yet
-invalid_input_rows	676	5189	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1362	3175	documented command-option pairs with at least one behavior row
+behavior_rows_written	5200	5200	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4492	5200	closed written rows only
+behavior_rows_classified	5171	5200	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5200	written rows with incomplete parity
+behavior_rows_open	26	5200	written rows not implemented or not matching yet
+invalid_input_rows	679	5200	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	31	0	27	87.1	126	126	100.0	110	87.3	0	0	16	no
@@ -148,7 +148,7 @@ switch	25	0	7	28.0	8	8	100.0	8	100.0	0	0	0	no
 symbolic-ref	8	8	8	100.0	88	88	100.0	86	97.7	0	0	2	yes
 tag	38	0	21	55.3	40	40	100.0	30	75.0	0	0	10	no
 unpack-file	0	0	0	0.0	4	4	100.0	2	50.0	0	0	2	yes
-unpack-objects	5	0	4	80.0	10	10	100.0	10	100.0	0	0	0	no
+unpack-objects	5	5	5	100.0	21	21	100.0	18	85.7	0	0	3	yes
 update-index	38	0	16	42.1	43	43	100.0	36	83.7	0	0	7	no
 update-ref	0	0	0	0.0	17	17	100.0	17	100.0	0	0	0	yes
 update-server-info	2	2	2	100.0	20	20	100.0	16	80.0	0	0	4	yes

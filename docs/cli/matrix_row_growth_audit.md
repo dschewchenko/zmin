@@ -110,6 +110,20 @@ behavior changes are expected because `read-tree` now needs stock-compatible
 `-u` guards and direct worktree materialization for the single-tree helper-free
 paths. Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `unpack-objects`
+documented-family plus reviewed-complete closure. The selected rows add the
+remaining documented `--max-input-size` parser surface, align repeated
+documented booleans `-n`, `-q`, `-r`, and `--strict` with stock Git, and add
+exact stock-Git evidence for repeated short/long forms, large-enough and
+too-small size limits, repeated `--max-input-size` last-one-wins behavior, and
+leading-digit-only parsing for malformed suffix values like `1m`. Expected
+delta is `+11` matrix rows, `+8` verified rows, `+3` invalid-input rows, `+1`
+complete command matrix, `+5` complete documented option pairs, and `-5`
+remaining checklist rows. Rust behavior changes are expected because
+`unpack-objects` now needs repeatable documented flag parsing and
+stock-compatible max-input-size enforcement on stdin pack streams. Actual delta
+matched.
+
 As of 2026-06-25 the next batch is a helper-free `gc` documented-option family
 closure. The selected rows add exact stock-Git evidence for long `--quiet`,
 bare `--prune` default-missing-value behavior, and `--auto --quiet`, then

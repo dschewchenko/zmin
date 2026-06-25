@@ -2354,10 +2354,12 @@ pub(crate) fn unpack_objects(
     _quiet: bool,
     _recover: bool,
     _strict: bool,
+    max_input_size: Vec<String>,
 ) -> Result<()> {
+    let max_input_size = parse_unpack_objects_max_input_size(max_input_size.last().map(String::as_str));
     let repo = find_repo()?;
     if dry_run {
-        io::copy(&mut io::stdin().lock(), &mut io::sink())?;
+        copy_unpack_objects_stdin(&mut io::stdin().lock(), &mut io::sink(), max_input_size)?;
         return Ok(());
     }
     let objects_dir = repo.objects_dir;
@@ -2370,7 +2372,7 @@ pub(crate) fn unpack_objects(
             .create_new(true)
             .open(&temp_pack)?;
         let mut file = io::BufWriter::with_capacity(UNPACK_OBJECTS_STDIN_BUF_CAPACITY, file);
-        io::copy(&mut io::stdin().lock(), &mut file)?;
+        copy_unpack_objects_stdin(&mut io::stdin().lock(), &mut file, max_input_size)?;
         file.flush()?;
         Ok(())
     })();
@@ -2387,6 +2389,38 @@ pub(crate) fn unpack_objects(
     };
     let _ = fs::remove_file(&temp_pack);
     Ok(())
+}
+
+fn parse_unpack_objects_max_input_size(raw: Option<&str>) -> Option<usize> {
+    let raw = raw?;
+    let digits_len = raw.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    if digits_len == 0 {
+        return Some(0);
+    }
+    raw[..digits_len].parse::<usize>().ok()
+}
+
+fn copy_unpack_objects_stdin<R: io::Read, W: io::Write>(
+    reader: &mut R,
+    writer: &mut W,
+    max_input_size: Option<usize>,
+) -> Result<u64> {
+    let mut total = 0u64;
+    let mut buffer = [0u8; UNPACK_OBJECTS_STDIN_BUF_CAPACITY];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(total);
+        }
+        total += read as u64;
+        if max_input_size.is_some_and(|limit| limit > 0 && total > limit as u64) {
+            return Err(CliError::Stderr {
+                code: 128,
+                text: "fatal: pack exceeds maximum allowed size\n".into(),
+            });
+        }
+        writer.write_all(&buffer[..read])?;
+    }
 }
 
 fn parse_check_attr_args(

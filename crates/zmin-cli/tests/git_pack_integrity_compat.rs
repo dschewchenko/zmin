@@ -4,14 +4,46 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use common::{
-    clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_stdout_bytes,
-    command_stdout_bytes_with_stdin, configure_identity, git, git_args, git_init, git_status,
-    git_status_args, git_with_env, git_with_stdin, git_with_stdin_args, git_with_stdin_bytes,
-    run_zmin, run_zmin_args, run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args,
-    run_zmin_with_stdin_bytes, write_file, zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin,
+    command_any_output_with_stdin_bytes, command_stdout_bytes, command_stdout_bytes_with_stdin,
+    configure_identity, git, git_args, git_init, git_status, git_status_args, git_with_env,
+    git_with_stdin, git_with_stdin_args, git_with_stdin_bytes, run_zmin, run_zmin_args,
+    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin_args, run_zmin_with_stdin_bytes,
+    write_file, zmin_bin,
 };
 use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
+
+fn object_files(repo: &Path) -> Vec<String> {
+    let mut files = fs::read_dir(repo.join(".git/objects"))
+        .expect("read objects dir")
+        .flat_map(|entry| {
+            let path = entry.expect("objects entry").path();
+            if !path.is_dir() {
+                return Vec::new();
+            }
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                return Vec::new();
+            };
+            let name = name.to_owned();
+            if name.len() != 2 || !name.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                return Vec::new();
+            }
+            fs::read_dir(&path)
+                .expect("read fanout dir")
+                .map(|child| {
+                    let child = child.expect("fanout child").path();
+                    format!(
+                        "{name}/{}",
+                        child.file_name().and_then(|value| value.to_str()).expect("object file")
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files
+}
 
 fn normalize_bundle_progress_result(result: (i32, String, String)) -> (i32, String, String) {
     let stderr = result
@@ -2530,6 +2562,67 @@ fn unpack_objects_recover_accepts_valid_stock_git_pack() {
             command_stdout_bytes("git", zmin_target.path(), &["cat-file", "-p", id]),
             command_stdout_bytes("git", git_target.path(), &["cat-file", "-p", id]),
             "object content for {id}"
+        );
+    }
+}
+
+#[test]
+fn unpack_objects_documented_option_combinations_match_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+    write_file(source.path(), "a.txt", "two\n");
+    git(source.path(), ["commit", "-am", "two"]);
+    let pack = command_stdout_bytes_with_stdin(
+        "git",
+        source.path(),
+        &["pack-objects", "--stdout", "--revs"],
+        b"HEAD\n",
+    );
+
+    for args in [
+        ["unpack-objects", "-q", "-q"].as_slice(),
+        ["unpack-objects", "-n", "-n"].as_slice(),
+        ["unpack-objects", "-r", "-r", "-q"].as_slice(),
+        ["unpack-objects", "--strict", "--strict", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=0", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=1500", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=bogus", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=1", "--max-input-size=1500", "-q"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        assert_eq!(
+            command_any_output_with_stdin_bytes(zmin_bin(), zmin_repo.path(), args, &pack, "zmin"),
+            command_any_output_with_stdin_bytes("git", git_repo.path(), args, &pack, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            object_files(zmin_repo.path()),
+            object_files(git_repo.path()),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["unpack-objects", "--max-input-size=1", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=1500", "--max-input-size=1", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=1m", "-q"].as_slice(),
+        ["unpack-objects", "--max-input-size=3k", "-q"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        assert_eq!(
+            command_any_output_with_stdin_bytes(zmin_bin(), zmin_repo.path(), args, &pack, "zmin"),
+            command_any_output_with_stdin_bytes("git", git_repo.path(), args, &pack, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            object_files(zmin_repo.path()),
+            object_files(git_repo.path()),
+            "args: {args:?}"
         );
     }
 }

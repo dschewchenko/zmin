@@ -1185,34 +1185,36 @@ Largest raw clusters:
 Current durable census after the `checkout-index` documented-surface closure:
 
 - complete command matrices: `76 / 151`
-- complete documented command-option pairs: `406 / 3175`
-- matrix rows: `5189`
-- verified rows: `4484`
-- invalid-input rows: `676`
+- complete documented command-option pairs: `411 / 3175`
+- matrix rows: `5200`
+- verified rows: `4492`
+- invalid-input rows: `679`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `read-tree` now covers the remaining helper-free schema-missing parser tail:
-  `-u`, `-v`, `--trivial`, and `--aggressive`.
-- The closed family added stock-Git-invalid `-u <tree>` and
-  `-i -u --prefix=import/ <tree>` guards, plus stock-Git worktree-update
-  parity for `-m -u`, `--reset -u`, `--prefix=import/ -u`,
-  `-m --trivial -u`, and `-m --aggressive -u`.
+- `unpack-objects` is now reviewed complete at both the command and
+  documented option-pair levels.
+- The closed family added the remaining documented parser surface
+  `--max-input-size=<size>`, made repeated documented booleans parse like stock
+  Git, and closed exact rows for repeated `-n`, `-q`, `-r`, and `--strict`,
+  `--max-input-size=0`, `--max-input-size=1500`, `--max-input-size=bogus`,
+  repeated `--max-input-size` last-one-wins, and stock-Git fatal rejections
+  for too-small limits and leading-digit-only suffix forms like `1m`.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_object_plumbing_compat read_tree_documented_option_forms_match_stock_git -- --nocapture`,
+  `cargo test -p zmin-cli --test git_pack_integrity_compat unpack_objects_documented_option_combinations_match_stock_git -- --nocapture`,
+  `ZMIN_BIN=target/debug/zmin bash tools/git-unpack-objects-schema-oracle-smoke.sh`,
   `cargo check -p zmin-cli --bin zmin --profile compat`,
   `python3 tools/git-compat-census.py --root .`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(unpack-objects|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `read-tree` now has no schema-missing documented options left in the
-  helper-free single-tree lane.
-- This moved `read-tree` to `17/17` represented documented option pairs and
-  `32/32` classified rows, but the command is still not durable
-  reviewed-complete because the remaining backlog is now expansion work inside
-  already represented options rather than missing parser surface.
+- `read-tree` remains the largest recently expanded helper-free plumbing lane,
+  but it is no longer the best next closure target.
+- The next efficient family now shifts back to unsupported documented surfaces,
+  with `gc` as the smallest remaining schema-missing helper-free candidate and
+  `repack` still the largest unresolved supported-option cluster.
 
 Latest zero-code closure:
 
@@ -1225,4 +1227,3 @@ Next helper-free family candidates by schema-missing size now remain:
 
 - `repack`: `16`
 - `gc`: `7`
-- `unpack-objects`: `1`

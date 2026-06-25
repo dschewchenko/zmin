@@ -176,7 +176,14 @@ pub(crate) fn dispatch(
             quiet,
             recover,
             strict,
-        } => run_unpack_objects(dry_run, quiet, recover, strict),
+            max_input_size,
+        } => run_unpack_objects(
+            dry_run > 0,
+            quiet > 0,
+            recover > 0,
+            strict > 0,
+            max_input_size,
+        ),
         _ => unreachable!("non-core command dispatched to core"),
     }
 }
@@ -510,8 +517,9 @@ pub(crate) fn run_unpack_objects(
     quiet: bool,
     recover: bool,
     strict: bool,
+    max_input_size: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::core_commands::unpack_objects(dry_run, quiet, recover, strict)
+    super::core_commands::unpack_objects(dry_run, quiet, recover, strict, max_input_size)
 }
 
 #[cfg(test)]

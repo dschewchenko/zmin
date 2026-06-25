@@ -87,3 +87,13 @@ run_case unpack_objects_dry_run_quiet -n -q
 run_case unpack_objects_strict_long --strict
 run_case unpack_objects_recover_short -r
 run_case unpack_objects_strict_recover --strict -r
+run_case unpack_objects_dry_run_repeated -n -n
+run_case unpack_objects_quiet_repeated -q -q
+run_case unpack_objects_recover_repeated -r -r -q
+run_case unpack_objects_strict_repeated --strict --strict -q
+run_case unpack_objects_max_input_size_zero --max-input-size=0 -q
+run_case unpack_objects_max_input_size_large_enough --max-input-size=1500 -q
+run_case unpack_objects_max_input_size_bogus --max-input-size=bogus -q
+run_case unpack_objects_max_input_size_last_wins --max-input-size=1 --max-input-size=1500 -q
+run_case unpack_objects_max_input_size_too_small --max-input-size=1 -q
+run_case unpack_objects_max_input_size_suffix_digit_prefix --max-input-size=1m -q

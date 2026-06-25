@@ -348,14 +348,16 @@ pub enum Command {
         args: Vec<String>,
     },
     UnpackObjects {
-        #[arg(short = 'n', action = ArgAction::SetTrue)]
-        dry_run: bool,
-        #[arg(short = 'q', action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(short = 'r', action = ArgAction::SetTrue)]
-        recover: bool,
-        #[arg(long = "strict", action = ArgAction::SetTrue)]
-        strict: bool,
+        #[arg(short = 'n', action = ArgAction::Count)]
+        dry_run: u8,
+        #[arg(short = 'q', action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(short = 'r', action = ArgAction::Count)]
+        recover: u8,
+        #[arg(long = "strict", action = ArgAction::Count)]
+        strict: u8,
+        #[arg(long = "max-input-size", require_equals = true)]
+        max_input_size: Vec<String>,
     },
     PackObjects {
         #[arg(long = "stdout", action = ArgAction::SetTrue)]
