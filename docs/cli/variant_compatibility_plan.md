@@ -343,15 +343,22 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `stash` command promotion, the exact-open queue in this
+After the latest `filter-branch` completion, the exact-open queue in this
 environment is still down to helper-oracle-unavailable rows only:
 `citool` (`5`), `cvsimport` (`2`), `svn` (`2`), `archimport` (`1`),
-`cvsexportcommit` (`1`) and `scalar` (`1`). `instaweb` now has `11/13`
-reviewed-complete documented option pairs with `11/13` represented documented
-option pairs, and the remaining `instaweb` documented backlog is only the real
-Git `--module-path` surface plus the Zmin-only internal flags tracked in the
-extension inventory. The primary `remaining_to_fix_or_verify.tsv` backlog
-still has no real implemented-but-unverified family beyond the lone schema-only
+`cvsexportcommit` (`1`) and `scalar` (`1`). `filter-branch` is now
+command-complete at `15/15` reviewed-complete documented option pairs,
+`15/15` represented documented option pairs, `19/19` classified rows, and
+`0` exact-open written rows after adding real `--prune-empty` parity and
+stopping the docs inventory from seeding the prose-only `--ignore-unmatch`
+example token. The smallest raw documented gap is still `http-fetch`, but
+`--index-pack-args` remains blocked on clean local stock-Git evidence, and
+`fmt-merge-msg --summary/--no-summary` still exposes a real `--log` parity
+gap. The next bounded helper-free follow-up should therefore move to another
+small supported subgroup with clear semantics, with `instaweb` (`11/13`) or
+`mergetool` (`8/10`) as the current best local candidates. The primary
+`remaining_to_fix_or_verify.tsv` backlog still has no real
+implemented-but-unverified family beyond the lone schema-only
 `archive <positional:args>` parser surface. `notes` is fully reviewed complete
 as a command at `28/28` documented option pairs, `28/28` represented
 documented option pairs, `69/69` classified rows, and `0` exact-open written
@@ -363,42 +370,37 @@ and `0` exact-open written rows; `bugreport` is now command-complete at
 `--no-diagnose` ordering family; `stash` is now command-complete at
 `18/18` documented option pairs, `18/18` represented documented option pairs,
 `211/211` classified rows, and `0` exact-open written rows after making the
-short `-S` and `-p` aliases durable. The next compact helper-free follow-up is
-no longer another stash or bugreport alias slice. `fmt-merge-msg
---summary/--no-summary` still exposes a real `--log` parity gap, and
-`http-fetch --index-pack-args` still lacks clean local stock-Git evidence, so
-the next high-throughput follow-up should move either to another bounded
-census-backed supported subgroup or to the next small command-unlocking
-documented gap with clear semantics.
+short `-S` and `-p` aliases durable.
 
 ### Latest Completed Slice
 
-The latest completed slice closes the helper-free `git stash` short-alias
-family for `-S` and `-p`, then promotes `stash` into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`. Zmin already matched
-stock Git for the long `--staged` and `--patch` lanes; this slice makes the
-short aliases durable with exact stock-Git evidence, bringing `stash` to full
-command-complete status at `18/18` documented option pairs and `211/211`
-classified rows.
+The latest completed slice closes the real `git filter-branch --prune-empty`
+gap, records exact stock-Git parity for pruning a single-parent empty commit
+plus the documented `--commit-filter` conflict, fixes the docs option inventory
+to only seed AsciiDoc option-definition lines, and then promotes
+`filter-branch` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. This removes the
+false prose-derived `--ignore-unmatch` seed, keeps the Git `2.47.1`
+denominator honest, and brings `filter-branch` to full command-complete status
+at `15/15` documented option pairs and `19/19` classified rows.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_stash_compat stash_push_short_staged_alias_matches_stock_git -- --exact`,
-`cargo test -p zmin-cli --test git_stash_compat stash_push_short_patch_alias_matches_stock_git -- --exact`,
+`cargo test -p zmin-cli --test git_filter_branch_compat filter_branch_prune_empty_ -- --nocapture`,
+`cargo test -p zmin-cli --test git_filter_branch_compat filter_branch_temp_dir_option_matches_stock_git -- --exact`,
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(stash|summary)\t'`,
-`tools/git-compat-audit-summary.sh --tsv`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(filter-branch|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5347` matrix rows, `4653` verified rows, `679`
-invalid-input rows, `12` exact-open rows, `86/151` complete command
-matrices, `1395/3175` complete documented option pairs, `1403/3175`
-represented documented option pairs, and `1792` remaining checklist rows.
-`stash` is now fully command-complete at `18/18` reviewed-complete documented
-option pairs with `18/18` represented documented option pairs, `211/211`
-classified rows, and `0` exact-open written rows. The exact-open queue remains
-limited to the helper-oracle-unavailable commands `citool`, `cvsimport`,
-`svn`, `archimport`, `cvsexportcommit`, and `scalar`.
+Current census counts are `5349` matrix rows, `4655` verified rows, `679`
+invalid-input rows, `12` exact-open rows, `87/151` complete command
+matrices, `1395/3156` complete documented option pairs, `1403/3156`
+represented documented option pairs, and `1773` remaining checklist rows.
+`filter-branch` is now fully command-complete at `15/15`
+reviewed-complete documented option pairs with `15/15` represented documented
+option pairs, `19/19` classified rows, and `0` exact-open written rows. The
+exact-open queue remains limited to the helper-oracle-unavailable commands
+`citool`, `cvsimport`, `svn`, `archimport`, `cvsexportcommit`, and `scalar`.
 
 ### No-Skip Rule
 

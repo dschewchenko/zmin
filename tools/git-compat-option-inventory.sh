@@ -110,6 +110,7 @@ awk '$1 ~ /^git-/ { command = $1; sub(/^git-/, "", command); print command }' "$
 
         next unless $section eq "OPTIONS";
         next unless /^\s*-/;
+        next unless /::\s*$/;
 
         s/`//g;
         s/\047//g;

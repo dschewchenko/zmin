@@ -11,6 +11,20 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git filter-branch`
+`--prune-empty` closure plus docs-option inventory correction. The selected
+change adds exact stock-Git evidence for pruning a single-parent empty commit
+and rejecting the documented `--commit-filter` conflict, while tightening
+`tools/git-compat-option-inventory.sh` to only seed AsciiDoc option-definition
+lines so prose-only tokens such as the `filter-branch` example
+`--ignore-unmatch` stop inflating the denominator. Expected delta is `+2`
+matrix rows, `+0` net complete documented option pairs because the new
+`--prune-empty` closure is offset by removing false docs seeds from the global
+denominator, `+1` complete command matrix, `+2` verified rows, `+0`
+invalid-input rows, and a lower documented-option seed plus remaining
+checklist count. Actual delta matched, and `filter-branch` is now
+command-complete at `15/15`.
+
 As of 2026-06-25 the next batch is a zero-code command promotion for
 helper-free `git describe`. The selected change promotes `describe` into
 `docs/cli/census/reviewed_complete_command_matrices.tsv` once its already-

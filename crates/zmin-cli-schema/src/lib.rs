@@ -2779,6 +2779,8 @@ pub enum Command {
     FilterBranch {
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
+        #[arg(long = "prune-empty", action = ArgAction::SetTrue)]
+        prune_empty: bool,
         #[arg(long = "msg-filter")]
         msg_filter: Option<String>,
         #[arg(long = "tree-filter")]

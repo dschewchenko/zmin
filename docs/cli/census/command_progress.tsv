@@ -1,17 +1,17 @@
 metric	count	total	note
-complete_command_matrices	86	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1395	3175	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	87	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	1395	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1403	3175	documented command-option pairs with at least one behavior row
-behavior_rows_written	5347	5347	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4653	5347	closed written rows only
-behavior_rows_classified	5332	5347	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5347	written rows with incomplete parity
-behavior_rows_open	12	5347	written rows not implemented or not matching yet
-invalid_input_rows	679	5347	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1403	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5349	5349	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4655	5349	closed written rows only
+behavior_rows_classified	5334	5349	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5349	written rows with incomplete parity
+behavior_rows_open	12	5349	written rows not implemented or not matching yet
+invalid_input_rows	679	5349	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
-add	31	27	27	87.1	126	126	100.0	110	87.3	0	0	16	no
+add	30	26	26	86.7	126	126	100.0	110	87.3	0	0	16	no
 am	54	0	0	0.0	2	2	100.0	2	100.0	0	0	0	no
 annotate	25	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 apply	38	5	5	13.2	22	22	100.0	21	95.5	0	0	1	no
@@ -35,7 +35,7 @@ citool	0	0	0	0.0	5	0	0.0	0	0.0	0	5	0	no
 clean	13	13	13	100.0	68	68	100.0	62	91.2	0	0	6	yes
 clone	0	0	0	0.0	96	96	100.0	86	89.6	0	0	10	yes
 column	7	7	7	100.0	54	54	100.0	46	85.2	0	0	8	yes
-commit	59	37	37	62.7	80	80	100.0	75	93.8	0	0	5	no
+commit	58	37	37	63.8	80	80	100.0	75	93.8	0	0	5	no
 commit-graph	3	3	3	100.0	14	14	100.0	11	78.6	0	0	3	yes
 commit-tree	6	4	4	66.7	58	58	100.0	40	69.0	0	0	18	no
 config	30	18	18	60.0	137	137	100.0	124	90.5	0	0	13	no
@@ -43,7 +43,7 @@ count-objects	4	4	4	100.0	53	53	100.0	45	84.9	0	0	8	yes
 credential	0	0	0	0.0	5	5	100.0	4	80.0	0	0	1	yes
 credential-cache	2	2	2	100.0	6	6	100.0	6	100.0	0	0	0	yes
 credential-store	1	1	1	100.0	12	12	100.0	8	66.7	0	0	4	yes
-cvsexportcommit	13	0	1	7.7	2	1	50.0	1	50.0	0	1	0	no
+cvsexportcommit	12	0	1	8.3	2	1	50.0	1	50.0	0	1	0	no
 cvsimport	20	0	6	30.0	3	1	33.3	1	33.3	0	2	0	no
 cvsserver	8	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 daemon	27	13	13	48.1	14	14	100.0	13	92.9	0	0	1	no
@@ -58,11 +58,11 @@ fast-export	18	0	0	0.0	7	7	100.0	4	57.1	0	0	3	no
 fast-import	19	1	1	5.3	11	11	100.0	8	72.7	0	0	3	no
 fetch	63	40	40	63.5	356	356	100.0	341	95.8	0	0	15	no
 fetch-pack	18	12	12	66.7	19	19	100.0	17	89.5	0	0	2	no
-filter-branch	16	14	14	87.5	17	17	100.0	17	100.0	0	0	0	no
+filter-branch	15	15	15	100.0	19	19	100.0	19	100.0	0	0	0	yes
 fmt-merge-msg	9	7	7	77.8	8	8	100.0	8	100.0	0	0	0	no
 for-each-ref	18	2	2	11.1	34	34	100.0	23	67.6	0	0	11	no
 for-each-repo	2	2	2	100.0	5	5	100.0	5	100.0	0	0	0	yes
-format-patch	163	12	12	7.4	15	15	100.0	15	100.0	0	0	0	no
+format-patch	162	12	12	7.4	15	15	100.0	15	100.0	0	0	0	no
 fsck	15	15	15	100.0	56	56	100.0	21	37.5	0	0	35	yes
 gc	12	12	12	100.0	21	21	100.0	21	100.0	0	0	0	yes
 get-tar-commit-id	0	0	0	0.0	2	2	100.0	1	50.0	0	0	1	yes
@@ -79,7 +79,7 @@ index-pack	16	10	10	62.5	17	17	100.0	11	64.7	0	0	6	no
 init	0	0	0	0.0	12	12	100.0	10	83.3	0	0	2	yes
 instaweb	13	11	11	84.6	11	11	100.0	11	100.0	0	0	0	no
 interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes
-log	134	18	18	13.4	111	111	100.0	106	95.5	0	0	5	no
+log	131	18	18	13.7	111	111	100.0	106	95.5	0	0	5	no
 ls-files	39	39	39	100.0	159	159	100.0	139	87.4	0	0	20	yes
 ls-remote	14	3	3	21.4	37	37	100.0	33	89.2	0	0	4	no
 ls-tree	13	3	3	23.1	9	9	100.0	8	88.9	0	0	1	no
@@ -118,13 +118,13 @@ refs	4	4	4	100.0	15	15	100.0	11	73.3	0	0	4	yes
 remote	2	2	2	100.0	34	34	100.0	27	79.4	0	0	7	yes
 repack	33	33	33	100.0	116	116	100.0	116	100.0	0	0	0	yes
 replace	11	11	11	100.0	19	19	100.0	19	100.0	0	0	0	yes
-replay	122	2	2	1.6	5	5	100.0	4	80.0	0	0	1	no
+replay	119	2	2	1.7	5	5	100.0	4	80.0	0	0	1	no
 request-pull	1	1	1	100.0	6	6	100.0	5	83.3	0	0	1	yes
 rerere	0	0	0	0.0	8	8	100.0	7	87.5	0	0	1	yes
 reset	6	0	0	0.0	11	11	100.0	6	54.5	0	0	5	no
 restore	25	7	7	28.0	81	81	100.0	61	75.3	0	0	20	no
-rev-list	120	12	12	10.0	31	31	100.0	31	100.0	0	0	0	no
-rev-parse	53	25	25	47.2	80	80	100.0	73	91.2	0	0	7	no
+rev-list	117	12	12	10.3	31	31	100.0	31	100.0	0	0	0	no
+rev-parse	51	25	25	49.0	80	80	100.0	73	91.2	0	0	7	no
 revert	19	4	4	21.1	7	7	100.0	5	71.4	0	0	2	no
 rm	12	12	12	100.0	50	50	100.0	41	82.0	0	0	9	yes
 send-email	64	2	2	3.1	18	18	100.0	17	94.4	0	0	1	no
@@ -132,7 +132,7 @@ send-pack	12	8	8	66.7	16	16	100.0	15	93.8	0	0	1	no
 sh-i18n	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 sh-setup	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 shell	0	0	0	0.0	5	5	100.0	2	40.0	0	0	3	yes
-shortlog	128	9	9	7.0	11	11	100.0	11	100.0	0	0	0	no
+shortlog	125	9	9	7.2	11	11	100.0	11	100.0	0	0	0	no
 show	15	3	3	20.0	38	38	100.0	38	100.0	0	0	0	no
 show-branch	19	7	7	36.8	10	10	100.0	10	100.0	0	0	0	no
 show-index	1	1	1	100.0	46	46	100.0	42	91.3	0	0	4	yes

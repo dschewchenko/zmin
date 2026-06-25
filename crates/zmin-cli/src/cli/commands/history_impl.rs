@@ -8133,6 +8133,7 @@ pub(crate) fn merge_base(
 
 pub(crate) struct FilterBranchOptions {
     pub(crate) force: bool,
+    pub(crate) prune_empty: bool,
     pub(crate) msg_filter: Option<String>,
     pub(crate) tree_filter: Option<String>,
     pub(crate) index_filter: Option<String>,
@@ -8173,6 +8174,16 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
+    let empty_tree = if options.prune_empty {
+        Some(
+            store.write_object(
+                GitObjectKind::Tree,
+                &encode_tree(&[]).map_err(CliError::Io)?,
+            )?,
+        )
+    } else {
+        None
+    };
     let targets = filter_branch_target_refs(&repo, &refs, all, &commits)?;
     ensure_filter_branch_backups_available(
         &refs,
@@ -8304,6 +8315,18 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
                 committer: &committer,
                 message: &message,
             })?
+        } else if options.prune_empty
+            && filter_branch_should_prune_commit(
+                &commit_cache,
+                empty_tree.as_ref().expect("prune-empty tree"),
+                &tree,
+                &parents,
+            )?
+        {
+            parents
+                .first()
+                .map(ObjectId::to_hex)
+                .unwrap_or_default()
         } else {
             let encoded = encode_raw_commit(&tree, &parents, &author, &committer, &message)?;
             let new_id = store.write_object(GitObjectKind::Commit, &encoded)?;
@@ -8369,6 +8392,12 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
 }
 
 fn reject_unsupported_filter_branch_options(_options: &FilterBranchOptions) -> Result<()> {
+    if _options.prune_empty && _options.commit_filter.is_some() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "Cannot set --prune-empty and --commit-filter at the same time\n".into(),
+        });
+    }
     Ok(())
 }
 
@@ -8386,6 +8415,21 @@ fn filter_branch_revs(args: Vec<String>) -> (bool, Vec<String>) {
         revs.push("HEAD".to_owned());
     }
     (all, revs)
+}
+
+fn filter_branch_should_prune_commit(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    empty_tree: &ObjectId,
+    tree: &ObjectId,
+    parents: &[ObjectId],
+) -> Result<bool> {
+    if parents.len() > 1 {
+        return Ok(false);
+    }
+    if let Some(parent) = parents.first() {
+        return Ok(commit_cache.read_commit(parent)?.tree == *tree);
+    }
+    Ok(tree == empty_tree)
 }
 
 fn filter_branch_target_refs(

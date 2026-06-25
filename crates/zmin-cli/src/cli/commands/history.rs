@@ -16,6 +16,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => run_range_diff(no_dual_color > 0, no_no_dual_color, ranges),
         runtime::Command::FilterBranch {
             force,
+            prune_empty,
             msg_filter,
             tree_filter,
             index_filter,
@@ -31,6 +32,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             revs,
         } => super::history_commands::filter_branch(super::history_commands::FilterBranchOptions {
             force,
+            prune_empty,
             msg_filter,
             tree_filter,
             index_filter,

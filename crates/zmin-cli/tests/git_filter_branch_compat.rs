@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{
-    command_output_with_env, configure_identity, git, git_with_env, run_zmin, write_file,
+    command_failure_output_with_env, command_output_with_env, configure_identity, git,
+    git_with_env, run_zmin, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -442,6 +443,93 @@ fn filter_branch_temp_dir_option_matches_stock_git() {
     );
     assert!(!git_temp.exists());
     assert!(!zmin_temp.exists());
+}
+
+#[test]
+fn filter_branch_prune_empty_drops_single_parent_empty_commit_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    write_file(&source, "README.md", "hello\n");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "base"]);
+    git_with_env(&source, ["commit", "--allow-empty", "-m", "empty"]);
+
+    let (git_repo, zmin_repo) = rewrite_pair(dir.path(), &source);
+    stock_filter_branch(
+        &git_repo,
+        &["--prune-empty", "-f", "--msg-filter", "cat", "HEAD"],
+        "prune-empty",
+    );
+    run_zmin(
+        &zmin_repo,
+        [
+            "filter-branch",
+            "--prune-empty",
+            "-f",
+            "--msg-filter",
+            "cat",
+            "HEAD",
+        ],
+    );
+
+    assert_eq!(
+        git(&zmin_repo, ["rev-parse", "HEAD"]),
+        git(&git_repo, ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["rev-list", "--count", "HEAD"]),
+        git(&git_repo, ["rev-list", "--count", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["log", "--format=%s", "--reverse"]),
+        git(&git_repo, ["log", "--format=%s", "--reverse"])
+    );
+}
+
+#[test]
+fn filter_branch_prune_empty_rejects_commit_filter_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    write_file(&source, "README.md", "hello\n");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "base"]);
+    git_with_env(&source, ["commit", "--allow-empty", "-m", "empty"]);
+
+    let (git_repo, zmin_repo) = rewrite_pair(dir.path(), &source);
+    let args = [
+        "-c",
+        "commit.gpgsign=false",
+        "filter-branch",
+        "--prune-empty",
+        "-f",
+        "--commit-filter",
+        "git commit-tree \"$@\"",
+        "HEAD",
+    ];
+    let env = [("FILTER_BRANCH_SQUELCH_WARNING", "1")];
+
+    let stock = command_failure_output_with_env("git", &git_repo, &args, &env, "git filter-branch");
+    let zmin = command_failure_output_with_env(
+        zmin_bin(),
+        &zmin_repo,
+        &args[2..],
+        &env,
+        "zmin filter-branch",
+    );
+
+    assert_eq!(zmin.0, stock.0);
+    assert_eq!(zmin.1, stock.1);
+    assert_eq!(zmin.2, stock.2);
 }
 
 #[test]
