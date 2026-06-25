@@ -1411,6 +1411,9 @@ fn read_tree_documented_option_forms_match_stock_git() {
     for args in [
         ["read-tree", "--dry-run", &tree].as_slice(),
         ["read-tree", "-n", &tree].as_slice(),
+        ["read-tree", "-v", &tree].as_slice(),
+        ["read-tree", "--trivial", &tree].as_slice(),
+        ["read-tree", "--aggressive", &tree].as_slice(),
         ["read-tree", "--quiet", &tree].as_slice(),
         ["read-tree", "-q", &tree].as_slice(),
         ["read-tree", "--reset", &tree].as_slice(),
@@ -1438,6 +1441,49 @@ fn read_tree_documented_option_forms_match_stock_git() {
             git(git_repo.path(), ["write-tree"]),
             "args: {args:?}"
         );
+    }
+
+    for args in [
+        ["read-tree", "-m", "-u", &tree].as_slice(),
+        ["read-tree", "--reset", "-u", &tree].as_slice(),
+        ["read-tree", "--prefix=import/", "-u", &tree].as_slice(),
+        ["read-tree", "-m", "--trivial", "-u", &tree].as_slice(),
+        ["read-tree", "-m", "--aggressive", "-u", &tree].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(tree_repo.path());
+        let zmin_repo = clone_repo_fixture(tree_repo.path());
+        fs::remove_file(git_repo.path().join("a.txt")).expect("remove git worktree a");
+        let _ = fs::remove_file(git_repo.path().join("b.txt"));
+        fs::remove_file(zmin_repo.path().join("a.txt")).expect("remove zmin worktree a");
+        let _ = fs::remove_file(zmin_repo.path().join("b.txt"));
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("/usr/bin/git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["ls-files", "-s"]),
+            git(git_repo.path(), ["ls-files", "-s"]),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["write-tree"]),
+            git(git_repo.path(), ["write-tree"]),
+            "args: {args:?}"
+        );
+        if args.contains(&"--prefix=import/") {
+            assert_eq!(
+                fs::read(zmin_repo.path().join("import/a.txt")).expect("read zmin imported file"),
+                fs::read(git_repo.path().join("import/a.txt")).expect("read git imported file"),
+                "args: {args:?}"
+            );
+        } else {
+            assert_eq!(
+                fs::read(zmin_repo.path().join("a.txt")).expect("read zmin worktree file"),
+                fs::read(git_repo.path().join("a.txt")).expect("read git worktree file"),
+                "args: {args:?}"
+            );
+        }
     }
 
     {
@@ -1482,6 +1528,8 @@ fn read_tree_documented_option_forms_match_stock_git() {
         for args in [
             ["read-tree", "-i", &tree].as_slice(),
             ["read-tree", "-i", "--index-output=alt.index", &tree].as_slice(),
+            ["read-tree", "-u", &tree].as_slice(),
+            ["read-tree", "-i", "-u", "--prefix=import/", &tree].as_slice(),
         ] {
             assert_eq!(
                 run_zmin_failure_output(zmin_repo.path(), args),

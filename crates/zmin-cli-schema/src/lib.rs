@@ -1753,12 +1753,20 @@ pub enum Command {
         empty: bool,
         #[arg(short = 'm', action = ArgAction::Count)]
         merge: u8,
+        #[arg(long = "trivial", action = ArgAction::SetTrue)]
+        trivial: bool,
+        #[arg(long = "aggressive", action = ArgAction::SetTrue)]
+        aggressive: bool,
         #[arg(long = "reset", action = ArgAction::SetTrue)]
         reset: bool,
+        #[arg(short = 'u', action = ArgAction::SetTrue)]
+        update_worktree: bool,
         #[arg(short = 'i', action = ArgAction::SetTrue)]
         index_only: bool,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
         dry_run: u8,
+        #[arg(short = 'v', action = ArgAction::Count)]
+        verbose: u8,
         #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
         quiet: u8,
         #[arg(long = "index-output")]

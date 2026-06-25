@@ -3810,9 +3810,13 @@ pub(crate) fn mv(
 pub(crate) struct ReadTreeCommandOptions {
     pub(crate) empty: bool,
     pub(crate) merge: bool,
+    pub(crate) trivial: bool,
+    pub(crate) aggressive: bool,
     pub(crate) reset: bool,
+    pub(crate) update_worktree: bool,
     pub(crate) index_only: bool,
     pub(crate) dry_run: bool,
+    pub(crate) verbose: bool,
     pub(crate) quiet: bool,
     pub(crate) index_output: Option<PathBuf>,
     pub(crate) prefix: Option<String>,
@@ -3826,9 +3830,13 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
     let ReadTreeCommandOptions {
         empty,
         merge,
+        trivial,
+        aggressive,
         reset,
+        update_worktree,
         index_only,
         dry_run,
+        verbose,
         quiet,
         index_output,
         prefix,
@@ -3837,7 +3845,15 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
         no_sparse_checkout,
         treeish,
     } = options;
-    let _ = (quiet, recurse_submodules, no_recurse_submodules, no_sparse_checkout);
+    let _ = (
+        quiet,
+        recurse_submodules,
+        no_recurse_submodules,
+        no_sparse_checkout,
+        verbose,
+        trivial,
+        aggressive,
+    );
     if empty && treeish.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -3856,8 +3872,25 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
             text: "fatal: -i is meaningless without -m, --reset, or --prefix\n".into(),
         });
     }
+    if update_worktree && index_only {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: -u and -i at the same time makes no sense\n".into(),
+        });
+    }
+    if update_worktree && !merge && !reset && prefix.is_none() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: -u is meaningless without -m, --reset, or --prefix\n".into(),
+        });
+    }
     let repo = find_repo()?;
     let output_path = index_output.unwrap_or_else(|| repo.index_path.clone());
+    let original_index = if repo.index_path.exists() {
+        read_index(&repo.index_path).map_err(CliError::Io)?
+    } else {
+        GitIndex::new()
+    };
     if empty {
         if !dry_run {
             GitIndex::new().write_to_path(&output_path)?;
@@ -3886,6 +3919,65 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
     };
     if !dry_run {
         result_index.write_to_path(&output_path)?;
+        if update_worktree {
+            read_tree_update_worktree(&repo, &store, &original_index, &result_index, prefix.is_some())?;
+        }
+    }
+    Ok(())
+}
+
+fn read_tree_update_worktree(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    original_index: &GitIndex,
+    result_index: &GitIndex,
+    keep_existing_paths: bool,
+) -> Result<()> {
+    let target_paths = result_index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .map(|entry| entry.path.as_slice())
+        .collect::<HashSet<_>>();
+    if !keep_existing_paths {
+        for entry in original_index.entries().iter().filter(|entry| entry.stage == 0) {
+            if !target_paths.contains(entry.path.as_slice()) {
+                remove_worktree_path(repo, &entry.path)?;
+            }
+        }
+    }
+    let checkout_entries = GitIndex::from_entries(
+        result_index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+            .cloned()
+            .collect(),
+    )?;
+    let materialized_paths = checkout_entries
+        .entries()
+        .iter()
+        .map(|entry| {
+            let path = repo
+                .root
+                .join(String::from_utf8_lossy(&entry.path).as_ref());
+            let existed = path_exists(&path);
+            (path, existed)
+        })
+        .collect::<Vec<_>>();
+    checkout_index(
+        store,
+        &checkout_entries,
+        &repo.root,
+        CheckoutIndexOptions { force: true },
+    )?;
+    if let Err(error) = smudge_worktree_filter_entries(repo, &checkout_entries) {
+        for (path, existed) in materialized_paths {
+            if !existed {
+                let _ = fs::remove_file(path);
+            }
+        }
+        return Err(error);
     }
     Ok(())
 }

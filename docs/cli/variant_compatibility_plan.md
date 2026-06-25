@@ -1186,31 +1186,33 @@ Current durable census after the `checkout-index` documented-surface closure:
 
 - complete command matrices: `76 / 151`
 - complete documented command-option pairs: `406 / 3175`
-- matrix rows: `5167`
-- verified rows: `4466`
-- invalid-input rows: `672`
+- matrix rows: `5189`
+- verified rows: `4484`
+- invalid-input rows: `676`
 - open or partial exact rows: `26`
 
 Latest completed batch:
 
-- `checkout-index` is now reviewed complete at both the command and documented
-  option-pair levels.
-- The closed family added the remaining documented parser surface:
-  `--index` / `-u`, `--no-create` / `-n`, `--temp`, `--stage`,
-  `--ignore-skip-worktree-bits`, and `-z`.
+- `read-tree` now covers the remaining helper-free schema-missing parser tail:
+  `-u`, `-v`, `--trivial`, and `--aggressive`.
+- The closed family added stock-Git-invalid `-u <tree>` and
+  `-i -u --prefix=import/ <tree>` guards, plus stock-Git worktree-update
+  parity for `-m -u`, `--reset -u`, `--prefix=import/ -u`,
+  `-m --trivial -u`, and `-m --aggressive -u`.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_worktree_state_compat checkout_index -- --nocapture`
-  plus `python3 tools/git-compat-census.py --root .`.
+  `cargo test -p zmin-cli --test git_object_plumbing_compat read_tree_documented_option_forms_match_stock_git -- --nocapture`,
+  `cargo check -p zmin-cli --bin zmin --profile compat`,
+  `python3 tools/git-compat-census.py --root .`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(read-tree|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `read-tree` now covers the helper-free parser subgroup:
-  `--dry-run` / `-n`, `--quiet` / `-q`, `--reset`, `--index-output`,
-  `-i` with its stock fatal guard, `--no-sparse-checkout`,
-  `--recurse-submodules`, and `--no-recurse-submodules`.
-- This moved `read-tree` to `13/17` represented documented option pairs and
-  leaves the merge-heavy tail `--aggressive`, `--trivial`, `-u`, and `-v` as
-  the remaining schema-missing surface.
+- `read-tree` now has no schema-missing documented options left in the
+  helper-free single-tree lane.
+- This moved `read-tree` to `17/17` represented documented option pairs and
+  `32/32` classified rows, but the command is still not durable
+  reviewed-complete because the remaining backlog is now expansion work inside
+  already represented options rather than missing parser surface.
 
 Latest zero-code closure:
 
@@ -1222,5 +1224,5 @@ Latest zero-code closure:
 Next helper-free family candidates by schema-missing size now remain:
 
 - `repack`: `16`
-- `read-tree`: `4`
 - `gc`: `7`
+- `unpack-objects`: `1`

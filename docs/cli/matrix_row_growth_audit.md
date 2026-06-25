@@ -98,6 +98,18 @@ verified rows, `+3` complete documented option pairs, `0` invalid-input rows
 and `-3` remaining checklist rows. Rust behavior changes are expected.
 Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `read-tree` schema-tail
+closure. The selected rows add exact stock-Git evidence for the remaining
+parser surface `-u`, `-v`, `--trivial`, and `--aggressive`, including the
+stock fatal guards for bare `-u` and mixed `-i -u`, plus worktree-update
+parity for `-m -u`, `--reset -u`, and `--prefix=import/ -u`. Expected delta
+is `+10` matrix rows, `+8` verified rows, `+2` invalid-input rows, `+4`
+represented documented option pairs, `0` complete documented option pairs,
+`0` complete command matrices, and `0` remaining checklist rows. Rust
+behavior changes are expected because `read-tree` now needs stock-compatible
+`-u` guards and direct worktree materialization for the single-tree helper-free
+paths. Actual delta matched.
+
 As of 2026-06-25 the next batch is a helper-free `gc` documented-option family
 closure. The selected rows add exact stock-Git evidence for long `--quiet`,
 bare `--prune` default-missing-value behavior, and `--auto --quiet`, then
