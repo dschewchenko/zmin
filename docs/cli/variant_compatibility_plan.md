@@ -1179,6 +1179,35 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
+Current durable census after the zero-code reviewed-complete `diff-index`
+documented-option promotion cluster:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `751 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `diff-index` now has seventy-eight represented helper-free documented option
+  families promoted into the reviewed-complete doc-option census list.
+- The slice adds no new behavior rows; it only makes already closed exact
+  stock-Git evidence durable in the reviewed doc-option source list.
+- Focused verification was
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(diff-index|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `diff-index` now has `78/112` documented option pairs reviewed complete with
+  `78/112` represented documented option pairs, `105/105` classified rows, and
+  `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed represented family or zero-code command-promotion cluster.
+
 Current durable census after the zero-code reviewed-complete `diff-tree`
 documented-option promotion cluster:
 
