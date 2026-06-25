@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`95/151 complete command matrices / 1429/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1438/3156 represented doc-option pairs / 5394 written rows / 4691/5394 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`96/151 complete command matrices / 1431/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1440/3156 represented doc-option pairs / 5396 written rows / 4693/5396 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,26 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git commit-tree` explicit
-gpg-sign family closure plus command promotion. Zmin now matches stock Git for
-unsigned and explicitly signed commit creation on the current local lane,
-including `-S` and `--gpg-sign` success with configured signing keys,
-`-Smissing` and `--gpg-sign=missing` attached-key failures, repeated
-`--no-gpg-sign` ordering, and signed-commit payload parity after stripping the
-dynamic `gpgsig` header. With those rows closed, `commit-tree` now sits at
-`6/6` reviewed-complete documented option pairs, `6/6` represented documented
-option pairs, `62/62` classified rows, and `0` exact-open written rows, and
-is promoted into
+The latest completed slice is a helper-free `git http-push` short-delete
+family closure plus command promotion. Zmin now matches stock Git for the
+documented `-d` and `-D` short aliases on the current writable HTTP lane,
+where stock Git currently fails with the URL-access error instead of following
+the `:ref` delete-refspec success path, while keeping the existing long-option
+outside-repository rejection rows and local writable push/delete-refspec rows.
+With those rows closed, `http-push` now sits at `6/6` reviewed-complete
+documented option pairs, `6/6` represented documented option pairs,
+`10/10` classified rows, and `0` exact-open written rows, and is promoted into
 `docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
-Current counts are `95/151` complete command matrices,
-`1429/3156` complete documented option pairs,
-`1438/3156` represented documented option pairs, `5394` written rows,
-`4691` verified rows, `12` open rows, and `688` invalid-input rows. The next
-bounded high-throughput follow-up should prefer the compact `http-push` tail,
-which now sits at `4/6` reviewed-complete documented option pairs with
-`8/8` classified rows and `0` exact-open written rows, before returning to the
-heavier local `multi-pack-index --bitmap` writer lane.
+Current counts are `96/151` complete command matrices,
+`1431/3156` complete documented option pairs,
+`1440/3156` represented documented option pairs, `5396` written rows,
+`4693` verified rows, `12` open rows, and `688` invalid-input rows. The next
+bounded high-throughput follow-up should return to the heavier local
+`multi-pack-index --bitmap` writer lane, which is now the clearest remaining
+review-incomplete maintenance batch after the compact `http-push` tail.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

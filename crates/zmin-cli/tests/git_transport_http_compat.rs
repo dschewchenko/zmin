@@ -12101,3 +12101,45 @@ fn http_push_deletes_remote_refspec() {
         "(delete) -> missing (dry run)"
     );
 }
+
+#[test]
+fn http_push_short_delete_aliases_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("root.txt"), b"root\n").expect("write root");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    let head = git(&source, ["rev-parse", "HEAD"]);
+
+    for short_flag in ["-d", "-D"] {
+        let server = WritableHttpServer::new();
+        let url = server.url();
+        let remote_git = server.remote_git_dir();
+        fs::create_dir_all(remote_git.join("refs/heads")).expect("create remote refs");
+        fs::write(remote_git.join("refs/heads/main"), format!("{head}\n")).expect("write main");
+        fs::write(remote_git.join("refs/heads/topic"), format!("{head}\n"))
+            .expect("write topic");
+
+        let git_args = ["http-push", short_flag, url.as_str(), "topic"];
+        let stock = command_any_output(
+            stock_git_bin().to_str().expect("stock git path"),
+            &source,
+            &git_args,
+            "stock git http-push short delete",
+        );
+        fs::write(remote_git.join("refs/heads/topic"), format!("{head}\n"))
+            .expect("restore topic");
+        let zmin = command_any_output(zmin_bin(), &source, &git_args, "zmin http-push short delete");
+
+        assert_eq!(zmin, stock, "{short_flag}");
+        assert!(
+            remote_git.join("refs/heads/topic").exists(),
+            "{short_flag} should preserve the remote topic ref on the current writable HTTP lane"
+        );
+    }
+}

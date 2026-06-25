@@ -279,6 +279,8 @@ pub(crate) fn dispatch(
         runtime::Command::HttpPush {
             all,
             dry_run,
+            delete,
+            force_delete,
             force,
             verbose,
             remote,
@@ -286,6 +288,8 @@ pub(crate) fn dispatch(
         } => super::transport_commands::http_push(super::transport_commands::HttpPushOptions {
             all,
             dry_run,
+            delete,
+            force_delete,
             force,
             verbose,
             remote,

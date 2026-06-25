@@ -2933,6 +2933,10 @@ pub enum Command {
         all: bool,
         #[arg(long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
+        #[arg(short = 'd', action = ArgAction::SetTrue)]
+        delete: bool,
+        #[arg(short = 'D', action = ArgAction::SetTrue)]
+        force_delete: bool,
         #[arg(long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(long = "verbose", action = ArgAction::SetTrue)]

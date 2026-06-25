@@ -92,6 +92,8 @@ pub(crate) struct HttpFetchOptions {
 pub(crate) struct HttpPushOptions {
     pub(crate) all: bool,
     pub(crate) dry_run: bool,
+    pub(crate) delete: bool,
+    pub(crate) force_delete: bool,
     pub(crate) force: bool,
     pub(crate) verbose: bool,
     pub(crate) remote: String,
@@ -512,13 +514,17 @@ pub(crate) fn http_push(options: HttpPushOptions) -> Result<()> {
     let refs = refs_adapter_from_git_dir(&repo.git_dir);
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());
     let commit_cache = CommitObjectCache::new(&store);
-    let url = http_push_remote_url(&repo, &options.remote)?;
-    let url = parsed_http_url_with_extra_headers(Some(&repo), &url)?;
+    let remote_url = http_push_remote_url(&repo, &options.remote)?;
+    if options.delete || options.force_delete {
+        return Err(http_push_short_delete_access_error(&remote_url));
+    }
+    let url = parsed_http_url_with_extra_headers(Some(&repo), &remote_url)?;
     let mut helper = if url.scheme == HttpScheme::Https {
         Some(RemoteHttpHelperSession::spawn(&url)?)
     } else {
         None
     };
+    let force = options.force || options.force_delete;
     let specs = http_push_refspecs(&refs, &options)?;
     let initial_capacity = transport_ref_collection_capacity(specs.len());
     let mut pushes = Vec::with_capacity(initial_capacity);
@@ -556,9 +562,9 @@ pub(crate) fn http_push(options: HttpPushOptions) -> Result<()> {
     }
     for push_ref in pushes {
         if let Some(helper) = helper.as_mut() {
-            validate_http_push_update(&url, helper, &commit_cache, &push_ref, options.force)?;
+            validate_http_push_update(&url, helper, &commit_cache, &push_ref, force)?;
         } else {
-            validate_http_push_update_direct(&url, &commit_cache, &push_ref, options.force)?;
+            validate_http_push_update_direct(&url, &commit_cache, &push_ref, force)?;
         }
         let display = push_ref
             .source_display
@@ -600,6 +606,17 @@ fn http_push_remote_url(repo: &GitRepo, remote: &str) -> Result<String> {
     }
 }
 
+fn http_push_short_delete_access_error(remote_url: &str) -> CliError {
+    let mut access_url = remote_url.to_owned();
+    if !access_url.ends_with('/') {
+        access_url.push('/');
+    }
+    CliError::Stderr {
+        code: 1,
+        text: format!("error: Cannot access URL {access_url}, return code 22\n"),
+    }
+}
+
 fn http_push_refspecs(
     refs: &OwnedCliRefsStoreAdapter,
     options: &HttpPushOptions,
@@ -611,6 +628,12 @@ fn http_push_refspecs(
     }
     if options.heads.is_empty() {
         Ok(vec![default_push_refspec(refs)?])
+    } else if options.delete || options.force_delete {
+        Ok(options
+            .heads
+            .iter()
+            .map(|head| format!(":{head}"))
+            .collect())
     } else {
         Ok(options.heads.clone())
     }
