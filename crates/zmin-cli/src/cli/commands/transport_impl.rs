@@ -121,9 +121,13 @@ pub(crate) struct SendPackOptions {
     pub(crate) dry_run: bool,
     pub(crate) force: bool,
     pub(crate) receive_pack: Option<String>,
+    pub(crate) exec: Option<String>,
     pub(crate) verbose: bool,
     pub(crate) thin: bool,
     pub(crate) atomic: bool,
+    pub(crate) signed: Option<String>,
+    pub(crate) no_signed: bool,
+    pub(crate) push_option: Vec<String>,
     pub(crate) all: bool,
     pub(crate) stdin: bool,
     pub(crate) directory: String,
@@ -6559,15 +6563,29 @@ fn fetch_pack_tag_peels_into(
 }
 
 pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
-    if options
-        .receive_pack
-        .as_deref()
-        .is_some_and(|value| value != "git-receive-pack")
-    {
+    let receive_pack = options.exec.as_deref().or(options.receive_pack.as_deref());
+    if receive_pack.is_some_and(|value| value != "git-receive-pack") {
         return Err(CliError::Fatal {
             code: 129,
             message: "send-pack currently supports local refs without optional protocol modes"
                 .into(),
+        });
+    }
+    if !options.push_option.is_empty() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text:
+                "fatal: the receiving end does not support push options\nfatal: the remote end hung up unexpectedly\n"
+                    .into(),
+        });
+    }
+    let signed_mode = send_pack_signed_mode(options.signed.as_deref(), options.no_signed);
+    if matches!(signed_mode, SendPackSignedMode::True) {
+        return Err(CliError::Stderr {
+            code: 128,
+            text:
+                "fatal: the receiving end does not support --signed push\nfatal: the remote end hung up unexpectedly\n"
+                    .into(),
         });
     }
     let repo = find_repo_or_bare()?;
@@ -6621,6 +6639,7 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
     let mut copied = HashSet::with_capacity(initial_capacity);
     let mut statuses = Vec::with_capacity(push_refs.len());
     for push_ref in push_refs {
+        let forced = options.mirror || push_ref.force;
         let old_id = send_pack_current_ref_id(&destination_refs, &push_ref.destination)?;
         if !options.dry_run {
             if let Some(id) = &push_ref.id {
@@ -6639,12 +6658,36 @@ pub(crate) fn send_pack(options: SendPackOptions) -> Result<()> {
         statuses.push(SendPackStatus {
             push_ref,
             old_id,
-            forced: options.mirror || options.force,
+            forced,
         });
+    }
+    if matches!(signed_mode, SendPackSignedMode::IfAsked) {
+        eprintln!(
+            "warning: not sending a push certificate since the receiving end does not support --signed push"
+        );
     }
     send_pack_write_status_report(&options.directory, &statuses)?;
     let _ = (options.thin, options.atomic, options.verbose, copied);
     Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SendPackSignedMode {
+    False,
+    True,
+    IfAsked,
+}
+
+fn send_pack_signed_mode(signed: Option<&str>, no_signed: bool) -> SendPackSignedMode {
+    if no_signed {
+        return SendPackSignedMode::False;
+    }
+    match signed {
+        Some("true") => SendPackSignedMode::True,
+        Some("if-asked") => SendPackSignedMode::IfAsked,
+        Some("false") | None => SendPackSignedMode::False,
+        Some(_) => SendPackSignedMode::False,
+    }
 }
 
 struct SendPackStatus {
@@ -6664,6 +6707,16 @@ fn send_pack_current_ref_id(refs: &RefStore, ref_name: &str) -> Result<Option<Ob
 
 fn send_pack_write_status_report(remote: &str, statuses: &[SendPackStatus]) -> Result<()> {
     let mut stderr = io::stderr().lock();
+    let has_effective_update = statuses.iter().any(|status| match (&status.old_id, &status.push_ref.id) {
+        (None, Some(_)) => true,
+        (Some(old), Some(new)) => old != new,
+        (Some(_), None) => true,
+        (None, None) => false,
+    });
+    if !has_effective_update {
+        writeln!(stderr, "Everything up-to-date")?;
+        return Ok(());
+    }
     writeln!(stderr, "To {remote}")?;
     for status in statuses {
         let destination = send_pack_display_ref(&status.push_ref.destination);
@@ -6678,6 +6731,9 @@ fn send_pack_write_status_report(remote: &str, statuses: &[SendPackStatus]) -> R
                 writeln!(stderr, " * [new branch]      {source} -> {destination}")?;
             }
             (Some(old), Some(new)) => {
+                if old == new {
+                    continue;
+                }
                 if status.forced && !is_zero_object_id_object(old) && old != new {
                     writeln!(
                         stderr,

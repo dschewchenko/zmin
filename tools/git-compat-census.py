@@ -760,7 +760,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
         schema_refs = zmin_options.get((command, spelling), []) or nested_schema_refs(
             command, spelling, zmin_options, command_set
         )
-        if (command, spelling) in complete_option_pairs and not (statuses["open"] or statuses["partial"]):
+        if (command, spelling) in complete_option_pairs:
             continue
         if statuses["closed"] or statuses["invalid-input"]:
             next_action = "expand remaining values, negations, repeated forms, combinations, states, transports and platforms for this documented option"

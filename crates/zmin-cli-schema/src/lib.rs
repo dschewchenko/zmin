@@ -2957,14 +2957,28 @@ pub enum Command {
         dry_run: bool,
         #[arg(long = "force", short = 'f', action = ArgAction::SetTrue)]
         force: bool,
-        #[arg(long = "receive-pack", alias = "exec")]
+        #[arg(long = "receive-pack")]
         receive_pack: Option<String>,
+        #[arg(long = "exec")]
+        exec: Option<String>,
         #[arg(long = "verbose", short = 'v', action = ArgAction::SetTrue)]
         verbose: bool,
         #[arg(long = "thin", action = ArgAction::SetTrue)]
         thin: bool,
         #[arg(long = "atomic", action = ArgAction::SetTrue)]
         atomic: bool,
+        #[arg(
+            long = "signed",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            value_parser = ["true", "false", "if-asked"]
+        )]
+        signed: Option<String>,
+        #[arg(long = "no-signed", action = ArgAction::SetTrue)]
+        no_signed: bool,
+        #[arg(long = "push-option")]
+        push_option: Vec<String>,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]

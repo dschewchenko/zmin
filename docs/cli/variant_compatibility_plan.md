@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`84/151 complete command matrices / 1392/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1400/3175 represented doc-option pairs / 5342 written rows / 4648/5342 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`89/151 complete command matrices / 1409/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1417/3156 represented doc-option pairs / 5364 written rows / 4668/5364 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,15 +300,20 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is helper-free `git ls-tree`: it now closes the
-remaining schema-tail for `-d`, `-l`, `-z`, `--name-status`, `--object-only`,
-`--abbrev[=<n>]`, `--full-name`, `--full-tree`, and `--format`, promotes
-`ls-tree` to `13/13` reviewed-complete documented option pairs, and moves the
-command to reviewed-complete at `13/13` represented documented option pairs,
-`18/18` classified rows, and `0` exact-open rows. The next bounded helper-free
-follow-up should move away from `ls-tree`; the smallest remaining supported
-schema-tail candidate is now `send-pack`, while `fmt-merge-msg` and
-`http-fetch` still need more careful evidence selection before promotion.
+The latest completed slice is helper-free `git send-pack`: it closes the
+remaining schema-tail for `--exec`, `--no-signed`, `--signed[=<mode>]`, and
+`--push-option=<value>`, matches stock Git for signed-push fatal and warning
+paths, keeps `--exec` aligned with `--receive-pack`, and fixes local no-op
+status reporting to print `Everything up-to-date` like stock Git. This
+promotes `send-pack` to reviewed-complete at `12/12` documented option pairs,
+`12/12` represented documented option pairs, `22/22` classified rows, and `0`
+exact-open rows. The next bounded helper-free follow-up should move away from
+`send-pack`; the densest local existing-oracle family now is
+`multi-pack-index`, whose remaining documented options
+`--bitmap`, `--no-bitmap`, `--incremental`, `--preferred-pack`,
+`--refs-snapshot`, and `--stdin-packs` can reuse the existing
+`git_maintenance_compat` multi-pack-index lane instead of starting another
+one-off micro-slice.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

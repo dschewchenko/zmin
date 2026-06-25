@@ -11,6 +11,17 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free `git send-pack` schema-tail
+closure plus command promotion. The selected change expands `send-pack` to
+cover `--exec`, `--no-signed`, `--signed[=<mode>]`, and `--push-option`,
+matches stock Git for signed-push fatal and warning paths on a local bare
+remote, and fixes no-op local status reporting to emit `Everything up-to-date`
+instead of synthetic ref lines. Expected delta is `+6` matrix rows, `+4`
+complete documented option pairs, `+4` represented documented option pairs,
+`+1` complete command matrix, `+4` verified rows, `+2` invalid-input rows,
+and `-4` remaining checklist rows. Actual delta matched, and `send-pack` is
+now command-complete at `12/12`.
+
 As of 2026-06-25 the next batch is a helper-free `git ls-tree` schema-tail
 closure plus command promotion. The selected change expands `ls-tree` to cover
 the documented `-d`, `-l`, `-z`, `--name-status`, `--object-only`,

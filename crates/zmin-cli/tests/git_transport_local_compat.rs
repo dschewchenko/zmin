@@ -92,6 +92,10 @@ fn sorted_shallow_file(path: &Path) -> Vec<String> {
     lines
 }
 
+fn normalize_remote_output(text: &str, remote: &str) -> String {
+    text.replace(remote, "<remote>")
+}
+
 fn pack_dir_files(repo: &Path) -> Vec<std::path::PathBuf> {
     let pack_dir = repo.join(".git/objects/pack");
     if !pack_dir.exists() {
@@ -9752,6 +9756,70 @@ fn receive_pack_accepts_stock_git_send_pack() {
         git_status(&remote, ["rev-parse", "--verify", "refs/heads/feature"]),
         0
     );
+}
+
+#[test]
+fn send_pack_signed_and_push_option_modes_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let git_remote = dir.path().join("git-remote.git");
+    let zmin_remote = dir.path().join("zmin-remote.git");
+    let git_work = dir.path().join("git-work");
+    let zmin_work = dir.path().join("zmin-work");
+    git(dir.path(), ["init", "--bare", "git-remote.git"]);
+    git(dir.path(), ["init", "--bare", "zmin-remote.git"]);
+    git(dir.path(), ["init", "-b", "main", "git-work"]);
+    git(dir.path(), ["init", "-b", "main", "zmin-work"]);
+    configure_identity(&git_work);
+    configure_identity(&zmin_work);
+    fs::write(git_work.join("a.txt"), b"hello\n").expect("write git");
+    fs::write(zmin_work.join("a.txt"), b"hello\n").expect("write zmin");
+    git(&git_work, ["add", "-A"]);
+    git(&zmin_work, ["add", "-A"]);
+    git_with_env(&git_work, ["commit", "-m", "initial"]);
+    run_zmin_with_env(&zmin_work, ["commit", "-m", "initial"]);
+
+    let git_remote_path = git_remote.to_str().expect("git remote");
+    let zmin_remote_path = zmin_remote.to_str().expect("zmin remote");
+    for args in [
+        &["send-pack", "--no-signed", zmin_remote_path, "refs/heads/main"][..],
+        &["send-pack", "--signed=false", zmin_remote_path, "refs/heads/main"][..],
+        &["send-pack", "--signed=if-asked", zmin_remote_path, "refs/heads/main"][..],
+        &["send-pack", "--exec=git-receive-pack", zmin_remote_path, "refs/heads/main"][..],
+    ] {
+        let git_args = args
+            .iter()
+            .map(|value| if *value == zmin_remote_path { git_remote_path } else { *value })
+            .collect::<Vec<_>>();
+        let zmin = command_any_output(zmin_bin(), &zmin_work, args, "zmin");
+        let git = command_any_output("git", &git_work, &git_args, "git");
+        assert_eq!(zmin.0, git.0, "args: {args:?}");
+        assert_eq!(zmin.1, git.1, "args: {args:?}");
+        assert_eq!(
+            normalize_remote_output(&zmin.2, zmin_remote_path),
+            normalize_remote_output(&git.2, git_remote_path),
+            "args: {args:?}"
+        );
+    }
+
+    let git_push_option = git_failure_output(
+        &git_work,
+        &["send-pack", "--push-option=abc", git_remote_path, "refs/heads/main"],
+    );
+    let zmin_push_option = run_zmin_failure_output(
+        &zmin_work,
+        &["send-pack", "--push-option=abc", zmin_remote_path, "refs/heads/main"],
+    );
+    assert_eq!(zmin_push_option, git_push_option);
+
+    let git_signed = git_failure_output(
+        &git_work,
+        &["send-pack", "--signed", git_remote_path, "refs/heads/main"],
+    );
+    let zmin_signed = run_zmin_failure_output(
+        &zmin_work,
+        &["send-pack", "--signed", zmin_remote_path, "refs/heads/main"],
+    );
+    assert_eq!(zmin_signed, git_signed);
 }
 
 #[test]

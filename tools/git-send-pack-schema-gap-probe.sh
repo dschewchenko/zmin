@@ -102,8 +102,14 @@ run_exact send_pack_dry_run empty 0 0 "" --dry-run refs/heads/main
 run_exact send_pack_force main 0 0 "" --force refs/heads/main
 run_exact send_pack_receive_pack empty 0 0 "" --receive-pack=git-receive-pack refs/heads/main
 run_exact send_pack_receive_pack_separate empty 0 0 "" --receive-pack git-receive-pack refs/heads/main
+run_exact send_pack_exec empty 0 0 "" --exec=git-receive-pack refs/heads/main
 run_exact send_pack_stdin empty 0 0 "refs/heads/main"$'\n' --stdin
+run_exact send_pack_no_signed empty 0 0 "" --no-signed refs/heads/main
+run_exact send_pack_signed_false empty 0 0 "" --signed=false refs/heads/main
+run_exact send_pack_signed_if_asked empty 0 0 "" --signed=if-asked refs/heads/main
 run_exact send_pack_verbose empty 0 0 "" --verbose refs/heads/main
 run_exact send_pack_force_short main 0 0 "" -f refs/heads/main
 run_exact send_pack_dry_run_short empty 0 0 "" -n refs/heads/main
 run_exact send_pack_verbose_short empty 0 0 "" -v refs/heads/main
+run_exact send_pack_signed_true empty 128 128 "" --signed refs/heads/main
+run_exact send_pack_push_option empty 128 128 "" --push-option=abc refs/heads/main
