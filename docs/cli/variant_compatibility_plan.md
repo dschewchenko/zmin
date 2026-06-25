@@ -310,11 +310,13 @@ all focused oracle buckets in `docs/cli/existing_oracle_test_inventory.tsv`
 are now fully represented or classified. The next recommended batch still
 keeps the exact-open queue visible, but the smallest local no-helper follow-up
 is no longer `git column`; that local subgroup is closed. `git pack-refs` now
-has all `5/5` documented options represented too, so the next smallest local
-parser-plus-evidence batch has now also closed the small `git prune`
-documented-flag subgroup. The next smallest helper-free follow-up should move
-to the next narrow command-tail classification or helper-free doc-option
-subgroup after the new `git hash-object` long-option batch.
+has all `5/5` documented options represented too, and
+`interpret-trailers` is now reviewed complete. The next highest-throughput
+helper-free families
+by current doc-option tail size are `repack` (`17/33` represented documented
+options), `read-tree` (`3/17`), and `gc` (`5/12`), so the next batch should
+target one of those documented-option families rather than another one-row
+command tail.
 The exact helper-backed
 foreign-SCM `git p4 submit` row is closed with a focused stock-vs-Zmin
 oracle. The remaining exact-open tail in this environment is the
@@ -323,21 +325,25 @@ local-helper-unavailable batch tracked in
 
 ### Latest Completed Slice
 
-The latest completed slice is another zero-row reviewed-complete closure batch
-for helper-free commands `replace` and `merge-file`. Their matrices, stock
-evidence and documented option coverage already existed; this slice promoted
-them into the reviewed-complete command and doc-option census artifacts.
+The latest completed slice is a focused `git interpret-trailers`
+parser-plus-evidence closure plus reviewed-complete promotion. This slice
+added the documented `--no-where`, `--no-if-exists`, and `--no-if-missing`
+parser surfaces, closed their exact stock-Git reset-ordering rows, and then
+promoted `interpret-trailers` into the reviewed-complete command and
+doc-option census artifacts.
 
 Focused gates were
+`cargo test -p zmin-cli --test git_mail_tools_compat interpret_trailers_matches_stock_git_for_common_modes -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(replace|merge-file|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(interpret-trailers|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5106` matrix rows, `4405` verified rows, `672`
+Current census counts are `5109` matrix rows, `4408` verified rows, `672`
 invalid-input rows, `26` exact-open local-oracle-unavailable rows, `26`
-open-or-partial rows, `58/151` complete command matrices, `197/3175`
-complete documented option pairs, and `3004` remaining checklist rows.
+open-or-partial rows, `59/151` complete command matrices, `211/3175`
+complete documented option pairs, and `2990` remaining checklist rows.
 The promoted commands now read:
 - `replace` `11/11` represented documented options, `19/19` classified rows, `19/19` matching stock Git rows, `0` open
 - `merge-file` `10/10` represented documented options, `50/50` classified rows, `36/50` matching stock Git rows, `0` open

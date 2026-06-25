@@ -19,6 +19,16 @@ empty stderr, opened edit/add/delete operations and remote-ref advance.
 Expected delta is `+0` matrix rows, `+1` verified row, `-1` open row, `0`
 invalid-input rows and `-1` remaining checklist row. Actual delta matched.
 
+As of 2026-06-25 the next batch is an `interpret-trailers`
+parser-plus-evidence closure plus reviewed-complete promotion. The selected
+rows add the documented `--no-where`, `--no-if-exists`, and
+`--no-if-missing` parser surfaces, close their exact stock-Git reset-ordering
+rows, and then promote `interpret-trailers` into the durable reviewed-complete
+command and doc-option census artifacts. Expected delta is `+3` matrix rows,
+`+3` verified rows, `+1` complete command matrix, `+14` complete documented
+option pairs, `0` invalid-input rows and `-14` remaining checklist rows. Rust
+behavior changes are expected. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for helper-free commands `diagnose`, `imap-send`, `mailsplit`, `mv`
 and `quiltimport`. Their behavior rows, stock evidence and documented option
@@ -5668,6 +5678,45 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+0` represented doc-option pairs, `+0`
 implemented-but-unverified schema rows, `-28` remaining checklist rows,
 `+7` complete command matrices, and `+28` complete doc-option pairs.
+
+## 2026-06-25 - interpret-trailers no-* reset closure and reviewed-complete promotion
+
+Expected movement:
+
+- behavior rows: `+3`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+3`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-14`
+- complete command matrices: `+1`
+- complete doc-option pairs: `+14`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git interpret-trailers --where before --no-where --trailer 'Acked-by: C' < message.txt`
+- `git interpret-trailers --if-exists add --no-if-exists --trailer 'Acked-by: B' < message.txt`
+- `git interpret-trailers --if-missing doNothing --no-if-missing --trailer 'Reviewed-by: C' < message.txt`
+
+This batch closes the remaining local `git interpret-trailers` documented
+parser tail by adding the three documented `--no-*` reset forms and matching
+their stock-Git last-one-wins behavior against earlier `--where`,
+`--if-exists`, and `--if-missing` overrides. With all `14/14` documented
+options represented, `22/22` written rows classified, and `0` open rows, the
+same slice then promotes `interpret-trailers` into the durable
+reviewed-complete command and doc-option-pair lists.
+
+Actual post-import movement matched the declaration: `+3` behavior rows, `+3`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows, `-14` remaining checklist rows,
+`+1` complete command matrix, and `+14` complete doc-option pairs.
 
 ## 2026-06-25 - commit-graph progress ordering surface
 

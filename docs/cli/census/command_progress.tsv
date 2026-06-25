@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	58	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	197	3175	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	59	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	211	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1333	3175	documented command-option pairs with at least one behavior row
-behavior_rows_written	5106	5106	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4405	5106	closed written rows only
-behavior_rows_classified	5077	5106	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5106	written rows with incomplete parity
-behavior_rows_open	26	5106	written rows not implemented or not matching yet
-invalid_input_rows	672	5106	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1336	3175	documented command-option pairs with at least one behavior row
+behavior_rows_written	5109	5109	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4408	5109	closed written rows only
+behavior_rows_classified	5080	5109	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5109	written rows with incomplete parity
+behavior_rows_open	26	5109	written rows not implemented or not matching yet
+invalid_input_rows	672	5109	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	31	0	27	87.1	126	126	100.0	110	87.3	0	0	16	no
@@ -78,7 +78,7 @@ imap-send	6	6	6	100.0	7	7	100.0	7	100.0	0	0	0	yes
 index-pack	16	0	10	62.5	17	17	100.0	11	64.7	0	0	6	no
 init	0	0	0	0.0	12	12	100.0	10	83.3	0	0	2	no
 instaweb	13	0	11	84.6	14	0	0.0	0	0.0	0	14	0	no
-interpret-trailers	14	0	11	78.6	19	19	100.0	19	100.0	0	0	0	no
+interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes
 log	134	0	18	13.4	111	111	100.0	106	95.5	0	0	5	no
 ls-files	39	0	38	97.4	158	158	100.0	138	87.3	0	0	20	no
 ls-remote	14	1	3	21.4	37	37	100.0	33	89.2	0	0	4	no

@@ -500,12 +500,18 @@ pub enum Command {
         in_place: bool,
         #[arg(long = "trim-empty", action = ArgAction::SetTrue)]
         trim_empty: bool,
-        #[arg(long = "where")]
+        #[arg(long = "where", overrides_with = "no_where")]
         where_: Option<String>,
-        #[arg(long = "if-exists")]
+        #[arg(long = "no-where", overrides_with = "where_", action = ArgAction::SetTrue)]
+        no_where: bool,
+        #[arg(long = "if-exists", overrides_with = "no_if_exists")]
         if_exists: Option<String>,
-        #[arg(long = "if-missing")]
+        #[arg(long = "no-if-exists", overrides_with = "if_exists", action = ArgAction::SetTrue)]
+        no_if_exists: bool,
+        #[arg(long = "if-missing", overrides_with = "no_if_missing")]
         if_missing: Option<String>,
+        #[arg(long = "no-if-missing", overrides_with = "if_missing", action = ArgAction::SetTrue)]
+        no_if_missing: bool,
         #[arg(long = "only-trailers", action = ArgAction::SetTrue)]
         only_trailers: bool,
         #[arg(long = "only-input", action = ArgAction::SetTrue)]

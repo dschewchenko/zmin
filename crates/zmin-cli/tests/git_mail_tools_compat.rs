@@ -318,6 +318,51 @@ fn interpret_trailers_matches_stock_git_for_common_modes() {
             empty_trailer
         )
     );
+
+    for (args, stdin) in [
+        (
+            [
+                "interpret-trailers",
+                "--where",
+                "before",
+                "--no-where",
+                "--trailer",
+                "Acked-by: C",
+            ]
+            .as_slice(),
+            fixture,
+        ),
+        (
+            [
+                "interpret-trailers",
+                "--if-exists",
+                "add",
+                "--no-if-exists",
+                "--trailer",
+                "Acked-by: B",
+            ]
+            .as_slice(),
+            fixture,
+        ),
+        (
+            [
+                "interpret-trailers",
+                "--if-missing",
+                "doNothing",
+                "--no-if-missing",
+                "--trailer",
+                "Reviewed-by: C",
+            ]
+            .as_slice(),
+            fixture,
+        ),
+    ] {
+        assert_eq!(
+            run_zmin_with_stdin_args(repo.path(), args, stdin),
+            git_with_stdin_args(repo.path(), args, stdin),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]
