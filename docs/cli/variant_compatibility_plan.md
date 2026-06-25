@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1234/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
+`82/151 complete command matrices / 1241/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1386/3175 represented doc-option pairs / 5332 written rows / 4624/5332 written rows matching stock Git / 0 partial written rows / 26 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,35 +343,35 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `shortlog` doc-option promotion, `shortlog` now
-adds another `9` durable reviewed-complete documented option pairs without
-changing Rust behavior and is up to `9/128` documented options complete with
-`9/128` represented documented option pairs and `11/11` classified rows.
+After the latest zero-code `show-branch` doc-option promotion, `show-branch`
+adds another `7` durable reviewed-complete documented option pairs without
+changing Rust behavior and is up to `7/19` documented options complete with
+`7/19` represented documented option pairs and `10/10` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
 represented family or zero-code command-promotion cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `shortlog` surface. The
-existing exact stock-Git evidence already closed nine `shortlog` option
-families across local author-summary, committer-grouping, summary, numbering,
-email, range, and non-merge lanes, so this slice only promotes those
+promotion cluster for the represented helper-free `show-branch` surface. The
+existing exact stock-Git evidence already closed seven `show-branch` option
+families across local branch-graph, explicit-revision, current-branch,
+no-name, and remote-listing lanes, so this slice only promotes those
 documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(shortlog|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(show-branch|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1234/3175` complete documented option pairs, and `1967`
-remaining checklist rows. `shortlog` now reads `128` documented option
-pairs with `9` reviewed complete, `9` represented documented option pairs,
-and `11/11` classified written rows with `0` open.
+matrices, `1241/3175` complete documented option pairs, and `1960`
+remaining checklist rows. `show-branch` now reads `19` documented option
+pairs with `7` reviewed complete, `7` represented documented option pairs,
+and `10/10` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1181,11 +1181,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code reviewed-complete `shortlog`
+Current durable census after the zero-code reviewed-complete `show-branch`
 documented-option promotion cluster:
 
 - complete command matrices: `82 / 151`
-- complete documented command-option pairs: `1234 / 3175`
+- complete documented command-option pairs: `1241 / 3175`
 - matrix rows: `5332`
 - verified rows: `4624`
 - invalid-input rows: `679`
@@ -1193,22 +1193,21 @@ documented-option promotion cluster:
 
 Latest completed batch:
 
-- `shortlog` now has nine represented helper-free local documented option
+- `show-branch` now has seven represented helper-free local documented option
   families promoted into the reviewed-complete doc-option census list,
-  bringing the command to `9/128` reviewed-complete documented option pairs.
+  bringing the command to `7/19` reviewed-complete documented option pairs.
 - The slice adds no new behavior rows; it only makes already closed exact
-  stock-Git local author-summary, committer-grouping, summary, numbering,
-  email, range, and non-merge evidence durable in the reviewed doc-option
-  source list.
+  stock-Git local branch-graph, explicit-revision, current-branch, no-name,
+  and remote-listing evidence durable in the reviewed doc-option source list.
 - Focused verification was
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(shortlog|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(show-branch|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `shortlog` now has `9/128` documented option pairs reviewed complete with
-  `9/128` represented documented option pairs, `11/11` classified rows, and
+- `show-branch` now has `7/19` documented option pairs reviewed complete with
+  `7/19` represented documented option pairs, `10/10` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
