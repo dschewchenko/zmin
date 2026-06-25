@@ -11,6 +11,16 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free existing-oracle
+`multi-pack-index --progress/--no-progress` family closure. The selected
+change promotes the currently modeled `multi-pack-index` progress toggles from
+schema-only backlog into exact stock-Git evidence across write, verify,
+expire, and batch-size-one repack lanes, and adds the missing runtime parity
+for `verify --progress` stderr plus last-one-wins progress toggle resolution.
+Expected delta is `+8` matrix rows, `+2` complete documented option pairs,
+`+0` complete command matrices, `+8` verified rows, `+0` invalid-input rows,
+and `-2` remaining checklist rows. Actual delta matched.
+
 As of 2026-06-25 the next batch is a census-only classification correction for
 top-level hyphen-prefix commands. The selected change does not add new
 behavior evidence or change Rust runtime behavior; it fixes

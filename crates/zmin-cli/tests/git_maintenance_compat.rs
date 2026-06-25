@@ -860,29 +860,80 @@ fn repack_write_midx_empty_repo_noops_like_stock_git() {
 }
 
 #[test]
-fn multi_pack_index_progress_flags_are_accepted_like_stock_git() {
-    let repo = two_pack_midx_fixture();
-
-    assert_eq!(
-        run_zmin(repo.path(), ["multi-pack-index", "write", "--no-progress"]),
-        ""
-    );
-    assert_eq!(
-        run_zmin(repo.path(), ["multi-pack-index", "verify", "--progress"]),
-        ""
-    );
-    assert_eq!(
-        run_zmin(repo.path(), ["multi-pack-index", "expire", "--no-progress"]),
-        ""
-    );
-    assert_eq!(
-        run_zmin(
-            repo.path(),
-            ["multi-pack-index", "repack", "--progress", "--batch-size=1"]
+fn multi_pack_index_progress_flags_match_stock_git() {
+    for (label, args, seed_write) in [
+        (
+            "write --progress",
+            ["multi-pack-index", "write", "--progress"].as_slice(),
+            false,
         ),
-        ""
-    );
-    assert_eq!(git_status(repo.path(), ["multi-pack-index", "verify"]), 0);
+        (
+            "write --no-progress",
+            ["multi-pack-index", "write", "--no-progress"].as_slice(),
+            false,
+        ),
+        (
+            "verify --progress",
+            ["multi-pack-index", "verify", "--progress"].as_slice(),
+            true,
+        ),
+        (
+            "verify --no-progress",
+            ["multi-pack-index", "verify", "--no-progress"].as_slice(),
+            true,
+        ),
+        (
+            "expire --progress",
+            ["multi-pack-index", "expire", "--progress"].as_slice(),
+            true,
+        ),
+        (
+            "expire --no-progress",
+            ["multi-pack-index", "expire", "--no-progress"].as_slice(),
+            true,
+        ),
+        (
+            "repack --progress --batch-size=1",
+            [
+                "multi-pack-index",
+                "repack",
+                "--progress",
+                "--batch-size=1",
+            ]
+            .as_slice(),
+            true,
+        ),
+        (
+            "repack --no-progress --batch-size=1",
+            [
+                "multi-pack-index",
+                "repack",
+                "--no-progress",
+                "--batch-size=1",
+            ]
+            .as_slice(),
+            true,
+        ),
+    ] {
+        let git_repo = two_pack_midx_fixture();
+        let zmin_repo = two_pack_midx_fixture();
+
+        if seed_write {
+            git(git_repo.path(), ["multi-pack-index", "write"]);
+            assert_eq!(
+                run_zmin(zmin_repo.path(), ["multi-pack-index", "write"]),
+                ""
+            );
+            assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+        }
+
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "{label}"
+        );
+        assert_repository_state_matches(zmin_repo.path(), git_repo.path());
+    }
 }
 
 #[test]

@@ -160,7 +160,10 @@ pub(crate) fn dispatch(
         runtime::Command::MultiPackIndex {
             object_dir,
             command,
-        } => super::pack_commands::multi_pack_index_command(object_dir, command),
+        } => super::pack_commands::multi_pack_index_command(
+            object_dir,
+            resolve_multi_pack_index_command_toggles(command, raw_args),
+        ),
         _ => unreachable!("non-pack command dispatched to pack"),
     }
 }
@@ -207,6 +210,44 @@ fn resolve_commit_graph_progress(raw_args: &[String], progress: bool, no_progres
         }
     }
     resolved
+}
+
+fn resolve_multi_pack_index_command_toggles(
+    command: runtime::MultiPackIndexCommand,
+    raw_args: &[String],
+) -> runtime::MultiPackIndexCommand {
+    match command {
+        runtime::MultiPackIndexCommand::Write {
+            progress,
+            no_progress,
+        } => runtime::MultiPackIndexCommand::Write {
+            progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
+            no_progress: false,
+        },
+        runtime::MultiPackIndexCommand::Verify {
+            progress,
+            no_progress,
+        } => runtime::MultiPackIndexCommand::Verify {
+            progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
+            no_progress: false,
+        },
+        runtime::MultiPackIndexCommand::Expire {
+            progress,
+            no_progress,
+        } => runtime::MultiPackIndexCommand::Expire {
+            progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
+            no_progress: false,
+        },
+        runtime::MultiPackIndexCommand::Repack {
+            batch_size,
+            progress,
+            no_progress,
+        } => runtime::MultiPackIndexCommand::Repack {
+            batch_size,
+            progress: resolve_commit_graph_progress(raw_args, progress, no_progress),
+            no_progress: false,
+        },
+    }
 }
 
 fn resolve_bundle_progress(raw_args: &[String], progress: bool, no_progress: bool) -> bool {

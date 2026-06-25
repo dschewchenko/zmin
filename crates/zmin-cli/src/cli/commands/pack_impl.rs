@@ -59,10 +59,7 @@ fn multi_pack_index(object_dir: Option<PathBuf>, command: MultiPackIndexCommand)
         MultiPackIndexCommand::Verify {
             progress,
             no_progress,
-        } => {
-            let _ = (progress, no_progress);
-            multi_pack_index_verify(&objects_dir)
-        }
+        } => multi_pack_index_verify(&objects_dir, progress, no_progress),
         MultiPackIndexCommand::Expire {
             progress,
             no_progress,
@@ -109,14 +106,24 @@ fn empty_multi_pack_index_failure_code() -> i32 {
     1
 }
 
-fn multi_pack_index_verify(objects_dir: &std::path::Path) -> Result<()> {
+fn multi_pack_index_verify(
+    objects_dir: &std::path::Path,
+    progress: bool,
+    no_progress: bool,
+) -> Result<()> {
     let path = objects_dir.join("pack/multi-pack-index");
     let bytes = match map_file_bytes(&path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(err) => return Err(CliError::Io(err)),
     };
-    verify_multi_pack_index_bytes(bytes.as_slice())
+    verify_multi_pack_index_bytes(bytes.as_slice())?;
+    if progress && !no_progress {
+        let (oid_count, object_count) =
+            multi_pack_index_verify_progress_counts(objects_dir, bytes.as_slice())?;
+        print_multi_pack_index_verify_progress(oid_count, object_count);
+    }
+    Ok(())
 }
 
 fn multi_pack_index_expire(objects_dir: &std::path::Path) -> Result<()> {
@@ -751,6 +758,74 @@ fn verify_multi_pack_index_bytes(bytes: &[u8]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn multi_pack_index_verify_progress_counts(
+    objects_dir: &std::path::Path,
+    bytes: &[u8],
+) -> Result<(usize, usize)> {
+    let digest_len = GitHashAlgorithm::Sha1.digest_len();
+    let graph_data_end = bytes.len() - digest_len;
+    let chunk_count = bytes[6] as usize;
+    let mut chunks = Vec::with_capacity(chunk_count);
+    for idx in 0..chunk_count {
+        let cursor = 12 + idx * 12;
+        chunks.push((
+            [
+                bytes[cursor],
+                bytes[cursor + 1],
+                bytes[cursor + 2],
+                bytes[cursor + 3],
+            ],
+            read_u64_be(&bytes[cursor + 4..cursor + 12])? as usize,
+        ));
+    }
+    let pnam = commit_graph_chunk_range_from_offsets(bytes, &chunks, b"PNAM", graph_data_end)?;
+    let oidf = commit_graph_chunk_range_from_offsets(bytes, &chunks, b"OIDF", graph_data_end)?;
+    let oid_count = read_u32_be(&oidf[255 * 4..256 * 4])? as usize;
+    let mut object_count = 0_usize;
+    let pack_dir = objects_dir.join("pack");
+    for pack in pnam.split(|byte| *byte == 0).filter(|name| !name.is_empty()) {
+        let pack_name = std::str::from_utf8(pack).map_err(|error| {
+            CliError::Fatal {
+                code: 1,
+                message: format!("multi-pack-index pack name is not valid UTF-8: {error}"),
+            }
+        })?;
+        object_count += pack_index_object_count_with_context(&pack_dir.join(pack_name))?;
+    }
+    Ok((oid_count.saturating_sub(1), object_count))
+}
+
+fn print_multi_pack_index_verify_progress(oid_count: usize, object_count: usize) {
+    eprint!(
+        "Verifying OID order in multi-pack-index: 100% ({}/{})\r",
+        oid_count, oid_count
+    );
+    eprintln!(
+        "Verifying OID order in multi-pack-index: 100% ({}/{}), done.",
+        oid_count, oid_count
+    );
+    eprint!(
+        "Sorting objects by packfile:   0% (0/{})\r",
+        object_count
+    );
+    eprint!(
+        "Sorting objects by packfile: 100% ({}/{})\r",
+        object_count, object_count
+    );
+    eprintln!(
+        "Sorting objects by packfile: 100% ({}/{}), done.",
+        object_count, object_count
+    );
+    eprint!(
+        "Verifying object offsets: 100% ({}/{})\r",
+        object_count, object_count
+    );
+    eprintln!(
+        "Verifying object offsets: 100% ({}/{}), done.",
+        object_count, object_count
+    );
 }
 
 fn commit_graph(command: CommitGraphCommand) -> Result<()> {
