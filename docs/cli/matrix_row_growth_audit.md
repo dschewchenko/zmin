@@ -7609,3 +7609,14 @@ closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
 functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
 schema rows and `+0` remaining checklist rows.
+As of 2026-06-25 the latest closure is a helper-backed `git fetch-pack`
+documented-option family batch for `--exec`, `--shallow-since`,
+`--shallow-exclude`, and `--deepen-relative`. Zmin now matches stock Git on
+the local helper lane for explicit upload-pack helper override, date-limited
+history fetch, named-history exclusion, and relative deepening from an already
+shallow destination, with matching stdout, normalized progress stderr and
+resulting shallow/object side effects in focused `git_transport_local_compat`
+rows. The remaining `fetch-pack` doc tail is now only the lighter
+`--check-self-contained-and-connected` / `--refetch` pair, so the next bounded
+follow-up can either finish `fetch-pack` outright or return to the heavier
+`multi-pack-index` bitmap/incremental family.

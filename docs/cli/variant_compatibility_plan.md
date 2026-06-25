@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`89/151 complete command matrices / 1412/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1420/3156 represented doc-option pairs / 5369 written rows / 4672/5369 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`89/151 complete command matrices / 1416/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1424/3156 represented doc-option pairs / 5373 written rows / 4676/5373 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,20 +300,18 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git multi-pack-index` write-option
-family closure for `--no-bitmap`, `--preferred-pack`, and `--stdin-packs`.
-Zmin now matches stock Git on the local two-pack lane for suppressing bitmap
-sidecar creation, selecting the preferred duplicate-object pack, warning on an
-unknown preferred pack, selecting pack indexes from stdin, and failing when
-stdin selects no pack indexes. This promotes `multi-pack-index` to `6/9`
-reviewed-complete documented option pairs and `6/9` represented documented
-option pairs with `23/23` classified rows and `0` exact-open written rows.
-The remaining `multi-pack-index` tail is now the heavier
-`--bitmap` / `--incremental` / `--refs-snapshot` side-effect family, so the
-next bounded helper-free follow-up should move to another dense local lane
-instead of forcing that larger bitmap layer into this commit. The best current
-candidate is `fetch-pack`, which still has `6` remaining documented options on
-an existing local transport oracle lane.
+The latest completed slice is a helper-backed `git fetch-pack`
+documented-option family batch for `--exec`, `--shallow-since`,
+`--shallow-exclude`, and `--deepen-relative`. Zmin now matches stock Git on
+the local helper lane for explicit upload-pack helper override, date-limited
+history fetch, named-history exclusion, and relative deepening from an already
+shallow destination, with matching stdout, normalized progress stderr and
+resulting shallow/object side effects in focused `git_transport_local_compat`
+rows. This should promote `fetch-pack` to `16/18` reviewed-complete
+documented option pairs, leaving only the lighter
+`--check-self-contained-and-connected` and `--refetch` tail. The next bounded
+follow-up can now either finish `fetch-pack` outright or switch back to the
+heavier `multi-pack-index --bitmap/--incremental/--refs-snapshot` family.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

@@ -106,8 +106,14 @@ pub(crate) struct FetchPackOptions {
     pub(crate) keep: bool,
     pub(crate) thin: bool,
     pub(crate) include_tag: bool,
+    pub(crate) exec: Option<String>,
     pub(crate) upload_pack: Option<String>,
     pub(crate) depth: Option<usize>,
+    pub(crate) shallow_since: Option<String>,
+    pub(crate) shallow_exclude: Vec<String>,
+    pub(crate) deepen_relative: bool,
+    pub(crate) refetch: bool,
+    pub(crate) check_self_contained_and_connected: bool,
     pub(crate) no_progress: bool,
     pub(crate) diag_url: bool,
     pub(crate) verbose: bool,
@@ -1111,7 +1117,7 @@ fn write_upload_pack_sideband_pack_to_open_file<R: Read>(
                 trace.progress_packets += 1;
                 trace.progress_bytes += sideband_len;
                 let progress_start = trace.enabled.then(Instant::now);
-                discard_exact_payload_with_buffer(reader, sideband_len, &mut buffer)?;
+                write_sideband_progress_to_stderr(reader, sideband_len, &mut buffer)?;
                 trace.record_progress_read(progress_start);
             }
             [3] => {
@@ -1225,6 +1231,7 @@ fn write_upload_pack_v2_sideband_pack_to_open_file<R: Read>(
             2 => {
                 trace.progress_packets += 1;
                 trace.progress_bytes += sideband.len();
+                io::stderr().write_all(sideband)?;
             }
             3 => {
                 trace.error_packets += 1;
@@ -1244,6 +1251,24 @@ fn write_upload_pack_v2_sideband_pack_to_open_file<R: Read>(
     file.flush()?;
     trace.emit();
     Ok(first_bytes_len == first_bytes.len() && first_bytes == *b"PACK")
+}
+
+fn write_sideband_progress_to_stderr<R: Read>(
+    reader: &mut R,
+    len: usize,
+    buffer: &mut [u8],
+) -> Result<()> {
+    let stderr = io::stderr();
+    let mut stderr = stderr.lock();
+    let mut remaining = len;
+    while remaining > 0 {
+        let chunk = remaining.min(buffer.len());
+        reader.read_exact(&mut buffer[..chunk])?;
+        stderr.write_all(&buffer[..chunk])?;
+        remaining -= chunk;
+    }
+    stderr.flush()?;
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -5768,18 +5793,27 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     if options.diag_url {
         return fetch_pack_diag_url(&options.directory);
     }
-    let _ = options.quiet;
-    if options
-        .upload_pack
+    let shallow_since = options
+        .shallow_since
         .as_deref()
-        .is_some_and(|command| command != "git-upload-pack")
-    {
-        return Err(CliError::Fatal {
-            code: 129,
-            message: "fetch-pack currently supports local refs without optional negotiation modes"
-                .into(),
+        .map(parse_git_date)
+        .transpose()?
+        .map(|(timestamp, _)| timestamp);
+    let upload_pack_command = options
+        .exec
+        .as_deref()
+        .or(options.upload_pack.as_deref())
+        .or_else(|| {
+            if shallow_since.is_some()
+                || !options.shallow_exclude.is_empty()
+                || options.deepen_relative
+            {
+                Some("git-upload-pack")
+            } else {
+                None
+            }
         });
-    }
+    let _ = options.quiet;
     let destination = find_repo_or_bare()?;
     let source_path = absolute_path_from_arg(std::path::Path::new(&options.directory))?;
     let source = local_clone_source(&source_path)?;
@@ -5814,6 +5848,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
 
     let source_store = object_adapter_from_objects_dir(&source_repo.objects_dir);
     let destination_store = object_adapter_from_objects_dir(&destination.objects_dir);
+    let destination_refs = refs_adapter_from_git_dir(&destination.git_dir);
     let requested_capacity = transport_ref_collection_capacity(requested.len());
     let mut fetched_objects = HashSet::with_capacity(requested_capacity);
     let mut output_rows = Vec::with_capacity(requested_capacity);
@@ -5827,7 +5862,10 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
         if options.verbose {
             eprintln!("want {} ({})", id.to_hex(), ref_name);
         }
-        if let Some(depth) = options.depth {
+        let use_upload_pack = upload_pack_command.is_some();
+        if use_upload_pack {
+            shallow_roots.push(id.clone());
+        } else if let Some(depth) = options.depth {
             if object_kind_hint_or_read(&source_store, &id)? == GitObjectKind::Commit {
                 let depth_limited_commits = upload_pack_depth_limited_commits(
                     &source_store,
@@ -5861,7 +5899,69 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
         }
         output_rows.push((id, ref_name));
     }
-    if !options.no_progress {
+    if let Some(command) = upload_pack_command {
+        let haves = if options.refetch {
+            Vec::new()
+        } else {
+            collect_upload_pack_haves(&destination_store, &destination_refs)?
+        };
+        let existing_shallows = if options.deepen_relative {
+            sorted_object_ids_from_set(
+                &read_repo_shallow_boundaries(&destination)?.unwrap_or_default(),
+            )
+        } else {
+            Vec::new()
+        };
+        let shallow_boundaries = if let Some(since) = shallow_since {
+            fetch_pack_with_local_upload_pack_command_with_since(
+                command,
+                source_path.to_string_lossy().as_ref(),
+                &destination.objects_dir,
+                &shallow_roots,
+                &haves,
+                since,
+                &existing_shallows,
+                options.no_progress,
+                options.include_tag,
+                options.keep,
+            )?
+        } else if !options.shallow_exclude.is_empty() {
+            fetch_pack_with_local_upload_pack_command_with_deepen_not(
+                command,
+                source_path.to_string_lossy().as_ref(),
+                &destination.objects_dir,
+                &shallow_roots,
+                &haves,
+                &options.shallow_exclude,
+                &existing_shallows,
+                options.no_progress,
+                options.include_tag,
+                options.keep,
+            )?
+        } else {
+            fetch_pack_with_local_upload_pack_command_with_depth(
+                command,
+                source_path.to_string_lossy().as_ref(),
+                &destination.objects_dir,
+                &shallow_roots,
+                &haves,
+                options.depth,
+                &existing_shallows,
+                options.no_progress,
+                options.include_tag,
+                options.deepen_relative,
+                options.keep,
+            )?
+        };
+        if options.depth.is_some()
+            || options.deepen_relative
+            || shallow_since.is_some()
+            || !options.shallow_exclude.is_empty()
+        {
+            write_shallow_file(&destination, shallow_boundaries)?;
+        }
+    }
+    if upload_pack_command.is_none() && !options.no_progress {
         write_fetch_pack_local_progress(fetched_objects.len());
     }
     if options.keep {
@@ -5872,7 +5972,8 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     for (id, ref_name) in output_rows {
         println!("{} {}", id.to_hex(), ref_name);
     }
-    if let Some(depth) = options.depth {
+    if upload_pack_command.is_none() {
+        if let Some(depth) = options.depth {
         let shallow_root_capacity = transport_ref_collection_capacity(shallow_roots.len());
         let mut unique_roots = HashSet::with_capacity(shallow_root_capacity);
         let mut roots = Vec::with_capacity(shallow_root_capacity);
@@ -5885,6 +5986,7 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
             &destination,
             shallow_boundaries(&source_store, &roots, depth)?,
         )?;
+        }
     }
     if options.include_tag {
         copy_fetch_pack_included_tags(
@@ -5896,7 +5998,12 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
             options.depth,
         )?;
     }
-    let _ = (options.thin, options.no_progress);
+    let _ = (
+        options.thin,
+        options.no_progress,
+        options.refetch,
+        options.check_self_contained_and_connected,
+    );
     Ok(())
 }
 
@@ -5975,6 +6082,69 @@ fn write_fetch_pack_receiving_progress(objects: usize) {
         );
     }
     eprintln!("Receiving objects: 100% ({objects}/{objects}), done.");
+}
+
+fn finalize_fetch_pack_temp_pack(
+    objects_dir: &std::path::Path,
+    temp_pack: &std::path::Path,
+    keep: bool,
+    has_haves: bool,
+) -> Result<()> {
+    if keep {
+        return write_indexed_pack_file(objects_dir, temp_pack, has_haves);
+    }
+    let store = object_adapter_from_objects_dir(objects_dir.to_path_buf());
+    let result = unpack_pack_file_to_loose(&store, GitHashAlgorithm::Sha1, temp_pack);
+    let _ = fs::remove_file(temp_pack);
+    result.map(|_| ()).map_err(CliError::Io)
+}
+
+fn emit_local_upload_pack_progress_from_stderr(stderr: &[u8], no_progress: bool) {
+    if no_progress {
+        return;
+    }
+    let Some((objects, compressing)) = parse_local_upload_pack_progress(stderr) else {
+        return;
+    };
+    write_fetch_pack_local_progress(objects);
+    if let Some(compressing) = compressing {
+        write_fetch_pack_compressing_progress(compressing);
+    }
+}
+
+fn parse_local_upload_pack_progress(stderr: &[u8]) -> Option<(usize, Option<usize>)> {
+    let text = String::from_utf8_lossy(stderr);
+    let mut objects = None;
+    let mut compressing = None;
+    for segment in text.split(['\n', '\r']) {
+        let line = segment.trim();
+        if let Some(rest) = line.strip_prefix("Total ") {
+            let count = rest.split_whitespace().next()?;
+            objects = count.parse::<usize>().ok();
+        }
+        if let Some(rest) = line.strip_prefix("Compressing objects: ")
+            && let Some(start) = rest.rfind('(')
+            && let Some((_, right)) = rest[start + 1..].split_once('/')
+        {
+            let value = right
+                .trim_end_matches("), done.")
+                .trim_end_matches(')')
+                .trim();
+            compressing = value.parse::<usize>().ok();
+        }
+    }
+    objects.map(|objects| (objects, compressing.filter(|count| *count > 0)))
+}
+
+fn write_fetch_pack_compressing_progress(objects: usize) {
+    for index in 1..=objects {
+        let percent = index * 100 / objects;
+        eprint!(
+            "remote: Compressing objects: {:3}% ({}/{})        \r",
+            percent, index, objects
+        );
+    }
+    eprintln!("remote: Compressing objects: 100% ({objects}/{objects}), done.        ");
 }
 
 pub(crate) fn copy_reachable_objects(
@@ -19893,6 +20063,10 @@ fn fetch_with_repo_and_remote_depth(
                 &haves,
                 Some(depth),
                 upload_pack_shallows,
+                true,
+                true,
+                false,
+                false,
             )?;
             roots.push(id);
             write_shallow_file(
@@ -20093,6 +20267,9 @@ fn fetch_with_repo_and_remote_shallow_since(
             &haves,
             since,
             &[],
+            true,
+            true,
+            false,
         )?;
         write_shallow_file(
             &repo,
@@ -20249,6 +20426,9 @@ fn fetch_with_repo_and_remote_shallow_exclude(
             &haves,
             exclude_revs,
             &[],
+            true,
+            true,
+            false,
         )?;
         write_shallow_file(
             &repo,
@@ -20931,6 +21111,10 @@ fn fetch_local_unshallow_objects_via_upload_pack(
         &haves,
         Some(i32::MAX as usize),
         shallows,
+        true,
+        true,
+        false,
+        false,
     )
     .map(|_| ())
 }
@@ -21362,16 +21546,21 @@ impl ParsedSshUrl {
 }
 
 impl RemoteCommandSession {
-    fn finish(mut self) -> Result<()> {
+    fn finish(self) -> Result<()> {
+        self.finish_with_stderr().map(|_| ())
+    }
+
+    fn finish_with_stderr(mut self) -> Result<Vec<u8>> {
         drop(self.stdin.take());
         let status = self.child.wait()?;
-        let mut stderr = String::new();
+        let mut stderr = Vec::new();
         if let Some(mut pipe) = self.stderr.take() {
-            pipe.read_to_string(&mut stderr)?;
+            pipe.read_to_end(&mut stderr)?;
         }
         if status.success() {
-            return Ok(());
+            return Ok(stderr);
         }
+        let stderr = String::from_utf8_lossy(&stderr);
         let stderr = stderr.trim();
         Err(CliError::Fatal {
             code: status.code().unwrap_or(128),
@@ -21916,7 +22105,7 @@ fn build_upload_pack_request_with_shallows(
     depth: Option<usize>,
     shallows: &[ObjectId],
 ) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(
+    build_upload_pack_request_with_shallow_options_flags(
         roots,
         haves,
         depth,
@@ -21925,35 +22114,8 @@ fn build_upload_pack_request_with_shallows(
         shallows,
         false,
         None,
-    )
-}
-
-fn build_upload_pack_request_with_since(
-    roots: &[ObjectId],
-    haves: &[ObjectId],
-    since: i64,
-    shallows: &[ObjectId],
-) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(
-        roots,
-        haves,
-        None,
-        Some(since),
-        &[],
-        shallows,
-        false,
-        None,
-    )
-}
-
-fn build_upload_pack_request_with_deepen_not(
-    roots: &[ObjectId],
-    haves: &[ObjectId],
-    deepen_not: &[String],
-    shallows: &[ObjectId],
-) -> Result<Vec<u8>> {
-    build_upload_pack_request_with_shallow_options(
-        roots, haves, None, None, deepen_not, shallows, false, None,
+        true,
+        true,
     )
 }
 
@@ -21967,6 +22129,32 @@ fn build_upload_pack_request_with_shallow_options(
     deepen_relative: bool,
     filter: Option<&str>,
 ) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options_flags(
+        roots,
+        haves,
+        depth,
+        since,
+        deepen_not,
+        shallows,
+        deepen_relative,
+        filter,
+        true,
+        true,
+    )
+}
+
+fn build_upload_pack_request_with_shallow_options_flags(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    since: Option<i64>,
+    deepen_not: &[String],
+    shallows: &[ObjectId],
+    deepen_relative: bool,
+    filter: Option<&str>,
+    no_progress: bool,
+    include_tag: bool,
+) -> Result<Vec<u8>> {
     let mut request = Vec::with_capacity(upload_pack_request_capacity(
         roots,
         haves,
@@ -21977,16 +22165,12 @@ fn build_upload_pack_request_with_shallow_options(
         deepen_relative,
         filter,
     ));
-    let first_extra = if deepen_relative && filter.is_some() {
-        b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative filter"
-            .as_slice()
-    } else if deepen_relative {
-        b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative".as_slice()
-    } else if filter.is_some() {
-        b" side-band-64k thin-pack ofs-delta no-progress include-tag filter".as_slice()
-    } else {
-        b" side-band-64k thin-pack ofs-delta no-progress include-tag".as_slice()
-    };
+    let first_extra = upload_pack_request_capabilities(
+        deepen_relative,
+        filter.is_some(),
+        no_progress,
+        include_tag,
+    );
     for (idx, root) in roots.iter().enumerate() {
         let extra: &[u8] = if idx == 0 { first_extra } else { &[] };
         append_pkt_line_len(
@@ -22061,6 +22245,125 @@ fn build_upload_pack_request_from_shallow_options(
         options.deepen_relative,
         options.filter,
     )
+}
+
+fn build_fetch_pack_request_with_shallows(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    depth: Option<usize>,
+    shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    deepen_relative: bool,
+) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options_flags(
+        roots,
+        haves,
+        depth,
+        None,
+        &[],
+        shallows,
+        deepen_relative,
+        None,
+        no_progress,
+        include_tag,
+    )
+}
+
+fn build_fetch_pack_request_with_since(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    since: i64,
+    shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options_flags(
+        roots,
+        haves,
+        None,
+        Some(since),
+        &[],
+        shallows,
+        false,
+        None,
+        no_progress,
+        include_tag,
+    )
+}
+
+fn build_fetch_pack_request_with_deepen_not(
+    roots: &[ObjectId],
+    haves: &[ObjectId],
+    deepen_not: &[String],
+    shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+) -> Result<Vec<u8>> {
+    build_upload_pack_request_with_shallow_options_flags(
+        roots,
+        haves,
+        None,
+        None,
+        deepen_not,
+        shallows,
+        false,
+        None,
+        no_progress,
+        include_tag,
+    )
+}
+
+fn upload_pack_request_capabilities(
+    deepen_relative: bool,
+    has_filter: bool,
+    no_progress: bool,
+    include_tag: bool,
+) -> &'static [u8] {
+    match (deepen_relative, has_filter, no_progress, include_tag) {
+        (true, true, true, true) => {
+            b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative filter"
+                .as_slice()
+        }
+        (true, false, true, true) => {
+            b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative"
+                .as_slice()
+        }
+        (false, true, true, true) => {
+            b" side-band-64k thin-pack ofs-delta no-progress include-tag filter".as_slice()
+        }
+        (false, false, true, true) => {
+            b" side-band-64k thin-pack ofs-delta no-progress include-tag".as_slice()
+        }
+        (true, true, true, false) => {
+            b" side-band-64k thin-pack ofs-delta no-progress deepen-relative filter".as_slice()
+        }
+        (true, false, true, false) => {
+            b" side-band-64k thin-pack ofs-delta no-progress deepen-relative".as_slice()
+        }
+        (false, true, true, false) => {
+            b" side-band-64k thin-pack ofs-delta no-progress filter".as_slice()
+        }
+        (false, false, true, false) => b" side-band-64k thin-pack ofs-delta no-progress".as_slice(),
+        (true, true, false, true) => {
+            b" side-band-64k thin-pack ofs-delta include-tag deepen-relative filter".as_slice()
+        }
+        (true, false, false, true) => {
+            b" side-band-64k thin-pack ofs-delta include-tag deepen-relative".as_slice()
+        }
+        (false, true, false, true) => {
+            b" side-band-64k thin-pack ofs-delta include-tag filter".as_slice()
+        }
+        (false, false, false, true) => b" side-band-64k thin-pack ofs-delta include-tag".as_slice(),
+        (true, true, false, false) => {
+            b" side-band-64k thin-pack ofs-delta deepen-relative filter".as_slice()
+        }
+        (true, false, false, false) => {
+            b" side-band-64k thin-pack ofs-delta deepen-relative".as_slice()
+        }
+        (false, true, false, false) => b" side-band-64k thin-pack ofs-delta filter".as_slice(),
+        (false, false, false, false) => b" side-band-64k thin-pack ofs-delta".as_slice(),
+    }
 }
 
 fn upload_pack_request_capacity(
@@ -22692,6 +22995,10 @@ fn fetch_pack_with_local_upload_pack_command(
         haves,
         None,
         &[],
+        true,
+        true,
+        false,
+        false,
     )
     .map(|_| ())
 }
@@ -22704,6 +23011,10 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
     haves: &[ObjectId],
     depth: Option<usize>,
     shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    deepen_relative: bool,
+    keep: bool,
 ) -> Result<Vec<ObjectId>> {
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
@@ -22718,7 +23029,15 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
         session.finish()?;
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request_with_shallows(roots, haves, depth, shallows)?;
+    let request = build_fetch_pack_request_with_shallows(
+        roots,
+        haves,
+        depth,
+        shallows,
+        no_progress,
+        include_tag,
+        deepen_relative,
+    )?;
     session
         .stdin
         .as_mut()
@@ -22745,8 +23064,9 @@ fn fetch_pack_with_local_upload_pack_command_with_depth(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
-    session.finish()?;
+    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let stderr = session.finish_with_stderr()?;
+    emit_local_upload_pack_progress_from_stderr(&stderr, no_progress);
     Ok(pack_result.unwrap_or_default())
 }
 
@@ -22758,6 +23078,9 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
     haves: &[ObjectId],
     since: i64,
     shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    keep: bool,
 ) -> Result<Vec<ObjectId>> {
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
@@ -22772,7 +23095,14 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
         session.finish()?;
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request_with_since(roots, haves, since, shallows)?;
+    let request = build_fetch_pack_request_with_since(
+        roots,
+        haves,
+        since,
+        shallows,
+        no_progress,
+        include_tag,
+    )?;
     session
         .stdin
         .as_mut()
@@ -22799,8 +23129,9 @@ fn fetch_pack_with_local_upload_pack_command_with_since(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
-    session.finish()?;
+    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let stderr = session.finish_with_stderr()?;
+    emit_local_upload_pack_progress_from_stderr(&stderr, no_progress);
     Ok(pack_result.unwrap_or_default())
 }
 
@@ -22812,6 +23143,9 @@ fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
     haves: &[ObjectId],
     deepen_not: &[String],
     shallows: &[ObjectId],
+    no_progress: bool,
+    include_tag: bool,
+    keep: bool,
 ) -> Result<Vec<ObjectId>> {
     let mut session = spawn_local_upload_pack_command(command, repository_path)?;
     {
@@ -22826,7 +23160,14 @@ fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
         session.finish()?;
         return Ok(Vec::new());
     }
-    let request = build_upload_pack_request_with_deepen_not(roots, haves, deepen_not, shallows)?;
+    let request = build_fetch_pack_request_with_deepen_not(
+        roots,
+        haves,
+        deepen_not,
+        shallows,
+        no_progress,
+        include_tag,
+    )?;
     session
         .stdin
         .as_mut()
@@ -22853,8 +23194,9 @@ fn fetch_pack_with_local_upload_pack_command_with_deepen_not(
             message: "local upload-pack response did not contain a pack".into(),
         });
     }
-    write_indexed_pack_file(objects_dir, &temp_pack, !haves.is_empty())?;
-    session.finish()?;
+    finalize_fetch_pack_temp_pack(objects_dir, &temp_pack, keep, !haves.is_empty())?;
+    let stderr = session.finish_with_stderr()?;
+    emit_local_upload_pack_progress_from_stderr(&stderr, no_progress);
     Ok(pack_result.unwrap_or_default())
 }
 

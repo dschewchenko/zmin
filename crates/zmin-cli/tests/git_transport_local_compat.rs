@@ -96,6 +96,40 @@ fn normalize_remote_output(text: &str, remote: &str) -> String {
     text.replace(remote, "<remote>")
 }
 
+fn normalize_fetch_pack_progress(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut saw_counting = false;
+    let mut saw_compressing = false;
+    for segment in text.split(['\n', '\r']) {
+        let line = segment.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        let line = line.strip_prefix("remote: ").unwrap_or(line);
+        let normalized = if line.starts_with("Enumerating objects: ") {
+            "Enumerating objects: __COUNT__, done.".to_owned()
+        } else if line.starts_with("Counting objects: ") {
+            if saw_counting {
+                continue;
+            }
+            saw_counting = true;
+            "Counting objects: __PROGRESS__".to_owned()
+        } else if line.starts_with("Compressing objects: ") {
+            if saw_compressing {
+                continue;
+            }
+            saw_compressing = true;
+            "Compressing objects: __PROGRESS__".to_owned()
+        } else if line.starts_with("Total ") {
+            "Total __COUNT__ (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)".to_owned()
+        } else {
+            line.to_owned()
+        };
+        out.push(normalized);
+    }
+    out.join("\n")
+}
+
 fn pack_dir_files(repo: &Path) -> Vec<std::path::PathBuf> {
     let pack_dir = repo.join(".git/objects/pack");
     if !pack_dir.exists() {
@@ -427,7 +461,10 @@ fn fetch_all_with_upload_pack_local_transports_matches_stock_git() {
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
     assert_eq!(
         git(&zmin_client, ["show-ref"]),
         git(&git_client, ["show-ref"])
@@ -554,7 +591,10 @@ fn fetch_multiple_with_upload_pack_local_transports_matches_stock_git() {
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
     assert_eq!(
         git(&zmin_client, ["show-ref"]),
         git(&git_client, ["show-ref"])
@@ -588,7 +628,10 @@ fn fetch_multiple_without_remotes_matches_stock_git_noop() {
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
 }
 
 #[test]
@@ -879,7 +922,10 @@ fn fetch_negotiate_only_outputs_common_tip_like_stock_git() {
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
     assert!(!zmin_client.join(".git/FETCH_HEAD").exists());
     assert!(!git_client.join(".git/FETCH_HEAD").exists());
 }
@@ -919,7 +965,10 @@ fn fetch_negotiate_only_without_tip_matches_stock_git_failure() {
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
 }
 
 #[test]
@@ -6088,7 +6137,10 @@ fn fetch_unshallow_complete_repo_matches_stock_git_failure() {
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
-    assert_eq!(zmin_output.2, git_output.2);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
 }
 
 #[test]
@@ -9185,6 +9237,281 @@ fn fetch_pack_depth_one_like_stock_git() {
     assert_eq!(
         git_status_args(&zmin_client, &["cat-file", "-e", &format!("{fetched}^")]),
         128
+    );
+}
+
+#[test]
+fn fetch_pack_exec_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    let wrapper = dir.path().join("fetch-pack-exec-wrapper.sh");
+    let log = wrapper.with_extension("sh.log");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file.txt"), b"hello\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    fs::write(
+        &wrapper,
+        b"#!/bin/sh\nprintf 'invoked %s\\n' \"$*\" >> \"$0.log\"\nexec git-upload-pack \"$@\"\n",
+    )
+    .expect("write wrapper");
+    chmod_executable(&wrapper);
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+    );
+
+    let wrapper_command = shell_command_path(wrapper.to_str().expect("wrapper path"));
+    let source_path = source.to_str().expect("source path");
+    let args = [
+        "fetch-pack",
+        &format!("--exec={wrapper_command}"),
+        source_path,
+        "refs/heads/main",
+    ];
+    let git_output = command_any_output("git", &git_client, &args, "git fetch-pack exec");
+    let zmin_output =
+        command_any_output(zmin_bin(), &zmin_client, &args, "zmin fetch-pack exec");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
+    let tip = git(&source, ["rev-parse", "HEAD"]);
+    assert_eq!(
+        git_status_args(&zmin_client, &["cat-file", "-e", &tip]),
+        git_status_args(&git_client, &["cat-file", "-e", &tip])
+    );
+    let invocations = fs::read_to_string(log).expect("wrapper log");
+    assert_eq!(invocations.lines().count(), 2);
+}
+
+#[test]
+fn fetch_pack_shallow_since_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let mut commits = Vec::new();
+    for idx in 1..=4 {
+        fs::write(source.join("file.txt"), format!("commit {idx}\n")).expect("write source");
+        git(&source, ["add", "-A"]);
+        let date = format!("2020-01-0{idx}T00:00:00 +0000");
+        let env = [
+            ("GIT_AUTHOR_DATE", date.as_str()),
+            ("GIT_COMMITTER_DATE", date.as_str()),
+        ];
+        command_output_with_env(
+            "git",
+            &source,
+            &["commit", "-m", &format!("commit {idx}")],
+            &env,
+            "git",
+        );
+        commits.push(git(&source, ["rev-parse", "HEAD"]));
+    }
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+    );
+
+    let source_path = source.to_str().expect("source path");
+    let args = [
+        "fetch-pack",
+        "--shallow-since=2020-01-03T00:00:00 +0000",
+        source_path,
+        "refs/heads/main",
+    ];
+    let git_output =
+        command_any_output("git", &git_client, &args, "git fetch-pack shallow-since");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch-pack shallow-since",
+    );
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+        fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow")
+    );
+    assert_eq!(
+        git(&zmin_client, ["rev-list", "--count", &commits[3]]),
+        git(&git_client, ["rev-list", "--count", &commits[3]])
+    );
+    assert_eq!(
+        git_status_args(&zmin_client, &["cat-file", "-e", &commits[1]]),
+        git_status_args(&git_client, &["cat-file", "-e", &commits[1]])
+    );
+}
+
+#[test]
+fn fetch_pack_shallow_exclude_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    for name in ["base 1", "base 2"] {
+        fs::write(source.join("file.txt"), format!("{name}\n")).expect("write source");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", name]);
+    }
+    let base_tip = git(&source, ["rev-parse", "HEAD"]);
+    git(&source, ["branch", "base"]);
+    for name in ["main 3", "main 4"] {
+        fs::write(source.join("file.txt"), format!("{name}\n")).expect("write source");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", name]);
+    }
+    let tip = git(&source, ["rev-parse", "HEAD"]);
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+    );
+
+    let source_path = source.to_str().expect("source path");
+    let args = [
+        "fetch-pack",
+        "--shallow-exclude=refs/heads/base",
+        source_path,
+        "refs/heads/main",
+    ];
+    let git_output =
+        command_any_output("git", &git_client, &args, "git fetch-pack shallow-exclude");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch-pack shallow-exclude",
+    );
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+        fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow")
+    );
+    assert_eq!(
+        git(&zmin_client, ["rev-list", "--count", &tip]),
+        git(&git_client, ["rev-list", "--count", &tip])
+    );
+    assert_eq!(
+        git_status_args(&zmin_client, &["cat-file", "-e", &base_tip]),
+        git_status_args(&git_client, &["cat-file", "-e", &base_tip])
+    );
+}
+
+#[test]
+fn fetch_pack_deepen_relative_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let mut commits = Vec::new();
+    for idx in 1..=4 {
+        fs::write(source.join("file.txt"), format!("commit {idx}\n")).expect("write source");
+        git(&source, ["add", "-A"]);
+        git_with_env(&source, ["commit", "-m", &format!("commit {idx}")]);
+        commits.push(git(&source, ["rev-parse", "HEAD"]));
+    }
+    git(
+        dir.path(),
+        ["init", "-b", "main", git_client.to_str().expect("git client")],
+    );
+    git(
+        dir.path(),
+        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+    );
+
+    let source_path = source.to_str().expect("source path");
+    for (tool, client) in [("git", &git_client), (zmin_bin(), &zmin_client)] {
+        let initial = command_any_output(
+            tool,
+            client,
+            &["fetch-pack", "--depth=1", source_path, "refs/heads/main"],
+            tool,
+        );
+        assert_eq!(initial.0, 0);
+    }
+
+    let args = [
+        "fetch-pack",
+        "--depth=1",
+        "--deepen-relative",
+        source_path,
+        "refs/heads/main",
+    ];
+    let git_output =
+        command_any_output("git", &git_client, &args, "git fetch-pack deepen-relative");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &args,
+        "zmin fetch-pack deepen-relative",
+    );
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fetch_pack_progress(&zmin_output.2),
+        normalize_fetch_pack_progress(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/shallow")).expect("zmin shallow"),
+        fs::read_to_string(git_client.join(".git/shallow")).expect("git shallow")
+    );
+    assert_eq!(
+        git(&zmin_client, ["rev-list", "--count", &commits[3]]),
+        git(&git_client, ["rev-list", "--count", &commits[3]])
+    );
+    assert_eq!(
+        git_status_args(&zmin_client, &["cat-file", "-e", &commits[0]]),
+        git_status_args(&git_client, &["cat-file", "-e", &commits[0]])
     );
 }
 

@@ -2937,10 +2937,22 @@ pub enum Command {
         thin: bool,
         #[arg(long = "include-tag", action = ArgAction::SetTrue)]
         include_tag: bool,
+        #[arg(long = "exec", require_equals = true)]
+        exec: Option<String>,
         #[arg(long = "upload-pack")]
         upload_pack: Option<String>,
         #[arg(long = "depth")]
         depth: Option<usize>,
+        #[arg(long = "shallow-since")]
+        shallow_since: Option<String>,
+        #[arg(long = "shallow-exclude")]
+        shallow_exclude: Vec<String>,
+        #[arg(long = "deepen-relative", action = ArgAction::SetTrue)]
+        deepen_relative: bool,
+        #[arg(long = "refetch", action = ArgAction::SetTrue)]
+        refetch: bool,
+        #[arg(long = "check-self-contained-and-connected", action = ArgAction::SetTrue)]
+        check_self_contained_and_connected: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
         no_progress: bool,
         #[arg(long = "diag-url", action = ArgAction::SetTrue)]

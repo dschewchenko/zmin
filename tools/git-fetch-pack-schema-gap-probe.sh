@@ -89,8 +89,33 @@ path, root = sys.argv[1], sys.argv[2]
 text = open(path, encoding="utf-8", errors="replace").read()
 text = text.replace(root, "__ROOT__")
 text = re.sub(r"\b[0-9a-f]{40}\b", "__OID__", text)
-text = re.sub(r"Counting objects:\s+\d+% \(\d+/\d+\)\s*\r?", "Counting objects: __PROGRESS__", text)
-print(text, end="")
+out = []
+saw_counting = False
+saw_compressing = False
+for raw in re.split(r"[\r\n]+", text):
+    line = raw.rstrip()
+    if not line:
+        continue
+    if line.startswith("remote: "):
+        line = line[len("remote: "):]
+    if line.startswith("Enumerating objects: "):
+        out.append("Enumerating objects: __COUNT__, done.")
+        continue
+    if line.startswith("Counting objects: "):
+        if not saw_counting:
+            out.append("Counting objects: __PROGRESS__")
+            saw_counting = True
+        continue
+    if line.startswith("Compressing objects: "):
+        if not saw_compressing:
+            out.append("Compressing objects: __PROGRESS__")
+            saw_compressing = True
+        continue
+    if line.startswith("Total "):
+        out.append("Total __COUNT__ (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)")
+        continue
+    out.append(line)
+print("\n".join(out), end="")
 PY
 }
 
