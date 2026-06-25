@@ -12,6 +12,17 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free
+`range-diff --no-dual-color` surface. The selected rows do not add new
+behavior evidence; they promote one exact stock-Git `range-diff` option family
+with existing explicit, repeated, negated, and invalid attached-value matrix
+coverage into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+Expected delta is `+0` matrix rows, `+1` complete documented option pair,
+`+0` complete command matrices, `+0` verified rows, `+0` invalid-input rows,
+and `-1` remaining checklist row. Rust behavior changes are not expected.
+Actual delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `rebase --onto`
 surface. The selected rows do not add new behavior evidence; they promote one
 exact stock-Git `rebase` option family with existing onto-base, positional-
