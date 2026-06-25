@@ -343,34 +343,36 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `log` doc-option promotion, `log` now adds another
-`18` durable reviewed-complete documented option pairs without changing Rust
-behavior and is up to `18/134` documented options complete with
-`18/134` represented documented option pairs and `111/111` classified rows.
+After the latest zero-code `update-index` doc-option promotion,
+`update-index` now adds another `16` durable reviewed-complete documented
+option pairs without changing Rust behavior and is up to `16/38` documented
+options complete with `16/38` represented documented option pairs and
+`43/43` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
 represented family or zero-code command-promotion cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-tail promotion for the remaining represented helper-free `ls-files` surface.
-The existing exact stock-Git evidence already closed eleven more `ls-files`
-option families on top of the earlier selector/exclude/output cluster, so this
-slice only promotes those documented option pairs into
+promotion cluster for the represented helper-free `update-index` surface. The
+existing exact stock-Git evidence already closed sixteen `update-index` option
+families across index mutation, stat-refresh, stdin, cacheinfo, index-info,
+replace, chmod, and flag-toggle lanes, so this slice only promotes those
+documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(ls-files|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(update-index|summary)\t'`,
 and `git diff --check`.
 
-Current census counts are `5331` matrix rows, `4623` verified rows, `679`
+Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `81/151` complete command
-matrices, `508/3175` complete documented option pairs, and `2693`
-remaining checklist rows. `ls-files` now reads `39` documented option pairs
-with `38` reviewed complete, `38` represented documented option pairs, and
-`158/158` classified written rows with `0` open.
+matrices, `1165/3175` complete documented option pairs, and `2036`
+remaining checklist rows. `update-index` now reads `38` documented option
+pairs with `16` reviewed complete, `16` represented documented option pairs,
+and `43/43` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1179,6 +1181,38 @@ Largest raw clusters:
 7. Platform variants: macOS, Linux, Windows path/process behavior.
 
 ## 2026-06-25 Census Snapshot
+
+Current durable census after the zero-code reviewed-complete `update-index`
+documented-option promotion cluster:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `1165 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `update-index` now has sixteen represented helper-free local documented
+  option families promoted into the reviewed-complete doc-option census list,
+  bringing the command to `16/38` reviewed-complete documented option pairs.
+- The slice adds no new behavior rows; it only makes already closed exact
+  stock-Git local index-mutation, flag-toggle, stdin, cacheinfo, index-info,
+  replace, chmod, and stat-refresh evidence durable in the reviewed doc-option
+  source list.
+- Focused verification was
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(update-index|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `update-index` now has `16/38` documented option pairs reviewed complete
+  with `16/38` represented documented option pairs, `43/43` classified rows,
+  and `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed represented family or zero-code command-promotion cluster.
 
 Current durable census after the zero-code reviewed-complete `log`
 documented-option promotion cluster:

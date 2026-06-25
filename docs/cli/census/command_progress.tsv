@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1149	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1165	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -149,7 +149,7 @@ symbolic-ref	8	8	8	100.0	88	88	100.0	86	97.7	0	0	2	yes
 tag	38	21	21	55.3	40	40	100.0	30	75.0	0	0	10	no
 unpack-file	0	0	0	0.0	4	4	100.0	2	50.0	0	0	2	yes
 unpack-objects	5	5	5	100.0	21	21	100.0	18	85.7	0	0	3	yes
-update-index	38	0	16	42.1	43	43	100.0	36	83.7	0	0	7	no
+update-index	38	16	16	42.1	43	43	100.0	36	83.7	0	0	7	no
 update-ref	0	0	0	0.0	17	17	100.0	17	100.0	0	0	0	yes
 update-server-info	2	2	2	100.0	20	20	100.0	16	80.0	0	0	4	yes
 upload-archive	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
