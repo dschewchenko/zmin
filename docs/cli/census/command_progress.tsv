@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	94	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1427	3156	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	95	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	1429	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1436	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5390	5390	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4689	5390	closed written rows only
-behavior_rows_classified	5375	5390	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5390	written rows with incomplete parity
-behavior_rows_open	12	5390	written rows not implemented or not matching yet
-invalid_input_rows	686	5390	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1438	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5394	5394	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4691	5394	closed written rows only
+behavior_rows_classified	5379	5394	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5394	written rows with incomplete parity
+behavior_rows_open	12	5394	written rows not implemented or not matching yet
+invalid_input_rows	688	5394	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	26	26	86.7	126	126	100.0	110	87.3	0	0	16	no
@@ -37,7 +37,7 @@ clone	0	0	0	0.0	96	96	100.0	86	89.6	0	0	10	yes
 column	7	7	7	100.0	54	54	100.0	46	85.2	0	0	8	yes
 commit	58	37	37	63.8	80	80	100.0	75	93.8	0	0	5	no
 commit-graph	3	3	3	100.0	14	14	100.0	11	78.6	0	0	3	yes
-commit-tree	6	4	4	66.7	58	58	100.0	40	69.0	0	0	18	no
+commit-tree	6	6	6	100.0	62	62	100.0	42	67.7	0	0	20	yes
 config	30	18	18	60.0	137	137	100.0	124	90.5	0	0	13	no
 count-objects	4	4	4	100.0	53	53	100.0	45	84.9	0	0	8	yes
 credential	0	0	0	0.0	5	5	100.0	4	80.0	0	0	1	yes

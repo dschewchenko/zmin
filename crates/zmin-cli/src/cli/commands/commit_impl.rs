@@ -55,9 +55,10 @@ pub(crate) fn commit_tree_command(
     tree: &str,
     parents: Vec<String>,
     message_sources: Vec<CommitTreeMessageSource>,
+    gpg_sign: Option<&str>,
     no_gpg_sign: bool,
 ) -> Result<()> {
-    commit_tree(tree, parents, message_sources, no_gpg_sign)
+    commit_tree(tree, parents, message_sources, gpg_sign, no_gpg_sign)
 }
 
 pub(crate) fn mktree_command(nul_terminated: bool, missing: bool, batch: bool) -> Result<()> {
@@ -1674,9 +1675,9 @@ fn commit_tree(
     tree: &str,
     parents: Vec<String>,
     message_sources: Vec<CommitTreeMessageSource>,
+    gpg_sign: Option<&str>,
     no_gpg_sign: bool,
 ) -> Result<()> {
-    let _no_gpg_sign = no_gpg_sign;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let tree = resolve_objectish(&repo, tree).map_err(|_| CliError::Fatal {
@@ -1706,10 +1707,60 @@ fn commit_tree(
         }
     }
     let message = commit_tree_message(message_sources)?;
-    let commit = builder.message(message)?.encode()?;
+    let mut builder = builder.message(message)?;
+    if !no_gpg_sign {
+        if let Some(signature) = commit_tree_gpg_signature(&repo, &builder, gpg_sign)? {
+            builder = builder.gpg_signature(signature)?;
+        }
+    }
+    let commit = builder.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     println!("{}", id.to_hex());
     Ok(())
+}
+
+fn commit_tree_gpg_signature(
+    repo: &GitRepo,
+    builder: &CommitBuilder,
+    gpg_sign: Option<&str>,
+) -> Result<Option<Vec<u8>>> {
+    let Some(signing_key) = commit_tree_signing_key(repo, gpg_sign)? else {
+        return Ok(None);
+    };
+    let payload = builder.encode()?;
+    let program = read_config_value(repo, "gpg.program")?.unwrap_or_else(|| "gpg".to_owned());
+    let mut child = std::process::Command::new(program)
+        .arg("--status-fd=2")
+        .arg("--armor")
+        .arg("--detach-sign")
+        .args(signing_key.iter().flat_map(|key| ["--local-user", key]))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(CliError::Io)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(&payload)?;
+    }
+    let output = child.wait_with_output().map_err(CliError::Io)?;
+    if !output.status.success() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: gpg failed to sign the data:\n{}\n",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        });
+    }
+    Ok(Some(output.stdout))
+}
+
+fn commit_tree_signing_key(repo: &GitRepo, gpg_sign: Option<&str>) -> Result<Option<Option<String>>> {
+    if let Some(key) = gpg_sign {
+        return Ok(Some((!key.is_empty()).then(|| key.to_owned())));
+    }
+    let _repo = repo;
+    Ok(None)
 }
 
 pub(crate) enum CommitTreeMessageSource {

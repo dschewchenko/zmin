@@ -21,6 +21,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+gpg_home=
+gpg_wrapper=
+gpg_key=
+
 compare_files() {
   local label="$1"
   local left="$2"
@@ -32,6 +36,45 @@ compare_files() {
   fi
 }
 
+strip_gpgsig_header() {
+  awk '
+    /^gpgsig / { skip = 1; next }
+    skip && /^ / { next }
+    { skip = 0; print }
+  ' "$1"
+}
+
+ensure_gpg_fixture() {
+  if test -n "${gpg_home:-}"; then
+    return
+  fi
+  gpg_home="$tmpdir/gnupg"
+  mkdir -p "$gpg_home"
+  chmod 700 "$gpg_home"
+  cat >"$tmpdir/gen-key" <<'EOF'
+Key-Type: RSA
+Key-Length: 2048
+Name-Real: Test Signer
+Name-Email: signer@example.test
+Expire-Date: 0
+%no-protection
+%commit
+EOF
+  GNUPGHOME="$gpg_home" gpg --batch --faked-system-time 1700000000 --generate-key \
+    "$tmpdir/gen-key" >/dev/null 2>/dev/null
+  gpg_key="$(
+    GNUPGHOME="$gpg_home" gpg --batch --with-colons --list-secret-keys signer@example.test |
+      awk -F: '$1=="sec"{print $5; exit}'
+  )"
+  test -n "$gpg_key"
+  gpg_wrapper="$tmpdir/gpg-wrap"
+  cat >"$gpg_wrapper" <<'EOF'
+#!/bin/sh
+exec gpg --batch --pinentry-mode loopback --faked-system-time 1700000000 "$@"
+EOF
+  chmod +x "$gpg_wrapper"
+}
+
 seed_repo() {
   local bin="$1"
   local repo="$2"
@@ -41,6 +84,15 @@ seed_repo() {
   "$GIT_BIN" -C "$repo" config user.email oracle@example.com
   printf 'one\n' >"$repo/a.txt"
   "$bin" -C "$repo" add a.txt
+}
+
+seed_signed_repo() {
+  local bin="$1"
+  local repo="$2"
+  ensure_gpg_fixture
+  seed_repo "$bin" "$repo"
+  "$GIT_BIN" -C "$repo" config user.signingkey "$gpg_key"
+  "$GIT_BIN" -C "$repo" config gpg.program "$gpg_wrapper"
 }
 
 run_case() {
@@ -473,6 +525,96 @@ run_parent_case() {
   printf '%s\tok\texit=%s\n' "$name" "$git_exit"
 }
 
+run_sign_case() {
+  local name="$1"
+  shift
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_commit="$tmpdir/${name}.git.commit"
+  local zmin_commit="$tmpdir/${name}.zmin.commit"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_signed_repo "$GIT_BIN" "$git_work"
+  seed_signed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  GNUPGHOME="$gpg_home" \
+    GIT_AUTHOR_DATE="1700000000 +0000" \
+    GIT_COMMITTER_DATE="1700000000 +0000" \
+    "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  GNUPGHOME="$gpg_home" \
+    GIT_AUTHOR_DATE="1700000000 +0000" \
+    GIT_COMMITTER_DATE="1700000000 +0000" \
+    "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$zmin_exit"
+  compare_files stderr "$git_err" "$zmin_err"
+  test "$(wc -c <"$git_out")" -gt 0
+  test "$(wc -c <"$zmin_out")" -gt 0
+  "$GIT_BIN" -C "$git_work" cat-file commit "$(cat "$git_out")" >"$git_commit"
+  "$GIT_BIN" -C "$zmin_work" cat-file commit "$(cat "$zmin_out")" >"$zmin_commit"
+  grep -q '^gpgsig -----BEGIN PGP SIGNATURE-----$' "$git_commit"
+  grep -q '^gpgsig -----BEGIN PGP SIGNATURE-----$' "$zmin_commit"
+  strip_gpgsig_header "$git_commit" >"$git_commit.stripped"
+  strip_gpgsig_header "$zmin_commit" >"$zmin_commit.stripped"
+  compare_files commit_object_payload "$git_commit.stripped" "$zmin_commit.stripped"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
+run_sign_invalid_case() {
+  local name="$1"
+  local expected_exit="$2"
+  shift 2
+  local git_work="$tmpdir/${name}.git.work"
+  local zmin_work="$tmpdir/${name}.zmin.work"
+  local git_out="$tmpdir/${name}.git.out"
+  local git_err="$tmpdir/${name}.git.err"
+  local zmin_out="$tmpdir/${name}.zmin.out"
+  local zmin_err="$tmpdir/${name}.zmin.err"
+  local git_tree
+  local zmin_tree
+  local git_exit=0
+  local zmin_exit=0
+
+  seed_signed_repo "$GIT_BIN" "$git_work"
+  seed_signed_repo "$ZMIN_BIN" "$zmin_work"
+  git_tree="$("$GIT_BIN" -C "$git_work" write-tree)"
+  zmin_tree="$("$ZMIN_BIN" -C "$zmin_work" write-tree)"
+  test "$git_tree" = "$zmin_tree"
+
+  set +e
+  GNUPGHOME="$gpg_home" \
+    GIT_AUTHOR_DATE="1700000000 +0000" \
+    GIT_COMMITTER_DATE="1700000000 +0000" \
+    "$GIT_BIN" -C "$git_work" commit-tree "$git_tree" "$@" >"$git_out" 2>"$git_err"
+  git_exit=$?
+  GNUPGHOME="$gpg_home" \
+    GIT_AUTHOR_DATE="1700000000 +0000" \
+    GIT_COMMITTER_DATE="1700000000 +0000" \
+    "$ZMIN_BIN" -C "$zmin_work" commit-tree "$zmin_tree" "$@" >"$zmin_out" 2>"$zmin_err"
+  zmin_exit=$?
+  set -e
+
+  test "$git_exit" = "$expected_exit"
+  test "$zmin_exit" = "$expected_exit"
+  compare_files stdout "$git_out" "$zmin_out"
+  compare_files stderr "$git_err" "$zmin_err"
+  printf '%s\tok\texit=%s\n' "$name" "$git_exit"
+}
+
 run_case commit_tree_positional_tree -m root
 run_case commit_tree_tree_then_delimiter --
 run_stdin_case commit_tree_empty_stdin ''
@@ -503,6 +645,8 @@ run_case commit_tree_multiple_message_files -F message.txt -F message.txt
 run_no_newline_message_file_case commit_tree_no_newline_file_then_message -F no-newline.txt -m inline
 run_no_newline_message_file_case commit_tree_message_then_no_newline_file -m inline -F no-newline.txt
 run_no_newline_message_file_case commit_tree_multiple_no_newline_files -F no-newline.txt -F no-newline.txt
+run_sign_case commit_tree_gpg_sign_short -S -m root
+run_sign_case commit_tree_gpg_sign_long --gpg-sign -m root
 run_case commit_tree_no_gpg_sign --no-gpg-sign -m root
 run_case commit_tree_repeated_no_gpg_sign --no-gpg-sign --no-gpg-sign -m root
 run_tree_after_first_arg_case commit_tree_no_gpg_sign_before_tree --no-gpg-sign -m root
@@ -514,6 +658,8 @@ run_parent_case commit_tree_parent_with_equals_message equals_message
 run_parent_case commit_tree_duplicate_parent duplicate
 run_invalid_case commit_tree_rejects_date 129 --date '2001-02-03T04:05:06+0000' -m root
 run_invalid_case commit_tree_rejects_attached_date 129 --date=2001-02-03T04:05:06+0000 -m root
+run_sign_invalid_case commit_tree_gpg_sign_short_attached_missing_key 1 -Smissing -m root
+run_sign_invalid_case commit_tree_gpg_sign_long_equals_missing_key 1 --gpg-sign=missing -m root
 run_invalid_case commit_tree_no_gpg_sign_rejects_value 129 --no-gpg-sign=true -m root
 run_invalid_case commit_tree_no_gpg_sign_rejects_empty_value 129 --no-gpg-sign= -m root
 run_invalid_case commit_tree_missing_message_file 128 -F missing.txt

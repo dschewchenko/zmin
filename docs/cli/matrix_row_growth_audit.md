@@ -11,6 +11,21 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git commit-tree`
+explicit gpg-sign family closure plus command promotion. The selected change
+adds stock-Git evidence and runtime parity for `-S`, `--gpg-sign`,
+`-Smissing`, and `--gpg-sign=missing`, promotes the two explicit signing
+families into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, and
+then promotes `commit-tree` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`. Expected delta was
+`+4` matrix rows, `+2` complete documented option pairs, `+2` represented
+documented option pairs, `+1` complete command matrix, `+2` verified rows,
+and `+2` invalid-input rows. Actual delta matched, and `commit-tree` is now
+command-complete at `6/6` reviewed-complete documented option pairs with
+`62/62` classified rows and `0` exact-open written rows. The next bounded
+high-throughput follow-up should prefer the compact `http-push` review tail
+before returning to the heavier local `multi-pack-index --bitmap` writer lane.
+
 As of 2026-06-26 the next batch is a helper-free `git multi-pack-index`
 incremental and refs-snapshot family closure. The selected change expands the
 write subcommand schema and runtime to cover stock-Git incremental write side

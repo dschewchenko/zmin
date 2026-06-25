@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`94/151 complete command matrices / 1427/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1436/3156 represented doc-option pairs / 5390 written rows / 4689/5390 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`95/151 complete command matrices / 1429/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1438/3156 represented doc-option pairs / 5394 written rows / 4691/5394 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,33 +300,26 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git multi-pack-index`
-`--incremental` plus `--refs-snapshot` family batch. Zmin now matches stock
-Git for fresh and existing incremental-write side effects on the current
-two-pack local lane, including incremental-layer file naming and chain-file
-contents, and for the current refs-snapshot behaviors where the option is
-accepted and ignored without bitmap but fails with stock-shaped missing-file
-stderr when bitmap is requested. With those rows closed, `multi-pack-index`
-now sits at `8/9` reviewed-complete documented option pairs, `9/9`
-represented documented option pairs, `28/28` classified rows, and `0`
-exact-open written rows. The next bounded high-throughput follow-up should
-stay on the remaining positive `--bitmap` writer lane, which is now the sole
-review-incomplete documented option family for `multi-pack-index`.
+The latest completed slice is a helper-free `git commit-tree` explicit
+gpg-sign family closure plus command promotion. Zmin now matches stock Git for
+unsigned and explicitly signed commit creation on the current local lane,
+including `-S` and `--gpg-sign` success with configured signing keys,
+`-Smissing` and `--gpg-sign=missing` attached-key failures, repeated
+`--no-gpg-sign` ordering, and signed-commit payload parity after stripping the
+dynamic `gpgsig` header. With those rows closed, `commit-tree` now sits at
+`6/6` reviewed-complete documented option pairs, `6/6` represented documented
+option pairs, `62/62` classified rows, and `0` exact-open written rows, and
+is promoted into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
-The latest completed slice after that closure is a zero-row census-accounting
-correction for reviewed-complete commands. `tools/git-compat-census.py` now
-stops emitting schema-only `implemented but unverified` leftovers for commands
-already promoted into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`, which removes the
-stale `archive <positional:args>` and `ls-tree --long` rows without changing
-runtime behavior or stock-Git evidence. Current counts stay at
-`90/151` complete command matrices, `1418/3156` complete documented option
-pairs, `1426/3156` represented documented option pairs, `5375` written rows,
-`4678` verified rows, `12` open rows, and `682` invalid-input rows, while
-`implemented_but_unverified_rows` drops to `0`. The next bounded
-high-throughput follow-up remains the local `multi-pack-index`
-`--bitmap` / `--incremental` / `--refs-snapshot` family, since that is now the
-real remaining command-tail backlog instead of a census artifact.
+Current counts are `95/151` complete command matrices,
+`1429/3156` complete documented option pairs,
+`1438/3156` represented documented option pairs, `5394` written rows,
+`4691` verified rows, `12` open rows, and `688` invalid-input rows. The next
+bounded high-throughput follow-up should prefer the compact `http-push` tail,
+which now sits at `4/6` reviewed-complete documented option pairs with
+`8/8` classified rows and `0` exact-open written rows, before returning to the
+heavier local `multi-pack-index --bitmap` writer lane.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

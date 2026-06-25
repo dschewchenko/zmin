@@ -86,12 +86,14 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             parents,
             messages,
             message_files,
+            gpg_sign,
             no_gpg_sign,
         } => super::commit_commands::commit_tree_command(
             &tree,
             parents,
             ordered_commit_tree_message_sources(messages, message_files),
-            no_gpg_sign,
+            effective_commit_tree_gpg_sign(gpg_sign, no_gpg_sign > 0).as_deref(),
+            no_gpg_sign > 0,
         ),
         runtime::Command::Mktree {
             nul_terminated,
@@ -209,4 +211,32 @@ fn grouped_commit_tree_message_sources(
                 .map(super::commit_commands::CommitTreeMessageSource::File),
         )
         .collect()
+}
+
+fn effective_commit_tree_gpg_sign(
+    gpg_sign: Option<String>,
+    no_gpg_sign: bool,
+) -> Option<String> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let Some(command_index) = args.iter().position(|arg| arg == "commit-tree") else {
+        return (!no_gpg_sign).then_some(gpg_sign).flatten();
+    };
+    let mut effective = (!no_gpg_sign).then_some(gpg_sign).flatten();
+    let mut index = command_index + 2;
+    while index < args.len() {
+        let arg = args[index].to_string_lossy();
+        match arg.as_ref() {
+            "--no-gpg-sign" => effective = None,
+            "--gpg-sign" | "-S" => effective = Some(String::new()),
+            _ if arg.starts_with("--gpg-sign=") => {
+                effective = Some(arg.trim_start_matches("--gpg-sign=").to_owned());
+            }
+            _ if arg.starts_with("-S") && arg.len() > 2 => {
+                effective = Some(arg[2..].to_owned());
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    effective
 }

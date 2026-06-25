@@ -1661,8 +1661,17 @@ pub enum Command {
         messages: Vec<String>,
         #[arg(short = 'F')]
         message_files: Vec<PathBuf>,
-        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue, overrides_with = "no_gpg_sign")]
-        no_gpg_sign: bool,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::Count, overrides_with = "gpg_sign")]
+        no_gpg_sign: u8,
     },
     Mktree {
         #[arg(short = 'z', action = ArgAction::Count)]

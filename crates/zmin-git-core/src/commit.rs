@@ -76,6 +76,7 @@ pub struct CommitBuilder {
     parents: Vec<ObjectId>,
     author: Signature,
     committer: Signature,
+    gpg_signature: Option<Vec<u8>>,
     message: Vec<u8>,
 }
 
@@ -86,6 +87,7 @@ impl CommitBuilder {
             parents: Vec::new(),
             author,
             committer,
+            gpg_signature: None,
             message: Vec::new(),
         }
     }
@@ -107,12 +109,25 @@ impl CommitBuilder {
         Ok(self)
     }
 
+    pub fn gpg_signature(mut self, signature: impl Into<Vec<u8>>) -> io::Result<Self> {
+        let signature = signature.into();
+        if signature.contains(&0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "commit gpg signature contains NUL",
+            ));
+        }
+        self.gpg_signature = Some(signature);
+        Ok(self)
+    }
+
     pub fn encode(&self) -> io::Result<Vec<u8>> {
-        encode_commit(
+        encode_commit_with_gpg_signature(
             &self.tree,
             &self.parents,
             &self.author,
             &self.committer,
+            self.gpg_signature.as_deref(),
             &self.message,
         )
     }
@@ -125,10 +140,27 @@ pub fn encode_commit(
     committer: &Signature,
     message: &[u8],
 ) -> io::Result<Vec<u8>> {
+    encode_commit_with_gpg_signature(tree, parents, author, committer, None, message)
+}
+
+pub fn encode_commit_with_gpg_signature(
+    tree: &ObjectId,
+    parents: &[ObjectId],
+    author: &Signature,
+    committer: &Signature,
+    gpg_signature: Option<&[u8]>,
+    message: &[u8],
+) -> io::Result<Vec<u8>> {
     if message.contains(&0) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "commit message contains NUL",
+        ));
+    }
+    if gpg_signature.is_some_and(|signature| signature.contains(&0)) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "commit gpg signature contains NUL",
         ));
     }
     let algorithm = tree.algorithm();
@@ -140,7 +172,12 @@ pub fn encode_commit(
     }
 
     let mut out = Vec::with_capacity(commit_encode_initial_capacity(
-        tree, parents, author, committer, message,
+        tree,
+        parents,
+        author,
+        committer,
+        gpg_signature,
+        message,
     ));
     out.extend_from_slice(b"tree ");
     tree.write_hex_bytes(&mut out);
@@ -155,6 +192,9 @@ pub fn encode_commit(
     out.push(b'\n');
     out.extend_from_slice(b"committer ");
     committer.write_to(&mut out);
+    if let Some(signature) = gpg_signature {
+        write_commit_multiline_header(&mut out, b"gpgsig ", signature);
+    }
     out.extend_from_slice(b"\n\n");
     out.extend_from_slice(message);
     Ok(out)
@@ -165,6 +205,7 @@ fn commit_encode_initial_capacity(
     parents: &[ObjectId],
     author: &Signature,
     committer: &Signature,
+    gpg_signature: Option<&[u8]>,
     message: &[u8],
 ) -> usize {
     let parent_bytes = parents.iter().fold(0_usize, |total, parent| {
@@ -177,8 +218,42 @@ fn commit_encode_initial_capacity(
         .saturating_add(author.encoded_len())
         .saturating_add(12)
         .saturating_add(committer.encoded_len())
+        .saturating_add(gpg_signature.map_or(0, commit_multiline_header_len))
         .saturating_add(message.len());
     bytes.min(COMMIT_ENCODE_INITIAL_CAPACITY_LIMIT)
+}
+
+fn write_commit_multiline_header(out: &mut Vec<u8>, prefix: &[u8], value: &[u8]) {
+    let mut lines = value.split(|byte| *byte == b'\n').peekable();
+    let Some(first_line) = lines.next() else {
+        return;
+    };
+    out.push(b'\n');
+    out.extend_from_slice(prefix);
+    out.extend_from_slice(first_line);
+    while let Some(line) = lines.next() {
+        if line.is_empty() && lines.peek().is_none() {
+            break;
+        }
+        out.push(b'\n');
+        out.push(b' ');
+        out.extend_from_slice(line);
+    }
+}
+
+fn commit_multiline_header_len(value: &[u8]) -> usize {
+    let mut total = 1 + b"gpgsig ".len();
+    let mut lines = value.split(|byte| *byte == b'\n').peekable();
+    if let Some(first_line) = lines.next() {
+        total += first_line.len();
+        while let Some(line) = lines.next() {
+            if line.is_empty() && lines.peek().is_none() {
+                break;
+            }
+            total += 2 + line.len();
+        }
+    }
+    total
 }
 
 fn decimal_i64_len(value: i64) -> usize {
