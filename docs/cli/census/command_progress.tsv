@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1040	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1056	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -22,7 +22,7 @@ blame	36	28	28	77.8	172	172	100.0	92	53.5	0	0	80	no
 branch	48	48	48	100.0	94	94	100.0	76	80.9	0	0	18	yes
 bugreport	7	6	6	85.7	10	10	100.0	10	100.0	0	0	0	no
 bundle	4	4	4	100.0	74	74	100.0	52	70.3	0	0	22	yes
-cat-file	21	0	16	76.2	42	42	100.0	34	81.0	0	0	8	no
+cat-file	21	16	16	76.2	42	42	100.0	34	81.0	0	0	8	no
 check-attr	6	6	6	100.0	17	17	100.0	17	100.0	0	0	0	yes
 check-ignore	9	9	9	100.0	23	23	100.0	13	56.5	0	0	10	yes
 check-mailmap	3	3	3	100.0	30	30	100.0	27	90.0	0	0	3	yes
