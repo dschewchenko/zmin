@@ -11,6 +11,22 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git cat-file`
+documented mailmap family plus `--allow-unknown-type` closure and command
+promotion. The selected change adds exact stock-Git evidence for
+`--use-mailmap` on commit-size, annotated-tag pretty, batch-check, and
+batch-command lanes, closes the alias and negated last-one-wins forms
+`--mailmap`, `--no-mailmap`, and `--no-use-mailmap`, records the current
+stock invalid-object-type rejection for `--allow-unknown-type` on the modeled
+corrupt loose-object lane, promotes those five documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, and then promotes
+`cat-file` into `docs/cli/census/reviewed_complete_command_matrices.tsv`.
+Expected delta was `+9` matrix rows, `+5` complete documented option pairs,
+`+5` represented documented option pairs, `+1` complete command matrix, `+7`
+verified rows, and `+2` invalid-input rows. Actual delta matched, and
+`cat-file` is now command-complete at `21/21` reviewed-complete documented
+option pairs with `51/51` classified rows and `0` exact-open written rows.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git multi-pack-index`
 positive `--bitmap` writer-lane closure plus command promotion. The selected
 change expands the local two-pack writer path to emit stock-shaped MIDX

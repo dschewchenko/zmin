@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::env;
 use std::io::{BufRead, BufWriter, Read, Write};
 use std::sync::Arc;
@@ -71,13 +72,19 @@ pub(crate) fn hash_object_command(
     let kind = parse_object_kind(object_type)?;
     let _ = literally;
     if stdin && stdin_paths {
-        return Err(hash_object_usage_error("Can't use --stdin-paths with --stdin"));
+        return Err(hash_object_usage_error(
+            "Can't use --stdin-paths with --stdin",
+        ));
     }
     if path.is_some() && no_filters {
-        return Err(hash_object_usage_error("Can't use --path with --no-filters"));
+        return Err(hash_object_usage_error(
+            "Can't use --path with --no-filters",
+        ));
     }
     if stdin_paths && path.is_some() {
-        return Err(hash_object_usage_error("Can't use --stdin-paths with --path"));
+        return Err(hash_object_usage_error(
+            "Can't use --stdin-paths with --path",
+        ));
     }
     if !stdin && !stdin_paths && paths.is_empty() {
         return Err(CliError::Message(
@@ -145,7 +152,9 @@ pub(crate) fn cat_file(
     type_only: bool,
     pretty: bool,
     size: bool,
+    allow_unknown_type: bool,
     exists: bool,
+    use_mailmap: bool,
     textconv: bool,
     filters: bool,
     path: Option<String>,
@@ -199,7 +208,7 @@ pub(crate) fn cat_file(
                 "options are incompatible with this mode",
             ));
         }
-        return cat_file_typed_object(&objects[0], &objects[1]);
+        return cat_file_typed_object(&objects[0], &objects[1], allow_unknown_type);
     }
     if selected == 0 {
         if path.is_some()
@@ -281,6 +290,7 @@ pub(crate) fn cat_file(
             unordered && !no_unordered,
             follow_symlinks,
             object_filter,
+            use_mailmap,
         );
     }
     if objects.is_empty() {
@@ -344,6 +354,15 @@ pub(crate) fn cat_file(
         }
     }
     if size {
+        if use_mailmap {
+            let object = match cat_file_read_object(&repo, &store, &id) {
+                Ok(object) => object,
+                Err(error) => return Err(cat_file_object_read_error(error, objectish, pretty)),
+            };
+            let content = cat_file_display_content(&repo, &object, true)?;
+            println!("{}", content.len());
+            return Ok(());
+        }
         match store.object_header_hint(&id) {
             Ok(Some((_, object_size))) => {
                 println!("{object_size}");
@@ -362,12 +381,14 @@ pub(crate) fn cat_file(
     if type_only {
         println!("{}", object.kind.as_str());
     } else if size {
-        println!("{}", object.content.len());
+        let content = cat_file_display_content(&repo, &object, use_mailmap)?;
+        println!("{}", content.len());
     } else if pretty {
         if object.kind == GitObjectKind::Tree {
             print_tree(&store, &id)?;
         } else {
-            io::stdout().write_all(&object.content)?;
+            let content = cat_file_display_content(&repo, &object, use_mailmap)?;
+            io::stdout().write_all(content.as_ref())?;
         }
     }
     Ok(())
@@ -558,7 +579,11 @@ fn cat_file_object_read_error(error: io::Error, objectish: &str, pretty: bool) -
     CliError::Io(error)
 }
 
-fn cat_file_typed_object(object_type: &str, objectish: &str) -> Result<()> {
+fn cat_file_typed_object(
+    object_type: &str,
+    objectish: &str,
+    _allow_unknown_type: bool,
+) -> Result<()> {
     let expected = parse_object_kind(object_type).map_err(|_| CliError::Fatal {
         code: 128,
         message: format!("invalid object type \"{object_type}\""),
@@ -780,6 +805,7 @@ fn cat_file_batch(
     unordered: bool,
     follow_symlinks: bool,
     object_filter: Option<CatFileFilter>,
+    use_mailmap: bool,
 ) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let stdout = io::stdout();
@@ -799,6 +825,7 @@ fn cat_file_batch(
             unordered,
             follow_symlinks,
             object_filter,
+            use_mailmap,
         )?;
         if env::var_os("GIT_TEST_CAT_FILE_NO_FLUSH_ON_EXIT").is_some() {
             std::mem::forget(stdout);
@@ -822,6 +849,7 @@ fn cat_file_batch(
         unordered,
         follow_symlinks,
         object_filter,
+        use_mailmap,
     )
 }
 
@@ -838,6 +866,7 @@ fn cat_file_batch_with_writer<W: io::Write>(
     unordered: bool,
     follow_symlinks: bool,
     object_filter: Option<CatFileFilter>,
+    use_mailmap: bool,
 ) -> Result<()> {
     if batch_all_objects {
         if format.uses_disk_size() {
@@ -847,12 +876,14 @@ fn cat_file_batch_with_writer<W: io::Write>(
                 }
                 write_batch_all_object(
                     stdout,
+                    repo,
                     store,
                     &id,
                     mode,
                     format,
                     output_nul,
                     Some(disk_size),
+                    use_mailmap,
                 )?;
             }
             return Ok(());
@@ -862,7 +893,17 @@ fn cat_file_batch_with_writer<W: io::Write>(
                 if !cat_file_filter_includes(store, id, object_filter)? {
                     return Ok(());
                 }
-                write_batch_all_object(stdout, store, id, mode, format, output_nul, None)
+                write_batch_all_object(
+                    stdout,
+                    repo,
+                    store,
+                    id,
+                    mode,
+                    format,
+                    output_nul,
+                    None,
+                    use_mailmap,
+                )
             };
             store.for_each_object_id(&mut write_object)?;
             return Ok(());
@@ -871,7 +912,17 @@ fn cat_file_batch_with_writer<W: io::Write>(
             if !cat_file_filter_includes(store, &id, object_filter)? {
                 continue;
             }
-            write_batch_all_object(stdout, store, &id, mode, format, output_nul, None)?;
+            write_batch_all_object(
+                stdout,
+                repo,
+                store,
+                &id,
+                mode,
+                format,
+                output_nul,
+                None,
+                use_mailmap,
+            )?;
         }
         return Ok(());
     }
@@ -951,6 +1002,7 @@ fn cat_file_batch_with_writer<W: io::Write>(
         if !include_content
             && write_object_batch_header(
                 &mut stdout,
+                repo,
                 store,
                 &resolved.id,
                 &read_id,
@@ -958,6 +1010,7 @@ fn cat_file_batch_with_writer<W: io::Write>(
                 rest,
                 mode_atom,
                 output_nul,
+                use_mailmap,
             )?
         {
             continue;
@@ -965,6 +1018,7 @@ fn cat_file_batch_with_writer<W: io::Write>(
         match store.read_object(&read_id) {
             Ok(object) => write_batch_object(
                 &mut stdout,
+                repo,
                 store,
                 &resolved.id,
                 &object,
@@ -973,6 +1027,7 @@ fn cat_file_batch_with_writer<W: io::Write>(
                 rest,
                 mode_atom,
                 output_nul,
+                use_mailmap,
             )?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 write_batch_missing(&mut stdout, objectish, output_nul)?
@@ -985,14 +1040,17 @@ fn cat_file_batch_with_writer<W: io::Write>(
 
 fn write_batch_all_object<W: io::Write>(
     writer: &mut W,
+    repo: &GitRepo,
     store: &LooseObjectStore,
     id: &ObjectId,
     mode: BatchMode,
     format: &BatchFormat,
     output_nul: bool,
     disk_size_override: Option<u64>,
+    use_mailmap: bool,
 ) -> io::Result<()> {
-    if mode == BatchMode::Check
+    if !use_mailmap
+        && mode == BatchMode::Check
         && let Some((kind, size)) = store.object_header_hint(id)?
     {
         let delta_base_atom = batch_delta_base_atom(store, id, format)?;
@@ -1012,13 +1070,14 @@ fn write_batch_all_object<W: io::Write>(
         return Ok(());
     }
     let object = store.read_object(id)?;
+    let content = cat_file_display_content_io(repo, &object, use_mailmap)?;
     let delta_base_atom = batch_delta_base_atom(store, &object.id, format)?;
     let disk_size_atom = batch_disk_size_atom(store, &object.id, format, disk_size_override)?;
     write_batch_header(
         writer,
         &object.id,
         object.kind,
-        object.content.len(),
+        content.len(),
         format,
         "",
         "",
@@ -1027,7 +1086,7 @@ fn write_batch_all_object<W: io::Write>(
         output_nul,
     )?;
     if mode == BatchMode::Contents {
-        writer.write_all(&object.content)?;
+        writer.write_all(content.as_ref())?;
         write_batch_terminator(writer, output_nul)?;
     }
     Ok(())
@@ -1233,10 +1292,12 @@ fn show_index_v2_offset_at(
     let large_start = large_idx
         .checked_mul(8)
         .and_then(|delta| large_offsets_start.checked_add(delta))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "inconsistent 64b offset index"))?;
-    let bytes = input
-        .get(large_start..large_start + 8)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "inconsistent 64b offset index"))?;
+        .ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "inconsistent 64b offset index")
+        })?;
+    let bytes = input.get(large_start..large_start + 8).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "inconsistent 64b offset index")
+    })?;
     Ok(u64::from_be_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]))
@@ -1595,11 +1656,9 @@ fn resolve_check_ref_format_branch_name(branch: &str) -> Result<String> {
     let index = inner.parse::<usize>().ok().filter(|index| *index > 0);
     match index {
         Some(index) => {
-            super::worktree_commands::previous_checkout_target(index).map_err(|_| {
-                CliError::Fatal {
-                    code: 128,
-                    message: format!("'{branch}' is not a valid branch name"),
-                }
+            super::worktree_commands::previous_checkout_target(index).map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("'{branch}' is not a valid branch name"),
             })
         }
         None => Ok(branch.to_owned()),
@@ -2142,9 +2201,9 @@ fn read_mailmap(
     } else {
         let path = mailmap_file.unwrap_or_else(|| repo.root.join(".mailmap"));
         match fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(CliError::Io(error)),
+            Ok(raw) => raw,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(CliError::Io(error)),
         }
     };
     Ok(raw
@@ -2280,7 +2339,11 @@ pub(crate) fn check_attr(
     Ok(())
 }
 
-fn load_check_attr_source(repo: &GitRepo, cached: bool, source: Option<&str>) -> Result<GitAttributes> {
+fn load_check_attr_source(
+    repo: &GitRepo,
+    cached: bool,
+    source: Option<&str>,
+) -> Result<GitAttributes> {
     if let Some(source) = source {
         return load_check_attr_source_treeish(repo, source);
     }
@@ -2304,7 +2367,9 @@ fn load_check_attr_source_index(repo: &GitRepo) -> Result<GitAttributes> {
                 message: "index .gitattributes is not a blob".into(),
             });
         }
-        return Ok(GitAttributes::parse(&String::from_utf8_lossy(&object.content)));
+        return Ok(GitAttributes::parse(&String::from_utf8_lossy(
+            &object.content,
+        )));
     }
     Ok(GitAttributes::default())
 }
@@ -2312,7 +2377,8 @@ fn load_check_attr_source_index(repo: &GitRepo) -> Result<GitAttributes> {
 fn load_check_attr_source_treeish(repo: &GitRepo, source: &str) -> Result<GitAttributes> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let tree = resolve_treeish(repo, &store, source).map_err(CliError::Io)?;
-    let Some(entry) = find_tree_entry(&store, &tree, b".gitattributes").map_err(CliError::Io)? else {
+    let Some(entry) = find_tree_entry(&store, &tree, b".gitattributes").map_err(CliError::Io)?
+    else {
         return Ok(GitAttributes::default());
     };
     let object = store.read_object(&entry.id)?;
@@ -2322,7 +2388,9 @@ fn load_check_attr_source_treeish(repo: &GitRepo, source: &str) -> Result<GitAtt
             message: "tree-ish .gitattributes is not a blob".into(),
         });
     }
-    Ok(GitAttributes::parse(&String::from_utf8_lossy(&object.content)))
+    Ok(GitAttributes::parse(&String::from_utf8_lossy(
+        &object.content,
+    )))
 }
 
 fn check_attr_path(
@@ -2356,7 +2424,8 @@ pub(crate) fn unpack_objects(
     _strict: bool,
     max_input_size: Vec<String>,
 ) -> Result<()> {
-    let max_input_size = parse_unpack_objects_max_input_size(max_input_size.last().map(String::as_str));
+    let max_input_size =
+        parse_unpack_objects_max_input_size(max_input_size.last().map(String::as_str));
     let repo = find_repo()?;
     if dry_run {
         copy_unpack_objects_stdin(&mut io::stdin().lock(), &mut io::sink(), max_input_size)?;
@@ -2811,6 +2880,7 @@ fn batch_path_status(kind: &'static str, original: &str) -> BatchLookup {
 
 fn write_batch_object(
     out: &mut impl Write,
+    repo: &GitRepo,
     store: &LooseObjectStore,
     display_id: &ObjectId,
     object: &LooseObject,
@@ -2819,14 +2889,16 @@ fn write_batch_object(
     rest: &str,
     mode_atom: &str,
     output_nul: bool,
+    use_mailmap: bool,
 ) -> Result<()> {
+    let content = cat_file_display_content(repo, object, use_mailmap)?;
     let delta_base_atom = batch_delta_base_atom(store, &object.id, format)?;
     let disk_size_atom = batch_disk_size_atom(store, &object.id, format, None)?;
     write_batch_header(
         out,
         display_id,
         object.kind,
-        object.content.len(),
+        content.len(),
         format,
         rest,
         mode_atom,
@@ -2835,7 +2907,7 @@ fn write_batch_object(
         output_nul,
     )?;
     if include_content {
-        out.write_all(&object.content)?;
+        out.write_all(content.as_ref())?;
         write_batch_terminator(out, output_nul)?;
     }
     Ok(())
@@ -2843,6 +2915,7 @@ fn write_batch_object(
 
 fn write_object_batch_header(
     out: &mut impl Write,
+    repo: &GitRepo,
     store: &LooseObjectStore,
     display_id: &ObjectId,
     read_id: &ObjectId,
@@ -2850,7 +2923,31 @@ fn write_object_batch_header(
     rest: &str,
     mode_atom: &str,
     output_nul: bool,
+    use_mailmap: bool,
 ) -> Result<bool> {
+    if use_mailmap {
+        let object = match store.read_object(read_id) {
+            Ok(object) => object,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        let content = cat_file_display_content(repo, &object, true)?;
+        let delta_base_atom = batch_delta_base_atom(store, read_id, format)?;
+        let disk_size_atom = batch_disk_size_atom(store, read_id, format, None)?;
+        write_batch_header(
+            out,
+            display_id,
+            object.kind,
+            content.len(),
+            format,
+            rest,
+            mode_atom,
+            &delta_base_atom,
+            &disk_size_atom,
+            output_nul,
+        )?;
+        return Ok(true);
+    }
     let Some((kind, size)) = store.object_header_hint(read_id)? else {
         return Ok(false);
     };
@@ -2956,6 +3053,111 @@ fn write_batch_special(
     write_batch_terminator(out, output_nul)?;
     out.write_all(payload.as_bytes())?;
     write_batch_terminator(out, output_nul)
+}
+
+fn cat_file_display_content<'a>(
+    repo: &GitRepo,
+    object: &'a LooseObject,
+    use_mailmap: bool,
+) -> Result<Cow<'a, [u8]>> {
+    cat_file_display_content_impl(repo, object.kind, &object.content, use_mailmap)
+        .map_err(CliError::Io)
+}
+
+fn cat_file_display_content_io<'a>(
+    repo: &GitRepo,
+    object: &'a LooseObject,
+    use_mailmap: bool,
+) -> io::Result<Cow<'a, [u8]>> {
+    cat_file_display_content_impl(repo, object.kind, &object.content, use_mailmap)
+}
+
+fn cat_file_display_content_impl<'a>(
+    repo: &GitRepo,
+    kind: GitObjectKind,
+    content: &'a [u8],
+    use_mailmap: bool,
+) -> io::Result<Cow<'a, [u8]>> {
+    if !use_mailmap || !matches!(kind, GitObjectKind::Commit | GitObjectKind::Tag) {
+        return Ok(Cow::Borrowed(content));
+    }
+    let entries =
+        read_mailmap(repo, None, None).map_err(|error| io::Error::other(format!("{error:?}")))?;
+    if entries.is_empty() {
+        return Ok(Cow::Borrowed(content));
+    }
+    let rewritten = rewrite_mailmap_identities(kind, content, &entries);
+    if rewritten.as_slice() == content {
+        Ok(Cow::Borrowed(content))
+    } else {
+        Ok(Cow::Owned(rewritten))
+    }
+}
+
+fn rewrite_mailmap_identities(
+    kind: GitObjectKind,
+    content: &[u8],
+    entries: &[MailmapEntry],
+) -> Vec<u8> {
+    let Some(message_start) = content.windows(2).position(|window| window == b"\n\n") else {
+        return content.to_vec();
+    };
+    let header_end = message_start + 2;
+    let mut rewritten = Vec::with_capacity(content.len());
+    for line in content[..header_end].split_inclusive(|byte| *byte == b'\n') {
+        let (body, has_newline) = match line.strip_suffix(b"\n") {
+            Some(body) => (body, true),
+            None => (line, false),
+        };
+        match kind {
+            GitObjectKind::Commit => {
+                if let Some(signature) = body.strip_prefix(b"author ") {
+                    rewritten.extend_from_slice(b"author ");
+                    rewritten.extend_from_slice(&rewrite_mailmap_signature(signature, entries));
+                } else if let Some(signature) = body.strip_prefix(b"committer ") {
+                    rewritten.extend_from_slice(b"committer ");
+                    rewritten.extend_from_slice(&rewrite_mailmap_signature(signature, entries));
+                } else {
+                    rewritten.extend_from_slice(body);
+                }
+            }
+            GitObjectKind::Tag => {
+                if let Some(signature) = body.strip_prefix(b"tagger ") {
+                    rewritten.extend_from_slice(b"tagger ");
+                    rewritten.extend_from_slice(&rewrite_mailmap_signature(signature, entries));
+                } else {
+                    rewritten.extend_from_slice(body);
+                }
+            }
+            _ => rewritten.extend_from_slice(body),
+        }
+        if has_newline {
+            rewritten.push(b'\n');
+        }
+    }
+    rewritten.extend_from_slice(&content[header_end..]);
+    rewritten
+}
+
+fn rewrite_mailmap_signature(signature: &[u8], entries: &[MailmapEntry]) -> Vec<u8> {
+    let Ok(signature) = std::str::from_utf8(signature) else {
+        return signature.to_vec();
+    };
+    let Some((prefix, timezone)) = signature.rsplit_once(' ') else {
+        return signature.as_bytes().to_vec();
+    };
+    let Some((name_email, timestamp)) = prefix.rsplit_once(' ') else {
+        return signature.as_bytes().to_vec();
+    };
+    let Some(identity) = parse_mailmap_identity(name_email) else {
+        return signature.as_bytes().to_vec();
+    };
+    let mapped = apply_mailmap(entries, &identity);
+    format!(
+        "{} <{}> {} {}",
+        mapped.name, mapped.email, timestamp, timezone
+    )
+    .into_bytes()
 }
 
 fn write_batch_submodule(out: &mut impl Write, id: &ObjectId, output_nul: bool) -> io::Result<()> {

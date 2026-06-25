@@ -38,3 +38,31 @@ fn cat_file_rejects_unsupported_loose_object_type_like_stock_git() {
     assert_eq!(zmin.2, stock.2, "stderr");
     assert_ne!(stock.0, 0, "stock Git must reject the corrupt object type");
 }
+
+#[test]
+fn cat_file_allow_unknown_type_matches_stock_git_for_current_corrupt_loose_object_lane() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    std::fs::write(repo.path().join("anchor.txt"), b"anchor\n").expect("write anchor");
+    git(repo.path(), ["add", "-A"]);
+    git(repo.path(), ["commit", "-m", "anchor"]);
+
+    let oid = write_loose_object(repo.path(), b"badtype 0\0");
+    for args in [
+        vec!["cat-file", "--allow-unknown-type", "-t", oid.as_str()],
+        vec!["cat-file", "--allow-unknown-type", "-s", oid.as_str()],
+    ] {
+        let stock =
+            command_any_output("git", repo.path(), &args, "git cat-file allow-unknown-type");
+        let zmin = command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &args,
+            "zmin cat-file allow-unknown-type",
+        );
+
+        assert_eq!(zmin.0, stock.0, "exit code");
+        assert_eq!(zmin.1, stock.1, "stdout");
+        assert_eq!(zmin.2, stock.2, "stderr");
+    }
+}

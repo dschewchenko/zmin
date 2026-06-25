@@ -50,7 +50,12 @@ pub(crate) fn dispatch(
             type_only,
             pretty,
             size,
+            allow_unknown_type,
             exists,
+            use_mailmap,
+            no_use_mailmap,
+            mailmap,
+            no_mailmap,
             textconv,
             filters,
             path,
@@ -68,38 +73,47 @@ pub(crate) fn dispatch(
             filter,
             no_filter,
             objects,
-        } => run_cat_file(
-            type_only,
-            pretty,
-            size,
-            exists,
-            textconv,
-            filters,
-            path,
-            batch_check,
-            batch,
-            batch_command,
-            batch_all_objects,
-            buffer,
-            no_buffer,
-            follow_symlinks,
-            nul,
-            full_nul,
-            unordered,
-            no_unordered,
-            filter,
-            no_filter,
-            objects,
-        ),
+        } => {
+            let resolved = resolve_cat_file_args(
+                raw_args,
+                allow_unknown_type,
+                use_mailmap,
+                no_use_mailmap,
+                mailmap,
+                no_mailmap,
+            );
+            run_cat_file(
+                type_only,
+                pretty,
+                size,
+                resolved.allow_unknown_type,
+                exists,
+                resolved.use_mailmap,
+                textconv,
+                filters,
+                path,
+                batch_check,
+                batch,
+                batch_command,
+                batch_all_objects,
+                buffer,
+                no_buffer,
+                follow_symlinks,
+                nul,
+                full_nul,
+                unordered,
+                no_unordered,
+                filter,
+                no_filter,
+                objects,
+            )
+        }
         runtime::Command::CountObjects {
             verbose,
             no_verbose: _,
             human_readable,
             no_human_readable: _,
-        } => run_count_objects(
-            verbose > 0,
-            human_readable > 0,
-        ),
+        } => run_count_objects(verbose > 0, human_readable > 0),
         runtime::Command::UnpackFile { object } => run_unpack_file(object),
         runtime::Command::ShowIndex {
             object_format,
@@ -148,13 +162,8 @@ pub(crate) fn dispatch(
             no_stdin,
             identities,
         } => {
-            let resolved = resolve_check_mailmap_args(
-                raw_args,
-                mailmap_file,
-                mailmap_blob,
-                stdin,
-                no_stdin,
-            );
+            let resolved =
+                resolve_check_mailmap_args(raw_args, mailmap_file, mailmap_blob, stdin, no_stdin);
             run_check_mailmap(
                 resolved.mailmap_file,
                 resolved.mailmap_blob,
@@ -239,7 +248,9 @@ pub(crate) fn run_cat_file(
     type_only: bool,
     pretty: bool,
     size: bool,
+    allow_unknown_type: bool,
     exists: bool,
+    use_mailmap: bool,
     textconv: bool,
     filters: bool,
     path: Option<String>,
@@ -262,7 +273,9 @@ pub(crate) fn run_cat_file(
         type_only,
         pretty,
         size,
+        allow_unknown_type,
         exists,
+        use_mailmap,
         textconv,
         filters,
         path,
@@ -281,6 +294,47 @@ pub(crate) fn run_cat_file(
         no_filter,
         objects,
     )
+}
+
+struct CatFileArgs {
+    allow_unknown_type: bool,
+    use_mailmap: bool,
+}
+
+fn resolve_cat_file_args(
+    raw_args: &[String],
+    allow_unknown_type: bool,
+    use_mailmap: bool,
+    no_use_mailmap: bool,
+    mailmap: bool,
+    no_mailmap: bool,
+) -> CatFileArgs {
+    let mut resolved_use_mailmap = use_mailmap || mailmap;
+    let mut resolved_allow_unknown_type = allow_unknown_type;
+
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--allow-unknown-type" => resolved_allow_unknown_type = true,
+            "--use-mailmap" | "--mailmap" => resolved_use_mailmap = true,
+            "--no-use-mailmap" | "--no-mailmap" => resolved_use_mailmap = false,
+            _ => {}
+        }
+    }
+
+    if !allow_unknown_type {
+        resolved_allow_unknown_type = false;
+    }
+    if !(use_mailmap || no_use_mailmap || mailmap || no_mailmap) {
+        resolved_use_mailmap = false;
+    }
+
+    CatFileArgs {
+        allow_unknown_type: resolved_allow_unknown_type,
+        use_mailmap: resolved_use_mailmap,
+    }
 }
 
 pub(crate) fn run_count_objects(
@@ -359,8 +413,7 @@ pub(crate) fn run_check_ref_format(
     refname: Option<String>,
 ) -> std::result::Result<(), runtime::CliError> {
     let allow_onelevel_option_present = allow_onelevel || no_allow_onelevel;
-    let allow_onelevel =
-        resolve_check_ref_format_allow_onelevel(allow_onelevel, no_allow_onelevel);
+    let allow_onelevel = resolve_check_ref_format_allow_onelevel(allow_onelevel, no_allow_onelevel);
     super::core_commands::check_ref_format_command(
         allow_onelevel,
         allow_onelevel_option_present,

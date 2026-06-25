@@ -338,14 +338,14 @@ Do not collapse these layers into one percentage.
 
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
-| Fully complete command matrices | `82/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
-| Fully complete command-option matrices | `1380/3175` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
+| Fully complete command matrices | `98/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
+| Fully complete command-option matrices | `1437/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | no | audit rows now span the Git baseline plus nested command families represented in focused matrices |
-| Git doc option pairs represented by rows | `1388/3175` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `5337` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `4643/5337` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/5337` | no | written rows with incomplete parity |
-| Open written rows | `12/5337` | no | written rows that still do not match stock Git |
+| Git doc option pairs represented by rows | `1445/3156` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `5406` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `4701/5406` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/5406` | no | written rows with incomplete parity |
+| Open written rows | `12/5406` | no | written rows that still do not match stock Git |
 | Invalid input rows | `679/5337` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
@@ -426,7 +426,7 @@ variants.
 | `branch` | `51` | `0` | `30` | `docs/cli/matrices/branch_v2_47.tsv` | `49` | `35` | `0` | `0` | `14` | no |
 | `bugreport` | `8` | `0` | `5` | `docs/cli/matrices/bugreport_v2_47.tsv` | `9` | `9` | `0` | `0` | `0` | no |
 | `bundle` | `15` | `0` | `2` | `docs/cli/matrices/bundle_v2_47.tsv` | `21` | `13` | `0` | `0` | `8` | no |
-| `cat-file` | `21` | `0` | `14` | `docs/cli/matrices/cat_file_v2_47.tsv` | `40` | `32` | `0` | `0` | `8` | no |
+| `cat-file` | `21` | `21` | `21` | `docs/cli/matrices/cat_file_v2_47.tsv` | `51` | `41` | `0` | `0` | `10` | yes |
 | `check-attr` | `6` | `0` | `3` | `docs/cli/matrices/check_attr_v2_47.tsv` | `9` | `9` | `0` | `0` | `0` | no |
 | `check-ignore` | `10` | `0` | `7` | `docs/cli/matrices/check_ignore_v2_47.tsv` | `20` | `10` | `0` | `0` | `10` | no |
 | `check-mailmap` | `3` | `0` | `1` | `docs/cli/matrices/check_mailmap_v2_47.tsv` | `8` | `8` | `0` | `0` | `0` | no |

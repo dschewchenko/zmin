@@ -217,8 +217,18 @@ pub enum Command {
         pretty: bool,
         #[arg(short = 's', long = "size", action = ArgAction::SetTrue)]
         size: bool,
+        #[arg(long = "allow-unknown-type", action = ArgAction::SetTrue)]
+        allow_unknown_type: bool,
         #[arg(short = 'e', long = "exists", action = ArgAction::SetTrue)]
         exists: bool,
+        #[arg(long = "use-mailmap", action = ArgAction::SetTrue)]
+        use_mailmap: bool,
+        #[arg(long = "no-use-mailmap", action = ArgAction::SetTrue)]
+        no_use_mailmap: bool,
+        #[arg(long = "mailmap", action = ArgAction::SetTrue)]
+        mailmap: bool,
+        #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
+        no_mailmap: bool,
         #[arg(long = "textconv", action = ArgAction::SetTrue)]
         textconv: bool,
         #[arg(long = "filters", action = ArgAction::SetTrue)]

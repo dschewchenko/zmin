@@ -6,11 +6,11 @@ use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    clone_repo_fixture, command_any_output, command_any_output_with_stdin_bytes, command_output_with_env,
-    command_stdout_bytes, configure_identity, git, git_args, git_failure_output, git_init, git_status,
-    git_with_env, git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args,
-    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, run_zmin_with_stdin,
-    run_zmin_with_stdin_bytes, zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin,
+    command_any_output_with_stdin_bytes, command_output_with_env, command_stdout_bytes,
+    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
+    git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_failure_output,
+    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
 };
 
 fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
@@ -246,13 +246,101 @@ fn hash_object_and_cat_file_match_stock_git() {
 }
 
 #[test]
+fn cat_file_mailmap_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "user.name", "Alias User"]);
+    git(repo.path(), ["config", "user.email", "alias@example.com"]);
+    fs::write(repo.path().join("a.txt"), b"hello\n").expect("write fixture");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+    fs::write(
+        repo.path().join(".mailmap"),
+        b"Real User <real@example.com> Alias User <alias@example.com>\n",
+    )
+    .expect("write mailmap");
+    git_with_env(repo.path(), ["tag", "-a", "v1", "-m", "tag message"]);
+
+    let commit = git(repo.path(), ["rev-parse", "HEAD"]);
+    let tag = git(repo.path(), ["rev-parse", "v1"]);
+
+    for args in [
+        vec!["cat-file", "-s", "--use-mailmap", commit.as_str()],
+        vec!["cat-file", "-s", "--mailmap", commit.as_str()],
+        vec![
+            "cat-file",
+            "-s",
+            "--use-mailmap",
+            "--no-mailmap",
+            commit.as_str(),
+        ],
+        vec![
+            "cat-file",
+            "-s",
+            "--mailmap",
+            "--no-use-mailmap",
+            commit.as_str(),
+        ],
+        vec!["cat-file", "-p", "--use-mailmap", commit.as_str()],
+        vec!["cat-file", "-p", "--use-mailmap", tag.as_str()],
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), &args, "zmin cat-file mailmap"),
+            command_any_output("git", repo.path(), &args, "git cat-file mailmap")
+        );
+    }
+
+    let batch_stdin = format!("{commit}\n");
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--batch-check", "--use-mailmap"],
+            &batch_stdin,
+            "zmin cat-file batch-check use-mailmap",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            repo.path(),
+            &["cat-file", "--batch-check", "--use-mailmap"],
+            &batch_stdin,
+            "git cat-file batch-check use-mailmap",
+        )
+    );
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            repo.path(),
+            &["cat-file", "--batch-command", "--use-mailmap"],
+            &format!("info {commit}\ncontents {commit}\n"),
+            "zmin cat-file batch-command use-mailmap",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            repo.path(),
+            &["cat-file", "--batch-command", "--use-mailmap"],
+            &format!("info {commit}\ncontents {commit}\n"),
+            "git cat-file batch-command use-mailmap",
+        )
+    );
+}
+
+#[test]
 fn hash_object_matches_stock_git_for_documented_long_option_modes() {
     let repo = git_init();
     fs::write(repo.path().join("a.txt"), b"alpha\n").expect("write fixture");
 
     assert_eq!(
-        run_zmin_with_stdin(repo.path(), ["hash-object", "--path=a.txt", "--stdin"], "stdin\n"),
-        git_with_stdin(repo.path(), ["hash-object", "--path=a.txt", "--stdin"], "stdin\n")
+        run_zmin_with_stdin(
+            repo.path(),
+            ["hash-object", "--path=a.txt", "--stdin"],
+            "stdin\n"
+        ),
+        git_with_stdin(
+            repo.path(),
+            ["hash-object", "--path=a.txt", "--stdin"],
+            "stdin\n"
+        )
     );
     assert_eq!(
         run_zmin_with_stdin(repo.path(), ["hash-object", "--stdin-paths"], "a.txt\n"),
@@ -271,8 +359,16 @@ fn hash_object_matches_stock_git_for_documented_long_option_modes() {
         )
     );
     assert_eq!(
-        run_zmin_with_stdin(repo.path(), ["hash-object", "--literally", "--stdin"], "stdin\n"),
-        git_with_stdin(repo.path(), ["hash-object", "--literally", "--stdin"], "stdin\n")
+        run_zmin_with_stdin(
+            repo.path(),
+            ["hash-object", "--literally", "--stdin"],
+            "stdin\n"
+        ),
+        git_with_stdin(
+            repo.path(),
+            ["hash-object", "--literally", "--stdin"],
+            "stdin\n"
+        )
     );
 
     assert_eq!(
@@ -286,8 +382,14 @@ fn hash_object_matches_stock_git_for_documented_long_option_modes() {
         )
     );
     assert_eq!(
-        run_zmin_failure_output(repo.path(), &["hash-object", "--stdin-paths", "--path=a.txt"]),
-        git_failure_output(repo.path(), &["hash-object", "--stdin-paths", "--path=a.txt"])
+        run_zmin_failure_output(
+            repo.path(),
+            &["hash-object", "--stdin-paths", "--path=a.txt"]
+        ),
+        git_failure_output(
+            repo.path(),
+            &["hash-object", "--stdin-paths", "--path=a.txt"]
+        )
     );
     assert_eq!(
         run_zmin_failure_output(repo.path(), &["hash-object", "--stdin", "--stdin-paths"]),
@@ -1017,39 +1119,192 @@ fn show_index_option_order_matches_stock_git() {
     let idx = fs::read(first_pack_index(repo.path())).expect("read pack index");
 
     for args in [
-        &["show-index", "--object-format=sha256", "--object-format=sha1"][..],
+        &[
+            "show-index",
+            "--object-format=sha256",
+            "--object-format=sha1",
+        ][..],
         &["show-index", "--object-format=bogus", "--no-object-format"][..],
         &["show-index", "--no-object-format", "--object-format=bogus"][..],
         &["show-index", "--object-format=sha256"][..],
-        &["show-index", "--object-format=sha1", "--object-format=sha256"][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--object-format=sha256",
+        ][..],
         &["show-index", "--no-object-format", "--object-format=sha256"][..],
-        &["show-index", "--object-format", "sha1", "--object-format=sha1"][..],
-        &["show-index", "--object-format=sha1", "--object-format", "sha1"][..],
-        &["show-index", "--no-object-format", "--object-format=sha1", "--no-object-format"][..],
-        &["show-index", "--object-format=sha1", "--no-object-format", "--object-format=sha1"][..],
+        &[
+            "show-index",
+            "--object-format",
+            "sha1",
+            "--object-format=sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--object-format",
+            "sha1",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--object-format=sha1",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--no-object-format",
+            "--object-format=sha1",
+        ][..],
         &["show-index", "--object-format=sha256", "--no-object-format"][..],
-        &["show-index", "--no-object-format", "--object-format=bogus", "--no-object-format"][..],
-        &["show-index", "--object-format=bogus", "--no-object-format", "--object-format=sha1"][..],
-        &["show-index", "--object-format", "sha1", "--object-format", "sha1"][..],
-        &["show-index", "--object-format=sha1", "--object-format=sha1", "--no-object-format"][..],
-        &["show-index", "--no-object-format", "--object-format", "sha1", "--no-object-format"][..],
-        &["show-index", "--object-format", "sha1", "--no-object-format", "--object-format", "sha1"][..],
-        &["show-index", "--object-format=sha256", "--object-format=sha256"][..],
-        &["show-index", "--object-format=sha256", "--object-format=sha256", "--no-object-format"][..],
-        &["show-index", "--object-format=bogus", "--no-object-format", "--no-object-format"][..],
-        &["show-index", "--no-object-format", "--object-format=sha1", "--object-format=sha1"][..],
-        &["show-index", "--object-format=sha1", "--no-object-format", "--no-object-format"][..],
-        &["show-index", "--no-object-format", "--object-format=sha256", "--no-object-format"][..],
-        &["show-index", "--object-format", "sha1", "--object-format", "sha1", "--no-object-format"][..],
-        &["show-index", "--object-format", "sha1", "--object-format", "sha1", "--no-object-format", "--object-format", "sha1"][..],
-        &["show-index", "--no-object-format", "--object-format", "sha1", "--object-format", "sha1", "--no-object-format"][..],
-        &["show-index", "--object-format=sha1", "--object-format=sha1", "--object-format=sha1"][..],
-        &["show-index", "--object-format=sha256", "--object-format=sha256", "--object-format=sha256"][..],
-        &["show-index", "--object-format=sha256", "--object-format=sha256", "--no-object-format", "--object-format=sha1"][..],
-        &["show-index", "--object-format=bogus", "--no-object-format", "--object-format=sha1", "--no-object-format"][..],
-        &["show-index", "--no-object-format", "--no-object-format", "--object-format=sha1"][..],
-        &["show-index", "--no-object-format", "--no-object-format", "--object-format=sha256"][..],
-        &["show-index", "--object-format=sha1", "--no-object-format", "--object-format=sha256", "--no-object-format"][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--object-format=bogus",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=bogus",
+            "--no-object-format",
+            "--object-format=sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format",
+            "sha1",
+            "--object-format",
+            "sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--object-format=sha1",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--object-format",
+            "sha1",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format",
+            "sha1",
+            "--no-object-format",
+            "--object-format",
+            "sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha256",
+            "--object-format=sha256",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha256",
+            "--object-format=sha256",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=bogus",
+            "--no-object-format",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--object-format=sha1",
+            "--object-format=sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--no-object-format",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--object-format=sha256",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format",
+            "sha1",
+            "--object-format",
+            "sha1",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format",
+            "sha1",
+            "--object-format",
+            "sha1",
+            "--no-object-format",
+            "--object-format",
+            "sha1",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--object-format",
+            "sha1",
+            "--object-format",
+            "sha1",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--object-format=sha1",
+            "--object-format=sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha256",
+            "--object-format=sha256",
+            "--object-format=sha256",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha256",
+            "--object-format=sha256",
+            "--no-object-format",
+            "--object-format=sha1",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=bogus",
+            "--no-object-format",
+            "--object-format=sha1",
+            "--no-object-format",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--no-object-format",
+            "--object-format=sha1",
+        ][..],
+        &[
+            "show-index",
+            "--no-object-format",
+            "--no-object-format",
+            "--object-format=sha256",
+        ][..],
+        &[
+            "show-index",
+            "--object-format=sha1",
+            "--no-object-format",
+            "--object-format=sha256",
+            "--no-object-format",
+        ][..],
     ] {
         assert_eq!(
             command_any_output_with_stdin_bytes(zmin_bin(), repo.path(), &args, &idx, "zmin"),
@@ -1500,12 +1755,30 @@ fn read_tree_documented_option_forms_match_stock_git() {
         ["read-tree", "--reset", "--index-output=alt.index", &tree].as_slice(),
         ["read-tree", "--index-output=alt.index", "--reset", &tree].as_slice(),
         ["read-tree", "--no-sparse-checkout", &tree].as_slice(),
-        ["read-tree", "--no-sparse-checkout", "--no-sparse-checkout", &tree].as_slice(),
+        [
+            "read-tree",
+            "--no-sparse-checkout",
+            "--no-sparse-checkout",
+            &tree,
+        ]
+        .as_slice(),
         ["read-tree", "--no-sparse-checkout", "--quiet", &tree].as_slice(),
         ["read-tree", "--quiet", "--no-sparse-checkout", &tree].as_slice(),
         ["read-tree", "--recurse-submodules", &tree].as_slice(),
-        ["read-tree", "--recurse-submodules", "--recurse-submodules", &tree].as_slice(),
-        ["read-tree", "--recurse-submodules", "--no-recurse-submodules", &tree].as_slice(),
+        [
+            "read-tree",
+            "--recurse-submodules",
+            "--recurse-submodules",
+            &tree,
+        ]
+        .as_slice(),
+        [
+            "read-tree",
+            "--recurse-submodules",
+            "--no-recurse-submodules",
+            &tree,
+        ]
+        .as_slice(),
         [
             "read-tree",
             "--recurse-submodules",
@@ -1515,8 +1788,20 @@ fn read_tree_documented_option_forms_match_stock_git() {
         ]
         .as_slice(),
         ["read-tree", "--no-recurse-submodules", &tree].as_slice(),
-        ["read-tree", "--no-recurse-submodules", "--no-recurse-submodules", &tree].as_slice(),
-        ["read-tree", "--no-recurse-submodules", "--recurse-submodules", &tree].as_slice(),
+        [
+            "read-tree",
+            "--no-recurse-submodules",
+            "--no-recurse-submodules",
+            &tree,
+        ]
+        .as_slice(),
+        [
+            "read-tree",
+            "--no-recurse-submodules",
+            "--recurse-submodules",
+            &tree,
+        ]
+        .as_slice(),
         [
             "read-tree",
             "--no-recurse-submodules",
@@ -1529,7 +1814,14 @@ fn read_tree_documented_option_forms_match_stock_git() {
         ["read-tree", "-i", "-i", "--prefix=import/", &tree].as_slice(),
         ["read-tree", "-i", "--reset", &tree].as_slice(),
         ["read-tree", "-i", "-i", "--reset", &tree].as_slice(),
-        ["read-tree", "-i", "--prefix=import/", "--index-output=alt.index", &tree].as_slice(),
+        [
+            "read-tree",
+            "-i",
+            "--prefix=import/",
+            "--index-output=alt.index",
+            &tree,
+        ]
+        .as_slice(),
         [
             "read-tree",
             "-i",
@@ -1648,10 +1940,38 @@ fn read_tree_documented_option_forms_match_stock_git() {
     {
         for args in [
             ["read-tree", "--index-output=alt.index", &tree].as_slice(),
-            ["read-tree", "-u", "--index-output=alt.index", "--reset", &tree].as_slice(),
-            ["read-tree", "--index-output=alt.index", "-u", "--reset", &tree].as_slice(),
-            ["read-tree", "-u", "--index-output=alt.index", "--prefix=import/", &tree].as_slice(),
-            ["read-tree", "--index-output=alt.index", "-u", "--prefix=import/", &tree].as_slice(),
+            [
+                "read-tree",
+                "-u",
+                "--index-output=alt.index",
+                "--reset",
+                &tree,
+            ]
+            .as_slice(),
+            [
+                "read-tree",
+                "--index-output=alt.index",
+                "-u",
+                "--reset",
+                &tree,
+            ]
+            .as_slice(),
+            [
+                "read-tree",
+                "-u",
+                "--index-output=alt.index",
+                "--prefix=import/",
+                &tree,
+            ]
+            .as_slice(),
+            [
+                "read-tree",
+                "--index-output=alt.index",
+                "-u",
+                "--prefix=import/",
+                &tree,
+            ]
+            .as_slice(),
         ] {
             let git_repo = clone_repo_fixture(tree_repo.path());
             let zmin_repo = clone_repo_fixture(tree_repo.path());

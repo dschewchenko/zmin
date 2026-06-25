@@ -167,12 +167,12 @@ Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete command matrices | `82/151` | commands whose current documented and discovered behavior matrix is fully closed |
-| Fully complete documented option matrices | `1380/3175` | documented command-option pairs whose current behavior matrix is fully closed |
+| Fully complete command matrices | `98/151` | commands whose current documented and discovered behavior matrix is fully closed |
+| Fully complete documented option matrices | `1437/3156` | documented command-option pairs whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `1388/3175` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `5337` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `4643/5337` | supported-behavior rows with focused parity evidence |
+| Documented option spellings represented by rows | `1445/3156` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `5406` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `4701/5406` | supported-behavior rows with focused parity evidence |
 | Partial written rows | `0/5337` | written rows with incomplete parity |
 | Open written rows | `12/5337` | written rows that still do not match stock Git |
 | Invalid input rows | `679/5337` | rows where stock Git rejects the input |
@@ -242,7 +242,7 @@ Current command-level matrices:
 | `branch` | `51` | `0` | `13` | `31` | `18` | `0` | `0` | `13` | no |
 | `bugreport` | `8` | `0` | `1` | `3` | `3` | `0` | `0` | `0` | no |
 | `bundle` | `15` | `0` | `2` | `21` | `13` | `0` | `0` | `8` | no |
-| `cat-file` | `21` | `0` | `11` | `33` | `25` | `0` | `0` | `8` | no |
+| `cat-file` | `21` | `21` | `21` | `51` | `41` | `0` | `0` | `10` | yes |
 | `check-attr` | `6` | `0` | `1` | `5` | `5` | `0` | `0` | `0` | no |
 | `check-ignore` | `10` | `0` | `7` | `19` | `9` | `0` | `0` | `10` | no |
 | `check-mailmap` | `3` | `0` | `1` | `6` | `6` | `0` | `0` | `0` | no |
