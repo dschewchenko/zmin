@@ -35,6 +35,17 @@ remaining checklist rows. Rust behavior changes are expected because the
 cruft-expiration parser must match stock Git's date-like cutoff behavior.
 Actual delta matched.
 
+As of 2026-06-25 the next batch is a helper-free `repack` geometric
+schema-tail closure. The selected rows add exact stock-Git evidence for `-g`
+and `--geometric` with joined and separate value forms, repeated short and
+long forms with last-one-wins behavior, mixed short/long ordering, and the
+stock invalid-value diagnostic for `--geometric=bogus`. Expected delta is `+8`
+matrix rows, `+8` verified rows, `+2` represented documented option pairs,
+`+0` complete documented option pairs, `+0` complete command matrices, and
+`0` remaining checklist rows. Rust behavior changes are expected because
+`repack` must add the missing `-g` / `--geometric` schema tail and stock-like
+value parsing. Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-row reviewed-complete closure
 cluster for `branch`, `status`, `rm`, `fsck`, `maintenance`, and
 `merge-tree`. Their behavior rows, stock evidence, and documented option

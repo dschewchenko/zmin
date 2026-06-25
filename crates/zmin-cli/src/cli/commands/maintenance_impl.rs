@@ -28,6 +28,7 @@ struct RepackOptions {
     window: Option<usize>,
     window_memory: Option<String>,
     depth: Option<usize>,
+    geometric: Vec<String>,
     threads: Option<usize>,
     max_pack_size: Option<String>,
     max_cruft_size: Vec<String>,
@@ -77,6 +78,7 @@ pub(crate) fn repack_command(
     window: Option<usize>,
     window_memory: Option<String>,
     depth: Option<usize>,
+    geometric: Vec<String>,
     threads: Option<usize>,
     max_pack_size: Option<String>,
     max_cruft_size: Vec<String>,
@@ -104,6 +106,7 @@ pub(crate) fn repack_command(
         window,
         window_memory,
         depth,
+        geometric,
         threads,
         max_pack_size,
         max_cruft_size,
@@ -1632,6 +1635,7 @@ fn repack(options: RepackOptions) -> Result<()> {
         options.window_memory.as_deref(),
         "window-memory",
     )?;
+    let _geometric = parse_repack_geometric_values(&options.geometric)?;
     let expire_unreachable_now = write_cruft_pack
         && cruft_expiration_expires_unreachable_now(options.cruft_expiration.as_deref())?;
     let _ = (
@@ -1881,6 +1885,27 @@ fn parse_repack_size_limit_values(values: &[String], option: &str) -> Result<Opt
         last = parse_repack_size_limit(Some(value.as_str()), option)?;
     }
     Ok(last)
+}
+
+fn parse_repack_geometric_values(values: &[String]) -> Result<Option<u64>> {
+    let mut last = None;
+    for value in values {
+        last = parse_repack_geometric(Some(value.as_str()))?;
+    }
+    Ok(last)
+}
+
+fn parse_repack_geometric(raw: Option<&str>) -> Result<Option<u64>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let Some(size) = parse_size_with_optional_suffix(raw) else {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: option `geometric' expects an integer value with an optional k/m/g suffix\n".into(),
+        });
+    };
+    Ok(Some(size))
 }
 
 fn cruft_expiration_expires_unreachable_now(value: Option<&str>) -> Result<bool> {
@@ -2272,6 +2297,7 @@ fn gc(options: GcOptions) -> Result<()> {
         window: options.aggressive.then_some(250),
         window_memory: None,
         depth: options.aggressive.then_some(250),
+        geometric: Vec::new(),
         threads: None,
         max_pack_size: None,
         max_cruft_size: options.max_cruft_size.clone(),

@@ -1427,6 +1427,13 @@ fn repack_documented_option_aliases_and_value_forms_match_stock_git() {
         ["repack", "--window=10", "--depth=10", "-q"].as_slice(),
         ["repack", "--depth=10", "--window=10", "-q"].as_slice(),
         ["repack", "--window", "10", "--depth", "10", "-q"].as_slice(),
+        ["repack", "-g2", "-d", "-q"].as_slice(),
+        ["repack", "-g", "2", "-d", "-q"].as_slice(),
+        ["repack", "--geometric=2", "-d", "-q"].as_slice(),
+        ["repack", "--geometric", "2", "-d", "-q"].as_slice(),
+        ["repack", "-g2", "-g3", "-d", "-q"].as_slice(),
+        ["repack", "--geometric=2", "--geometric=3", "-d", "-q"].as_slice(),
+        ["repack", "-g2", "--geometric=3", "-d", "-q"].as_slice(),
         ["repack", "--max-pack-size=2m", "-a", "-d", "-q"].as_slice(),
         ["repack", "--max-pack-size=1", "-a", "-d", "-q"].as_slice(),
         ["repack", "--write-midx", "-q"].as_slice(),
@@ -1454,6 +1461,7 @@ fn repack_documented_option_aliases_and_value_forms_match_stock_git() {
 fn repack_invalid_documented_size_values_match_stock_git() {
     for args in [
         ["repack", "--window-memory=bogus", "-q"].as_slice(),
+        ["repack", "--geometric=bogus", "-d", "-q"].as_slice(),
         ["repack", "--max-pack-size=bogus", "-a", "-d", "-q"].as_slice(),
     ] {
         let git_repo = repack_documented_option_fixture_repo();

@@ -1720,6 +1720,8 @@ pub enum Command {
         window_memory: Option<String>,
         #[arg(long = "depth")]
         depth: Option<usize>,
+        #[arg(short = 'g', long = "geometric")]
+        geometric: Vec<String>,
         #[arg(long = "threads")]
         threads: Option<usize>,
         #[arg(long = "max-pack-size")]
