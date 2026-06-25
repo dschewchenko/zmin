@@ -1202,8 +1202,18 @@ Latest completed batch:
   `cargo test -p zmin-cli --test git_worktree_state_compat checkout_index -- --nocapture`
   plus `python3 tools/git-compat-census.py --root .`.
 
+Latest in-progress family follow-up:
+
+- `read-tree` now covers the helper-free parser subgroup:
+  `--dry-run` / `-n`, `--quiet` / `-q`, `--reset`, `--index-output`,
+  `-i` with its stock fatal guard, `--no-sparse-checkout`,
+  `--recurse-submodules`, and `--no-recurse-submodules`.
+- This moved `read-tree` to `13/17` represented documented option pairs and
+  leaves the merge-heavy tail `--aggressive`, `--trivial`, `-u`, and `-v` as
+  the remaining schema-missing surface.
+
 Next helper-free family candidates by schema-missing size now remain:
 
 - `repack`: `16`
-- `read-tree`: `14`
+- `read-tree`: `4`
 - `gc`: `7`

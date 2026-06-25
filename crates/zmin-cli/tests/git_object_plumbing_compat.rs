@@ -6,10 +6,11 @@ use tempfile::TempDir;
 use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 
 use common::{
-    clone_repo_fixture, command_any_output, command_any_output_with_stdin_bytes, command_stdout_bytes,
-    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
-    git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args, run_zmin_failure_output,
-    run_zmin_status, run_zmin_with_env, run_zmin_with_stdin, run_zmin_with_stdin_bytes, zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin_bytes, command_output_with_env,
+    command_stdout_bytes, configure_identity, git, git_args, git_failure_output, git_init, git_status,
+    git_with_env, git_with_stdin, git_with_stdin_bytes, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, run_zmin_with_stdin,
+    run_zmin_with_stdin_bytes, zmin_bin,
 };
 
 fn first_pack_index(repo: &std::path::Path) -> std::path::PathBuf {
@@ -1405,6 +1406,94 @@ fn read_tree_documented_option_forms_match_stock_git() {
             git(git_repo.path(), ["write-tree"]),
             "args: {args:?}"
         );
+    }
+
+    for args in [
+        ["read-tree", "--dry-run", &tree].as_slice(),
+        ["read-tree", "-n", &tree].as_slice(),
+        ["read-tree", "--quiet", &tree].as_slice(),
+        ["read-tree", "-q", &tree].as_slice(),
+        ["read-tree", "--reset", &tree].as_slice(),
+        ["read-tree", "--no-sparse-checkout", &tree].as_slice(),
+        ["read-tree", "--recurse-submodules", &tree].as_slice(),
+        ["read-tree", "--no-recurse-submodules", &tree].as_slice(),
+        ["read-tree", "-i", "--prefix=import/", &tree].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(tree_repo.path());
+        let zmin_repo = clone_repo_fixture(tree_repo.path());
+        git(git_repo.path(), ["read-tree", "--empty"]);
+        run_zmin(zmin_repo.path(), ["read-tree", "--empty"]);
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["ls-files", "-s"]),
+            git(git_repo.path(), ["ls-files", "-s"]),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["write-tree"]),
+            git(git_repo.path(), ["write-tree"]),
+            "args: {args:?}"
+        );
+    }
+
+    {
+        let git_repo = clone_repo_fixture(tree_repo.path());
+        let zmin_repo = clone_repo_fixture(tree_repo.path());
+        git(git_repo.path(), ["read-tree", "--empty"]);
+        run_zmin(zmin_repo.path(), ["read-tree", "--empty"]);
+        let args = ["read-tree", "--index-output=alt.index", &tree];
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &args, "zmin"),
+            command_any_output("git", git_repo.path(), &args, "git")
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["write-tree"]),
+            git(git_repo.path(), ["write-tree"])
+        );
+        assert_eq!(
+            command_output_with_env(
+                "git",
+                zmin_repo.path(),
+                &["write-tree"],
+                &[("GIT_INDEX_FILE", "alt.index")],
+                "git write-tree zmin alt index",
+            )
+            .1,
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &["write-tree"],
+                &[("GIT_INDEX_FILE", "alt.index")],
+                "git write-tree alt index",
+            )
+            .1
+        );
+    }
+
+    {
+        let git_repo = clone_repo_fixture(tree_repo.path());
+        let zmin_repo = clone_repo_fixture(tree_repo.path());
+        git(git_repo.path(), ["read-tree", "--empty"]);
+        run_zmin(zmin_repo.path(), ["read-tree", "--empty"]);
+        for args in [
+            ["read-tree", "-i", &tree].as_slice(),
+            ["read-tree", "-i", "--index-output=alt.index", &tree].as_slice(),
+        ] {
+            assert_eq!(
+                run_zmin_failure_output(zmin_repo.path(), args),
+                git_failure_output(git_repo.path(), args),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                run_zmin(zmin_repo.path(), ["write-tree"]),
+                git(git_repo.path(), ["write-tree"]),
+                "args: {args:?}"
+            );
+        }
     }
 }
 

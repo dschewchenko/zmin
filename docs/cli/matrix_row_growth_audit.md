@@ -5601,6 +5601,52 @@ schema rows and `-8` remaining checklist rows. The reviewed-complete census now
 marks `checkout-index` `16/16` documented option pairs and the full command
 matrix as finished.
 
+## 2026-06-25 - read-tree helper-free parser surface batch
+
+Expected movement:
+
+- behavior rows: `+12`
+- closed rows: `+10`
+- open rows: `+0`
+- invalid-input rows: `+2`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+10`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git read-tree --dry-run <tree>`
+- `git read-tree -n <tree>`
+- `git read-tree --quiet <tree>`
+- `git read-tree -q <tree>`
+- `git read-tree --reset <tree>`
+- `git read-tree --index-output=alt.index <tree>`
+- `git read-tree -i --prefix=import/ <tree>`
+- `git read-tree -i <tree>`
+- `git read-tree -i --index-output=alt.index <tree>`
+- `git read-tree --no-sparse-checkout <tree>`
+- `git read-tree --recurse-submodules <tree>`
+- `git read-tree --no-recurse-submodules <tree>`
+
+This batch closes the helper-free `git read-tree` parser surface that does not
+require new merge or worktree-update machinery. Zmin now accepts and matches
+stock Git for dry-run, quiet, reset, alternate-index output, index-only prefix
+import, and the no-op sparse/submodule toggles on simple repositories, while
+also matching the stock fatal `-i` guard when it is used without `-m`,
+`--reset`, or `--prefix`.
+
+Actual post-import movement matched the declaration: `+12` behavior rows, `+10`
+closed rows, `+0` open rows, `+2` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+10` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows. `read-tree` is now `13/17`
+represented documented option pairs with only `--aggressive`, `--trivial`,
+`-u`, and `-v` still outside the schema.
+
 ## 2026-06-25 - check-ref-format precedence and branch-history surface
 
 Expected movement:

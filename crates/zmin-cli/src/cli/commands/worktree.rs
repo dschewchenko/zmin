@@ -253,9 +253,30 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::ReadTree {
             empty,
             merge,
+            reset,
+            index_only,
+            dry_run,
+            quiet,
+            index_output,
             prefix,
+            recurse_submodules,
+            no_recurse_submodules,
+            no_sparse_checkout,
             treeish,
-        } => run_read_tree(empty, merge, prefix, treeish),
+        } => run_read_tree(
+            empty,
+            merge,
+            reset,
+            index_only,
+            dry_run,
+            quiet,
+            index_output,
+            prefix,
+            recurse_submodules,
+            no_recurse_submodules,
+            no_sparse_checkout,
+            treeish,
+        ),
         runtime::Command::Checkout {
             force,
             quiet,
@@ -442,15 +463,31 @@ pub(crate) fn run_status(
 pub(crate) fn run_read_tree(
     empty: bool,
     merge: u8,
+    reset: bool,
+    index_only: bool,
+    dry_run: u8,
+    quiet: u8,
+    index_output: Option<PathBuf>,
     prefix: Option<String>,
+    recurse_submodules: bool,
+    no_recurse_submodules: bool,
+    no_sparse_checkout: bool,
     treeish: Option<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::read_tree_command(
+    super::worktree_commands::read_tree_command(super::worktree_commands::ReadTreeCommandOptions {
         empty,
-        merge > 0,
-        prefix.as_deref(),
-        treeish.as_deref(),
-    )
+        merge: merge > 0,
+        reset,
+        index_only,
+        dry_run: dry_run > 0,
+        quiet: quiet > 0,
+        index_output,
+        prefix,
+        recurse_submodules,
+        no_recurse_submodules,
+        no_sparse_checkout,
+        treeish,
+    })
 }
 
 pub(crate) fn run_checkout_index(

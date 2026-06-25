@@ -3806,12 +3806,38 @@ pub(crate) fn mv(
     Ok(())
 }
 
-pub(crate) fn read_tree_command(
-    empty: bool,
-    _merge: bool,
-    prefix: Option<&str>,
-    treeish: Option<&str>,
-) -> Result<()> {
+#[derive(Debug, Clone)]
+pub(crate) struct ReadTreeCommandOptions {
+    pub(crate) empty: bool,
+    pub(crate) merge: bool,
+    pub(crate) reset: bool,
+    pub(crate) index_only: bool,
+    pub(crate) dry_run: bool,
+    pub(crate) quiet: bool,
+    pub(crate) index_output: Option<PathBuf>,
+    pub(crate) prefix: Option<String>,
+    pub(crate) recurse_submodules: bool,
+    pub(crate) no_recurse_submodules: bool,
+    pub(crate) no_sparse_checkout: bool,
+    pub(crate) treeish: Option<String>,
+}
+
+pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
+    let ReadTreeCommandOptions {
+        empty,
+        merge,
+        reset,
+        index_only,
+        dry_run,
+        quiet,
+        index_output,
+        prefix,
+        recurse_submodules,
+        no_recurse_submodules,
+        no_sparse_checkout,
+        treeish,
+    } = options;
+    let _ = (quiet, recurse_submodules, no_recurse_submodules, no_sparse_checkout);
     if empty && treeish.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -3824,12 +3850,21 @@ pub(crate) fn read_tree_command(
             message: "you must specify at least one tree to merge".into(),
         });
     }
+    if index_only && !merge && !reset && prefix.is_none() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: -i is meaningless without -m, --reset, or --prefix\n".into(),
+        });
+    }
     let repo = find_repo()?;
+    let output_path = index_output.unwrap_or_else(|| repo.index_path.clone());
     if empty {
-        GitIndex::new().write_to_path(&repo.index_path)?;
+        if !dry_run {
+            GitIndex::new().write_to_path(&output_path)?;
+        }
         return Ok(());
     }
-    let Some(treeish) = treeish else {
+    let Some(treeish) = treeish.as_deref() else {
         return Err(CliError::Fatal {
             code: 129,
             message: "read-tree requires --empty or a tree-ish".into(),
@@ -3839,17 +3874,19 @@ pub(crate) fn read_tree_command(
     let tree_id = resolve_treeish_or_invalid_object(&repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
     let imported_index = tree_cache.read_tree_to_index(&tree_id)?;
-    if let Some(prefix) = prefix {
+    let result_index = if let Some(prefix) = prefix.as_deref() {
         let existing = if repo.index_path.exists() {
             read_index(&repo.index_path).map_err(CliError::Io)?
         } else {
             GitIndex::new()
         };
         prefix_index_onto_existing(existing, imported_index, prefix)?
-            .write_to_path(&repo.index_path)?;
-        return Ok(());
+    } else {
+        imported_index
+    };
+    if !dry_run {
+        result_index.write_to_path(&output_path)?;
     }
-    imported_index.write_to_path(&repo.index_path)?;
     Ok(())
 }
 

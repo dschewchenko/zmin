@@ -1753,8 +1753,24 @@ pub enum Command {
         empty: bool,
         #[arg(short = 'm', action = ArgAction::Count)]
         merge: u8,
+        #[arg(long = "reset", action = ArgAction::SetTrue)]
+        reset: bool,
+        #[arg(short = 'i', action = ArgAction::SetTrue)]
+        index_only: bool,
+        #[arg(short = 'n', long = "dry-run", action = ArgAction::Count)]
+        dry_run: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(long = "index-output")]
+        index_output: Option<PathBuf>,
         #[arg(long = "prefix")]
         prefix: Option<String>,
+        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
+        recurse_submodules: bool,
+        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
+        no_recurse_submodules: bool,
+        #[arg(long = "no-sparse-checkout", action = ArgAction::SetTrue)]
+        no_sparse_checkout: bool,
         treeish: Option<String>,
     },
     Checkout {
