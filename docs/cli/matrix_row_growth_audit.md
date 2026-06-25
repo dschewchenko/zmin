@@ -5647,6 +5647,41 @@ schema rows and `+0` remaining checklist rows. `read-tree` is now `13/17`
 represented documented option pairs with only `--aggressive`, `--trivial`,
 `-u`, and `-v` still outside the schema.
 
+## 2026-06-25 - archive reviewed-complete command promotion
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: no
+
+Expected promotion:
+
+- `archive` into `docs/cli/census/reviewed_complete_command_matrices.tsv`
+
+This is a zero-code census closure. `archive` now has `14/14` documented option
+pairs reviewed complete, `24/24` classified rows, no remaining checklist rows,
+and exact stock-Git evidence for local and remote archive creation, format
+listing, output inference, mtime parsing, verbose output, worktree attributes,
+and invalid-format rejection. The earlier backend-tail concern is no longer
+reflected in the current census, so the durable command-level promotion is now
+safe.
+
+Actual post-import movement matched the declaration: `+0` behavior rows, `+0`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows and `+0` remaining checklist rows. The reviewed-complete census now
+marks `archive` as a finished command matrix.
+
 ## 2026-06-25 - check-ref-format precedence and branch-history surface
 
 Expected movement:

@@ -1212,6 +1212,13 @@ Latest in-progress family follow-up:
   leaves the merge-heavy tail `--aggressive`, `--trivial`, `-u`, and `-v` as
   the remaining schema-missing surface.
 
+Latest zero-code closure:
+
+- `archive` is now promoted into the reviewed-complete command list.
+- The current census already had `14/14` documented option pairs complete,
+  `24/24` classified rows, and no remaining checklist items for `archive`, so
+  the command-level promotion is now durable.
+
 Next helper-free family candidates by schema-missing size now remain:
 
 - `repack`: `16`
