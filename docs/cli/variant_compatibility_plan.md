@@ -343,34 +343,34 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest zero-code `switch` doc-option promotion, `switch`
+After the latest zero-code `difftool` doc-option promotion, `difftool`
 adds another `7` durable reviewed-complete documented option pairs without
-changing Rust behavior and is up to `7/25` documented options complete with
-`7/25` represented documented option pairs and `8/8` classified rows.
+changing Rust behavior and is up to `7/19` documented options complete with
+`7/19` represented documented option pairs and `9/9` classified rows.
 The next best helper-free follow-up should move to another dense census-backed
 represented family or zero-code command-promotion cluster.
 
 ### Latest Completed Slice
 
 The latest completed slice is a zero-code reviewed-complete documented-option
-promotion cluster for the represented helper-free `switch` surface. The
-existing exact stock-Git evidence already closed seven `switch` option
-families across create, orphan, detach, discard-changes, and force lanes, so
-this slice only promotes those documented option pairs into
+promotion cluster for the represented helper-free `difftool` surface. The
+existing exact stock-Git evidence already closed seven `difftool` option
+families across extcmd, configured-tool, prompt, short-alias, and
+path-limited lanes, so this slice only promotes those documented option pairs into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
 Focused gates were
 `python3 tools/git-compat-census.py --root .`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(switch|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(difftool|summary)\t'`,
 and `git diff --check`.
 
 Current census counts are `5332` matrix rows, `4624` verified rows, `679`
 invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1297/3175` complete documented option pairs, and `1904`
-remaining checklist rows. `switch` now reads `25` documented option
+matrices, `1304/3175` complete documented option pairs, and `1897`
+remaining checklist rows. `difftool` now reads `19` documented option
 pairs with `7` reviewed complete, `7` represented documented option pairs,
-and `8/8` classified written rows with `0` open.
+and `9/9` classified written rows with `0` open.
 
 ### No-Skip Rule
 
@@ -1180,11 +1180,11 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
-Current durable census after the zero-code reviewed-complete `switch`
+Current durable census after the zero-code reviewed-complete `difftool`
 documented-option promotion cluster:
 
 - complete command matrices: `82 / 151`
-- complete documented command-option pairs: `1297 / 3175`
+- complete documented command-option pairs: `1304 / 3175`
 - matrix rows: `5332`
 - verified rows: `4624`
 - invalid-input rows: `679`
@@ -1192,21 +1192,21 @@ documented-option promotion cluster:
 
 Latest completed batch:
 
-- `switch` now has seven represented helper-free documented option families
+- `difftool` now has seven represented helper-free documented option families
   promoted into the reviewed-complete doc-option census list, bringing the
-  command to `7/25` reviewed-complete documented option pairs.
+  command to `7/19` reviewed-complete documented option pairs.
 - The slice adds no new behavior rows; it only makes already closed exact
-  stock-Git create, orphan, detach, discard-changes, and force evidence
-  durable in the reviewed doc-option source list.
+  stock-Git extcmd, configured-tool, prompt, short-alias, and path-limited
+  evidence durable in the reviewed doc-option source list.
 - Focused verification was
   `python3 tools/git-compat-census.py --root .`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(switch|summary)\t'`.
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(difftool|summary)\t'`.
 
 Latest in-progress family follow-up:
 
-- `switch` now has `7/25` documented option pairs reviewed complete with
-  `7/25` represented documented option pairs, `8/8` classified rows, and
+- `difftool` now has `7/19` documented option pairs reviewed complete with
+  `7/19` represented documented option pairs, `9/9` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
