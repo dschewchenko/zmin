@@ -23786,7 +23786,7 @@ fn shell_single_directory_arg(words: &[String]) -> Result<PathBuf> {
     Ok(PathBuf::from(&words[1]))
 }
 
-fn split_shell_words(input: &str) -> Result<Vec<String>> {
+pub(crate) fn split_shell_words(input: &str) -> Result<Vec<String>> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut chars = input.chars().peekable();

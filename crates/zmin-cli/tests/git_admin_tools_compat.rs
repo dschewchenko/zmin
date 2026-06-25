@@ -77,6 +77,25 @@ fn first_stderr_line(output: (i32, String, String)) -> (i32, String, String) {
     (output.0, output.1, stderr)
 }
 
+fn command_output_with_env_overrides(
+    command: &str,
+    cwd: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> (i32, String, String) {
+    let output = Command::new(common::test_command_program(command))
+        .args(args)
+        .current_dir(cwd)
+        .envs(env.iter().copied())
+        .output()
+        .unwrap_or_else(|error| panic!("run {command} {args:?}: {error}"));
+    (
+        output.status.code().unwrap_or(1),
+        String::from_utf8(output.stdout).expect("stdout utf8"),
+        String::from_utf8(output.stderr).expect("stderr utf8"),
+    )
+}
+
 #[test]
 fn optional_gitk_and_gitweb_match_stock_unavailable_shape() {
     let repo = git_init();
@@ -2230,7 +2249,7 @@ fn instaweb_starts_serves_repo_summary_and_stops() {
     assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("instaweb commit"));
     assert!(response.contains(&git(repo.path(), ["rev-parse", "HEAD"])));
-    assert!(!repo.path().join(".git/gitweb/pid").exists());
+    assert!(!repo.path().join(".git/pid").exists());
 }
 
 #[cfg(unix)]
@@ -2242,12 +2261,12 @@ fn instaweb_starts_external_httpd_command_and_stops_it() {
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "instaweb external"]);
     let temp = TempDir::new().expect("temp external httpd");
-    let log = temp.path().join("httpd.log");
-    let script = temp.path().join("fake-httpd");
+    let log = temp.path().join("lighttpd.log");
+    let script = temp.path().join("lighttpd");
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nprintf 'port=%s bind=%s git_dir=%s work_tree=%s\\n' \"$GITWEB_PORT\" \"$GITWEB_BIND\" \"$GIT_DIR\" \"$GIT_WORK_TREE\" > '{}'\nsleep 60\n",
+            "#!/bin/sh\nconf=\"${{2:-$1}}\"\npid_file=\"$(sed -n 's/^server.pid-file = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nport=\"$(sed -n 's/^server.port = \\([0-9][0-9]*\\)$/\\1/p' \"$conf\")\"\nbind=\"$(sed -n 's/^server.bind = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nprintf 'conf=%s\\nport=%s\\nbind=%s\\n' \"$conf\" \"$port\" \"$bind\" > '{}'\nsleep 60 &\nprintf '%s\\n' \"$!\" > \"$pid_file\"\n",
             log.display()
         ),
     )
@@ -2255,19 +2274,27 @@ fn instaweb_starts_external_httpd_command_and_stops_it() {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("chmod fake httpd");
     let port = unused_local_port();
+    let path_env = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
 
-    run_zmin(
+    let start = command_output_with_env_overrides(
+        zmin_bin(),
         repo.path(),
-        [
+        &[
             "instaweb",
             "--start",
             "--local",
             "--httpd",
-            script.to_str().expect("script path"),
+            "lighttpd",
             "--port",
             &port.to_string(),
         ],
+        &[("PATH", &path_env)],
     );
+    assert_eq!(start.0, 0, "start stderr={}", start.2);
     for _ in 0..500 {
         if log.exists() {
             break;
@@ -2275,20 +2302,225 @@ fn instaweb_starts_external_httpd_command_and_stops_it() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     let logged = fs::read_to_string(&log).unwrap_or_else(|error| {
-        let pid = fs::read_to_string(repo.path().join(".git/gitweb/pid")).unwrap_or_default();
+        let pid = fs::read_to_string(repo.path().join(".git/pid")).unwrap_or_default();
         panic!(
             "read fake httpd log after waiting for startup: {error}; pid={}",
             pid.trim()
         )
     });
-    run_zmin(repo.path(), ["instaweb", "--stop"]);
+    let stop = command_output_with_env_overrides(
+        zmin_bin(),
+        repo.path(),
+        &["instaweb", "--stop"],
+        &[("PATH", &path_env)],
+    );
+    assert_eq!(stop.0, 0, "stop stderr={}", stop.2);
 
     assert!(logged.contains(&format!("port={port}")));
     assert!(logged.contains("bind=127.0.0.1"));
-    assert!(logged.contains("git_dir="));
-    assert!(logged.contains(".git"));
-    assert!(logged.contains("work_tree="));
-    assert!(!repo.path().join(".git/gitweb/pid").exists());
+    assert!(logged.contains("conf="));
+    assert!(!repo.path().join(".git/pid").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn instaweb_lighttpd_start_stop_matches_stock_shape() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "README.md", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "instaweb lighttpd"]);
+    let temp = TempDir::new().expect("temp lighttpd");
+    let server_log = temp.path().join("lighttpd.log");
+    let browser_log = temp.path().join("browser.log");
+    let lighttpd = temp.path().join("lighttpd");
+    let browser = temp.path().join("browser");
+    fs::write(
+        &lighttpd,
+        format!(
+            "#!/bin/sh\nconf=\"${{2:-$1}}\"\npid_file=\"$(sed -n 's/^server.pid-file = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nport=\"$(sed -n 's/^server.port = \\([0-9][0-9]*\\)$/\\1/p' \"$conf\")\"\nbind=\"$(sed -n 's/^server.bind = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nprintf 'conf=%s\\nport=%s\\nbind=%s\\n' \"$conf\" \"$port\" \"$bind\" > '{}'\nsleep 60 &\nprintf '%s\\n' \"$!\" > \"$pid_file\"\n",
+            server_log.display()
+        ),
+    )
+    .expect("write fake lighttpd");
+    fs::write(
+        &browser,
+        format!("#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n", browser_log.display()),
+    )
+    .expect("write fake browser");
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&lighttpd, fs::Permissions::from_mode(0o755)).expect("chmod lighttpd");
+    fs::set_permissions(&browser, fs::Permissions::from_mode(0o755)).expect("chmod browser");
+    let path_env = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let port = unused_local_port().to_string();
+
+    let start = command_output_with_env_overrides(
+        zmin_bin(),
+        repo.path(),
+        &[
+            "instaweb",
+            "--start",
+            "--local",
+            "--port",
+            &port,
+            "--httpd",
+            "lighttpd",
+            "--browser",
+            browser.to_str().expect("browser path"),
+        ],
+        &[("PATH", &path_env)],
+    );
+    assert_eq!(start.0, 0, "start stderr={}", start.2);
+    assert_eq!(start.1, "");
+    assert_eq!(start.2, "");
+    let conf = repo.path().join(".git/gitweb/lighttpd.conf");
+    let logged = fs::read_to_string(&server_log).expect("fake lighttpd log");
+    assert!(conf.exists());
+    assert!(repo.path().join(".git/pid").exists());
+    assert!(logged.contains(&format!("port={port}")));
+    assert!(logged.contains("bind=127.0.0.1"));
+    assert!(!browser_log.exists(), "browser should be ignored for --start");
+
+    let stop = command_output_with_env_overrides(
+        zmin_bin(),
+        repo.path(),
+        &["instaweb", "--stop"],
+        &[("PATH", &path_env)],
+    );
+    assert_eq!(stop.0, 0, "stop stderr={}", stop.2);
+    assert_eq!(stop.1, "");
+    assert_eq!(stop.2, "");
+    assert!(!repo.path().join(".git/pid").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn instaweb_restart_matches_stock_shape() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "README.md", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "instaweb restart"]);
+    let temp = TempDir::new().expect("temp lighttpd");
+    let server_log = temp.path().join("lighttpd.log");
+    let browser_log = temp.path().join("browser.log");
+    let lighttpd = temp.path().join("lighttpd");
+    let browser = temp.path().join("browser");
+    fs::write(
+        &lighttpd,
+        format!(
+            "#!/bin/sh\nconf=\"${{2:-$1}}\"\npid_file=\"$(sed -n 's/^server.pid-file = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nport=\"$(sed -n 's/^server.port = \\([0-9][0-9]*\\)$/\\1/p' \"$conf\")\"\nbind=\"$(sed -n 's/^server.bind = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nprintf 'conf=%s\\nport=%s\\nbind=%s\\n' \"$conf\" \"$port\" \"$bind\" > '{}'\nsleep 60 &\nprintf '%s\\n' \"$!\" > \"$pid_file\"\n",
+            server_log.display()
+        ),
+    )
+    .expect("write fake lighttpd");
+    fs::write(
+        &browser,
+        format!("#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n", browser_log.display()),
+    )
+    .expect("write fake browser");
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&lighttpd, fs::Permissions::from_mode(0o755)).expect("chmod lighttpd");
+    fs::set_permissions(&browser, fs::Permissions::from_mode(0o755)).expect("chmod browser");
+    let path_env = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let initial_port = unused_local_port().to_string();
+    let initial = command_output_with_env_overrides(
+        zmin_bin(),
+        repo.path(),
+        &["instaweb", "--start", "--httpd", "lighttpd", "--port", &initial_port],
+        &[("PATH", &path_env)],
+    );
+    assert_eq!(initial.0, 0, "initial stderr={}", initial.2);
+
+    let restart = command_output_with_env_overrides(
+        zmin_bin(),
+        repo.path(),
+        &[
+            "instaweb",
+            "--restart",
+            "-d",
+            "lighttpd",
+            "-b",
+            browser.to_str().expect("browser path"),
+        ],
+        &[("PATH", &path_env)],
+    );
+    assert_eq!(restart.0, 0, "restart stderr={}", restart.2);
+    assert_eq!(restart.1, "");
+    assert_eq!(restart.2, "");
+    assert!(repo.path().join(".git/pid").exists());
+    assert!(!browser_log.exists(), "browser should be ignored for --restart");
+}
+
+#[cfg(unix)]
+#[test]
+fn instaweb_short_aliases_match_stock_start_shape() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "README.md", "hello\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "instaweb aliases"]);
+    let temp = TempDir::new().expect("temp lighttpd");
+    let server_log = temp.path().join("lighttpd.log");
+    let browser_log = temp.path().join("browser.log");
+    let lighttpd = temp.path().join("lighttpd");
+    let browser = temp.path().join("browser");
+    fs::write(
+        &lighttpd,
+        format!(
+            "#!/bin/sh\nconf=\"${{2:-$1}}\"\npid_file=\"$(sed -n 's/^server.pid-file = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nport=\"$(sed -n 's/^server.port = \\([0-9][0-9]*\\)$/\\1/p' \"$conf\")\"\nbind=\"$(sed -n 's/^server.bind = \"\\(.*\\)\"$/\\1/p' \"$conf\")\"\nprintf 'conf=%s\\nport=%s\\nbind=%s\\n' \"$conf\" \"$port\" \"$bind\" > '{}'\nsleep 60 &\nprintf '%s\\n' \"$!\" > \"$pid_file\"\n",
+            server_log.display()
+        ),
+    )
+    .expect("write fake lighttpd");
+    fs::write(
+        &browser,
+        format!("#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n", browser_log.display()),
+    )
+    .expect("write fake browser");
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&lighttpd, fs::Permissions::from_mode(0o755)).expect("chmod lighttpd");
+    fs::set_permissions(&browser, fs::Permissions::from_mode(0o755)).expect("chmod browser");
+    let path_env = format!(
+        "{}:{}",
+        temp.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let port = unused_local_port().to_string();
+
+    let start = command_output_with_env_overrides(
+        zmin_bin(),
+        repo.path(),
+        &[
+            "instaweb",
+            "--start",
+            "-d",
+            "lighttpd",
+            "-p",
+            &port,
+            "-l",
+            "-b",
+            browser.to_str().expect("browser path"),
+        ],
+        &[("PATH", &path_env)],
+    );
+    assert_eq!(start.0, 0, "start stderr={}", start.2);
+    assert_eq!(start.1, "");
+    assert_eq!(start.2, "");
+    let logged = fs::read_to_string(&server_log).expect("fake lighttpd log");
+    assert!(repo.path().join(".git/pid").exists());
+    assert!(logged.contains(&format!("port={port}")));
+    assert!(logged.contains("bind=127.0.0.1"));
+    assert!(!browser_log.exists(), "browser should be ignored for --start");
 }
 
 #[test]

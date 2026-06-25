@@ -338,15 +338,15 @@ Do not collapse these layers into one percentage.
 
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
-| Fully complete command matrices | `0/151` | yes, when complete | no command matrix is complete yet |
-| Fully complete command-option matrices | `0/4632` | yes, when complete | no documented option spelling has a complete behavior matrix yet |
-| Commands with any matrix rows | `108/151` | no | audit rows exist for `add`, `am`, `apply`, `archive`, `bisect`, `blame`, `branch`, `bugreport`, `bundle`, `cat-file`, `check-attr`, `check-ignore`, `check-mailmap`, `check-ref-format`, `cherry`, `cherry-pick`, `checkout`, `checkout-index`, `clean`, `clone`, `column`, `commit`, `commit-graph`, `commit-tree`, `config`, `count-objects`, `credential`, `credential-cache`, `credential-store`, `describe`, `diff`, `diff-files`, `diff-index`, `diff-tree`, `difftool`, `fast-import`, `fetch`, `fetch-pack`, `filter-branch`, `fmt-merge-msg`, `for-each-ref`, `format-patch`, `fsck`, `get-tar-commit-id`, `grep`, `hash-object`, `http-backend`, `http-fetch`, `index-pack`, `init`, `interpret-trailers`, `log`, `ls-files`, `ls-remote`, `ls-tree`, `mailinfo`, `mailsplit`, `maintenance`, `merge`, `merge-base`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `notes`, `p4`, `pack-objects`, `patch-id`, `prune`, `pull`, `push`, `quiltimport`, `range-diff`, `read-tree`, `rebase`, `reflog`, `remote`, `replace`, `request-pull`, `replay`, `rerere`, `rev-list`, `rev-parse`, `rm`, `send-email`, `send-pack`, `show`, `show-branch`, `show-index`, `show-ref`, `shortlog`, `sparse-checkout`, `stash`, `status`, `stripspace`, `submodule`, `symbolic-ref`, `tag`, `unpack-file`, `update-index`, `update-ref`, `update-server-info`, `var`, `verify-pack`, `version`, `worktree` and `write-tree` |
-| Git doc option pairs represented by rows | `729/4632` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `2846` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `2457/2846` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/2846` | no | written rows with incomplete parity |
-| Open written rows | `1/2846` | no | written rows that still do not match stock Git |
-| Invalid input rows | `388/2846` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Fully complete command matrices | `82/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
+| Fully complete command-option matrices | `1380/3175` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
+| Commands with any matrix rows | `155/151` | no | audit rows now span the Git baseline plus nested command families represented in focused matrices |
+| Git doc option pairs represented by rows | `1388/3175` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `5337` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `4643/5337` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/5337` | no | written rows with incomplete parity |
+| Open written rows | `12/5337` | no | written rows that still do not match stock Git |
+| Invalid input rows | `679/5337` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full

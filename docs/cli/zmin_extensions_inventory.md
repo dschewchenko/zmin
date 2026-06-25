@@ -11,7 +11,7 @@ coverage numbers in the Git compatibility matrix.
 | Layer | Count | Meaning |
 | --- | ---: | --- |
 | Zmin-only commands | `12` | additive top-level commands that are not Git command names |
-| Zmin-only options on Git commands | `12` | additive options on existing Git-compatible commands |
+| Zmin-only options on Git commands | `15` | additive options on existing Git-compatible commands |
 | Zmin-only environment controls | `1` | additive environment variables for Zmin internals or transport tuning |
 | Zmin-only schema command aliases | `9` | flattened schema entries that belong to Zmin-only command groups |
 | Deferred/non-Git-2.47 schema commands | `1` | schema commands compared to newer/current stock Git but outside the Git `2.47.1` denominator |
@@ -78,6 +78,9 @@ evidence compares against newer/current stock Git rather than Git `2.47.1`.
 | `zmin imap-send` | `--list` | stable | `manual stock oracle 2026-06-23: git imap-send --list exits 129; zmin imap-send --list lists mailboxes` | Zmin-only mailbox listing mode; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 | `zmin imap-send` | `-f` | stable | `manual stock oracle 2026-06-23: git imap-send -f exits 129; zmin imap-send -f aliases --folder` | Zmin-only short mailbox override; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
 | `zmin credential-cache` | `--daemon-internal` | internal | `manual stock oracle 2026-06-23: git credential-cache --daemon-internal exits 129; zmin credential-cache --daemon-internal --socket <path> starts the private cache daemon helper` | Zmin-only internal daemon helper used by the credential-cache implementation; stock Git `2.47.1` rejects this option, so it stays outside the Git compatibility denominator |
+| `zmin instaweb` | `--daemon-internal` | internal | `tools/git-instaweb-local-oracle-gap-probe.sh::upstream_git_instaweb_daemon_internal_rejected` | Zmin-only internal daemon helper used to run the builtin `instaweb` server; upstream Git `2.47.1` rejects this option as unknown, so it stays outside the compatibility denominator |
+| `zmin instaweb` | `--git-dir` | internal | `tools/git-instaweb-local-oracle-gap-probe.sh::upstream_git_instaweb_daemon_internal_rejected` | paired internal path option for the Zmin builtin `instaweb` daemon; upstream Git `2.47.1` only reaches an unknown-option failure on the preceding internal flag, so this stays outside the compatibility denominator |
+| `zmin instaweb` | `--work-tree` | internal | `tools/git-instaweb-local-oracle-gap-probe.sh::upstream_git_instaweb_daemon_internal_rejected` | paired internal path option for the Zmin builtin `instaweb` daemon; stock Git `2.47.1` does not expose this internal surface, so it stays outside the compatibility denominator |
 
 ## Zmin-Only Environment Controls
 

@@ -11,6 +11,18 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-25 the next batch is a helper-free upstream-oracle `instaweb`
+lighttpd family closure plus internal-surface reclassification. The selected
+change closes the stock Git `instaweb` start, stop, restart, browser-ignore,
+httpd, local, port and short-alias lighttpd rows using an upstream Git
+`v2.47.1` helper harness, while moving the Zmin-only internal
+`--daemon-internal`, `--git-dir` and `--work-tree` surfaces out of the Git
+compatibility denominator into the extension inventory. Expected delta is `-3`
+matrix rows, `+11` complete documented option pairs, `+0` complete command
+matrices, `+11` verified rows, `+0` invalid-input rows, `-14` open rows,
+`+3` extension/deferred rows, and `-14` remaining checklist rows. Actual
+delta matched.
+
 As of 2026-06-25 the next batch is a helper-free existing-oracle
 `multi-pack-index --progress/--no-progress` family closure. The selected
 change promotes the currently modeled `multi-pack-index` progress toggles from

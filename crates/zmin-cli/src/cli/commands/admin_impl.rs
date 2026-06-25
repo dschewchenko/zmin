@@ -3577,7 +3577,6 @@ fn instaweb(options: InstawebCommandOptions) -> Result<()> {
     if options.stop {
         return instaweb_stop(&repo);
     }
-    let _ = options.start;
     instaweb_start(&repo, &options)
 }
 
@@ -3585,25 +3584,17 @@ fn instaweb_start(repo: &GitRepo, options: &InstawebCommandOptions) -> Result<()
     let gitweb_dir = repo.git_dir.join("gitweb");
     fs::create_dir_all(&gitweb_dir)?;
     instaweb_stop(repo)?;
-    let url = format!(
-        "http://{}:{}/",
-        if options.local {
-            "127.0.0.1"
-        } else {
-            "0.0.0.0"
-        },
-        options.port
-    );
-    let child = match options.httpd.as_deref().unwrap_or("builtin") {
-        "zmin" | "builtin" => instaweb_spawn_builtin(repo, options)?,
-        httpd => instaweb_spawn_external(repo, options, httpd)?,
-    };
-    fs::write(instaweb_pid_path(repo), format!("{}\n", child.id()))?;
-    println!("Started git instaweb at {url}");
-    if let Some(browser) = options.browser.as_deref()
-        && !browser.is_empty()
+    match options
+        .httpd
+        .as_deref()
+        .unwrap_or("lighttpd -f")
+        .trim()
     {
-        let _ = ProcessCommand::new(browser).arg(&url).status();
+        "zmin" | "builtin" => {
+            let child = instaweb_spawn_builtin(repo, options)?;
+            fs::write(instaweb_pid_path(repo), format!("{}\n", child.id()))?;
+        }
+        httpd => instaweb_spawn_external(repo, options, httpd)?,
     }
     Ok(())
 }
@@ -3632,34 +3623,50 @@ fn instaweb_spawn_builtin(
         .spawn()?)
 }
 
-fn instaweb_spawn_external(
-    repo: &GitRepo,
-    options: &InstawebCommandOptions,
-    httpd: &str,
-) -> Result<std::process::Child> {
-    let mut command = ProcessCommand::new(httpd);
+fn instaweb_spawn_external(repo: &GitRepo, options: &InstawebCommandOptions, httpd: &str) -> Result<()> {
+    let words =
+        normalize_instaweb_httpd_words(crate::cli::commands::transport_commands::split_shell_words(
+            httpd,
+        )?);
+    let Some(program) = words.first() else {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "Unknown httpd specified: ".into(),
+        });
+    };
+    let config_path = instaweb_prepare_external_httpd(repo, options, program)?;
+    let mut command = ProcessCommand::new(program);
     configure_instaweb_daemon_command(&mut command);
-    Ok(command
+    let status = command
         .current_dir(&repo.root)
+        .args(&words[1..])
+        .arg(&config_path)
         .env("GIT_DIR", &repo.git_dir)
-        .env("GIT_WORK_TREE", &repo.root)
-        .env("GITWEB_PORT", options.port.to_string())
-        .env(
-            "GITWEB_BIND",
-            if options.local {
-                "127.0.0.1"
-            } else {
-                "0.0.0.0"
-            },
-        )
-        .env(
-            "GITWEB_CONFIG",
-            repo.git_dir.join("gitweb").join("gitweb_config.perl"),
-        )
+        .env("GITWEB_CONFIG", repo.git_dir.join("gitweb").join("gitweb_config.perl"))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()?)
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Fatal {
+            code: status.code().unwrap_or(1),
+            message: format!("Could not execute http daemon {httpd}."),
+        })
+    }
+}
+
+fn normalize_instaweb_httpd_words(mut words: Vec<String>) -> Vec<String> {
+    let Some(program) = words.first() else {
+        return words;
+    };
+    if matches_httpd(program, &["lighttpd", "apache2", "httpd"])
+        && !words.last().is_some_and(|word| word == "-f")
+    {
+        words.push("-f".to_owned());
+    }
+    words
 }
 
 fn configure_instaweb_daemon_command(_command: &mut ProcessCommand) {
@@ -3688,7 +3695,44 @@ fn instaweb_stop(repo: &GitRepo) -> Result<()> {
 }
 
 fn instaweb_pid_path(repo: &GitRepo) -> PathBuf {
-    repo.git_dir.join("gitweb").join("pid")
+    repo.git_dir.join("pid")
+}
+
+fn instaweb_prepare_external_httpd(
+    repo: &GitRepo,
+    options: &InstawebCommandOptions,
+    httpd: &str,
+) -> Result<PathBuf> {
+    let httpd_only = httpd.split_ascii_whitespace().next().unwrap_or_default();
+    let conf = repo.git_dir.join("gitweb").join(format!("{httpd_only}.conf"));
+    let content = if matches_httpd(httpd_only, &["lighttpd"]) {
+        instaweb_lighttpd_conf(repo, options, httpd_only)
+    } else {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: format!("Unknown httpd specified: {httpd}"),
+        });
+    };
+    fs::write(&conf, content)?;
+    Ok(conf)
+}
+
+fn matches_httpd(httpd: &str, names: &[&str]) -> bool {
+    names.iter().any(|name| httpd.contains(name))
+}
+
+fn instaweb_lighttpd_conf(repo: &GitRepo, options: &InstawebCommandOptions, httpd_only: &str) -> String {
+    let mut conf = format!(
+        "server.document-root = \"{root}\"\nserver.port = {port}\nserver.modules = ( \"mod_setenv\", \"mod_cgi\" )\nserver.indexfiles = ( \"gitweb.cgi\" )\nserver.pid-file = \"{pid}\"\nserver.errorlog = \"{error_log}\"\nsetenv.add-environment = ( \"PATH\" => env.PATH, \"GITWEB_CONFIG\" => env.GITWEB_CONFIG )\ncgi.assign = ( \".cgi\" => \"\" )\n",
+        root = repo.git_dir.join("gitweb").display(),
+        port = options.port,
+        pid = instaweb_pid_path(repo).display(),
+        error_log = repo.git_dir.join("gitweb").join(httpd_only).join("error.log").display(),
+    );
+    if options.local {
+        conf.push_str("server.bind = \"127.0.0.1\"\n");
+    }
+    conf
 }
 
 fn kill_process(pid: u32) -> io::Result<()> {

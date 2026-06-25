@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`82/151 complete command matrices / 1369/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1388/3175 represented doc-option pairs / 5340 written rows / 4632/5340 written rows matching stock Git / 0 partial written rows / 26 open written rows`
+`82/151 complete command matrices / 1380/3175 complete doc-option matrices / 155/151 commands with matrix rows / 1388/3175 represented doc-option pairs / 5337 written rows / 4643/5337 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -343,44 +343,47 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `multi-pack-index --progress/--no-progress` batch, the
-helper-free progress family is now closed across the currently modeled write,
-verify, expire, and batch-size-one repack lanes. `multi-pack-index` is now up
-to `3/9` reviewed-complete documented option pairs with `3/9` represented
-documented option pairs, and the primary `remaining_to_fix_or_verify.tsv`
-backlog no longer has any `implemented but unverified` rows. The only
-remaining `implemented_but_unverified.tsv` item is the lone schema-only
-`archive <positional:args>` parser surface, so the next iteration should not
-default to that one-row cleanup unless it unlocks a larger archive batch.
-Prefer the next largest safe helper-free family from
-`docs/cli/census/remaining_to_fix_or_verify.tsv` or another reviewed-complete
-promotion cluster that appears after the next census audit.
+After the latest `instaweb` lighttpd-family closure, the exact-open queue in
+this environment is down to helper-oracle-unavailable rows only:
+`citool` (`5`), `cvsimport` (`2`), `svn` (`2`), `archimport` (`1`),
+`cvsexportcommit` (`1`) and `scalar` (`1`). `instaweb` now has `11/13`
+reviewed-complete documented option pairs with `11/13` represented documented
+option pairs, and the remaining `instaweb` documented backlog is only the real
+Git `--module-path` surface plus the Zmin-only internal flags tracked in the
+extension inventory. The primary `remaining_to_fix_or_verify.tsv` backlog
+still has no real implemented-but-unverified family beyond the lone schema-only
+`archive <positional:args>` parser surface, so the next iteration should
+prefer another larger census-backed family or a reviewed-complete promotion
+cluster instead of that one-row cleanup.
 
 ### Latest Completed Slice
 
-The latest completed slice is a helper-free existing-oracle
-`multi-pack-index --progress/--no-progress` family closure. The strengthened
-maintenance compat test now compares exact stock-Git stdout, stderr, exit
-status, pack layout, MIDX verification, and repository state across the
-currently modeled local write, verify, expire, and batch-size-one repack
-lanes, while the runtime now matches stock Git on `verify --progress` stderr
-and resolves `--progress/--no-progress` by last one wins for
-`multi-pack-index`.
+The latest completed slice is a helper-free upstream-oracle `instaweb`
+lighttpd family closure plus internal-surface reclassification. The
+`instaweb` runtime now matches stock Git `2.47.1` on explicit lighttpd start,
+stop and restart shape by staying silent on success, recording pid state in
+`.git/pid`, generating stock-style lighttpd config files, normalizing
+`lighttpd -f` command invocation, and ignoring browser launching for explicit
+`--start` and `--restart`. The internal Zmin-only `--daemon-internal`,
+`--git-dir` and `--work-tree` surfaces are now tracked outside the Git
+compatibility denominator in `docs/cli/zmin_extensions_inventory.md`.
 
 Focused gates were
-`cargo test -p zmin-cli --test git_maintenance_compat multi_pack_index_progress_flags_match_stock_git -- --exact`,
-`cargo test -p zmin-cli --test git_maintenance_compat multi_pack_index_repack_batch_size_one_noops_like_stock_git -- --exact`,
+`tools/git-instaweb-local-oracle-gap-probe.sh`,
+`cargo test -p zmin-cli --test git_admin_tools_compat instaweb_ -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(multi-pack-index|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(instaweb|summary)\t'`,
+`tools/git-compat-audit-summary.sh --tsv`,
 and `git diff --check`.
 
-Current census counts are `5340` matrix rows, `4632` verified rows, `679`
-invalid-input rows, `26` exact-open rows, `82/151` complete command
-matrices, `1369/3175` complete documented option pairs, and `1832`
-remaining checklist rows. `multi-pack-index` now has exact stock-Git evidence
-for `--progress` and `--no-progress`, so those two documented option pairs are
-promoted into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+Current census counts are `5337` matrix rows, `4643` verified rows, `679`
+invalid-input rows, `12` exact-open rows, `82/151` complete command
+matrices, `1380/3175` complete documented option pairs, and `1818`
+remaining checklist rows. `instaweb` now has exact stock-Git evidence for the
+documented lighttpd start/stop/restart family and short aliases, while the
+only remaining `instaweb` Git-scope doc gap is `--module-path`.
 
 ### No-Skip Rule
 

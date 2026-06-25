@@ -167,22 +167,22 @@ Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete command matrices | `0/151` | no command has a full Git behavior matrix yet |
-| Fully complete documented option matrices | `0/4632` | no documented command-option pair has a full behavior matrix yet |
-| Commands with any matrix rows | `102/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `611/4632` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `2665` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `2287/2665` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/2665` | written rows with incomplete parity |
-| Open written rows | `1/2665` | written rows that still do not match stock Git |
-| Invalid input rows | `377/2665` | rows where stock Git rejects the input |
+| Fully complete command matrices | `82/151` | commands whose current documented and discovered behavior matrix is fully closed |
+| Fully complete documented option matrices | `1380/3175` | documented command-option pairs whose current behavior matrix is fully closed |
+| Commands with any matrix rows | `155/151` | commands that have started behavior matrices; this is not support |
+| Documented option spellings represented by rows | `1388/3175` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `5337` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `4643/5337` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/5337` | written rows with incomplete parity |
+| Open written rows | `12/5337` | written rows that still do not match stock Git |
+| Invalid input rows | `679/5337` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `2287/2665` as Git compatibility. It only means `2287` of the `2665`
+Do not read `4643/5337` as Git compatibility. It only means `4643` of the `5337`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/2665` rows are partially matching,
-`1/2665` rows are known open mismatches, and `377/2665` additional rows are
-stock-compatible invalid inputs. Do not read `611/4632` as option support
+unexpanded surface is not counted yet, `0/5337` rows are partially matching,
+`12/5337` rows are known open mismatches, and `679/5337` additional rows are
+stock-compatible invalid inputs. Do not read `1388/3175` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
