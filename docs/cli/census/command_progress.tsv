@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1193	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1205	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -62,7 +62,7 @@ filter-branch	16	14	14	87.5	17	17	100.0	17	100.0	0	0	0	no
 fmt-merge-msg	9	7	7	77.8	8	8	100.0	8	100.0	0	0	0	no
 for-each-ref	18	0	2	11.1	34	34	100.0	23	67.6	0	0	11	no
 for-each-repo	2	2	2	100.0	5	5	100.0	5	100.0	0	0	0	yes
-format-patch	163	0	12	7.4	15	15	100.0	15	100.0	0	0	0	no
+format-patch	163	12	12	7.4	15	15	100.0	15	100.0	0	0	0	no
 fsck	15	15	15	100.0	56	56	100.0	21	37.5	0	0	35	yes
 gc	12	12	12	100.0	21	21	100.0	21	100.0	0	0	0	yes
 get-tar-commit-id	0	0	0	0.0	2	2	100.0	1	50.0	0	0	1	yes
