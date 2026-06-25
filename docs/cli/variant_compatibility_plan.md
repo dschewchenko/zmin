@@ -1179,6 +1179,37 @@ Largest raw clusters:
 
 ## 2026-06-25 Census Snapshot
 
+Current durable census after the zero-code reviewed-complete `blame`
+documented-option promotion cluster:
+
+- complete command matrices: `82 / 151`
+- complete documented command-option pairs: `1040 / 3175`
+- matrix rows: `5332`
+- verified rows: `4624`
+- invalid-input rows: `679`
+- open or partial exact rows: `26`
+
+Latest completed batch:
+
+- `blame` now has twenty-eight represented helper-free local documented option
+  families promoted into the reviewed-complete doc-option census list,
+  bringing the command to `28/36` reviewed-complete documented option pairs.
+- The slice adds no new behavior rows; it only makes already closed exact
+  stock-Git local annotation, date-mode, line-range, regex-range, progress,
+  and invalid-input evidence durable in the reviewed doc-option source list.
+- Focused verification was
+  `python3 tools/git-compat-census.py --root .`,
+  `tools/git-cli-readiness-status.sh`,
+  and `tools/git-compat-command-summary.sh --tsv | rg '^(blame|summary)\t'`.
+
+Latest in-progress family follow-up:
+
+- `blame` now has `28/36` documented option pairs reviewed complete with
+  `28/36` represented documented option pairs, `172/172` classified rows, and
+  `0` exact-open written rows.
+- The next best helper-free follow-up should move to another dense
+  census-backed represented family or zero-code command-promotion cluster.
+
 Current durable census after the zero-code reviewed-complete `rev-parse`
 documented-option promotion cluster:
 
