@@ -12,6 +12,17 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
+option promotion cluster for the represented helper-free `grep` surface. The
+selected rows do not add new behavior evidence; they promote seven exact
+stock-Git `grep` option families with existing tracked-file, treeish, path-
+limited, cached, fixed-string, line-number, and filename-only matrix coverage
+into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta
+is `+0` matrix rows, `+7` complete documented option pairs, `+0` complete
+command matrices, `+0` verified rows, `+0` invalid-input rows, and `-7`
+remaining checklist rows. Rust behavior changes are not expected.
+Actual delta matched.
+
+As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `merge` surface. The
 selected rows do not add new behavior evidence; they promote eight exact
 stock-Git `merge` option families with existing local fast-forward, merge-

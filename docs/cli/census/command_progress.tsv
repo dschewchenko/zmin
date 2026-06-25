@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	82	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1276	3175	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1283	3175	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1386	3175	documented command-option pairs with at least one behavior row
 behavior_rows_written	5332	5332	current written command option value combination state transport platform rows
@@ -66,7 +66,7 @@ format-patch	163	12	12	7.4	15	15	100.0	15	100.0	0	0	0	no
 fsck	15	15	15	100.0	56	56	100.0	21	37.5	0	0	35	yes
 gc	12	12	12	100.0	21	21	100.0	21	100.0	0	0	0	yes
 get-tar-commit-id	0	0	0	0.0	2	2	100.0	1	50.0	0	0	1	yes
-grep	73	0	7	9.6	16	16	100.0	16	100.0	0	0	0	no
+grep	73	7	7	9.6	16	16	100.0	16	100.0	0	0	0	no
 gui	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 hash-object	7	7	7	100.0	17	17	100.0	14	82.4	0	0	3	yes
 help	17	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
