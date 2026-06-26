@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git rev-list`
+reflog-walk plus first-parent represented-family expansion on the current
+local lane. The selected change added four exact stock-Git rows for
+`rev-list --first-parent`, `--walk-reflogs`, `--grep-reflog`, and `-g`,
+including the stock `--grep-reflog requires --walk-reflogs` fatal, then
+promoted four documented option pairs from unrepresented into represented
+state without yet moving them into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+4` matrix rows, `+0` complete documented option pairs, `+4` represented
+documented option pairs, `+4` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Actual delta matched. Current census counts
+are `5875` matrix rows, `5114` verified rows, `724` invalid-input rows,
+`12` exact-open rows, `146/151` complete command matrices, `1853/3212`
+complete documented option pairs, and `1865/3212` represented documented
+option pairs. `rev-list` now sits at `61/117` reviewed-complete documented
+option pairs with `93/93` classified rows, `92` stock-matching rows, `1`
+invalid-input row, and `0` exact-open rows on its current modeled surface,
+while represented documented option pairs moved from `61` to `65`. The next
+default follow-up should either complete the remaining expansion lanes for
+this reflog/first-parent family or move to the next dense shared
+history-query represented family.
+
 As of 2026-06-26 the latest completed batch is a helper-free shared
 `git rev-list` formatting/text documented-option family expansion on the
 current local lane. The selected change added twelve exact stock-Git rows for

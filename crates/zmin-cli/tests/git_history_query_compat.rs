@@ -843,6 +843,52 @@ fn log_grep_reflog_requires_walk_reflogs_and_matches_stock_git() {
 }
 
 #[test]
+fn rev_list_reflog_and_first_parent_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "topic"]);
+    write_file(repo.path(), "topic.txt", "topic\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "topic"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "main.txt", "main\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "main"]);
+    git(repo.path(), ["merge", "--no-ff", "topic", "-m", "merge topic"]);
+
+    for args in [
+        ["rev-list", "--first-parent", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--walk-reflogs",
+            "--grep-reflog=commit",
+            "--format=%H",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["rev-list", "-g", "--max-count=2", "--format=%H", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["rev-list", "--grep-reflog=commit", "HEAD"]),
+        git_failure_output(repo.path(), &["rev-list", "--grep-reflog=commit", "HEAD"])
+    );
+}
+
+#[test]
 fn log_identity_time_and_parent_filters_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

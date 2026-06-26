@@ -9532,7 +9532,10 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) filter: Option<String>,
     pub(crate) filter_provided_objects: bool,
     pub(crate) parents: bool,
+    pub(crate) first_parent: bool,
     pub(crate) children: bool,
+    pub(crate) walk_reflogs: bool,
+    pub(crate) grep_reflog: Vec<String>,
     pub(crate) reverse: bool,
     pub(crate) full_history: bool,
     pub(crate) ancestry_path: bool,
@@ -9587,7 +9590,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         expand_tabs,
         no_expand_tabs,
         notes,
-        no_notes: _,
+        no_notes,
         abbrev_commit,
         no_abbrev_commit,
         grep,
@@ -9610,7 +9613,10 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         filter,
         filter_provided_objects,
         parents,
+        first_parent,
         children,
+        walk_reflogs,
+        grep_reflog,
         reverse,
         full_history,
         ancestry_path,
@@ -9639,6 +9645,13 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let _accepted_sparse = sparse;
     let _accepted_show_pulls = show_pulls;
     let _accepted_simplify_merges = simplify_merges;
+    let _accepted_no_notes = no_notes;
+    if !grep_reflog.is_empty() && !walk_reflogs {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
+        });
+    }
     let simplify_history_topo = simplify_merges || simplify_by_decoration;
     let Some(since) = parse_log_since(since) else {
         return Ok(());
@@ -9705,6 +9718,25 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
+    if walk_reflogs {
+        return rev_list_walk_reflogs(
+            &repo,
+            &store,
+            &commit_cache,
+            RevListReflogRenderOptions {
+                rendered_format: rendered_format.as_ref(),
+                date_mode,
+                default_commit_abbrev,
+                abbrev_len,
+                parents,
+                regexp_ignore_case,
+                count,
+                max_count,
+            },
+            &revs,
+            &grep_reflog,
+        );
+    }
     let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
     if objects && no_object_names && object_filter.is_some() {
         let filter = object_filter.expect("checked filter");
@@ -9828,13 +9860,23 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let mut commit_ids = if post_collection_filters {
         let commit_cache = CommitObjectCache::new(&store);
         let collect_max_count = if count || objects { None } else { max_count };
-        let mut commits = collect_commit_objects_with_exclusions_cached(
-            &repo,
-            &store,
-            &commit_cache,
-            &revs,
-            collect_max_count,
-        )?;
+        let mut commits = if first_parent && !all && revs.exclude.is_empty() {
+            collect_first_parent_commit_objects(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs.include,
+                collect_max_count,
+            )?
+        } else {
+            collect_commit_objects_with_exclusions_cached(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs,
+                collect_max_count,
+            )?
+        };
         if let Some(since) = since {
             commits.retain(|entry| {
                 signature_timestamp_timezone(&entry.commit.committer)
@@ -9893,7 +9935,20 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         }
         commits.into_iter().map(|entry| entry.id).collect()
     } else {
-        collect_commits_with_exclusions(&repo, &store, &revs, max_count)?
+        if first_parent && !all && revs.exclude.is_empty() {
+            collect_first_parent_commit_objects(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs.include,
+                max_count,
+            )?
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect()
+        } else {
+            collect_commits_with_exclusions(&repo, &store, &revs, max_count)?
+        }
     };
     if ancestry_path {
         commit_ids =
@@ -10013,6 +10068,137 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+struct RevListReflogRenderOptions<'a> {
+    rendered_format: Option<&'a LogFormat<'a>>,
+    date_mode: LogDateMode<'a>,
+    default_commit_abbrev: bool,
+    abbrev_len: usize,
+    parents: bool,
+    regexp_ignore_case: bool,
+    count: bool,
+    max_count: Option<usize>,
+}
+
+fn rev_list_walk_reflogs(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    options: RevListReflogRenderOptions<'_>,
+    revs: &[String],
+    grep_reflog: &[String],
+) -> Result<()> {
+    let revs = revs
+        .iter()
+        .take_while(|rev| rev.as_str() != "--")
+        .cloned()
+        .collect::<Vec<_>>();
+    if revs.is_empty() {
+        return Err(CliError::Message("`rev-list` requires a revision".into()));
+    }
+    let commit_ids = collect_rev_list_reflog_commit_ids(
+        repo,
+        store,
+        &revs,
+        grep_reflog,
+        options.regexp_ignore_case,
+        options.max_count,
+    )?;
+    if options.count {
+        println!("{}", commit_ids.len());
+        return Ok(());
+    }
+    let decorations = LogDecorations::empty();
+    let notes = LogNotes::empty();
+    let mut out = io::stdout().lock();
+    for id in &commit_ids {
+        if let Some(format) = options.rendered_format {
+            let commit = commit_cache.read_commit(id)?;
+            let rendered = format.render_with_context(
+                id,
+                commit.as_ref(),
+                options.parents,
+                options.abbrev_len,
+                None,
+                options.default_commit_abbrev,
+                false,
+                &decorations,
+                &notes,
+                options.date_mode,
+            )?;
+            if matches!(format, LogFormat::Custom { .. }) {
+                writeln!(out, "commit {}", id.to_hex())?;
+            }
+            out.write_all(rendered.as_bytes())?;
+            if format.terminates_lines() {
+                out.write_all(b"\n")?;
+            }
+        } else if options.parents {
+            let parents = read_commit_parents_uncached(store, id)?;
+            write!(out, "{id}")?;
+            for parent in parents {
+                write!(out, " {parent}")?;
+            }
+            writeln!(out)?;
+        } else if options.default_commit_abbrev {
+            writeln!(out, "{}", short_object_id_len(id, options.abbrev_len))?;
+        } else {
+            writeln!(out, "{id}")?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_rev_list_reflog_commit_ids(
+    repo: &GitRepo,
+    _store: &LooseObjectStore,
+    revs: &[String],
+    grep_reflog: &[String],
+    regexp_ignore_case: bool,
+    max_count: Option<usize>,
+) -> Result<Vec<ObjectId>> {
+    let mut commit_ids = Vec::new();
+    let limit = max_count.unwrap_or(usize::MAX);
+    for target in revs {
+        if commit_ids.len() >= limit {
+            break;
+        }
+        let path = reflog_path(repo, target)?;
+        let file = match fs::File::open(&path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound && resolve_objectish(repo, target).is_ok() => {
+                continue;
+            }
+            Err(error) => return Err(CliError::Io(error)),
+        };
+        for_each_reflog_line_rev(file, |line| {
+            if commit_ids.len() >= limit {
+                return Ok(());
+            }
+            let Some(entry) = parse_reflog_entry(line) else {
+                return Ok(());
+            };
+            if entry.new_id == zero_object_id() {
+                return Ok(());
+            }
+            if !grep_reflog.is_empty()
+                && !shortlog_commit_matches_grep(
+                    entry.message.as_bytes(),
+                    grep_reflog,
+                    false,
+                    false,
+                    regexp_ignore_case,
+                    ShortlogPatternMode::Basic,
+                )?
+            {
+                return Ok(());
+            }
+            commit_ids.push(entry.new_id);
+            Ok(())
+        })?;
+    }
+    Ok(commit_ids)
 }
 
 fn collect_rev_list_children(

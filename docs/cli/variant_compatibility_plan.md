@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1818/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1826/3212 represented doc-option pairs / 5829 written rows / 5069/5829 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1853/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1865/3212 represented doc-option pairs / 5875 written rows / 5114/5875 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,18 +300,19 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free shared `git rev-list`
-formatting/text documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `rev-list --no-notes`,
-`--notes`, `--abbrev-commit`, `--no-abbrev-commit`, `--oneline`,
-`--pretty`, `--expand-tabs`, `--no-expand-tabs`, `--encoding`, `--date`,
-and `--format` on modeled one-commit local history lanes, including the stock
-unsupported-notes fatal, short-hash raw output, oneline full-hash restore,
-medium/format commit rendering, and the stock commit-header prefix for custom
-format placeholders.
+The latest completed slice is a helper-free `git rev-list` reflog-walk plus
+first-parent represented-family expansion on the current local lane. Zmin now
+accepts and matches stock Git for `rev-list --first-parent`,
+`rev-list --walk-reflogs`, `rev-list -g`, and `rev-list --grep-reflog` on
+modeled local merge-graph and HEAD reflog lanes, including the stock
+`--grep-reflog requires --walk-reflogs` fatal, reflog-entry commit ordering,
+`--max-count` limiting on `-g`, and rev-list-native custom format rendering
+for reflog-walked commits. This batch increased represented documented
+`rev-list` option pairs from `61` to `65` without yet promoting them into the
+reviewed-complete denominator.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_notes_abbrev_and_text_rendering_match_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_date_and_format_modes_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat rev_list_reflog_and_first_parent_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat reflog -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,

@@ -3745,8 +3745,14 @@ pub enum Command {
         filter_provided_objects: bool,
         #[arg(long = "parents", action = ArgAction::SetTrue)]
         parents: bool,
+        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+        first_parent: bool,
         #[arg(long = "children", action = ArgAction::SetTrue)]
         children: bool,
+        #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
+        walk_reflogs: bool,
+        #[arg(long = "grep-reflog")]
+        grep_reflog: Vec<String>,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(long = "full-history", action = ArgAction::SetTrue)]
