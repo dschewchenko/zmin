@@ -12,6 +12,23 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
+diff-family promotion cluster. The selected change promotes `diff`,
+`diff-files`, `diff-index`, and `diff-tree` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` because each command
+already had all represented documented option pairs reviewed complete,
+`100%` classified written rows, and `0` exact-open rows on the currently
+modeled helper-free local surface. Expected delta was `+0` matrix rows,
+`+0` complete documented option pairs, `+4` complete command matrices, `+0`
+represented documented option pairs, `+0` verified rows, and `+0`
+invalid-input rows. Actual delta matched. The diff family now sits at
+`diff 83/83`, `diff-files 79/79`, `diff-index 78/78`, and
+`diff-tree 85/85` reviewed-complete represented option pairs on their
+current modeled surfaces, with `0` exact-open rows across all four commands.
+The next best default follow-up should either close the lone
+`rev-parse --exclude-hidden` tail if a helper-free lane is available or move
+to the next dense represented family from the refreshed census queue.
+
+As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
 `git rev-parse` promotion cluster. The selected change promotes the remaining
 twenty-five represented `rev-parse` documented options `--all`,
 `--branches`, `--tags`, `--remotes`, `--glob`, `--exclude`,

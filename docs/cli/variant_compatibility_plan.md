@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`109/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`113/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,32 +300,26 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a zero-code reviewed-complete `git rev-parse`
-promotion cluster. Zmin now promotes the remaining twenty-five represented
-`rev-parse` documented options `--all`, `--branches`, `--tags`,
-`--remotes`, `--glob`, `--exclude`, `--local-env-vars`,
-`--resolve-git-dir`, `--flags`, `--no-flags`, `--revs-only`,
-`--no-revs`, `--default`, `--not`, `--symbolic`, `--prefix`, `--sq`,
-`--sq-quote`, `--output-object-format`, `--disambiguate`,
-`--shared-index-path`, `--parseopt`, `--keep-dashdash`,
-`--stop-at-non-option`, and `--stuck-long` into the reviewed-complete
-census list and promotes `rev-parse` itself into the reviewed-complete
-command set because the current modeled helper-free surface is fully
-represented with `0` exact-open rows. The lone documented
-`--exclude-hidden` tail remains explicitly outside the current modeled
-reviewed-complete surface.
+The latest completed slice is a zero-code reviewed-complete diff-family
+promotion cluster. Zmin now promotes `diff`, `diff-files`, `diff-index`, and
+`diff-tree` into the reviewed-complete command set because each command
+already had all represented documented option pairs reviewed complete,
+`100%` classified written rows, and `0` exact-open rows on the current
+modeled helper-free local surface. The remaining unrepresented documented
+tails for each diff-family command stay explicitly outside these modeled
+reviewed-complete surfaces.
 
-Current counts are `109/151` complete command matrices,
+Current counts are `113/151` complete command matrices,
 `1605/3156` complete documented option pairs,
 `1614/3156` represented documented option pairs, `5654` written rows,
 `4922` verified rows, `12` open rows, and `718` invalid-input rows.
-`rev-parse` now sits at `50/50` reviewed-complete represented option pairs on
-the current modeled surface, with `111/111` written rows, `111/111`
-classified rows, `102` stock-matching rows, `9` invalid-input rows, and `0`
-exact-open written rows. The next bounded high-throughput follow-up should
-either close the lone `--exclude-hidden` tail if a clean helper-free lane can
-be proven, or move to the next dense represented family from the refreshed
-census queue.
+The diff family now sits at:
+`diff 83/83`, `diff-files 79/79`, `diff-index 78/78`, and `diff-tree 85/85`
+reviewed-complete represented option pairs on their current modeled surfaces,
+with `0` exact-open rows across all four commands. The next bounded
+high-throughput follow-up should either close the lone `rev-parse
+--exclude-hidden` tail if a clean helper-free lane can be proven, or move to
+the next dense represented family from the refreshed census queue.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
