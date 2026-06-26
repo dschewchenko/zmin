@@ -1958,7 +1958,8 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_mode = parse_log_date_mode(date)?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
-    let grep_mode = parse_shortlog_pattern_mode(extended_regexp, fixed_strings, perl_regexp);
+    let grep_mode =
+        parse_shortlog_pattern_mode(false, extended_regexp, fixed_strings, perl_regexp);
     let _ = reflog;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
@@ -2239,11 +2240,14 @@ fn wrap_shortlog_subject(subject: &str, wrap: ShortlogWrap) -> Vec<String> {
 }
 
 fn parse_shortlog_pattern_mode(
+    basic_regexp: bool,
     extended_regexp: bool,
     fixed_strings: bool,
     perl_regexp: bool,
 ) -> ShortlogPatternMode {
-    if fixed_strings {
+    if basic_regexp {
+        ShortlogPatternMode::Basic
+    } else if fixed_strings {
         ShortlogPatternMode::Fixed
     } else if perl_regexp {
         ShortlogPatternMode::Perl
@@ -5801,6 +5805,15 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) ignore_matching_lines: Vec<String>,
     pub(crate) walk_reflogs: bool,
     pub(crate) no_walk: bool,
+    pub(crate) grep_reflog: Vec<String>,
+    pub(crate) grep: Vec<String>,
+    pub(crate) invert_grep: bool,
+    pub(crate) all_match: bool,
+    pub(crate) regexp_ignore_case: bool,
+    pub(crate) basic_regexp: bool,
+    pub(crate) extended_regexp: bool,
+    pub(crate) fixed_strings: bool,
+    pub(crate) perl_regexp: bool,
     pub(crate) format: Option<&'a str>,
     pub(crate) max_count: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
@@ -5945,6 +5958,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     .into(),
         });
     }
+    if !options.grep_reflog.is_empty() && !options.walk_reflogs {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
+        });
+    }
     if options.walk_reflogs {
         return log_reflog(&options, parsed_log_revs.revs, max_count);
     }
@@ -5955,6 +5974,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     )?;
     let ignore_matching_lines =
         compile_ignore_matching_lines(&parsed_log_revs.ignore_matching_lines)?;
+    let grep_mode = parse_shortlog_pattern_mode(
+        options.basic_regexp,
+        options.extended_regexp,
+        options.fixed_strings,
+        options.perl_regexp,
+    );
     let Some(since) = parse_log_since(options.since) else {
         return Ok(());
     };
@@ -6039,6 +6064,19 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             signature_timestamp_timezone(&entry.commit.committer)
                 .map(|(timestamp, _)| timestamp)
                 .is_some_and(|timestamp| timestamp > since)
+        });
+    }
+    if !options.grep.is_empty() {
+        commits.retain(|entry| {
+            shortlog_commit_matches_grep(
+                &entry.commit.message,
+                &options.grep,
+                options.all_match,
+                options.invert_grep,
+                options.regexp_ignore_case,
+                grep_mode,
+            )
+            .unwrap_or(false)
         });
     }
     if pickaxe_options.enabled() {
@@ -6702,10 +6740,25 @@ fn log_reflog(options: &LogOptions<'_>, revs: Vec<String>, max_count: Option<usi
         .unwrap_or("%gd %H %gs");
     let format = format.strip_prefix("format:").unwrap_or(format);
     if let Some(patterns) = log_reflog_branch_patterns(&revs) {
-        return log_reflog_branches(&repo, format, &patterns, max_count);
+        return log_reflog_branches(
+            &repo,
+            format,
+            &patterns,
+            max_count,
+            &options.grep_reflog,
+            options.regexp_ignore_case,
+        );
     }
     let target = revs.first().map(String::as_str).unwrap_or("HEAD");
-    log_reflog_target(&repo, format, target, max_count, false)?;
+    log_reflog_target(
+        &repo,
+        format,
+        target,
+        max_count,
+        false,
+        &options.grep_reflog,
+        options.regexp_ignore_case,
+    )?;
     Ok(())
 }
 
@@ -6715,6 +6768,8 @@ fn log_reflog_target(
     target: &str,
     max_count: Option<usize>,
     allow_missing: bool,
+    grep_reflog: &[String],
+    regexp_ignore_case: bool,
 ) -> Result<usize> {
     let path = reflog_path(&repo, target)?;
     let file = match fs::File::open(&path) {
@@ -6741,6 +6796,18 @@ fn log_reflog_target(
         let entry_index = reflog_index;
         reflog_index += 1;
         if entry.new_id == zero_object_id() {
+            return Ok(());
+        }
+        if !grep_reflog.is_empty()
+            && !shortlog_commit_matches_grep(
+                entry.message.as_bytes(),
+                grep_reflog,
+                false,
+                false,
+                regexp_ignore_case,
+                ShortlogPatternMode::Basic,
+            )?
+        {
             return Ok(());
         }
         println!(
@@ -6780,6 +6847,8 @@ fn log_reflog_branches(
     format: &str,
     patterns: &[String],
     max_count: Option<usize>,
+    grep_reflog: &[String],
+    regexp_ignore_case: bool,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let mut branches = Vec::new();
@@ -6803,7 +6872,15 @@ fn log_reflog_branches(
         if emitted >= limit {
             break;
         }
-        emitted += log_reflog_target(repo, format, &branch, Some(limit - emitted), true)?;
+        emitted += log_reflog_target(
+            repo,
+            format,
+            &branch,
+            Some(limit - emitted),
+            true,
+            grep_reflog,
+            regexp_ignore_case,
+        )?;
     }
     Ok(())
 }
@@ -7785,6 +7862,15 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         ignore_matching_lines: Vec::new(),
         walk_reflogs: false,
         no_walk: true,
+        grep_reflog: Vec::new(),
+        grep: Vec::new(),
+        invert_grep: false,
+        all_match: false,
+        regexp_ignore_case: false,
+        basic_regexp: false,
+        extended_regexp: false,
+        fixed_strings: false,
+        perl_regexp: false,
         format: options.format,
         max_count: None,
         since: None,

@@ -1,14 +1,14 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1741	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1754	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1749	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	5747	5747	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4993	5747	closed written rows only
-behavior_rows_classified	5712	5747	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5747	written rows with incomplete parity
-behavior_rows_open	12	5747	written rows not implemented or not matching yet
-invalid_input_rows	719	5747	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1762	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	5761	5761	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	5006	5761	closed written rows only
+behavior_rows_classified	5726	5761	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5761	written rows with incomplete parity
+behavior_rows_open	12	5761	written rows not implemented or not matching yet
+invalid_input_rows	720	5761	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -79,7 +79,7 @@ index-pack	16	15	15	93.8	33	33	100.0	23	69.7	0	0	10	yes
 init	9	9	9	100.0	12	12	100.0	10	83.3	0	0	2	yes
 instaweb	13	13	13	100.0	13	13	100.0	13	100.0	0	0	0	yes
 interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes
-log	131	18	18	13.7	111	111	100.0	106	95.5	0	0	5	yes
+log	131	31	31	23.7	125	125	100.0	119	95.2	0	0	6	yes
 ls-files	39	39	39	100.0	159	159	100.0	139	87.4	0	0	20	yes
 ls-remote	14	3	3	21.4	37	37	100.0	33	89.2	0	0	4	yes
 ls-tree	13	13	13	100.0	18	18	100.0	17	94.4	0	0	1	yes

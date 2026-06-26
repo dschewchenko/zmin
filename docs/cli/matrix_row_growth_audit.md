@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git log`
+grep plus reflog-grep documented-option family expansion on the current local
+lane. The selected change added fourteen exact stock-Git `log` rows for
+`--grep`, `--all-match`, `--invert-grep`, `--regexp-ignore-case`,
+`--basic-regexp`, `--extended-regexp`, `--fixed-strings`,
+`--perl-regexp`, `--grep-reflog`, and the short aliases `-E`, `-F`, `-P`,
+and `-i`, then promoted thirteen represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+14` matrix rows, `+13` complete documented option pairs, `+13`
+represented documented option pairs, `+13` verified rows, `+1`
+invalid-input row, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5761` matrix rows, `5006` verified rows, `720`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1754/3212` complete documented option pairs, and
+`1762/3212` represented documented option pairs. `log` now sits at
+`31/131` reviewed-complete documented option pairs with `125/125`
+classified rows, `119` stock-matching rows, `6` invalid-input rows, and `0`
+exact-open rows on the current modeled surface. The next default follow-up
+should stay on shared history-query surfaces and prioritize another dense
+helper-free reusable family rather than returning to already saturated local
+promotion lanes.
+
 As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
 `git clone` plus `git init` documented-option promotion cluster on the current
 modeled surface. The selected change promotes the currently represented

@@ -471,6 +471,187 @@ fn shortlog_reflog_option_family_matches_stock_git() {
 }
 
 #[test]
+fn log_grep_family_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: Alpha\n\nbody apple banana",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000600 +0000",
+        "fix: beta\n\nbody BANANA carrot",
+    );
+    write_file(repo.path(), "a.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700001200 +0000",
+        "chore: gamma\n\nbody carrot delta",
+    );
+
+    for args in [
+        ["log", "--grep=banana", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--grep=banana", "-i", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=banana",
+            "--regexp-ignore-case",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--grep=banana", "--invert-grep", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=banana",
+            "--grep=carrot",
+            "--all-match",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--grep=banana", "--grep=carrot", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--grep=BA[N]ANA", "-E", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=BA[N]ANA",
+            "--extended-regexp",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--grep=BA[N]ANA", "--basic-regexp", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--grep=banana", "-F", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=banana",
+            "--fixed-strings",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--grep=BA[N]ANA",
+            "--extended-regexp",
+            "--fixed-strings",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--grep=BA[N]ANA",
+            "--fixed-strings",
+            "--extended-regexp",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--grep=ba.+na", "-P", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=ba.+na",
+            "--perl-regexp",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--grep=ba.+na", "-P", "-F", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--grep=ba.+na", "-F", "-P", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=ba.+na",
+            "--perl-regexp",
+            "--fixed-strings",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--grep=ba.+na",
+            "--fixed-strings",
+            "--perl-regexp",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn log_grep_reflog_requires_walk_reflogs_and_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: one",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000600 +0000",
+        "fix: two",
+    );
+
+    assert_eq!(
+        run_zmin_args(
+            repo.path(),
+            &[
+                "log",
+                "--walk-reflogs",
+                "--grep-reflog=commit",
+                "--format=%gd %gs",
+                "HEAD",
+            ],
+        ),
+        git_args(
+            repo.path(),
+            &[
+                "log",
+                "--walk-reflogs",
+                "--grep-reflog=commit",
+                "--format=%gd %gs",
+                "HEAD",
+            ],
+        )
+    );
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["log", "--grep-reflog=commit", "HEAD"]),
+        git_failure_output(repo.path(), &["log", "--grep-reflog=commit", "HEAD"])
+    );
+}
+
+#[test]
 fn blame_line_range_forms_match_stock_git() {
     let git_repo = blame_line_range_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());
