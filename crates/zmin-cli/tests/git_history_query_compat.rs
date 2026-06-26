@@ -290,6 +290,57 @@ fn shortlog_documented_option_family_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_grep_family_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: Alpha\n\nbody apple banana",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000600 +0000",
+        "fix: beta\n\nbody BANANA carrot",
+    );
+    write_file(repo.path(), "a.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700001200 +0000",
+        "chore: gamma\n\nbody carrot delta",
+    );
+
+    for args in [
+        ["shortlog", "--grep=banana", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "-i", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "--invert-grep", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "--grep=carrot", "--all-match", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "--grep=carrot", "HEAD"].as_slice(),
+        ["shortlog", "--grep=BA[N]ANA", "-E", "HEAD"].as_slice(),
+        ["shortlog", "--grep=BA[N]ANA", "-i", "-E", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "-F", "HEAD"].as_slice(),
+        ["shortlog", "--grep=ba.+na", "-P", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_line_range_forms_match_stock_git() {
     let git_repo = blame_line_range_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

@@ -12,6 +12,22 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
+grep-family schema expansion. The selected change adds the shortlog grep
+surface for `--grep`, `--invert-grep`, `--all-match`, `-i`, `-E`, `-F`, and
+`-P`, reuses the existing helper-free local shortlog summarization lane, and
+adds new exact stock-Git evidence for default grep, case-insensitive grep,
+invert-grep, all-match composition, extended-regexp, fixed-string, and
+perl-regexp filtering. Expected delta was `+7` matrix rows, `+7`
+represented documented option pairs, `+7` verified rows, `+0` invalid-input
+rows, `+0` complete documented option pairs, and `+0` complete command
+matrices. Actual delta matched. `shortlog` now sits at `21/125` represented
+documented option pairs, `9/21` reviewed-complete documented option pairs,
+`29/29` classified rows, `25` stock-matching rows, `4` invalid-input rows,
+and `0` exact-open rows. The next best helper-free follow-up should finish
+the remaining shortlog-specific `-g` tail before deciding on a broader
+rev-list-backed schema sweep.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
 documented explicit-schema family expansion. The selected change adds the
 shortlog-specific schema surface for `--group`, `--format`, `--date`, `-w`,
 and stock-compatible rejecting `--stdin`, reuses existing author/committer

@@ -1873,6 +1873,13 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) group: Vec<String>,
     pub(crate) wrap: Option<&'a str>,
     pub(crate) stdin: bool,
+    pub(crate) grep: Vec<String>,
+    pub(crate) invert_grep: bool,
+    pub(crate) all_match: bool,
+    pub(crate) regexp_ignore_case: bool,
+    pub(crate) extended_regexp: bool,
+    pub(crate) fixed_strings: bool,
+    pub(crate) perl_regexp: bool,
     pub(crate) revs: Vec<String>,
 }
 
@@ -1891,6 +1898,14 @@ struct ShortlogWrap {
     indent2: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ShortlogPatternMode {
+    Basic,
+    Extended,
+    Fixed,
+    Perl,
+}
+
 pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let ShortlogOptions {
         committer,
@@ -1903,6 +1918,13 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         group,
         wrap,
         stdin,
+        grep,
+        invert_grep,
+        all_match,
+        regexp_ignore_case,
+        extended_regexp,
+        fixed_strings,
+        perl_regexp,
         revs,
     } = options;
     if stdin {
@@ -1921,12 +1943,23 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_mode = parse_log_date_mode(date)?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
+    let grep_mode = parse_shortlog_pattern_mode(extended_regexp, fixed_strings, perl_regexp);
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
     let notes = LogNotes::empty();
     for entry in commits.iter().rev() {
         let commit = entry.commit.as_ref();
         if no_merges && commit.parents.len() > 1 {
+            continue;
+        }
+        if !shortlog_commit_matches_grep(
+            &commit.message,
+            &grep,
+            all_match,
+            invert_grep,
+            regexp_ignore_case,
+            grep_mode,
+        )? {
             continue;
         }
         let subject = render_shortlog_subject(
@@ -2187,6 +2220,80 @@ fn wrap_shortlog_subject(subject: &str, wrap: ShortlogWrap) -> Vec<String> {
     }
     lines.push(current);
     lines
+}
+
+fn parse_shortlog_pattern_mode(
+    extended_regexp: bool,
+    fixed_strings: bool,
+    perl_regexp: bool,
+) -> ShortlogPatternMode {
+    if fixed_strings {
+        ShortlogPatternMode::Fixed
+    } else if perl_regexp {
+        ShortlogPatternMode::Perl
+    } else if extended_regexp {
+        ShortlogPatternMode::Extended
+    } else {
+        ShortlogPatternMode::Basic
+    }
+}
+
+fn shortlog_commit_matches_grep(
+    message: &[u8],
+    patterns: &[String],
+    all_match: bool,
+    invert_grep: bool,
+    regexp_ignore_case: bool,
+    mode: ShortlogPatternMode,
+) -> Result<bool> {
+    if patterns.is_empty() {
+        return Ok(true);
+    }
+    let text = String::from_utf8_lossy(message);
+    let matched = if all_match {
+        patterns.iter().all(|pattern| {
+            shortlog_text_matches_pattern(&text, pattern, regexp_ignore_case, mode)
+        })
+    } else {
+        patterns.iter().any(|pattern| {
+            shortlog_text_matches_pattern(&text, pattern, regexp_ignore_case, mode)
+        })
+    };
+    Ok(if invert_grep { !matched } else { matched })
+}
+
+fn shortlog_text_matches_pattern(
+    text: &str,
+    pattern: &str,
+    regexp_ignore_case: bool,
+    mode: ShortlogPatternMode,
+) -> bool {
+    match mode {
+        ShortlogPatternMode::Fixed => {
+            if regexp_ignore_case {
+                text.to_ascii_lowercase()
+                    .contains(&pattern.to_ascii_lowercase())
+            } else {
+                text.contains(pattern)
+            }
+        }
+        ShortlogPatternMode::Basic => {
+            let translated = translate_blame_basic_regex(pattern);
+            shortlog_regex_matches(text, &translated, regexp_ignore_case)
+        }
+        ShortlogPatternMode::Extended | ShortlogPatternMode::Perl => {
+            shortlog_regex_matches(text, pattern, regexp_ignore_case)
+        }
+    }
+}
+
+fn shortlog_regex_matches(text: &str, pattern: &str, regexp_ignore_case: bool) -> bool {
+    let mut builder = regex::RegexBuilder::new(pattern);
+    builder.case_insensitive(regexp_ignore_case);
+    let Ok(regex) = builder.build() else {
+        return false;
+    };
+    regex.is_match(text)
 }
 
 pub(crate) fn request_pull(patch: bool, start: &str, url: &str, end: Option<&str>) -> Result<()> {
