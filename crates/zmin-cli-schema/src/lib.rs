@@ -996,6 +996,8 @@ pub enum Command {
         ignore_missing: u8,
         #[arg(long = "unmerged", action = ArgAction::Count)]
         unmerged: u8,
+        #[arg(long = "unresolve", action = ArgAction::Count)]
+        unresolve: u8,
         #[arg(long = "info-only", action = ArgAction::Count)]
         info_only: u8,
         #[arg(long = "cacheinfo")]

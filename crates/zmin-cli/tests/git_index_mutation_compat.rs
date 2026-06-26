@@ -94,6 +94,53 @@ fn conflicted_index_repos() -> (TempDir, TempDir) {
     (git_repo, zmin_repo)
 }
 
+fn resolved_conflict_repos() -> (TempDir, TempDir) {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "f.txt", "base\n");
+    }
+    git(git_repo.path(), ["add", "f.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "f.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+
+    let git_base = git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]);
+    let zmin_base = run_zmin(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(zmin_base, git_base);
+
+    git(git_repo.path(), ["checkout", "-b", "left"]);
+    run_zmin(zmin_repo.path(), ["checkout", "-b", "left"]);
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "f.txt", "left\n");
+    }
+    git_with_env(git_repo.path(), ["commit", "-am", "left"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-am", "left"]);
+
+    git(git_repo.path(), ["checkout", &git_base]);
+    run_zmin(zmin_repo.path(), ["checkout", &zmin_base]);
+    git(git_repo.path(), ["checkout", "-b", "right"]);
+    run_zmin(zmin_repo.path(), ["checkout", "-b", "right"]);
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "f.txt", "right\n");
+    }
+    git_with_env(git_repo.path(), ["commit", "-am", "right"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-am", "right"]);
+
+    assert_eq!(
+        run_zmin_status(zmin_repo.path(), ["merge", "left"]),
+        git_status(git_repo.path(), ["merge", "left"])
+    );
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "f.txt", "resolved\n");
+    }
+    git(git_repo.path(), ["add", "f.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "f.txt"]);
+    (git_repo, zmin_repo)
+}
+
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -1634,6 +1681,58 @@ fn update_index_reporting_and_info_only_match_stock_git() {
             &["update-index", "--index-version", "5"],
         ),
         git_failure_output(git_repo.path(), &["update-index", "--index-version", "5"])
+    );
+}
+
+#[test]
+fn update_index_unresolve_matches_stock_git() {
+    let (git_repo, zmin_repo) = resolved_conflict_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--unresolve", "f.txt"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--unresolve", "f.txt"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "f.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "f.txt"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--resolve-undo", "f.txt"]),
+        git(git_repo.path(), ["ls-files", "--resolve-undo", "f.txt"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--unresolve", "a.txt"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--unresolve", "a.txt"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
     );
 }
 

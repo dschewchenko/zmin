@@ -946,6 +946,9 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
         .or_else(|| index.entry(&relative, 3))
         .map(|entry| entry.mode);
     if let Some(existing_mode) = unmerged_mode {
+        if let Some(resolve_undo) = resolve_undo_from_unmerged_entries(index, &relative) {
+            index.upsert_resolve_undo(resolve_undo)?;
+        }
         if let Some(trace) = trace.as_deref_mut() {
             trace.unmerged_replacements += 1;
         }
@@ -1112,6 +1115,28 @@ pub(crate) fn remove_index_parent_file_entries(index: &mut GitIndex, path: &[u8]
     Ok(())
 }
 
+pub(crate) fn resolve_undo_from_unmerged_entries(
+    index: &GitIndex,
+    path: &[u8],
+) -> Option<zmin_git_core::ResolveUndoEntry> {
+    let mut stages = [None, None, None];
+    let mut found = false;
+    for stage in 1..=3 {
+        let Some(entry) = index.entry(path, stage) else {
+            continue;
+        };
+        found = true;
+        stages[(stage - 1) as usize] = Some(zmin_git_core::ResolveUndoStage {
+            mode: entry.mode,
+            id: entry.id.clone(),
+        });
+    }
+    found.then(|| zmin_git_core::ResolveUndoEntry {
+        path: path.to_vec(),
+        stages,
+    })
+}
+
 pub(crate) fn repo_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
     let Some(entry) = read_local_config_entries(repo)?
         .into_iter()
@@ -1236,6 +1261,7 @@ fn stage_resolved_content(
         index.upsert(entry)?;
         return Ok(());
     }
+    remove_index_parent_file_entries(index, &relative)?;
     let id = store.write_object(GitObjectKind::Blob, &content)?;
     let mut entry = IndexEntry::new(
         relative,

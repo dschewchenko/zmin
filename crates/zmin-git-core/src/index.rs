@@ -305,6 +305,31 @@ impl GitIndex {
         &self.resolve_undo
     }
 
+    pub fn take_resolve_undo(&mut self, path: impl AsRef<[u8]>) -> io::Result<Option<ResolveUndoEntry>> {
+        let path = path.as_ref();
+        validate_index_path(path)?;
+        match self
+            .resolve_undo
+            .binary_search_by(|probe| probe.path.as_slice().cmp(path))
+        {
+            Ok(idx) => Ok(Some(self.resolve_undo.remove(idx))),
+            Err(_) => Ok(None),
+        }
+    }
+
+    pub fn upsert_resolve_undo(&mut self, entry: ResolveUndoEntry) -> io::Result<()> {
+        validate_index_path(&entry.path)?;
+        validate_resolve_undo_entries(std::slice::from_ref(&entry))?;
+        match self
+            .resolve_undo
+            .binary_search_by(|probe| probe.path.as_slice().cmp(entry.path.as_slice()))
+        {
+            Ok(idx) => self.resolve_undo[idx] = entry,
+            Err(idx) => self.resolve_undo.insert(idx, entry),
+        }
+        Ok(())
+    }
+
     pub fn upsert(&mut self, entry: IndexEntry) -> io::Result<()> {
         validate_index_path(&entry.path)?;
         if entry.stage > 3 {

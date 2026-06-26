@@ -49,6 +49,7 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) refresh: bool,
     pub(crate) ignore_missing: bool,
     pub(crate) unmerged: bool,
+    pub(crate) unresolve: bool,
     pub(crate) info_only: bool,
     pub(crate) cacheinfo: Vec<String>,
     pub(crate) index_info: bool,
@@ -546,7 +547,12 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     } else {
         update_index_paths(&options, &repo)?
     };
-    let _ = (options.quiet, options.ignore_missing, options.unmerged);
+    let _ = (
+        options.quiet,
+        options.ignore_missing,
+        options.unmerged,
+        options.unresolve,
+    );
     if options.show_index_version {
         println!("{initial_index_version}");
     }
@@ -571,6 +577,8 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         }
     } else if options.refresh {
         update_index_refresh_tracked(&repo, &index, &paths)?;
+    } else if options.unresolve {
+        update_index_unresolve_paths(&repo, &mut index, &paths)?;
     } else if !update_index_has_only_flag_changes(&options) {
         for path in &paths {
             update_index_path(&repo, &store, &mut index, path, &options)?;
@@ -689,9 +697,33 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
         && !options.replace
         && !options.again
         && !options.refresh
+        && !options.unresolve
         && options.cacheinfo.is_empty()
         && !options.index_info
         && options.chmod.is_none()
+}
+
+fn update_index_unresolve_paths(
+    repo: &GitRepo,
+    index: &mut GitIndex,
+    paths: &[PathBuf],
+) -> Result<()> {
+    for path in paths {
+        let relative = path_arg_to_repo_relative(repo, path)?;
+        let Some(resolve_undo) = index.take_resolve_undo(&relative)? else {
+            continue;
+        };
+        index.remove_path(&relative)?;
+        for (stage_idx, stage) in resolve_undo.stages.into_iter().enumerate() {
+            let Some(stage) = stage else {
+                continue;
+            };
+            let mut entry = IndexEntry::new(relative.clone(), stage.id, stage.mode, 0)?;
+            entry.stage = (stage_idx + 1) as u8;
+            index.upsert(entry)?;
+        }
+    }
+    Ok(())
 }
 
 fn update_index_again_paths(
@@ -790,6 +822,9 @@ fn update_index_stage_info_only(
         .or_else(|| index.entry(&relative, 3))
         .map(|entry| entry.mode);
     if let Some(existing_mode) = unmerged_mode {
+        if let Some(resolve_undo) = resolve_undo_from_unmerged_entries(index, &relative) {
+            index.upsert_resolve_undo(resolve_undo)?;
+        }
         if existing_mode == IndexMode::Executable && !stage_options.filemode_enabled() {
             mode = IndexMode::Executable;
         } else if existing_mode == IndexMode::Symlink && !stage_options.symlinks_enabled() {
