@@ -5794,6 +5794,9 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) separate_merges: bool,
     pub(crate) dd: bool,
     pub(crate) reverse: bool,
+    pub(crate) topo_order: bool,
+    pub(crate) date_order: bool,
+    pub(crate) author_date_order: bool,
     pub(crate) left_right: bool,
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
@@ -5846,6 +5849,18 @@ pub(crate) struct LogOptions<'a> {
 }
 
 impl LogOptions<'_> {
+    fn history_order(&self) -> Option<HistoryCommitOrder> {
+        if self.author_date_order {
+            Some(HistoryCommitOrder::AuthorDate)
+        } else if self.date_order {
+            Some(HistoryCommitOrder::Date)
+        } else if self.topo_order {
+            Some(HistoryCommitOrder::Topo)
+        } else {
+            None
+        }
+    }
+
     fn diff_format(&self, patch: bool) -> Option<ShowDiffFormat> {
         if self.patch_with_stat {
             if self.summary {
@@ -5905,6 +5920,178 @@ impl LogOptions<'_> {
         }
         Ok(mode)
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HistoryCommitOrder {
+    Topo,
+    Date,
+    AuthorDate,
+}
+
+#[derive(Debug, Clone)]
+struct HistoryOrderMetadata {
+    id: ObjectId,
+    parents: Vec<ObjectId>,
+    timestamp: i64,
+    original_index: usize,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct HistoryOrderReady {
+    timestamp: i64,
+    original_index: usize,
+    id: ObjectId,
+}
+
+impl Ord for HistoryOrderReady {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.timestamp
+            .cmp(&other.timestamp)
+            .then_with(|| other.original_index.cmp(&self.original_index))
+            .then_with(|| self.id.to_hex().cmp(&other.id.to_hex()))
+    }
+}
+
+impl PartialOrd for HistoryOrderReady {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn history_order_timestamp(commit: &CommitObject, order: HistoryCommitOrder) -> Result<i64> {
+    let (signature, label) = match order {
+        HistoryCommitOrder::AuthorDate => (&commit.author, "author"),
+        HistoryCommitOrder::Topo | HistoryCommitOrder::Date => (&commit.committer, "committer"),
+    };
+    signature_timestamp(signature).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: format!("commit has invalid {label} timestamp"),
+    })
+}
+
+fn reorder_history_from_metadata(
+    commits: Vec<HistoryOrderMetadata>,
+) -> Result<Vec<ObjectId>> {
+    let included = commits
+        .iter()
+        .map(|commit| commit.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let mut remaining_children = HashMap::<ObjectId, usize>::new();
+    let mut metadata_by_id = HashMap::<ObjectId, HistoryOrderMetadata>::new();
+
+    for commit in commits {
+        remaining_children.entry(commit.id.clone()).or_insert(0);
+        for parent in &commit.parents {
+            if included.contains(parent) {
+                *remaining_children.entry(parent.clone()).or_insert(0) += 1;
+            }
+        }
+        metadata_by_id.insert(commit.id.clone(), commit);
+    }
+
+    let mut ready = std::collections::BinaryHeap::new();
+    for commit in metadata_by_id.values() {
+        if remaining_children.get(&commit.id).copied().unwrap_or(0) == 0 {
+            ready.push(HistoryOrderReady {
+                timestamp: commit.timestamp,
+                original_index: commit.original_index,
+                id: commit.id.clone(),
+            });
+        }
+    }
+
+    let mut ordered = Vec::with_capacity(metadata_by_id.len());
+    while let Some(next) = ready.pop() {
+        let Some(commit) = metadata_by_id.get(&next.id) else {
+            continue;
+        };
+        ordered.push(next.id.clone());
+        for parent in &commit.parents {
+            if !included.contains(parent) {
+                continue;
+            }
+            let Some(remaining) = remaining_children.get_mut(parent) else {
+                continue;
+            };
+            *remaining -= 1;
+            if *remaining == 0 {
+                let parent_commit = metadata_by_id.get(parent).ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "history order parent metadata missing".into(),
+                })?;
+                ready.push(HistoryOrderReady {
+                    timestamp: parent_commit.timestamp,
+                    original_index: parent_commit.original_index,
+                    id: parent.clone(),
+                });
+            }
+        }
+    }
+
+    if ordered.len() != metadata_by_id.len() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "history ordering failed to visit every collected commit".into(),
+        });
+    }
+    Ok(ordered)
+}
+
+fn reorder_collected_commits(
+    commits: Vec<CollectedCommit>,
+    order: HistoryCommitOrder,
+) -> Result<Vec<CollectedCommit>> {
+    let metadata = commits
+        .iter()
+        .enumerate()
+        .map(|(original_index, entry)| {
+            Ok(HistoryOrderMetadata {
+                id: entry.id.clone(),
+                parents: entry.commit.parents.clone(),
+                timestamp: history_order_timestamp(entry.commit.as_ref(), order)?,
+                original_index,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let ordered_ids = reorder_history_from_metadata(metadata)?;
+    let mut commits_by_id = commits
+        .into_iter()
+        .map(|entry| (entry.id.clone(), entry))
+        .collect::<HashMap<_, _>>();
+    ordered_ids
+        .into_iter()
+        .map(|id| {
+            commits_by_id.remove(&id).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "history ordered commit missing from collected set".into(),
+            })
+        })
+        .collect()
+}
+
+fn reorder_commit_ids<S>(
+    commit_cache: &CommitObjectCache<'_, S>,
+    commit_ids: Vec<ObjectId>,
+    order: HistoryCommitOrder,
+) -> Result<Vec<ObjectId>>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let metadata = commit_ids
+        .iter()
+        .enumerate()
+        .map(|(original_index, id)| {
+            let commit = commit_cache.read_commit(id)?;
+            Ok(HistoryOrderMetadata {
+                id: id.clone(),
+                parents: commit.parents.clone(),
+                timestamp: history_order_timestamp(commit.as_ref(), order)?,
+                original_index,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    reorder_history_from_metadata(metadata)
 }
 
 fn parse_log_diff_merges_arg(
@@ -6068,13 +6255,15 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         regex_mode: parsed_log_revs.pickaxe_regex_mode,
         all: parsed_log_revs.pickaxe_all,
     };
+    let history_order = options.history_order();
     let post_collection_filters = since.is_some()
         || until.is_some()
         || !options.grep.is_empty()
         || author_pattern.is_some()
         || committer_pattern.is_some()
         || min_parents.is_some()
-        || max_parents.is_some();
+        || max_parents.is_some()
+        || history_order.is_some();
     let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
     } else {
@@ -6196,6 +6385,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             }
         }
         traversal_markers = traversal.markers;
+    }
+    if let Some(order) = history_order {
+        commits = reorder_collected_commits(commits, order)?;
     }
     if let Some(max_count) = max_count {
         commits.truncate(max_count);
@@ -8323,6 +8515,9 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         separate_merges: options.separate_merges,
         dd: false,
         reverse: false,
+        topo_order: false,
+        date_order: false,
+        author_date_order: false,
         left_right: false,
         cherry_pick: false,
         cherry_mark: false,
@@ -9147,12 +9342,27 @@ pub(crate) struct RevListOptions {
     pub(crate) parents: bool,
     pub(crate) children: bool,
     pub(crate) reverse: bool,
+    pub(crate) topo_order: bool,
+    pub(crate) date_order: bool,
+    pub(crate) author_date_order: bool,
     pub(crate) left_right: bool,
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
     pub(crate) boundary: bool,
     pub(crate) max_count: Option<usize>,
     pub(crate) revs: Vec<String>,
+}
+
+fn rev_list_history_order(options: &RevListOptions) -> Option<HistoryCommitOrder> {
+    if options.author_date_order {
+        Some(HistoryCommitOrder::AuthorDate)
+    } else if options.date_order {
+        Some(HistoryCommitOrder::Date)
+    } else if options.topo_order {
+        Some(HistoryCommitOrder::Topo)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -9163,6 +9373,7 @@ enum RevListObjectFilter {
 }
 
 pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
+    let history_order = rev_list_history_order(&options);
     let RevListOptions {
         all,
         count,
@@ -9173,6 +9384,9 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         parents,
         children,
         reverse,
+        topo_order: _,
+        date_order: _,
+        author_date_order: _,
         left_right,
         cherry_pick,
         cherry_mark,
@@ -9271,7 +9485,7 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         )?;
         return Ok(());
     }
-    if count && !objects {
+    if count && !objects && history_order.is_none() {
         println!(
             "{}",
             count_commits_with_exclusions(&repo, &store, &revs, max_count)?
@@ -9329,6 +9543,9 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     }
     if boundary {
         commit_ids.extend(traversal.boundary_ids.iter().cloned());
+    }
+    if let Some(order) = history_order {
+        commit_ids = reorder_commit_ids(&commit_cache, commit_ids, order)?;
     }
     if reverse {
         commit_ids.reverse();

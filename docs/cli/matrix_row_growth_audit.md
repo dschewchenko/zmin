@@ -8826,3 +8826,25 @@ rows. The remaining `fetch-pack` doc tail is now only the lighter
 `--check-self-contained-and-connected` / `--refetch` pair, so the next bounded
 follow-up can either finish `fetch-pack` outright or return to the heavier
 `multi-pack-index` bitmap/incremental family.
+As of 2026-06-26 the latest completed batch is a helper-free shared `git log`
+and `git rev-list` traversal-order documented-option family expansion on the
+current local lane. The selected change added six exact stock-Git rows for
+`log --topo-order`, `log --date-order`, `log --author-date-order`,
+`rev-list --topo-order`, `rev-list --date-order`, and
+`rev-list --author-date-order`, then promoted six represented documented
+options into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+Expected delta was `+6` matrix rows, `+6` complete documented option pairs,
+`+6` represented documented option pairs, `+6` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5805` matrix rows, `5049` verified rows, `720`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1798/3212` complete documented option pairs, and
+`1806/3212` represented documented option pairs. `log` now sits at
+`57/131` reviewed-complete documented option pairs with `151` written rows,
+`150` classified rows, `144` stock-matching rows, `6` invalid-input rows,
+and `0` exact-open rows, while `rev-list` now sits at `19/117`
+reviewed-complete documented option pairs with `38/38` classified rows,
+`38` stock-matching rows, `0` invalid-input rows, and `0` exact-open rows on
+their current modeled surfaces. The next default follow-up should move to the
+remaining shared history-query topology family such as
+`full-history`/`simplify-merges`/`ancestry-path`.

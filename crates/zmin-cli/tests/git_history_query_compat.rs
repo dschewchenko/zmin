@@ -91,6 +91,34 @@ fn git_commit_with_identities(
     );
 }
 
+fn git_commit_with_split_dates(
+    cwd: &std::path::Path,
+    author_name: &str,
+    author_email: &str,
+    author_date: &str,
+    committer_name: &str,
+    committer_email: &str,
+    committer_date: &str,
+    message: &str,
+) {
+    let output = Command::new(stock_git_bin())
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", message])
+        .env("GIT_AUTHOR_NAME", author_name)
+        .env("GIT_AUTHOR_EMAIL", author_email)
+        .env("GIT_AUTHOR_DATE", author_date)
+        .env("GIT_COMMITTER_NAME", committer_name)
+        .env("GIT_COMMITTER_EMAIL", committer_email)
+        .env("GIT_COMMITTER_DATE", committer_date)
+        .current_dir(cwd)
+        .output()
+        .expect("git commit with split dates");
+    assert!(
+        output.status.success(),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn write_loose_blob(cwd: &std::path::Path, content: &str) {
     let mut child = Command::new(stock_git_bin())
         .args(["hash-object", "-w", "--stdin"])
@@ -2420,6 +2448,92 @@ fn log_and_rev_list_left_right_cherry_boundary_family_matches_stock_git() {
         assert_eq!(
             run_zmin_args(repo.path(), args),
             git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn log_and_rev_list_traversal_order_family_matches_stock_git() {
+    fn build_repo(repo: &std::path::Path) {
+        configure_identity(repo);
+        git(repo, ["checkout", "-b", "main"]);
+
+        write_file(repo, "base.txt", "base\n");
+        git(repo, ["add", "-A"]);
+        git_commit_with_split_dates(
+            repo,
+            "Base",
+            "base@example.test",
+            "2024-01-01T00:00:00+0000",
+            "Base",
+            "base@example.test",
+            "2024-01-01T00:00:00+0000",
+            "base",
+        );
+
+        git(repo, ["checkout", "-b", "side"]);
+        write_file(repo, "side.txt", "side\n");
+        git(repo, ["add", "-A"]);
+        git_commit_with_split_dates(
+            repo,
+            "Side",
+            "side@example.test",
+            "2024-01-02T00:00:00+0000",
+            "Side",
+            "side@example.test",
+            "2024-01-04T00:00:00+0000",
+            "side",
+        );
+
+        git(repo, ["checkout", "main"]);
+        write_file(repo, "main.txt", "main\n");
+        git(repo, ["add", "-A"]);
+        git_commit_with_split_dates(
+            repo,
+            "Main",
+            "main@example.test",
+            "2024-01-05T00:00:00+0000",
+            "Main",
+            "main@example.test",
+            "2024-01-03T00:00:00+0000",
+            "main",
+        );
+
+        let output = Command::new(stock_git_bin())
+            .args(["merge", "--no-ff", "side", "-m", "merge"])
+            .env("GIT_AUTHOR_NAME", "Merge")
+            .env("GIT_AUTHOR_EMAIL", "merge@example.test")
+            .env("GIT_AUTHOR_DATE", "2024-01-06T00:00:00+0000")
+            .env("GIT_COMMITTER_NAME", "Merge")
+            .env("GIT_COMMITTER_EMAIL", "merge@example.test")
+            .env("GIT_COMMITTER_DATE", "2024-01-02T12:00:00+0000")
+            .current_dir(repo)
+            .output()
+            .expect("git merge");
+        assert!(
+            output.status.success(),
+            "git merge failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    build_repo(git_repo.path());
+    build_repo(zmin_repo.path());
+
+    for args in [
+        ["rev-list", "--topo-order", "HEAD"].as_slice(),
+        ["rev-list", "--date-order", "HEAD"].as_slice(),
+        ["rev-list", "--author-date-order", "HEAD"].as_slice(),
+        ["log", "--topo-order", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--date-order", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--author-date-order", "--format=%s", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
             "args: {args:?}"
         );
     }

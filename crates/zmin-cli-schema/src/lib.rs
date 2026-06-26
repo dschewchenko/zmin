@@ -3105,6 +3105,12 @@ pub enum Command {
         dd: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "topo-order", action = ArgAction::SetTrue)]
+        topo_order: bool,
+        #[arg(long = "date-order", action = ArgAction::SetTrue)]
+        date_order: bool,
+        #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
+        author_date_order: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
         #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
@@ -3662,6 +3668,12 @@ pub enum Command {
         children: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "topo-order", action = ArgAction::SetTrue)]
+        topo_order: bool,
+        #[arg(long = "date-order", action = ArgAction::SetTrue)]
+        date_order: bool,
+        #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
+        author_date_order: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
         #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
