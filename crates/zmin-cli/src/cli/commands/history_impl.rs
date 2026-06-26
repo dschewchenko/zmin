@@ -1860,14 +1860,55 @@ fn reflog_display_name(ref_name: &str) -> String {
     ref_name.to_owned()
 }
 
-pub(crate) fn shortlog(
-    committer: bool,
-    numbered: bool,
-    summary: bool,
-    email: bool,
-    no_merges: bool,
-    revs: Vec<String>,
-) -> Result<()> {
+const SHORTLOG_USAGE: &str = "usage: git shortlog [<options>] [<revision-range>] [[--] <path>...]\n   or: git log --pretty=short | git shortlog [<options>]\n\n    -c, --[no-]committer  group by committer rather than author\n    -n, --[no-]numbered   sort output according to the number of commits per author\n    -s, --[no-]summary    suppress commit descriptions, only provides commit count\n    -e, --[no-]email      show the email address of each author\n    -w[<w>[,<i1>[,<i2>]]] linewrap output\n    --[no-]group <field>  group by field\n";
+
+pub(crate) struct ShortlogOptions<'a> {
+    pub(crate) committer: bool,
+    pub(crate) numbered: bool,
+    pub(crate) summary: bool,
+    pub(crate) email: bool,
+    pub(crate) no_merges: bool,
+    pub(crate) format: Option<&'a str>,
+    pub(crate) date: Option<&'a str>,
+    pub(crate) group: Vec<String>,
+    pub(crate) wrap: Option<&'a str>,
+    pub(crate) stdin: bool,
+    pub(crate) revs: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+enum ShortlogGroup {
+    Author,
+    Committer,
+    Trailer(String),
+    Format(String),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ShortlogWrap {
+    width: usize,
+    indent1: usize,
+    indent2: usize,
+}
+
+pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
+    let ShortlogOptions {
+        committer,
+        numbered,
+        summary,
+        email,
+        no_merges,
+        format,
+        date,
+        group,
+        wrap,
+        stdin,
+        revs,
+    } = options;
+    if stdin {
+        return Err(shortlog_unknown_option("--stdin"));
+    }
+    let (wrap, revs) = normalize_shortlog_revs(wrap, revs);
     if revs.is_empty() {
         return Ok(());
     }
@@ -1877,27 +1918,33 @@ pub(crate) fn shortlog(
     let commit_cache = CommitObjectCache::new(&store);
     let commits =
         collect_commit_objects_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
+    let groups_spec = parse_shortlog_groups(&group, committer)?;
+    let date_mode = parse_log_date_mode(date)?;
+    let wrap = parse_shortlog_wrap(wrap.as_deref())?;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+    let decorations = LogDecorations::empty();
+    let notes = LogNotes::empty();
     for entry in commits.iter().rev() {
         let commit = entry.commit.as_ref();
         if no_merges && commit.parents.len() > 1 {
             continue;
         }
-        let signature = if committer {
-            &commit.committer
-        } else {
-            &commit.author
-        };
-        let mut key = signature_name(signature);
-        if email {
-            key.push_str(" <");
-            key.push_str(&signature_email(signature));
-            key.push('>');
+        let subject = render_shortlog_subject(
+            &entry.id,
+            commit,
+            format,
+            &decorations,
+            &notes,
+            date_mode,
+        )?;
+        let mut keys = HashSet::new();
+        for group in &groups_spec {
+            for key in shortlog_group_keys(group, &entry.id, commit, email, date_mode)? {
+                if keys.insert(key.clone()) {
+                    groups.entry(key).or_default().push(subject.clone());
+                }
+            }
         }
-        groups
-            .entry(key)
-            .or_default()
-            .push(commit_subject(&commit.message));
     }
     let mut groups = groups.into_iter().collect::<Vec<_>>();
     if numbered {
@@ -1918,11 +1965,228 @@ pub(crate) fn shortlog(
         }
         println!("{} ({}):", name, subjects.len());
         for subject in subjects {
-            println!("      {subject}");
+            for line in wrap_shortlog_subject(subject, wrap) {
+                println!("{line}");
+            }
         }
         println!();
     }
     Ok(())
+}
+
+fn shortlog_unknown_option(option: &str) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!("error: unknown option `{option}'\n{SHORTLOG_USAGE}"),
+    }
+}
+
+fn parse_shortlog_groups(values: &[String], committer: bool) -> Result<Vec<ShortlogGroup>> {
+    if values.is_empty() {
+        return Ok(vec![if committer {
+            ShortlogGroup::Committer
+        } else {
+            ShortlogGroup::Author
+        }]);
+    }
+    values.iter().map(|value| parse_shortlog_group(value)).collect()
+}
+
+fn parse_shortlog_group(value: &str) -> Result<ShortlogGroup> {
+    match value {
+        "author" => Ok(ShortlogGroup::Author),
+        "committer" => Ok(ShortlogGroup::Committer),
+        value if value.starts_with("trailer:") => Ok(ShortlogGroup::Trailer(
+            value["trailer:".len()..].to_owned(),
+        )),
+        value if value.starts_with("format:") => Ok(ShortlogGroup::Format(
+            value["format:".len()..].to_owned(),
+        )),
+        _ => Err(CliError::Stderr {
+            code: 129,
+            text: format!("error: unknown group type: {value}\n"),
+        }),
+    }
+}
+
+fn parse_shortlog_wrap(value: Option<&str>) -> Result<ShortlogWrap> {
+    let Some(value) = value else {
+        return Ok(ShortlogWrap {
+            width: 76,
+            indent1: 6,
+            indent2: 9,
+        });
+    };
+    if value.is_empty() {
+        return Ok(ShortlogWrap {
+            width: 76,
+            indent1: 6,
+            indent2: 9,
+        });
+    }
+    let parts = value.split(',').collect::<Vec<_>>();
+    if parts.len() > 3
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: "error: -w[<width>[,<indent1>[,<indent2>]]]\n".to_owned(),
+        });
+    }
+    let width = parts[0].parse::<usize>().map_err(|_| CliError::Stderr {
+        code: 129,
+        text: "error: -w[<width>[,<indent1>[,<indent2>]]]\n".to_owned(),
+    })?;
+    let indent1 = parts
+        .get(1)
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| CliError::Stderr {
+            code: 129,
+            text: "error: -w[<width>[,<indent1>[,<indent2>]]]\n".to_owned(),
+        })?
+        .unwrap_or(6);
+    let indent2 = parts
+        .get(2)
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| CliError::Stderr {
+            code: 129,
+            text: "error: -w[<width>[,<indent1>[,<indent2>]]]\n".to_owned(),
+        })?
+        .unwrap_or(9);
+    Ok(ShortlogWrap {
+        width,
+        indent1,
+        indent2,
+    })
+}
+
+fn normalize_shortlog_revs(wrap: Option<&str>, revs: Vec<String>) -> (Option<String>, Vec<String>) {
+    let mut normalized_wrap = wrap.map(str::to_owned);
+    let mut normalized_revs = Vec::with_capacity(revs.len());
+    for rev in revs {
+        if let Some(value) = rev.strip_prefix("-w")
+            && !value.is_empty()
+        {
+            normalized_wrap = Some(value.to_owned());
+            continue;
+        }
+        normalized_revs.push(rev);
+    }
+    (normalized_wrap, normalized_revs)
+}
+
+fn render_shortlog_subject(
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    format: Option<&str>,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    match format {
+        Some(pattern) => render_log_format(pattern, id, commit, 7, decorations, notes, date_mode),
+        None => Ok(commit_subject(&commit.message)),
+    }
+}
+
+fn shortlog_group_keys(
+    group: &ShortlogGroup,
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    email: bool,
+    date_mode: LogDateMode<'_>,
+) -> Result<Vec<String>> {
+    match group {
+        ShortlogGroup::Author => Ok(vec![shortlog_signature_key(&commit.author, email)]),
+        ShortlogGroup::Committer => Ok(vec![shortlog_signature_key(&commit.committer, email)]),
+        ShortlogGroup::Trailer(field) => Ok(shortlog_trailer_keys(&commit.message, field, email)),
+        ShortlogGroup::Format(pattern) => Ok(vec![render_log_format(
+            pattern,
+            id,
+            commit,
+            7,
+            &LogDecorations::empty(),
+            &LogNotes::empty(),
+            date_mode,
+        )?]),
+    }
+}
+
+fn shortlog_signature_key(signature: &[u8], email: bool) -> String {
+    let mut key = signature_name(signature);
+    if email {
+        key.push_str(" <");
+        key.push_str(&signature_email(signature));
+        key.push('>');
+    }
+    key
+}
+
+fn shortlog_trailer_keys(message: &[u8], field: &str, email: bool) -> Vec<String> {
+    let field = field.to_ascii_lowercase();
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for line in String::from_utf8_lossy(message).lines() {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim().to_ascii_lowercase() != field {
+            continue;
+        }
+        let value = value.trim();
+        let rendered = if email {
+            value.to_owned()
+        } else if let Some((name, _)) = value.rsplit_once('<') {
+            name.trim().to_owned()
+        } else {
+            value.to_owned()
+        };
+        if seen.insert(rendered.clone()) {
+            out.push(rendered);
+        }
+    }
+    out
+}
+
+fn wrap_shortlog_subject(subject: &str, wrap: ShortlogWrap) -> Vec<String> {
+    let first_indent = " ".repeat(wrap.indent1);
+    let rest_indent = " ".repeat(wrap.indent2);
+    if wrap.width == 0 {
+        return vec![format!("{first_indent}{subject}")];
+    }
+    let mut lines = Vec::new();
+    let words = subject.split_whitespace().collect::<Vec<_>>();
+    if words.is_empty() {
+        return vec![first_indent];
+    }
+    let mut current = first_indent.clone();
+    let mut current_width = wrap.indent1;
+    let mut first_line = true;
+    for word in words {
+        let indent_width = if first_line { wrap.indent1 } else { wrap.indent2 };
+        let space = usize::from(current_width > indent_width);
+        let word_len = word.chars().count();
+        if current_width + space + word_len > wrap.width && current_width > indent_width {
+            lines.push(current);
+            current = rest_indent.clone();
+            current.push_str(word);
+            current_width = wrap.indent2 + word_len;
+            first_line = false;
+            continue;
+        }
+        if current_width > indent_width {
+            current.push(' ');
+            current_width += 1;
+        }
+        current.push_str(word);
+        current_width += word_len;
+    }
+    lines.push(current);
+    lines
 }
 
 pub(crate) fn request_pull(patch: bool, start: &str, url: &str, end: Option<&str>) -> Result<()> {

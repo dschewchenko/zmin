@@ -53,10 +53,25 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             summary,
             email,
             no_merges,
+            format,
+            date,
+            group,
+            wrap,
+            stdin,
             revs,
-        } => {
-            super::history_commands::shortlog(committer, numbered, summary, email, no_merges, revs)
-        }
+        } => super::history_commands::shortlog(super::history_commands::ShortlogOptions {
+            committer,
+            numbered,
+            summary,
+            email,
+            no_merges,
+            format: format.as_deref(),
+            date: date.as_deref(),
+            group,
+            wrap: wrap.as_deref(),
+            stdin,
+            revs,
+        }),
         runtime::Command::Blame {
             help,
             long,

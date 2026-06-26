@@ -216,6 +216,80 @@ fn shortlog_matches_stock_git_for_author_summaries() {
 }
 
 #[test]
+fn shortlog_documented_option_family_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: init\n\nReviewed-by: Rev <rev@example.test>",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Bob",
+        "b@example.test",
+        "1700000600 +0000",
+        "fix: second\n\nReviewed-by: Rev <rev@example.test>\nCo-authored-by: Co <co@example.test>",
+    );
+
+    for args in [
+        ["shortlog", "--group=committer", "HEAD"].as_slice(),
+        ["shortlog", "--group=trailer:reviewed-by", "-sne", "HEAD"].as_slice(),
+        ["shortlog", "--group=format:%an", "-sn", "HEAD"].as_slice(),
+        ["shortlog", "--format=%h %s", "HEAD"].as_slice(),
+        ["shortlog", "--date=short", "--group=format:%ad", "-sn", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["shortlog", "--group=bogus", "HEAD"].as_slice(),
+        ["shortlog", "--date=bogus", "--group=format:%ad", "-sn", "HEAD"].as_slice(),
+        ["shortlog", "-wbogus", "HEAD"].as_slice(),
+        ["shortlog", "--stdin"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    let wrap_repo = git_init();
+    git(wrap_repo.path(), ["checkout", "-b", "main"]);
+    write_file(wrap_repo.path(), "a.txt", "one\n");
+    git(wrap_repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        wrap_repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: this is a very long subject line that should wrap in shortlog output once the width is intentionally tiny",
+    );
+
+    for args in [
+        ["shortlog", "-w20,4,6", "HEAD"].as_slice(),
+        ["shortlog", "-w0,4,6", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(wrap_repo.path(), args),
+            git_args(wrap_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_line_range_forms_match_stock_git() {
     let git_repo = blame_line_range_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

@@ -11,6 +11,24 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
+documented explicit-schema family expansion. The selected change adds the
+shortlog-specific schema surface for `--group`, `--format`, `--date`, `-w`,
+and stock-compatible rejecting `--stdin`, reuses existing author/committer
+summary lanes, adds new exact stock-Git evidence for trailer and format
+grouping, custom subject rendering, date-aware format grouping, attached wrap
+and zero-width wrap behavior, and closes invalid-input rows for bad group,
+bad date, bad attached wrap, and the stock unknown `--stdin` spelling.
+Expected delta was `+11` matrix rows, `+5` represented documented option
+pairs, `+7` verified rows, `+4` invalid-input rows, `+0` complete documented
+option pairs, and `+0` complete command matrices. Actual delta matched.
+`shortlog` now sits at `14/125` represented documented option pairs,
+`9/14` reviewed-complete documented option pairs, `22/22` classified rows,
+`18` stock-matching rows, `4` invalid-input rows, and `0` exact-open rows.
+The next best helper-free follow-up should finish the remaining shortlog
+specific tail around `-g` / `-i` before deciding on a broader rev-list-backed
+schema sweep.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git blame`
 documented explicit-schema family expansion. The selected change adds the
 remaining documented `blame` schema surface for `--contents`, `--encoding`,

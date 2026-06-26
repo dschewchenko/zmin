@@ -601,6 +601,16 @@ pub enum Command {
         email: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
         no_merges: bool,
+        #[arg(long = "format")]
+        format: Option<String>,
+        #[arg(long = "date")]
+        date: Option<String>,
+        #[arg(long = "group")]
+        group: Vec<String>,
+        #[arg(short = 'w', num_args = 0..=1, default_missing_value = "")]
+        wrap: Option<String>,
+        #[arg(long = "stdin", hide = true, action = ArgAction::SetTrue)]
+        stdin: bool,
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },
