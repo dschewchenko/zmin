@@ -21,6 +21,40 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-26 the latest completed batch is a zero-code shared
+history-query reviewed-complete promotion for `git log` and
+`git rev-list`. The selected change promoted fourteen already-represented
+documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv` after confirming
+they already had exact helper-free stock-Git evidence on the current modeled
+local lanes: `--no-standard-notes`, `--quiet`, `--reflog`,
+`--relative-date`, `--show-notes`, `--show-notes-by-default`, and
+`--standard-notes` for both commands.
+
+Actual durable census after this promotion:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1881 / 3212`
+- represented documented command-option pairs: `1889 / 3212`
+- matrix rows: `5942`
+- verified rows: `5169`
+- invalid-input rows: `737`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `log`: `78 / 131` reviewed-complete documented option pairs, `193` written
+  rows, `193` classified rows, `183` stock-matching rows, `10` invalid-input
+  rows, `0` exact-open rows
+- `rev-list`: `75 / 117` reviewed-complete documented option pairs, `127`
+  written rows, `127` classified rows, `117` stock-matching rows, `10`
+  invalid-input rows, `0` exact-open rows
+
+The next best helper-free follow-up should keep the same census-first method:
+take the next densest represented shared history-query family that still lacks
+reviewed-complete promotion or needs additional exact rows, rather than
+switching back to isolated one-row closures.
+
 As of 2026-06-26 the latest completed batch is a zero-code shared history
 matrix-shape cleanup for `git log`. The selected change repaired two malformed
 `docs/cli/matrices/log_v2_47.tsv` rows where `repo_state` / `combination`

@@ -11,6 +11,29 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a zero-code shared
+history-query reviewed-complete promotion for `git log` and
+`git rev-list`. The selected change promoted fourteen already-represented
+documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv` after confirming the
+existing exact stock-Git rows already covered the current helper-free local
+lanes for `--no-standard-notes`, `--quiet`, `--reflog`, `--relative-date`,
+`--show-notes`, `--show-notes-by-default`, and `--standard-notes` across both
+commands. Actual delta is `+0` matrix rows, `+14` complete documented option
+pairs, `+0` represented documented option pairs, `+0` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `5942` matrix rows, `5169` verified rows, `737` invalid-input rows, `12`
+exact-open rows, `146/151` complete command matrices, `1881/3212` complete
+documented option pairs, and `1889/3212` represented documented option pairs.
+`log` now sits at `78/131` reviewed-complete documented option pairs with
+`193` written rows, `193` classified rows, `183` stock-matching rows, `10`
+invalid-input rows, and `0` exact-open rows, while `rev-list` now sits at
+`75/117` reviewed-complete documented option pairs with `127` written rows,
+`127` classified rows, `117` stock-matching rows, `10` invalid-input rows,
+and `0` exact-open rows. The next default follow-up should stay census-first
+on the remaining represented shared history-query surface instead of dropping
+back to isolated row additions.
+
 As of 2026-06-26 the latest completed batch is a zero-code shared history
 matrix-shape cleanup for `git log`. The selected change repaired two malformed
 `docs/cli/matrices/log_v2_47.tsv` rows where `repo_state` / `combination`
