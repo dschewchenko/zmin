@@ -8233,6 +8233,22 @@ fn render_log_format(
                     }
                 }
             }
+            'g' => {
+                let Some(next) = chars.next() else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "unterminated reflog log format placeholder".into(),
+                    });
+                };
+                match next {
+                    'D' | 'd' | 'n' | 'N' | 'e' | 'E' | 's' => {}
+                    _ => {
+                        out.push('%');
+                        out.push('g');
+                        out.push(next);
+                    }
+                }
+            }
             _ => {
                 out.push('%');
                 out.push(atom);
@@ -9572,6 +9588,29 @@ fn rev_list_history_order(options: &RevListOptions<'_>) -> Option<HistoryCommitO
     }
 }
 
+fn rev_list_walk_reflogs_exclusion_target(revs: &[String]) -> Option<String> {
+    let mut not_mode = false;
+    for rev in revs {
+        if rev == "--not" {
+            not_mode = !not_mode;
+            continue;
+        }
+        if let Some(stripped) = rev.strip_prefix('^') {
+            return Some(stripped.to_owned());
+        }
+        if let Some((left, _)) = rev.split_once("...") {
+            return Some(if left.is_empty() { "HEAD" } else { left }.to_owned());
+        }
+        if let Some((left, _)) = rev.split_once("..") {
+            return Some(if left.is_empty() { "HEAD" } else { left }.to_owned());
+        }
+        if not_mode {
+            return Some(rev.clone());
+        }
+    }
+    None
+}
+
 #[derive(Debug, Clone, Copy)]
 enum RevListObjectFilter {
     BlobNone,
@@ -9652,6 +9691,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
         });
     }
+    if walk_reflogs && reverse {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--reverse' and '--walk-reflogs' cannot be used together".into(),
+        });
+    }
     let simplify_history_topo = simplify_merges || simplify_by_decoration;
     let Some(since) = parse_log_since(since) else {
         return Ok(());
@@ -9719,6 +9764,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     if walk_reflogs {
+        if let Some(target) = rev_list_walk_reflogs_exclusion_target(&revs) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("cannot walk reflogs for {target}"),
+            });
+        }
         return rev_list_walk_reflogs(
             &repo,
             &store,
@@ -9860,12 +9911,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let mut commit_ids = if post_collection_filters {
         let commit_cache = CommitObjectCache::new(&store);
         let collect_max_count = if count || objects { None } else { max_count };
-        let mut commits = if first_parent && !all && revs.exclude.is_empty() {
-            collect_first_parent_commit_objects(
+        let mut commits = if first_parent && !all {
+            collect_first_parent_commit_objects_with_exclusions(
                 &repo,
                 &store,
                 &commit_cache,
-                &revs.include,
+                &revs,
                 collect_max_count,
             )?
         } else {
@@ -9935,12 +9986,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         }
         commits.into_iter().map(|entry| entry.id).collect()
     } else {
-        if first_parent && !all && revs.exclude.is_empty() {
-            collect_first_parent_commit_objects(
+        if first_parent && !all {
+            collect_first_parent_commit_objects_with_exclusions(
                 &repo,
                 &store,
                 &commit_cache,
-                &revs.include,
+                &revs,
                 max_count,
             )?
             .into_iter()
@@ -10148,6 +10199,53 @@ fn rev_list_walk_reflogs(
         }
     }
     Ok(())
+}
+
+fn collect_first_parent_commit_objects_with_exclusions<S>(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, S>,
+    revs: &RevListRevs,
+    max_count: Option<usize>,
+) -> Result<Vec<CollectedCommit>>
+where
+    S: GitObjectStore + ?Sized,
+{
+    let roots = if revs.include.is_empty() {
+        vec!["HEAD".to_owned()]
+    } else {
+        revs.include.clone()
+    };
+    let excluded = collect_rev_list_excluded_commits(repo, store, revs)?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let mut commits = Vec::new();
+    let mut seen = HashSet::new();
+    for root in roots {
+        let mut current = resolve_commitish(repo, store, &root)?;
+        loop {
+            if !seen.insert(current.clone()) {
+                break;
+            }
+            if excluded.contains(&current) {
+                break;
+            }
+            if max_count.is_some_and(|limit| commits.len() >= limit) {
+                return Ok(commits);
+            }
+            let commit = commit_cache.read_commit(&current)?;
+            let next = commit.parents.first().cloned();
+            commits.push(CollectedCommit {
+                id: current,
+                commit,
+            });
+            let Some(parent) = next else {
+                break;
+            };
+            current = parent;
+        }
+    }
+    Ok(commits)
 }
 
 fn collect_rev_list_reflog_commit_ids(
