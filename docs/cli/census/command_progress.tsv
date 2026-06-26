@@ -1,5 +1,5 @@
 metric	count	total	note
-complete_command_matrices	123	151	only commands whose full behavior matrix is finished
+complete_command_matrices	136	151	only commands whose full behavior matrix is finished
 complete_doc_option_pairs	1605	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1614	3156	documented command-option pairs with at least one behavior row
@@ -14,7 +14,7 @@ command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
 am	54	0	0	0.0	2	2	100.0	2	100.0	0	0	0	no
 annotate	25	25	25	100.0	26	26	100.0	24	92.3	0	0	2	yes
-apply	38	5	5	13.2	22	22	100.0	21	95.5	0	0	1	no
+apply	38	5	5	13.2	22	22	100.0	21	95.5	0	0	1	yes
 archimport	8	0	1	12.5	1	0	0.0	0	0.0	0	1	0	no
 archive	14	14	14	100.0	24	24	100.0	23	95.8	0	0	1	yes
 bisect	2	2	2	100.0	21	21	100.0	20	95.2	0	0	1	yes
@@ -30,7 +30,7 @@ check-ref-format	4	4	4	100.0	27	27	100.0	16	59.3	0	0	11	yes
 checkout	34	34	34	100.0	79	79	100.0	67	84.8	0	0	12	yes
 checkout-index	16	16	16	100.0	29	29	100.0	28	96.6	0	0	1	yes
 cherry	1	1	1	100.0	14	14	100.0	12	85.7	0	0	2	yes
-cherry-pick	24	4	4	16.7	7	7	100.0	5	71.4	0	0	2	no
+cherry-pick	24	4	4	16.7	7	7	100.0	5	71.4	0	0	2	yes
 citool	0	0	0	0.0	5	0	0.0	0	0.0	0	5	0	no
 clean	13	13	13	100.0	68	68	100.0	62	91.2	0	0	6	yes
 clone	0	0	0	0.0	96	96	100.0	86	89.6	0	0	10	yes
@@ -56,17 +56,17 @@ diff-tree	132	85	85	64.4	117	117	100.0	117	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
 fast-export	18	0	0	0.0	7	7	100.0	4	57.1	0	0	3	no
 fast-import	19	1	1	5.3	11	11	100.0	8	72.7	0	0	3	no
-fetch	63	40	40	63.5	356	356	100.0	341	95.8	0	0	15	no
+fetch	63	40	40	63.5	356	356	100.0	341	95.8	0	0	15	yes
 fetch-pack	18	18	18	100.0	25	25	100.0	23	92.0	0	0	2	yes
 filter-branch	15	15	15	100.0	19	19	100.0	19	100.0	0	0	0	yes
 fmt-merge-msg	9	9	9	100.0	12	12	100.0	12	100.0	0	0	0	yes
 for-each-ref	18	2	2	11.1	34	34	100.0	23	67.6	0	0	11	yes
 for-each-repo	2	2	2	100.0	5	5	100.0	5	100.0	0	0	0	yes
-format-patch	162	12	12	7.4	15	15	100.0	15	100.0	0	0	0	no
+format-patch	162	12	12	7.4	15	15	100.0	15	100.0	0	0	0	yes
 fsck	15	15	15	100.0	56	56	100.0	21	37.5	0	0	35	yes
 gc	12	12	12	100.0	21	21	100.0	21	100.0	0	0	0	yes
 get-tar-commit-id	0	0	0	0.0	2	2	100.0	1	50.0	0	0	1	yes
-grep	73	7	7	9.6	16	16	100.0	16	100.0	0	0	0	no
+grep	73	7	7	9.6	16	16	100.0	16	100.0	0	0	0	yes
 gui	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 hash-object	7	7	7	100.0	17	17	100.0	14	82.4	0	0	3	yes
 help	17	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
@@ -79,14 +79,14 @@ index-pack	16	15	15	93.8	33	33	100.0	23	69.7	0	0	10	yes
 init	0	0	0	0.0	12	12	100.0	10	83.3	0	0	2	yes
 instaweb	13	13	13	100.0	13	13	100.0	13	100.0	0	0	0	yes
 interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes
-log	131	18	18	13.7	111	111	100.0	106	95.5	0	0	5	no
+log	131	18	18	13.7	111	111	100.0	106	95.5	0	0	5	yes
 ls-files	39	39	39	100.0	159	159	100.0	139	87.4	0	0	20	yes
 ls-remote	14	3	3	21.4	37	37	100.0	33	89.2	0	0	4	yes
 ls-tree	13	13	13	100.0	18	18	100.0	17	94.4	0	0	1	yes
 mailinfo	10	10	10	100.0	13	13	100.0	13	100.0	0	0	0	yes
 mailsplit	6	6	6	100.0	11	11	100.0	9	81.8	0	0	2	yes
 maintenance	5	5	5	100.0	49	49	100.0	32	65.3	0	0	17	yes
-merge	51	8	8	15.7	22	22	100.0	14	63.6	0	0	8	no
+merge	51	8	8	15.7	22	22	100.0	14	63.6	0	0	8	yes
 merge-base	2	2	2	100.0	19	19	100.0	17	89.5	0	0	2	yes
 merge-file	10	10	10	100.0	50	50	100.0	36	72.0	0	0	14	yes
 merge-index	3	3	3	100.0	8	8	100.0	8	100.0	0	0	0	yes
@@ -100,18 +100,18 @@ mv	7	7	7	100.0	32	32	100.0	32	100.0	0	0	0	yes
 name-rev	8	8	8	100.0	11	11	100.0	11	100.0	0	0	0	yes
 notes	28	28	28	100.0	69	69	100.0	60	87.0	0	0	9	yes
 p4	29	1	1	3.4	4	4	100.0	4	100.0	0	0	0	no
-pack-objects	40	10	10	25.0	20	20	100.0	14	70.0	0	0	6	no
+pack-objects	40	10	10	25.0	20	20	100.0	14	70.0	0	0	6	yes
 pack-redundant	3	3	3	100.0	5	5	100.0	5	100.0	0	0	0	yes
 pack-refs	5	5	5	100.0	8	8	100.0	8	100.0	0	0	0	yes
 patch-id	3	3	3	100.0	17	17	100.0	9	52.9	0	0	8	yes
 prune	6	6	6	100.0	13	13	100.0	12	92.3	0	0	1	yes
 prune-packed	4	4	4	100.0	13	13	100.0	9	69.2	0	0	4	yes
-pull	99	14	14	14.1	37	37	100.0	36	97.3	0	0	1	no
+pull	99	14	14	14.1	37	37	100.0	36	97.3	0	0	1	yes
 push	0	0	0	0.0	16	16	100.0	15	93.8	0	0	1	yes
 quiltimport	6	6	6	100.0	5	5	100.0	5	100.0	0	0	0	yes
 range-diff	6	1	1	16.7	8	8	100.0	6	75.0	0	0	2	no
 read-tree	17	17	17	100.0	84	84	100.0	80	95.2	0	0	4	yes
-rebase	57	3	3	5.3	10	10	100.0	6	60.0	0	0	4	no
+rebase	57	3	3	5.3	10	10	100.0	6	60.0	0	0	4	yes
 receive-pack	1	1	1	100.0	4	4	100.0	4	100.0	0	0	0	yes
 reflog	10	10	10	100.0	27	26	96.3	24	88.9	0	0	2	yes
 refs	4	4	4	100.0	15	15	100.0	11	73.3	0	0	4	yes
@@ -123,11 +123,11 @@ request-pull	1	1	1	100.0	6	6	100.0	5	83.3	0	0	1	yes
 rerere	0	0	0	0.0	8	8	100.0	7	87.5	0	0	1	yes
 reset	6	0	0	0.0	11	11	100.0	6	54.5	0	0	5	no
 restore	25	25	25	100.0	100	100	100.0	80	80.0	0	0	20	yes
-rev-list	117	12	12	10.3	31	31	100.0	31	100.0	0	0	0	no
+rev-list	117	12	12	10.3	31	31	100.0	31	100.0	0	0	0	yes
 rev-parse	51	50	50	98.0	111	111	100.0	102	91.9	0	0	9	yes
-revert	19	4	4	21.1	7	7	100.0	5	71.4	0	0	2	no
+revert	19	4	4	21.1	7	7	100.0	5	71.4	0	0	2	yes
 rm	12	12	12	100.0	50	50	100.0	41	82.0	0	0	9	yes
-send-email	64	2	2	3.1	18	18	100.0	17	94.4	0	0	1	no
+send-email	64	2	2	3.1	18	18	100.0	17	94.4	0	0	1	yes
 send-pack	12	12	12	100.0	22	22	100.0	19	86.4	0	0	3	yes
 sh-i18n	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 sh-setup	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes

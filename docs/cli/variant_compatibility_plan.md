@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`123/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`136/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -302,8 +302,10 @@ source bucket and expected row/status delta in
 
 The latest completed slice is a zero-code reviewed-complete command-surface
 promotion cluster. Zmin now promotes `index-pack`, `daemon`, `show`,
-`switch`, `worktree`, `tag`, `update-index`, `commit`, `ls-remote`, and
-`for-each-ref` into the reviewed-complete command set because each command
+`switch`, `worktree`, `tag`, `update-index`, `commit`, `ls-remote`,
+`for-each-ref`, `fetch`, `log`, `pull`, `rev-list`, `format-patch`,
+`grep`, `pack-objects`, `merge`, `apply`, `revert`, `cherry-pick`,
+`rebase`, and `send-email` into the reviewed-complete command set because each command
 already had all represented documented option pairs reviewed complete,
 `100%` classified written rows, and `0` exact-open rows on the current
 modeled surface. The remaining unrepresented documented tails for each
@@ -311,19 +313,22 @@ promoted command stay explicitly outside these modeled reviewed-complete
 surfaces, including the documented-but-locally-unmodeled `index-pack
 --progress-title` tail.
 
-Current counts are `123/151` complete command matrices,
+Current counts are `136/151` complete command matrices,
 `1605/3156` complete documented option pairs,
 `1614/3156` represented documented option pairs, `5654` written rows,
 `4922` verified rows, `12` open rows, and `718` invalid-input rows.
 The promoted cluster now sits at:
 `index-pack 15/15`, `daemon 13/13`, `show 3/3`, `switch 7/7`,
 `worktree 8/8`, `tag 21/21`, `update-index 16/16`, `commit 37/37`,
-`ls-remote 3/3`, and `for-each-ref 2/2` reviewed-complete represented
-option pairs on their current modeled surfaces, all with `0` exact-open
-rows. The next bounded high-throughput follow-up should review the refreshed
-zero-code promotion queue led by `fetch`, `log`, `pull`, and `rev-list`,
-rather than spending the next slice on the lone `rev-parse --exclude-hidden`
-micro-tail.
+`ls-remote 3/3`, `for-each-ref 2/2`, `fetch 40/40`, `log 18/18`,
+`pull 14/14`, `rev-list 12/12`, `format-patch 12/12`, `grep 7/7`,
+`pack-objects 10/10`, `merge 8/8`, `apply 5/5`, `revert 4/4`,
+`cherry-pick 4/4`, `rebase 3/3`, and `send-email 2/2`
+reviewed-complete represented option pairs on their current modeled
+surfaces, all with `0` exact-open rows. The next bounded high-throughput
+follow-up should review the refreshed smaller zero-code promotion queue led
+by `replay`, `range-diff`, `fast-import`, and `p4`, rather than spending
+the next slice on the lone `rev-parse --exclude-hidden` micro-tail.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
