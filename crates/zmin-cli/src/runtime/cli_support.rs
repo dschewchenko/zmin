@@ -517,15 +517,16 @@ fn validate_update_ref_invocation_before_clap(args: &[String]) -> Result<()> {
 }
 
 fn validate_whatchanged_invocation_before_clap(args: &[String]) -> Result<()> {
-    if args.first().map(String::as_str) == Some("whatchanged")
-        && args.iter().skip(1).any(|arg| arg == "--i-still-use-this")
-    {
-        return Err(CliError::Stderr {
-            code: 128,
-            text: "fatal: unrecognized argument: --i-still-use-this\n".into(),
-        });
+    if args.first().map(String::as_str) != Some("whatchanged") {
+        return Ok(());
     }
-    Ok(())
+    if args.iter().skip(1).any(|arg| arg == "--i-still-use-this") {
+        return Ok(());
+    }
+    Err(CliError::Stderr {
+        code: 128,
+        text: "warning: git whatchanged is deprecated and will be removed in a future version of Git\nfatal: git whatchanged has been nominated for removal; use --i-still-use-this to proceed\n".into(),
+    })
 }
 
 fn is_known_command(command: &str) -> bool {

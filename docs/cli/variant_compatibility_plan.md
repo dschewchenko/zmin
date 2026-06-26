@@ -21,6 +21,69 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a history-compat stabilization
+pass on the shared `log` / `rev-list` / `whatchanged` surface. This batch did
+not add new matrix rows or documented-option coverage; instead it restored the
+behavioral baseline needed for the next high-throughput schema closure pass by
+fixing three regressions exposed by the focused
+`git_history_query_compat` suite and by removing one flaky stock-oracle test
+assumption.
+
+The batch fixed two concrete Zmin behavior mismatches and one test-harness
+issue:
+
+- `log --walk-reflogs --grep-reflog=... --format=%gd %gs` now renders
+  reflog placeholders from the reflog entry again instead of treating them as
+  plain commit-format placeholders
+- `whatchanged` once again requires the explicit
+  `--i-still-use-this` opt-in on hosts where stock Git has nominated the
+  command for removal
+- the history-simplification compat test now uses a deterministic merge commit
+  timestamp, eliminating a flaky cross-repository SHA mismatch that was not a
+  real Zmin runtime bug
+
+Focused verification was
+`cargo test -p zmin-cli --test git_history_query_compat log_grep_reflog_requires_walk_reflogs_and_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_reflog_relative_date_and_notes_aliases_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_history_simplification_acceptance_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat whatchanged_requires_explicit_opt_in_like_git_2_54 -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|whatchanged|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch is unchanged:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1927 / 3212`
+- represented documented command-option pairs: `1927 / 3212`
+- matrix rows: `5984`
+- verified rows: `5221`
+- invalid-input rows: `738`
+- open or partial exact rows: `0`
+
+Per-command position on the touched shared surface:
+
+- `log`: `131 / 78` written rows, `78` classified rows, `193 / 193`
+  represented documented options, `183` stock-matching rows, `10`
+  invalid-input rows, `0` exact-open rows
+- `rev-list`: `117 / 75` written rows, `75` classified rows, `127 / 127`
+  represented documented options, `117` stock-matching rows, `10`
+  invalid-input rows, `0` exact-open rows
+- `whatchanged`: `0 / 0` written rows, `0` classified rows, `29 / 29`
+  represented documented options, `29` stock-matching rows, `0`
+  invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up remains a helper-free documented-option
+schema batch rather than more history-runtime work. The best bounded queue is
+the shared history schema tail visible in
+`docs/cli/census/remaining_to_fix_or_verify.tsv` (`log`/`rev-list`
+`--skip`, `--stdin`, `--timestamp`, `--left-only`, `--right-only`,
+`--mailmap`, `--show-signature`, and nearby flags), because the behavior suite
+is green again and counts are stable.
+
 As of 2026-06-26 the latest completed batch closes the final exact-open
 helper/oracle tail: the top-level `scalar` no-subcommand row plus the two
 modeled `git svn` rows (`clone`, `dcommit`). The selected change did not add

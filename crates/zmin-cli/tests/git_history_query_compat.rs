@@ -3360,6 +3360,12 @@ fn log_and_rev_list_history_simplification_acceptance_family_matches_stock_git()
 
         let output = Command::new(stock_git_bin())
             .args(["merge", "--no-ff", "side", "-m", "merge"])
+            .env("GIT_AUTHOR_NAME", "Merge")
+            .env("GIT_AUTHOR_EMAIL", "merge@example.test")
+            .env("GIT_AUTHOR_DATE", "2024-01-06T00:00:00+0000")
+            .env("GIT_COMMITTER_NAME", "Merge")
+            .env("GIT_COMMITTER_EMAIL", "merge@example.test")
+            .env("GIT_COMMITTER_DATE", "2024-01-06T00:00:00+0000")
             .current_dir(repo)
             .output()
             .expect("git merge");

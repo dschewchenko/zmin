@@ -7263,6 +7263,7 @@ fn log_reflog(
             date_mode,
             &patterns,
             max_count,
+            options.walk_reflogs,
             &options.grep_reflog,
             options.regexp_ignore_case,
         );
@@ -7276,6 +7277,7 @@ fn log_reflog(
         target,
         max_count,
         false,
+        options.walk_reflogs,
         &options.grep_reflog,
         options.regexp_ignore_case,
     )?;
@@ -7290,6 +7292,7 @@ fn log_reflog_target(
     target: &str,
     max_count: Option<usize>,
     allow_missing: bool,
+    render_reflog_placeholders: bool,
     grep_reflog: &[String],
     regexp_ignore_case: bool,
 ) -> Result<usize> {
@@ -7335,16 +7338,20 @@ fn log_reflog_target(
             return Ok(());
         }
         let rendered = if let Some(pattern) = custom_format {
-            let commit = commit_cache.read_commit(&entry.new_id)?;
-            render_log_format(
-                pattern,
-                &entry.new_id,
-                &commit,
-                7,
-                &LogDecorations::empty(),
-                &LogNotes::empty(),
-                date_mode,
-            )?
+            if render_reflog_placeholders && log_format_uses_placeholder(pattern, 'g') {
+                render_reflog_log_format(pattern, target, entry_index, &entry)?
+            } else {
+                let commit = commit_cache.read_commit(&entry.new_id)?;
+                render_log_format(
+                    pattern,
+                    &entry.new_id,
+                    &commit,
+                    7,
+                    &LogDecorations::empty(),
+                    &LogNotes::empty(),
+                    date_mode,
+                )?
+            }
         } else {
             render_reflog_log_format(format, target, entry_index, &entry)?
         };
@@ -7388,6 +7395,7 @@ fn log_reflog_branches(
     date_mode: LogDateMode<'_>,
     patterns: &[String],
     max_count: Option<usize>,
+    render_reflog_placeholders: bool,
     grep_reflog: &[String],
     regexp_ignore_case: bool,
 ) -> Result<()> {
@@ -7421,6 +7429,7 @@ fn log_reflog_branches(
             &branch,
             Some(limit - emitted),
             true,
+            render_reflog_placeholders,
             grep_reflog,
             regexp_ignore_case,
         )?;
