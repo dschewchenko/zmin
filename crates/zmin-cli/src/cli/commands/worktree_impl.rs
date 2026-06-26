@@ -10218,6 +10218,8 @@ pub(crate) fn checkout(
     quiet: bool,
     _guess: bool,
     _no_guess: bool,
+    _merge: bool,
+    _conflict: Option<String>,
     _progress: bool,
     _no_progress: bool,
     detach: bool,

@@ -7194,6 +7194,45 @@ rows, `+0` represented oracle functions, `+0` missing-or-unclassified oracle
 functions, `+0` commands with rows, `+8` represented doc-option pairs, `+0`
 implemented-but-unverified schema rows, and `+0` remaining checklist rows.
 
+## 2026-06-26 - checkout merge conflict path family
+
+Expected movement:
+
+- behavior rows: `+6`
+- closed rows: `+6`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+3`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git checkout --merge .`
+- `git checkout -m .`
+- `git checkout --conflict=merge .`
+- `git checkout --conflict=diff3 .`
+- `git checkout --conflict=zdiff3 .`
+- `git checkout --conflict merge .`
+
+This batch closes the helper-free local `git checkout` merge/conflict family
+on the non-conflicted dot-pathspec restore lane by exposing stock-compatible
+parser/runtime handling for `--merge`, `-m`, and the documented conflict style
+spellings without introducing branch-switching or real conflict-resolution
+logic into the slice. The focused evidence uses
+`git_worktree_state_compat` against stock Git 2.53.0 through the shared
+`stock_git_bin` test helper.
+
+Actual post-import movement matched the declaration: `+6` behavior rows, `+6`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows, and `+0` remaining checklist rows.
+
 ## 2026-06-25 - repack cruft-family schema-tail closure
 
 Expected movement:

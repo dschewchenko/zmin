@@ -348,6 +348,39 @@ fn checkout_path_modifier_family_matches_stock_git() {
 }
 
 #[test]
+fn checkout_merge_conflict_path_family_matches_stock_git() {
+    for args in [
+        ["checkout", "--merge", "."].as_slice(),
+        ["checkout", "-m", "."].as_slice(),
+        ["checkout", "--conflict=merge", "."].as_slice(),
+        ["checkout", "--conflict=diff3", "."].as_slice(),
+        ["checkout", "--conflict=zdiff3", "."].as_slice(),
+        ["checkout", "--conflict", "merge", "."].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            configure_identity(repo);
+            fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "initial"]);
+            fs::remove_file(repo.join("a.txt")).expect("remove a");
+        }
+
+        assert_eq!(
+            command_any_output("git", git_repo.path(), args, "git"),
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+            fs::read(git_repo.path().join("a.txt")).expect("read git a"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn checkout_negated_pathspec_file_flags_match_stock_git() {
     for args in [
         ["checkout", "--no-pathspec-from-file", "a.txt"].as_slice(),

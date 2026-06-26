@@ -2075,6 +2075,10 @@ pub enum Command {
         guess: bool,
         #[arg(long = "no-guess", action = ArgAction::SetTrue)]
         no_guess: bool,
+        #[arg(short = 'm', long = "merge", action = ArgAction::Count)]
+        merge: u8,
+        #[arg(long = "conflict")]
+        conflict: Option<String>,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
