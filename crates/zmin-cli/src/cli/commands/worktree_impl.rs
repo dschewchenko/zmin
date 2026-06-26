@@ -10222,6 +10222,7 @@ pub(crate) fn checkout(
     _conflict: Option<String>,
     _progress: bool,
     _no_progress: bool,
+    patch: bool,
     detach: bool,
     _recurse_submodules: bool,
     _no_recurse_submodules: bool,
@@ -10379,6 +10380,16 @@ pub(crate) fn checkout(
         }
     }
     if let Some((source, paths, report_updated_paths)) = path_mode {
+        if patch {
+            if source.is_some() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "patch mode for tree-ish checkout is not implemented in this compatibility batch"
+                        .into(),
+                });
+            }
+            return checkout_patch(&paths);
+        }
         return checkout_paths(
             source,
             paths,
@@ -10396,6 +10407,9 @@ pub(crate) fn checkout(
     };
     if detach {
         return checkout_detached(force, target, "checkout");
+    }
+    if patch {
+        return checkout_patch(&[PathBuf::from(target)]);
     }
     if target == "HEAD" || target == "@" {
         return checkout_current_head(force);
@@ -10415,6 +10429,115 @@ pub(crate) fn checkout(
         );
     }
     checkout_existing(force, target)
+}
+
+fn checkout_patch(paths: &[PathBuf]) -> Result<()> {
+    let repo = find_repo()?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let current_index = read_repo_index(&repo)?;
+    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let head_index =
+        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let worktree_index = worktree_index_snapshot(&repo, &current_index)?;
+    let pathspecs = paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let entries = diff_indexes(&head_index, &worktree_index)?
+        .into_iter()
+        .filter(|entry| pathspec_matches(&entry.path, &pathspecs))
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let patches = entries
+        .iter()
+        .map(|entry| {
+            let mut patch_bytes = Vec::new();
+            write_patch_entries(
+                &mut patch_bytes,
+                &repo,
+                &store,
+                &head_index,
+                &worktree_index,
+                std::slice::from_ref(entry),
+                PatchFormatOptions::worktree(),
+            )?;
+            let patch = patch_commands::parse_apply_patches(&patch_bytes)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| CliError::Fatal {
+                    code: 128,
+                    message: "checkout patch diff did not contain a patch".into(),
+                })?;
+            Ok((patch_bytes, patch))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut answers = patch_commands::PatchAnswers::read()?;
+    let mut all_remaining = None;
+    for (patch_bytes, patch) in patches {
+        let action = match all_remaining {
+            Some(value) => Some(value),
+            None => {
+                let output = String::from_utf8(patch_bytes).map_err(|error| CliError::Fatal {
+                    code: 128,
+                    message: format!("patch output was not valid utf-8: {error}"),
+                })?;
+                print!("{output}");
+                print!("(1/1) Discard this hunk from worktree [y,n,q,a,d,e,p,P,?]? ");
+                io::stdout().flush()?;
+                let answer = answers.next();
+                println!();
+                match answer {
+                    patch_commands::PatchAnswer::Yes => Some(true),
+                    patch_commands::PatchAnswer::No => Some(false),
+                    patch_commands::PatchAnswer::All => {
+                        all_remaining = Some(true);
+                        Some(true)
+                    }
+                    patch_commands::PatchAnswer::Done => {
+                        all_remaining = Some(false);
+                        Some(false)
+                    }
+                    patch_commands::PatchAnswer::Quit => None,
+                    patch_commands::PatchAnswer::Split => Some(false),
+                }
+            }
+        };
+        let Some(discard) = action else {
+            break;
+        };
+        if !discard {
+            continue;
+        }
+        let target_path = patch
+            .new_path
+            .as_ref()
+            .or(patch.old_path.as_ref())
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "patch has no target path".into(),
+            })?;
+        let base_entry = find_index_entry(&head_index, target_path).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: format!(
+                "cannot restore untracked path '{}' in checkout --patch",
+                String::from_utf8_lossy(target_path)
+            ),
+        })?;
+        let base = read_index_entry_content(&store, base_entry)?;
+        write_patch_worktree_update(
+            &repo,
+            PatchWorktreeUpdate {
+                path: target_path.clone(),
+                content: base,
+                remove_if_empty_untracked: false,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn checkout_raw_args_have_separator() -> bool {

@@ -5,9 +5,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, command_any_output_with_stdin_bytes, command_output, configure_identity,
-    git, git_args, git_failure_output, git_init, git_with_env, git_with_stdin, run_zmin,
-    run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin, zmin_bin,
+    command_any_output, command_any_output_with_stdin, command_any_output_with_stdin_bytes,
+    command_output, configure_identity, git, git_args, git_failure_output, git_init, git_with_env,
+    git_with_stdin, run_zmin, run_zmin_failure_output, run_zmin_with_env, run_zmin_with_stdin,
+    zmin_bin,
 };
 
 fn committed_repo() -> TempDir {
@@ -416,6 +417,51 @@ fn checkout_track_family_matches_stock_git_invalid_input() {
             zmin_repo.path().join("a.txt").exists(),
             git_repo.path().join("a.txt").exists(),
             "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn checkout_patch_family_matches_stock_git() {
+    for (args, stdin) in [
+        (["checkout", "--patch", "."].as_slice(), "q\n"),
+        (["checkout", "-p", "."].as_slice(), "q\n"),
+        (["checkout", "--patch", "--", "a.txt"].as_slice(), "q\n"),
+        (["checkout", "-p", "--", "a.txt"].as_slice(), "q\n"),
+        (["checkout", "--patch", "."].as_slice(), "y\nq\n"),
+        (["checkout", "--patch", "--", "a.txt"].as_slice(), "y\n"),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            configure_identity(repo);
+            fs::write(repo.join("a.txt"), b"one\n").expect("write a");
+            fs::write(repo.join("b.txt"), b"two\n").expect("write b");
+            git(repo, ["add", "a.txt", "b.txt"]);
+            git_with_env(repo, ["commit", "-m", "base"]);
+            fs::write(repo.join("a.txt"), b"worktree-a\n").expect("modify a");
+            fs::write(repo.join("b.txt"), b"worktree-b\n").expect("modify b");
+        }
+
+        assert_eq!(
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, stdin, "zmin"),
+            command_any_output_with_stdin("git", git_repo.path(), args, stdin, "git"),
+            "args: {args:?}, stdin: {stdin:?}"
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+            fs::read(git_repo.path().join("a.txt")).expect("read git a"),
+            "args: {args:?}, stdin: {stdin:?}"
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("b.txt")).expect("read zmin b"),
+            fs::read(git_repo.path().join("b.txt")).expect("read git b"),
+            "args: {args:?}, stdin: {stdin:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"]),
+            "args: {args:?}, stdin: {stdin:?}"
         );
     }
 }

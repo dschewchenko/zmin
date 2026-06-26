@@ -2083,6 +2083,8 @@ pub enum Command {
         progress: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
         no_progress: bool,
+        #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
+        patch: bool,
         #[arg(short = 'd', long = "detach", action = ArgAction::SetTrue)]
         detach: bool,
         #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]

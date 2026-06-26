@@ -12,6 +12,21 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git checkout`
+patch-family closure batch. The selected change adds six exact stock-Git rows
+for `checkout --patch .`, `checkout -p .`, `checkout --patch -- a.txt`,
+`checkout -p -- a.txt`, the dot-pathspec accept-first-then-quit lane, and the
+single-path accept lane on the current local tracked-file surface. Expected
+delta was `+6` matrix rows, `+2` represented documented option pairs, `+6`
+verified rows, `+0` invalid-input rows, `+0` complete documented option
+pairs, and `+0` complete command matrices. Actual delta matched. `checkout`
+now sits at `34/34` represented documented option pairs, `79/79` written
+rows, `78/79` classified rows, `66` stock-matching rows, `12`
+invalid-input rows, and `0` exact-open rows. The next best default follow-up
+should either deepen the still-incomplete `checkout` documented option
+expansions or move to another dense represented family now that `checkout`
+has no remaining schema-gap options.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git checkout`
 overwrite-ignore/toggle plus short-detach batch. The selected change adds
 four exact stock-Git rows for `checkout --overwrite-ignore .`,
 `checkout --no-overwrite-ignore .`, `checkout --ignore-other-worktrees .`,

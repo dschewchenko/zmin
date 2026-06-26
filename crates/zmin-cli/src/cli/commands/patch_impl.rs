@@ -66,7 +66,7 @@ pub(crate) struct PatchAnswers {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum PatchAnswer {
+pub(crate) enum PatchAnswer {
     Yes,
     No,
     All,
@@ -584,7 +584,7 @@ impl PatchAnswers {
         })
     }
 
-    fn next(&mut self) -> PatchAnswer {
+    pub(crate) fn next(&mut self) -> PatchAnswer {
         let answer = self.answers.pop_front().unwrap_or(PatchAnswer::No);
         if matches!(answer, PatchAnswer::Quit) {
             self.quit = true;
