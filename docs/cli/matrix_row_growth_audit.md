@@ -11,25 +11,29 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-26 the latest completed batch is a zero-code `git shortlog
---stdin` reviewed-complete promotion. The selected change adds no new matrix
-rows and promotes the existing represented `shortlog --stdin` documented option
-pair into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv` because the
-current modeled helper-free surface already includes an exact stock-Git
-invalid-input row for `git shortlog --stdin` with the stock unknown-option
-usage diagnostic on this machine. Expected delta was `+0` matrix rows, `+1`
-complete documented option pair, `+0` complete command matrices, `+0`
-represented documented option pairs, `+0` verified rows, and `+0`
-invalid-input rows. Actual delta matched. Current census counts are `5667`
-matrix rows, `4935` verified rows, `718` invalid-input rows, `12` exact-open
-rows, `146/151` complete command matrices, `1622/3156` complete documented
-option pairs, and `1630/3156` represented documented option pairs. `shortlog`
-now sits at `29/29` reviewed-complete represented option pairs with `59`
-written rows, `59` classified rows, `54` stock-matching rows, `5`
-invalid-input rows, and `0` exact-open rows on the current modeled surface.
-The next default follow-up should move back to the refreshed exact-open queue
-or the next larger helper-free represented-family candidate rather than spend
-another slice on `shortlog`.
+As of 2026-06-26 the latest completed batch is a helper-free `git switch`
+documented-option family expansion plus reviewed-complete promotion. The
+selected change added fifteen exact stock-Git `switch` rows for `--quiet`,
+`-q`, `--merge`, `-m`, `--conflict=merge`, `--progress`,
+`--no-progress`, `--guess`, `--no-guess`,
+`--recurse-submodules`, `--no-recurse-submodules`,
+`--ignore-other-worktrees`, `-d`, `--force-create`, and `-C` on stable local
+branch-switch lanes, then promoted those represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+15` matrix rows, `+15` complete documented option pairs, `+15`
+represented documented option pairs, `+15` verified rows, `+0` invalid-input
+rows, and `+0` complete command matrices. Actual delta matched. Current
+census counts are `5682` matrix rows, `4950` verified rows, `718`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1637/3156` complete documented option pairs, and
+`1645/3156` represented documented option pairs. `switch` now sits at
+`22/22` reviewed-complete represented option pairs with `23` written rows,
+`23` classified rows, `23` stock-matching rows, `0` invalid-input rows, and
+`0` exact-open rows on the current modeled surface. The next default
+follow-up should skip the remaining three-row `switch` tracking micro-tail
+unless it unlocks a broader family and instead move to the next larger
+helper-free represented-family candidate such as the `commit`
+status/dry-run surface.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git submodule`
 documented-option closure plus command promotion. The selected change added

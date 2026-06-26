@@ -9710,7 +9710,7 @@ fn stash_branch(args: &[String]) -> Result<()> {
             message: "stash commit has no base parent".into(),
         });
     };
-    checkout_new_branch(false, branch, &base.to_hex(), false, false, false)?;
+    checkout_new_branch(false, branch, &base.to_hex(), false, false, false, false)?;
     let repo = find_repo()?;
     let tree_cache = TreeObjectCache::new(&store);
     if !stash_apply_can_preserve_dirty_paths(&repo, &store, &commit_cache, &tree_cache, &id)? {
@@ -10338,6 +10338,7 @@ pub(crate) fn checkout(
             explicit_start.is_none(),
             false,
             create_reflog,
+            false,
         );
     }
     if let Some(branch) = reset_create {
@@ -10356,6 +10357,7 @@ pub(crate) fn checkout(
             explicit_start.is_none(),
             true,
             create_reflog,
+            false,
         );
     }
     if let Some(branch) = orphan {
@@ -10427,7 +10429,7 @@ pub(crate) fn checkout(
     }
     let Some(target) = args.first() else {
         if detach {
-            return checkout_detached(force, "HEAD", "checkout");
+            return checkout_detached(force, "HEAD", "checkout", true);
         }
         return Err(CliError::Fatal {
             code: 129,
@@ -10435,7 +10437,7 @@ pub(crate) fn checkout(
         });
     };
     if detach {
-        return checkout_detached(force, target, "checkout");
+        return checkout_detached(force, target, "checkout", true);
     }
     if patch {
         return checkout_patch(&[PathBuf::from(target)]);
@@ -10448,7 +10450,7 @@ pub(crate) fn checkout(
         return checkout_existing(force, &previous);
     }
     if target.starts_with("refs/heads/") {
-        return checkout_detached(force, target, "checkout");
+        return checkout_detached(force, target, "checkout", true);
     }
     if !checkout_target_exists(target)? {
         return checkout_paths(
@@ -10746,6 +10748,7 @@ fn checkout_new_branch(
     default_start: bool,
     reset_existing: bool,
     create_reflog: bool,
+    switch_reset_message: bool,
 ) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -10793,10 +10796,25 @@ fn checkout_new_branch(
     if let Some(old_id) = reset_current_branch_old_id {
         append_reflog(&repo, "HEAD", &old_id, &id, &branch_reflog_message)?;
     }
-    if reset_existing {
-        checkout_existing_with_message(force, branch, CheckoutBranchMessage::ResetBranch)
-    } else {
-        checkout_existing_with_message(force, branch, CheckoutBranchMessage::NewBranch)
+    match (reset_existing, switch_reset_message) {
+        (true, true) => checkout_existing_with_message(
+            force,
+            branch,
+            CheckoutBranchMessage::SwitchResetBranch,
+            true,
+        ),
+        (true, false) => checkout_existing_with_message(
+            force,
+            branch,
+            CheckoutBranchMessage::ResetBranch,
+            true,
+        ),
+        (false, _) => checkout_existing_with_message(
+            force,
+            branch,
+            CheckoutBranchMessage::NewBranch,
+            true,
+        ),
     }
 }
 
@@ -10886,16 +10904,18 @@ enum CheckoutBranchMessage {
     ExistingBranch,
     NewBranch,
     ResetBranch,
+    SwitchResetBranch,
 }
 
 pub(crate) fn checkout_existing(force: bool, target: &str) -> Result<()> {
-    checkout_existing_with_message(force, target, CheckoutBranchMessage::ExistingBranch)
+    checkout_existing_with_message(force, target, CheckoutBranchMessage::ExistingBranch, true)
 }
 
 fn checkout_existing_with_message(
     force: bool,
     target: &str,
     branch_message: CheckoutBranchMessage,
+    print_messages: bool,
 ) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -10910,7 +10930,10 @@ fn checkout_existing_with_message(
         resolve_commitish(&repo, &store, target)?
     };
     let current_id = head_refs.resolve("HEAD").ok();
-    let force_transition = matches!(branch_message, CheckoutBranchMessage::ResetBranch);
+    let force_transition = matches!(
+        branch_message,
+        CheckoutBranchMessage::ResetBranch | CheckoutBranchMessage::SwitchResetBranch
+    );
     if force_transition || current_id.as_ref() != Some(&target_id) {
         let checkout_metadata = WorktreeCheckoutMetadata {
             ref_name: target_branch_ref.clone(),
@@ -10933,18 +10956,25 @@ fn checkout_existing_with_message(
     if let Some(ref_name) = target_branch_ref {
         let already_on_branch = current_branch.as_deref() == Some(ref_name.as_str());
         let reflog_message = format!("checkout: moving from {source} to {target}");
-        if !print_detached_orphan_warning(&store, &head_refs, &[])? {
+        if print_messages && !print_detached_orphan_warning(&store, &head_refs, &[])? {
             print_previous_detached_head_position(&repo, &store, &head_refs)?;
         }
         write_head_symbolic_with_reflog(&repo, &head_refs, &ref_name, &reflog_message)?;
-        match branch_message {
-            CheckoutBranchMessage::ExistingBranch if already_on_branch => {
-                eprintln!("Already on '{target}'")
-            }
-            CheckoutBranchMessage::ExistingBranch => eprintln!("Switched to branch '{target}'"),
-            CheckoutBranchMessage::ResetBranch => eprintln!("Reset branch '{target}'"),
-            CheckoutBranchMessage::NewBranch => {
-                eprintln!("Switched to a new branch '{target}'")
+        if print_messages {
+            match branch_message {
+                CheckoutBranchMessage::ExistingBranch if already_on_branch => {
+                    eprintln!("Already on '{target}'")
+                }
+                CheckoutBranchMessage::ExistingBranch => {
+                    eprintln!("Switched to branch '{target}'")
+                }
+                CheckoutBranchMessage::ResetBranch => eprintln!("Reset branch '{target}'"),
+                CheckoutBranchMessage::SwitchResetBranch => {
+                    eprintln!("Switched to and reset branch '{target}'")
+                }
+                CheckoutBranchMessage::NewBranch => {
+                    eprintln!("Switched to a new branch '{target}'")
+                }
             }
         }
         if let Some(lines) = human_status_upstream(&repo, &head_refs, true)? {
@@ -10957,20 +10987,22 @@ fn checkout_existing_with_message(
             "checkout: moving from {source} to {}",
             short_object_id(&target_id)
         );
-        print_detached_checkout_notice(
-            &repo,
-            &store,
-            &head_refs,
-            &target_id,
-            target,
-            DetachedCheckoutMode::Implicit,
-        )?;
+        if print_messages {
+            print_detached_checkout_notice(
+                &repo,
+                &store,
+                &head_refs,
+                &target_id,
+                target,
+                DetachedCheckoutMode::Implicit,
+            )?;
+        }
         write_head_direct_with_reflog(&repo, &head_refs, &target_id, &reflog_message)?;
     }
     Ok(())
 }
 
-fn checkout_detached(force: bool, target: &str, operation: &str) -> Result<()> {
+fn checkout_detached(force: bool, target: &str, operation: &str, print_messages: bool) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let _ = operation;
@@ -10991,7 +11023,9 @@ fn checkout_detached(force: bool, target: &str, operation: &str) -> Result<()> {
     } else {
         DetachedCheckoutMode::Implicit
     };
-    print_detached_checkout_notice(&repo, &store, &refs, &target_id, target, mode)?;
+    if print_messages {
+        print_detached_checkout_notice(&repo, &store, &refs, &target_id, target, mode)?;
+    }
     let reflog_message = format!(
         "checkout: moving from {source} to {}",
         short_object_id(&target_id)
@@ -11165,21 +11199,39 @@ fn current_head_reflog_name(refs: &RefStore) -> Result<String> {
 pub(crate) fn switch(
     force: bool,
     discard_changes: bool,
+    force_create: Option<String>,
     create: Option<String>,
+    _merge: bool,
+    _conflict: Option<String>,
+    _guess: bool,
+    _no_guess: bool,
+    quiet: bool,
+    _progress: bool,
+    _no_progress: bool,
+    _recurse_submodules: bool,
+    _no_recurse_submodules: bool,
+    _ignore_other_worktrees: bool,
     orphan: Option<String>,
     detach: bool,
+    _track: Option<String>,
+    _no_track: bool,
     target: Option<String>,
 ) -> Result<()> {
-    if (create.is_some() || orphan.is_some()) && detach {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "'--detach' cannot be used with '-b/-B/--orphan'".into(),
-        });
-    }
-    if create.is_some() && orphan.is_some() {
+    if [force_create.is_some(), create.is_some(), orphan.is_some()]
+        .into_iter()
+        .filter(|mode| *mode)
+        .count()
+        > 1
+    {
         return Err(CliError::Fatal {
             code: 128,
             message: "'--orphan' cannot be used with '-c'".into(),
+        });
+    }
+    if (force_create.is_some() || create.is_some() || orphan.is_some()) && detach {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "'--detach' cannot be used with '-b/-B/--orphan'".into(),
         });
     }
     let force = force || discard_changes;
@@ -11189,6 +11241,17 @@ pub(crate) fn switch(
 
     if let Some(branch) = orphan {
         return orphan_checkout(force, &branch);
+    }
+
+    if let Some(branch) = force_create {
+        if !force && !worktree_clean(&repo, &store)? {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: "local changes would be overwritten by switch".into(),
+            });
+        }
+        let start = target.as_deref().unwrap_or("HEAD");
+        return checkout_new_branch(force, &branch, start, target.is_none(), true, false, true);
     }
 
     if let Some(branch) = create {
@@ -11211,7 +11274,12 @@ pub(crate) fn switch(
             message: format!("invalid reference: {start}"),
         })?;
         write_ref_with_reflog(&repo, &refs, &ref_name, &id, "branch: Created from HEAD")?;
-        return checkout_existing_with_message(force, &branch, CheckoutBranchMessage::NewBranch);
+        return checkout_existing_with_message(
+            force,
+            &branch,
+            CheckoutBranchMessage::NewBranch,
+            true,
+        );
     }
 
     let Some(target) = target else {
@@ -11221,7 +11289,7 @@ pub(crate) fn switch(
         });
     };
     if detach {
-        return checkout_detached(force, &target, "switch");
+        return checkout_detached(force, &target, "checkout", !quiet);
     }
     if !ref_exists(&refs, &branch_ref_name(&target)?)? {
         return Err(CliError::Fatal {
@@ -11229,5 +11297,10 @@ pub(crate) fn switch(
             message: format!("invalid reference: {target}"),
         });
     }
-    checkout_existing(force, &target)
+    checkout_existing_with_message(
+        force,
+        &target,
+        CheckoutBranchMessage::ExistingBranch,
+        !quiet,
+    )
 }

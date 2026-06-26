@@ -95,6 +95,26 @@ fn checkout_index_debug_metadata_populated(debug: &str) -> bool {
     debug.lines().skip(1).take(2).all(|line| !line.ends_with(": 0:0"))
 }
 
+fn switch_branch_fixture_repos() -> (TempDir, TempDir) {
+    let git_repo = two_commit_repo();
+    let zmin_repo = two_commit_repo();
+    git(git_repo.path(), ["branch", "feature", "HEAD~1"]);
+    run_zmin(zmin_repo.path(), ["branch", "feature", "HEAD~1"]);
+    (git_repo, zmin_repo)
+}
+
+fn switch_outputs_match_stock_git(args: &[&str]) {
+    let (git_repo, zmin_repo) = switch_branch_fixture_repos();
+    let git_run = command_any_output("git", git_repo.path(), args, "git switch");
+    let zmin_run = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin switch");
+    assert_eq!(zmin_run, git_run, "switch output mismatch for {args:?}");
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        "switch status mismatch for {args:?}"
+    );
+}
+
 #[cfg(unix)]
 fn write_delayed_smudge_filter_helper(path: &std::path::Path) {
     fs::write(
@@ -1539,6 +1559,82 @@ fn switch_detach_matches_stock_git_for_branch_targets() {
         git(zmin_repo.path(), ["cat-file", "-p", "HEAD^{tree}"]),
         git(git_repo.path(), ["cat-file", "-p", "HEAD^{tree}"])
     );
+}
+
+#[test]
+fn switch_documented_branch_flags_match_stock_git() {
+    for args in [
+        ["switch", "--quiet", "feature"].as_slice(),
+        ["switch", "-q", "feature"].as_slice(),
+        ["switch", "--merge", "feature"].as_slice(),
+        ["switch", "-m", "feature"].as_slice(),
+        ["switch", "--merge", "--conflict=merge", "feature"].as_slice(),
+        ["switch", "--progress", "feature"].as_slice(),
+        ["switch", "--no-progress", "feature"].as_slice(),
+        ["switch", "--guess", "feature"].as_slice(),
+        ["switch", "--no-guess", "feature"].as_slice(),
+        ["switch", "--recurse-submodules", "feature"].as_slice(),
+        ["switch", "--no-recurse-submodules", "feature"].as_slice(),
+        ["switch", "--ignore-other-worktrees", "feature"].as_slice(),
+    ] {
+        switch_outputs_match_stock_git(args);
+    }
+}
+
+#[test]
+fn switch_detach_short_matches_stock_git_for_branch_targets() {
+    let (git_repo, zmin_repo) = switch_branch_fixture_repos();
+    let git_run = command_any_output("git", git_repo.path(), &["switch", "-d", "feature"], "git switch");
+    let zmin_run = command_any_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["switch", "-d", "feature"],
+        "zmin switch",
+    );
+
+    assert_eq!(zmin_run, git_run);
+    assert_eq!(
+        git(zmin_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]),
+        "HEAD"
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["rev-parse", "HEAD"]),
+        git(git_repo.path(), ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+        git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+    );
+}
+
+#[test]
+fn switch_force_create_matches_stock_git_state() {
+    for args in [
+        ["switch", "--force-create", "feature", "HEAD~1"].as_slice(),
+        ["switch", "-C", "feature", "HEAD~1"].as_slice(),
+    ] {
+        let (git_repo, zmin_repo) = switch_branch_fixture_repos();
+        let git_run = command_any_output("git", git_repo.path(), args, "git switch");
+        let zmin_run = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin switch");
+
+        assert_eq!(zmin_run, git_run, "switch output mismatch for {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "HEAD"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD"]),
+            git(git_repo.path(), ["rev-parse", "HEAD"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD^{tree}"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD^{tree}"])
+        );
+    }
 }
 
 #[test]

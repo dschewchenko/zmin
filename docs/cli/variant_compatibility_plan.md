@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1622/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1630/3156 represented doc-option pairs / 5667 written rows / 4935/5667 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1637/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1645/3156 represented doc-option pairs / 5682 written rows / 4950/5682 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,28 +300,37 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a zero-code `git shortlog --stdin`
-reviewed-complete promotion. Zmin already had the exact stock-Git invalid-input
-matrix row for `git shortlog --stdin`, where stock Git rejects the documented
-rev-list spelling with the same unknown-option usage diagnostic on the current
-machine, so this slice only promotes that represented option into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Focused gates were
+The latest completed slice is a helper-free `git switch` documented-option
+family expansion plus reviewed-complete promotion. Zmin now covers the
+remaining stable helper-free local `switch` lanes for `--quiet` / `-q`,
+`--merge` / `-m`, `--conflict=merge`, `--progress`,
+`--no-progress`, `--guess`, `--no-guess`,
+`--recurse-submodules`, `--no-recurse-submodules`,
+`--ignore-other-worktrees`, short detach `-d`, and branch reset
+`--force-create` / `-C`, then promotes those fifteen represented documented
+options into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+Focused gates were
+`ZMIN_STOCK_GIT=/usr/local/bin/git cargo test -p zmin-cli --test git_worktree_state_compat switch_ -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(shortlog|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(switch|summary)\t'`, and
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1622/3156` complete documented option pairs,
-`1630/3156` represented documented option pairs, `5667` written rows,
-`4935` verified rows, `12` open rows, and `718` invalid-input rows.
-`shortlog` now sits at `29/29` reviewed-complete represented option pairs,
-`59` written rows, `59` classified rows, `54` stock-matching rows,
-`5` invalid-input rows, and `0` exact-open rows on its current modeled
-surface. The next bounded high-throughput follow-up should move back to the
-refreshed exact-open queue or the next larger helper-free represented-family
-candidate from `docs/cli/census/remaining_to_fix_or_verify.tsv`; `shortlog`
-no longer has a modeled reviewed-complete tail.
+`1637/3156` complete documented option pairs,
+`1645/3156` represented documented option pairs, `5682` written rows,
+`4950` verified rows, `12` open rows, and `718` invalid-input rows.
+`switch` now sits at `22/22` reviewed-complete represented option pairs,
+`23` written rows, `23` classified rows, `23` stock-matching rows,
+`0` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next bounded high-throughput follow-up should avoid the remaining
+three-row `switch` tracking micro-tail unless it unlocks a broader tracking
+family and instead move to the next larger helper-free represented-family
+candidate from `docs/cli/census/remaining_to_fix_or_verify.tsv`, with the
+`commit` status/dry-run family still the strongest current parser/runtime
+batch.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

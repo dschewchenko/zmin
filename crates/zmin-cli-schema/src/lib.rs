@@ -2161,12 +2161,38 @@ pub enum Command {
         force: bool,
         #[arg(long = "discard-changes", action = ArgAction::SetTrue)]
         discard_changes: bool,
+        #[arg(short = 'C', long = "force-create")]
+        force_create: Option<String>,
         #[arg(short = 'c', long = "create")]
         create: Option<String>,
+        #[arg(short = 'm', long = "merge", action = ArgAction::SetTrue)]
+        merge: bool,
+        #[arg(long = "conflict")]
+        conflict: Option<String>,
+        #[arg(long = "guess", action = ArgAction::SetTrue)]
+        guess: bool,
+        #[arg(long = "no-guess", action = ArgAction::SetTrue)]
+        no_guess: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-progress", action = ArgAction::SetTrue)]
+        no_progress: bool,
+        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
+        recurse_submodules: bool,
+        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
+        no_recurse_submodules: bool,
+        #[arg(long = "ignore-other-worktrees", action = ArgAction::SetTrue)]
+        ignore_other_worktrees: bool,
         #[arg(long = "orphan")]
         orphan: Option<String>,
-        #[arg(long = "detach", action = ArgAction::SetTrue)]
+        #[arg(short = 'd', long = "detach", action = ArgAction::SetTrue)]
         detach: bool,
+        #[arg(short = 't', long = "track")]
+        track: Option<String>,
+        #[arg(long = "no-track", action = ArgAction::SetTrue)]
+        no_track: bool,
         target: Option<String>,
     },
     Restore {
