@@ -1871,6 +1871,9 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) encoding: Option<&'a str>,
     pub(crate) abbrev_commit: bool,
     pub(crate) max_count: Option<&'a str>,
+    pub(crate) max_age: Option<&'a str>,
+    pub(crate) skip: Option<usize>,
+    pub(crate) min_age: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
     pub(crate) committer: bool,
@@ -1878,16 +1881,24 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) email: bool,
     pub(crate) no_merges: bool,
+    pub(crate) merges: bool,
     pub(crate) do_walk: bool,
+    pub(crate) no_walk: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
+    pub(crate) reverse: bool,
     pub(crate) left_right: bool,
     pub(crate) right_only: bool,
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
     pub(crate) boundary: bool,
     pub(crate) children: bool,
+    pub(crate) max_parents: Option<&'a str>,
+    pub(crate) no_max_parents: bool,
+    pub(crate) min_parents: Option<&'a str>,
+    pub(crate) no_min_parents: bool,
+    pub(crate) first_parent: bool,
     pub(crate) parents: bool,
     pub(crate) objects: bool,
     pub(crate) graph: bool,
@@ -1912,6 +1923,7 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) no_object_names: bool,
     pub(crate) mailmap: bool,
     pub(crate) source: bool,
+    pub(crate) raw_args: &'a [String],
     pub(crate) revs: Vec<String>,
 }
 
@@ -1947,6 +1959,9 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         encoding,
         abbrev_commit,
         max_count,
+        max_age,
+        skip,
+        min_age,
         since,
         until,
         committer,
@@ -1954,16 +1969,24 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         summary,
         email,
         no_merges,
+        merges,
         do_walk,
+        no_walk,
         topo_order,
         date_order,
         author_date_order,
+        reverse,
         left_right,
         right_only,
         cherry_pick,
         cherry_mark,
         boundary,
         children,
+        max_parents,
+        no_max_parents,
+        min_parents,
+        no_min_parents,
+        first_parent,
         parents,
         objects,
         graph,
@@ -1988,6 +2011,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         no_object_names,
         mailmap,
         source,
+        raw_args,
         revs,
     } = options;
     let _accepted_oneline = oneline;
@@ -1998,6 +2022,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let _accepted_topo_order = topo_order;
     let _accepted_date_order = date_order;
     let _accepted_author_date_order = author_date_order;
+    let _accepted_reverse = reverse;
     let _accepted_left_right = left_right;
     let _accepted_right_only = right_only;
     let _accepted_cherry_pick = cherry_pick;
@@ -2037,24 +2062,88 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         return Ok(());
     }
     let max_count = parse_log_max_count(max_count)?;
+    let no_walk = resolve_history_walk_mode(raw_args, no_walk, do_walk);
+    let (since, until) = resolve_history_age_bounds(raw_args, since, max_age, until, min_age);
     let Some(since) = parse_log_since(since) else {
         return Ok(());
     };
     let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
+    let skip = resolve_history_skip(raw_args, skip)?;
+    let (min_parents, max_parents) = parse_log_parent_bounds(
+        min_parents,
+        no_min_parents,
+        no_merges,
+        max_parents,
+        no_max_parents,
+        merges,
+    )?;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
     let commit_cache = CommitObjectCache::new(&store);
-    let commits =
+    let post_collection_filters = since.is_some()
+        || until.is_some()
+        || !grep.is_empty()
+        || author.is_some()
+        || min_parents.is_some()
+        || max_parents.is_some();
+    let collect_max_count = if post_collection_filters {
+        None
+    } else {
+        expand_history_max_count(max_count, skip)
+    };
+    let mut commits = if no_walk && !all {
+        collect_no_walk_commit_objects(
+            &repo,
+            &store,
+            &commit_cache,
+            &revs.include,
+            collect_max_count,
+        )?
+    } else if first_parent && !all {
+        collect_first_parent_commit_objects_with_exclusions(
+            &repo,
+            &store,
+            &commit_cache,
+            &revs,
+            collect_max_count,
+        )?
+    } else {
         collect_commit_objects_with_exclusions_cached(
             &repo,
             &store,
             &commit_cache,
             &revs,
-            max_count,
-        )?;
+            collect_max_count,
+        )?
+    };
+    if let Some(since) = since {
+        commits.retain(|entry| {
+            signature_timestamp_timezone(&entry.commit.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_some_and(|timestamp| timestamp > since)
+        });
+    }
+    if let Some(until) = until {
+        commits.retain(|entry| {
+            signature_timestamp_timezone(&entry.commit.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_some_and(|timestamp| timestamp < until)
+        });
+    }
+    if min_parents.is_some() || max_parents.is_some() {
+        commits.retain(|entry| {
+            log_parent_count_matches_bounds(entry.commit.parents.len(), min_parents, max_parents)
+        });
+    }
+    if let Some(skip) = skip {
+        commits = commits.into_iter().skip(skip).collect();
+    }
+    if post_collection_filters && let Some(max_count) = max_count {
+        commits.truncate(max_count);
+    }
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_mode = parse_log_date_mode(date)?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;

@@ -627,14 +627,20 @@ pub enum Command {
         email: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
         no_merges: bool,
+        #[arg(long = "merges", action = ArgAction::SetTrue)]
+        merges: bool,
         #[arg(long = "do-walk", action = ArgAction::SetTrue)]
         do_walk: bool,
+        #[arg(long = "no-walk", action = ArgAction::SetTrue)]
+        no_walk: bool,
         #[arg(long = "topo-order", action = ArgAction::SetTrue)]
         topo_order: bool,
         #[arg(long = "date-order", action = ArgAction::SetTrue)]
         date_order: bool,
         #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
         author_date_order: bool,
+        #[arg(long = "reverse", action = ArgAction::SetTrue)]
+        reverse: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
         #[arg(long = "right-only", action = ArgAction::SetTrue)]
@@ -647,6 +653,16 @@ pub enum Command {
         boundary: bool,
         #[arg(long = "children", action = ArgAction::SetTrue)]
         children: bool,
+        #[arg(long = "max-parents")]
+        max_parents: Option<String>,
+        #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
+        no_max_parents: bool,
+        #[arg(long = "min-parents")]
+        min_parents: Option<String>,
+        #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
+        no_min_parents: bool,
+        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+        first_parent: bool,
         #[arg(long = "parents", action = ArgAction::SetTrue)]
         parents: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
@@ -716,6 +732,12 @@ pub enum Command {
         source: bool,
         #[arg(long = "max-count")]
         max_count: Option<String>,
+        #[arg(long = "max-age")]
+        max_age: Option<String>,
+        #[arg(long = "skip")]
+        skip: Option<usize>,
+        #[arg(long = "min-age")]
+        min_age: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
         #[arg(long = "until", alias = "before")]

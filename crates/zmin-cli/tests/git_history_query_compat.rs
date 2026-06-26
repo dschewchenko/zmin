@@ -673,6 +673,37 @@ fn shortlog_option_surface_batch_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_shared_history_schema_batch_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700001000 +0000", "two");
+    write_commit_with_date(repo.path(), "a.txt", "three\n", "1700002000 +0000", "three");
+
+    for args in [
+        ["shortlog", "-sne", "--since=1700000300", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--until=1700000900", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--max-age=1700000300", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--min-age=1700000900", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--skip=1", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--first-parent", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-walk", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--max-parents=1", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--min-parents=0", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--merges", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-max-parents", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-min-parents", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--reverse", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_family_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);
