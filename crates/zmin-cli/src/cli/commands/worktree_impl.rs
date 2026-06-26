@@ -5116,9 +5116,14 @@ fn worktree_add(args: &[String]) -> Result<()> {
     let mut branch_option: Option<(&str, bool)> = None;
     let mut checkout = true;
     let mut force_count = 0usize;
+    let mut guess_remote = false;
     let mut lock = false;
     let mut lock_reason = String::new();
+    let mut no_guess_remote = false;
+    let mut no_track = false;
+    let mut orphan = false;
     let mut quiet = false;
+    let mut _track_requested = false;
     let mut values = Vec::new();
     let mut cursor = 0usize;
     while cursor < args.len() {
@@ -5131,8 +5136,16 @@ fn worktree_add(args: &[String]) -> Result<()> {
             checkout = false;
         } else if arg == "-f" || arg == "--force" {
             force_count += 1;
+        } else if arg == "--guess-remote" {
+            guess_remote = true;
         } else if arg == "-q" || arg == "--quiet" {
             quiet = true;
+        } else if arg == "--no-guess-remote" {
+            no_guess_remote = true;
+        } else if arg == "--no-track" {
+            no_track = true;
+        } else if arg == "--orphan" {
+            orphan = true;
         } else if arg == "--lock" {
             lock = true;
         } else if arg == "--reason" {
@@ -5143,6 +5156,8 @@ fn worktree_add(args: &[String]) -> Result<()> {
             })?;
         } else if let Some(value) = arg.strip_prefix("--reason=") {
             lock_reason = value.to_owned();
+        } else if arg == "--track" {
+            _track_requested = true;
         } else if arg == "-b" || arg == "-B" {
             cursor += 1;
             let branch = args
@@ -5158,7 +5173,16 @@ fn worktree_add(args: &[String]) -> Result<()> {
         }
         cursor += 1;
     }
-    if detach && branch_option.is_some() {
+    if no_guess_remote {
+        guess_remote = false;
+    }
+    if orphan && branch_option.is_some() {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "options '-b'/'-B' and '--orphan' cannot be used together".into(),
+        });
+    }
+    if detach && (branch_option.is_some() || orphan) {
         return Err(CliError::Fatal {
             code: 129,
             message: "options '-b'/'-B' and '--detach' cannot be used together".into(),
@@ -5175,11 +5199,6 @@ fn worktree_add(args: &[String]) -> Result<()> {
         });
     }
     let target_root = absolute_path_from_arg(std::path::Path::new(values[0]))?;
-    let commitish = values.get(1).copied().unwrap_or("HEAD");
-    let mut id = resolve_commitish(&repo, &store, commitish).map_err(|_| CliError::Fatal {
-        code: 128,
-        message: format!("invalid reference: {commitish}"),
-    })?;
     if target_root.exists() && fs::read_dir(&target_root)?.next().is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -5194,8 +5213,46 @@ fn worktree_add(args: &[String]) -> Result<()> {
         objects_dir: repo.objects_dir.clone(),
         index_path: repo.index_path.clone(),
     };
+    let path_branch_name = target_root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: format!("cannot derive branch name from '{}'", target_root.display()),
+        })?;
+    let inferred_upstream = if guess_remote && branch_option.is_none() && values.len() == 1 && !orphan {
+        find_unique_remote_tracking_branch(&refs, path_branch_name)?
+    } else {
+        None
+    };
+    let default_commitish = inferred_upstream
+        .as_ref()
+        .map(|upstream| upstream.ref_name.as_str())
+        .unwrap_or("HEAD");
+    let explicit_commitish = values.get(1).copied();
+    let commitish = explicit_commitish.unwrap_or(default_commitish);
+    let mut id = if orphan {
+        None
+    } else {
+        Some(resolve_commitish(&repo, &store, commitish).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid reference: {commitish}"),
+        })?)
+    };
+    let mut tracking_upstream = None;
+    let mut created_new_branch = false;
     let branch_ref = if detach {
         None
+    } else if orphan {
+        let ref_name = branch_ref_name(path_branch_name)?;
+        if ref_exists(&refs, &ref_name)? {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("a branch named '{path_branch_name}' already exists"),
+            });
+        }
+        created_new_branch = true;
+        Some(ref_name)
     } else if let Some((branch, reset)) = branch_option {
         let ref_name = branch_ref_name(branch)?;
         let exists = ref_exists(&refs, &ref_name)?;
@@ -5221,19 +5278,16 @@ fn worktree_add(args: &[String]) -> Result<()> {
             &common_repo,
             &refs,
             &ref_name,
-            &id,
+            id.as_ref().expect("worktree branch target"),
             "branch: Created from HEAD",
         )?;
+        if !no_track {
+            tracking_upstream = parse_worktree_tracking_upstream(&refs, commitish)?;
+        }
+        created_new_branch = true;
         Some(ref_name)
     } else if values.len() == 1 {
-        let branch = target_root
-            .file_name()
-            .and_then(|value| value.to_str())
-            .ok_or_else(|| CliError::Fatal {
-                code: 128,
-                message: format!("cannot derive branch name from '{}'", target_root.display()),
-            })?;
-        let ref_name = branch_ref_name(branch)?;
+        let ref_name = branch_ref_name(path_branch_name)?;
         if ref_exists(&refs, &ref_name)? {
             if force_count == 0
                 && let Some(path) = branch_checked_out_worktree(&repo, &ref_name)?
@@ -5247,38 +5301,44 @@ fn worktree_add(args: &[String]) -> Result<()> {
                     ),
                 });
             }
-            id = refs.resolve(&ref_name)?;
+            id = Some(refs.resolve(&ref_name)?);
         } else {
+            let target_id = if let Some(upstream) = &inferred_upstream {
+                tracking_upstream = Some(upstream.clone());
+                refs.resolve(&upstream.ref_name)?
+            } else {
+                id.expect("path-only worktree target")
+            };
             write_ref_with_reflog(
                 &common_repo,
                 &refs,
                 &ref_name,
-                &id,
+                &target_id,
                 "branch: Created from HEAD",
             )?;
+            id = Some(target_id);
+            created_new_branch = true;
+        }
+        Some(ref_name)
+    } else if let Some(ref_name) = branch_ref_name(commitish)
+        .ok()
+        .filter(|ref_name| refs.resolve(ref_name).is_ok())
+    {
+        if force_count == 0
+            && let Some(path) = branch_checked_out_worktree(&repo, &ref_name)?
+        {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "'{}' is already used by worktree at '{}'",
+                    branch_display_name(&ref_name),
+                    path.display()
+                ),
+            });
         }
         Some(ref_name)
     } else {
-        if let Some(ref_name) = branch_ref_name(commitish)
-            .ok()
-            .filter(|ref_name| refs.resolve(ref_name).is_ok())
-        {
-            if force_count == 0
-                && let Some(path) = branch_checked_out_worktree(&repo, &ref_name)?
-            {
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message: format!(
-                        "'{}' is already used by worktree at '{}'",
-                        branch_display_name(&ref_name),
-                        path.display()
-                    ),
-                });
-            }
-            Some(ref_name)
-        } else {
-            None
-        }
+        None
     };
     let admin_dir = allocate_worktree_admin_dir(&repo, &target_root)?;
     fs::create_dir_all(&target_root)?;
@@ -5293,7 +5353,10 @@ fn worktree_add(args: &[String]) -> Result<()> {
     if let Some(branch_ref) = &branch_ref {
         fs::write(admin_dir.join("HEAD"), format!("ref: {branch_ref}\n"))?;
     } else {
-        fs::write(admin_dir.join("HEAD"), format!("{}\n", id.to_hex()))?;
+        fs::write(
+            admin_dir.join("HEAD"),
+            format!("{}\n", id.as_ref().expect("detached worktree id").to_hex()),
+        )?;
     }
     let linked_repo = GitRepo {
         root: target_root.clone(),
@@ -5305,16 +5368,24 @@ fn worktree_add(args: &[String]) -> Result<()> {
         index_path: linked_repo.git_dir.join("index"),
         ..linked_repo
     };
-    append_reflog_if_identity_available(
-        &linked_repo,
-        "HEAD",
-        &zero_object_id(),
-        &id,
-        "worktree: Created from HEAD",
-    )?;
-    let commit = commit_cache.read_commit(&id)?;
-    if checkout {
-        let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
+    if let Some(id) = id.as_ref() {
+        append_reflog_if_identity_available(
+            &linked_repo,
+            "HEAD",
+            &zero_object_id(),
+            id,
+            "worktree: Created from HEAD",
+        )?;
+    }
+    let commit = if let Some(id) = id.as_ref() {
+        Some(commit_cache.read_commit(id)?)
+    } else {
+        None
+    };
+    if orphan {
+        GitIndex::new().write_to_path(&linked_repo.index_path)?;
+    } else if checkout {
+        let new_index = tree_cache.read_tree_to_index(&commit.as_ref().expect("worktree commit").tree)?;
         new_index.write_to_path(&linked_repo.index_path)?;
         checkout_index(
             &store,
@@ -5326,16 +5397,31 @@ fn worktree_add(args: &[String]) -> Result<()> {
     if lock {
         fs::write(linked_repo.git_dir.join("locked"), format!("{lock_reason}\n"))?;
     }
+    if let (Some(branch_ref), Some(upstream)) = (branch_ref.as_ref(), tracking_upstream.as_ref()) {
+        let branch_name = branch_display_name(branch_ref);
+        set_config_value(
+            &common_repo,
+            &format!("branch.{branch_name}.remote"),
+            &upstream.remote,
+        )?;
+        set_config_value(
+            &common_repo,
+            &format!("branch.{branch_name}.merge"),
+            &upstream.merge,
+        )?;
+    }
     if !quiet {
         if let Some(branch_ref) = &branch_ref {
-            let action = if let Some((_, reset)) = branch_option {
-                if reset {
-                    "resetting branch"
+            let action = if orphan || created_new_branch {
+                if let Some((_, reset)) = branch_option {
+                    if reset {
+                        "resetting branch"
+                    } else {
+                        "new branch"
+                    }
                 } else {
                     "new branch"
                 }
-            } else if values.len() == 1 {
-                "new branch"
             } else {
                 "checking out"
             };
@@ -5343,26 +5429,88 @@ fn worktree_add(args: &[String]) -> Result<()> {
                 "Preparing worktree ({action} '{}')",
                 branch_display_name(branch_ref)
             );
-            println!(
-                "HEAD is now at {} {}",
-                short_object_id(&id),
-                commit_subject(&commit.message)
-            );
+            if let Some(upstream) = &tracking_upstream {
+                println!(
+                    "branch '{}' set up to track '{}'.",
+                    branch_display_name(branch_ref),
+                    upstream.display
+                );
+            }
+            if let Some((id, commit)) = id.as_ref().zip(commit.as_ref()) {
+                println!(
+                    "HEAD is now at {} {}",
+                    short_object_id(id),
+                    commit_subject(&commit.message)
+                );
+            }
         } else {
             eprintln!(
                 "Preparing worktree (detached HEAD {})",
-                short_object_id(&id)
+                short_object_id(id.as_ref().expect("detached worktree id"))
             );
             if checkout {
                 println!(
                     "HEAD is now at {} {}",
-                    short_object_id(&id),
-                    commit_subject(&commit.message)
+                    short_object_id(id.as_ref().expect("detached worktree id")),
+                    commit_subject(&commit.as_ref().expect("detached worktree commit").message)
                 );
             }
         }
     }
     Ok(())
+}
+
+#[derive(Clone)]
+struct WorktreeTrackingUpstream {
+    remote: String,
+    merge: String,
+    display: String,
+    ref_name: String,
+}
+
+fn parse_worktree_tracking_upstream(
+    refs: &RefStore,
+    value: &str,
+) -> Result<Option<WorktreeTrackingUpstream>> {
+    if let Some(rest) = value.strip_prefix("refs/remotes/") {
+        let Some((remote, branch)) = rest.split_once('/') else {
+            return Ok(None);
+        };
+        return Ok(Some(WorktreeTrackingUpstream {
+            remote: remote.to_owned(),
+            merge: format!("refs/heads/{branch}"),
+            display: format!("{remote}/{branch}"),
+            ref_name: value.to_owned(),
+        }));
+    }
+    if let Some((remote, branch)) = value.split_once('/') {
+        let ref_name = format!("refs/remotes/{remote}/{branch}");
+        if refs.resolve(&ref_name).is_ok() {
+            return Ok(Some(WorktreeTrackingUpstream {
+                remote: remote.to_owned(),
+                merge: format!("refs/heads/{branch}"),
+                display: value.to_owned(),
+                ref_name,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+fn find_unique_remote_tracking_branch(
+    refs: &RefStore,
+    branch_name: &str,
+) -> Result<Option<WorktreeTrackingUpstream>> {
+    let suffix = format!("/{branch_name}");
+    let matches = refs
+        .list_refs("refs/remotes/")?
+        .into_iter()
+        .filter(|ref_name| !ref_name.ends_with("/HEAD") && ref_name.ends_with(&suffix))
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return Ok(None);
+    }
+    parse_worktree_tracking_upstream(refs, &matches[0])
 }
 
 fn worktree_list(args: &[String]) -> Result<()> {

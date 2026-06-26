@@ -22,6 +22,47 @@ fn worktree_fixture_repo() -> TempDir {
     repo
 }
 
+fn remote_tracking_worktree_fixture_repo() -> TempDir {
+    let root = TempDir::new().expect("temp remote root");
+    let source = root.path().join("remote-src");
+    fs::create_dir_all(&source).expect("create source repo dir");
+    git(root.path(), ["init", source.to_str().expect("source repo path")]);
+    configure_identity(&source);
+    git(&source, ["checkout", "-b", "main"]);
+    write_file(&source, "a.txt", "one\n");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "one"]);
+    git(&source, ["checkout", "-b", "topic"]);
+    write_file(&source, "a.txt", "two\n");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "two"]);
+    git(&source, ["branch", "noguess"]);
+    git(&source, ["checkout", "main"]);
+
+    let remote = root.path().join("remote.git");
+    git(
+        root.path(),
+        [
+            "clone",
+            "--bare",
+            source.to_str().expect("source path"),
+            remote.to_str().expect("remote path"),
+        ],
+    );
+
+    let local = root.path().join("local");
+    git(
+        root.path(),
+        [
+            "clone",
+            remote.to_str().expect("remote path"),
+            local.to_str().expect("local path"),
+        ],
+    );
+    configure_identity(&local);
+    root
+}
+
 fn single_worktree_admin(repo: &std::path::Path) -> std::path::PathBuf {
     let entries = fs::read_dir(repo.join(".git/worktrees"))
         .expect("read worktree admin dir")
@@ -72,6 +113,10 @@ fn normalize_worktree_human_list(output: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn normalize_worktree_tracking_output(output: &str) -> String {
+    normalize_worktree_human_list(output)
 }
 
 #[test]
@@ -2129,6 +2174,242 @@ fn worktree_add_short_aliases_and_list_flags_match_stock_git() {
                 (git_prune_parent.as_path(), zmin_prune_parent.as_path()),
                 (git_prune_worktree.as_path(), zmin_prune_worktree.as_path()),
             ]
+        )
+    );
+}
+
+#[test]
+fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
+    let git_root = remote_tracking_worktree_fixture_repo();
+    let zmin_root = remote_tracking_worktree_fixture_repo();
+    let git_repo = git_root.path().join("local");
+    let zmin_repo = zmin_root.path().join("local");
+
+    let git_orphan = git_root.path().join("wt-orphan");
+    let zmin_orphan = zmin_root.path().join("wt-orphan");
+    let zmin_orphan_output = command_output(
+        zmin_bin(),
+        &zmin_repo,
+        &[
+            "worktree",
+            "add",
+            "--orphan",
+            zmin_orphan.to_str().expect("zmin orphan worktree"),
+        ],
+        "zmin",
+    );
+    let git_orphan_output = command_output(
+        "git",
+        &git_repo,
+        &[
+            "worktree",
+            "add",
+            "--orphan",
+            git_orphan.to_str().expect("git orphan worktree"),
+        ],
+        "git",
+    );
+    assert_eq!(zmin_orphan_output.0, git_orphan_output.0);
+    assert_eq!(
+        normalize_worktree_output(&zmin_orphan_output.1, &[]),
+        normalize_worktree_output(&git_orphan_output.1, &[(git_orphan.as_path(), zmin_orphan.as_path())])
+    );
+    assert_eq!(
+        normalize_worktree_output(&zmin_orphan_output.2, &[]),
+        normalize_worktree_output(&git_orphan_output.2, &[(git_orphan.as_path(), zmin_orphan.as_path())])
+    );
+    assert_eq!(
+        git(&zmin_orphan, ["symbolic-ref", "HEAD"]),
+        git(&git_orphan, ["symbolic-ref", "HEAD"])
+    );
+    assert_eq!(
+        command_failure_output("git", &zmin_orphan, &["rev-parse", "--verify", "HEAD"], "git"),
+        command_failure_output("git", &git_orphan, &["rev-parse", "--verify", "HEAD"], "git")
+    );
+    assert_eq!(
+        fs::read_dir(&zmin_orphan)
+            .expect("read zmin orphan worktree")
+            .count(),
+        fs::read_dir(&git_orphan)
+            .expect("read git orphan worktree")
+            .count()
+    );
+
+    let git_track = git_root.path().join("wt-track");
+    let zmin_track = zmin_root.path().join("wt-track");
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            &zmin_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature-track",
+                "--track",
+                zmin_track.to_str().expect("zmin track worktree"),
+                "origin/topic",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            &git_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature-track",
+                "--track",
+                git_track.to_str().expect("git track worktree"),
+                "origin/topic",
+            ],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(&zmin_track, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
+        git(&git_track, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+    );
+
+    let git_no_track = git_root.path().join("wt-no-track");
+    let zmin_no_track = zmin_root.path().join("wt-no-track");
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            &zmin_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature-no-track",
+                "--no-track",
+                zmin_no_track.to_str().expect("zmin no-track worktree"),
+                "origin/topic",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            &git_repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature-no-track",
+                "--no-track",
+                git_no_track.to_str().expect("git no-track worktree"),
+                "origin/topic",
+            ],
+            "git",
+        )
+    );
+    assert_eq!(
+        command_failure_output(
+            "git",
+            &zmin_no_track,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            "git",
+        ),
+        command_failure_output(
+            "git",
+            &git_no_track,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            "git",
+        )
+    );
+
+    let git_guess = git_root.path().join("topic");
+    let zmin_guess = zmin_root.path().join("topic");
+    let zmin_guess_output = command_output(
+        zmin_bin(),
+        &zmin_repo,
+        &[
+            "worktree",
+            "add",
+            "--guess-remote",
+            zmin_guess.to_str().expect("zmin guess worktree"),
+        ],
+        "zmin",
+    );
+    let git_guess_output = command_output(
+        "git",
+        &git_repo,
+        &[
+            "worktree",
+            "add",
+            "--guess-remote",
+            git_guess.to_str().expect("git guess worktree"),
+        ],
+        "git",
+    );
+    assert_eq!(zmin_guess_output.0, git_guess_output.0);
+    assert_eq!(
+        normalize_worktree_tracking_output(&normalize_worktree_output(&zmin_guess_output.1, &[])),
+        normalize_worktree_tracking_output(&normalize_worktree_output(&git_guess_output.1, &[(git_guess.as_path(), zmin_guess.as_path())]))
+    );
+    assert_eq!(
+        normalize_worktree_output(&zmin_guess_output.2, &[]),
+        normalize_worktree_output(&git_guess_output.2, &[(git_guess.as_path(), zmin_guess.as_path())])
+    );
+    assert_eq!(
+        git(&zmin_guess, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
+        git(&git_guess, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+    );
+    assert_eq!(
+        git(&zmin_guess, ["rev-parse", "HEAD"]),
+        git(&git_guess, ["rev-parse", "HEAD"])
+    );
+
+    let git_no_guess = git_root.path().join("noguess");
+    let zmin_no_guess = zmin_root.path().join("noguess");
+    let zmin_no_guess_output = command_output(
+        zmin_bin(),
+        &zmin_repo,
+        &[
+            "worktree",
+            "add",
+            "--no-guess-remote",
+            zmin_no_guess.to_str().expect("zmin no-guess worktree"),
+        ],
+        "zmin",
+    );
+    let git_no_guess_output = command_output(
+        "git",
+        &git_repo,
+        &[
+            "worktree",
+            "add",
+            "--no-guess-remote",
+            git_no_guess.to_str().expect("git no-guess worktree"),
+        ],
+        "git",
+    );
+    assert_eq!(zmin_no_guess_output.0, git_no_guess_output.0);
+    assert_eq!(
+        normalize_worktree_tracking_output(&normalize_worktree_output(&zmin_no_guess_output.1, &[])),
+        normalize_worktree_tracking_output(&normalize_worktree_output(&git_no_guess_output.1, &[(git_no_guess.as_path(), zmin_no_guess.as_path())]))
+    );
+    assert_eq!(
+        normalize_worktree_output(&zmin_no_guess_output.2, &[]),
+        normalize_worktree_output(&git_no_guess_output.2, &[(git_no_guess.as_path(), zmin_no_guess.as_path())])
+    );
+    assert_eq!(
+        git(&zmin_no_guess, ["rev-parse", "HEAD"]),
+        git(&git_no_guess, ["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        command_failure_output(
+            "git",
+            &zmin_no_guess,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            "git",
+        ),
+        command_failure_output(
+            "git",
+            &git_no_guess,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            "git",
         )
     );
 }

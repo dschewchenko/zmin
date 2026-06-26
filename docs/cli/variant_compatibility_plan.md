@@ -22,39 +22,42 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-26 the latest completed batch is a helper-free `git worktree`
-short-alias plus list-format documented-option family expansion on the
-current local lane. The selected change added six exact stock-Git rows for
-`worktree add -d`, `worktree add -q`, `worktree add --force`,
-`worktree list -v`, `worktree list --porcelain -z`, and
-`worktree prune -n`, then promoted those six represented documented options
-into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+remote-inference plus unborn-branch documented-option tail closure on the
+current local lane. The selected change added five exact stock-Git rows for
+`worktree add --orphan`, `worktree add --track`, `worktree add --no-track`,
+`worktree add --guess-remote`, and `worktree add --no-guess-remote`, then
+promoted those five represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
-The batch fixed two concrete runtime gaps on the worktree path:
+The batch fixed three concrete runtime gaps on the worktree add path:
 
-- `worktree add -d ...` now accepts the stock short detach alias
-- `worktree list` now accepts list-format flags directly, including aligned
-  human `-v` output and NUL-delimited porcelain output for `--porcelain -z`
+- `worktree add --orphan <path>` now creates the stock unborn branch named
+  from the path basename and leaves the linked worktree empty
+- `worktree add -b <branch> [--no-]track <path> <remote>/<branch>` now
+  preserves the stock upstream-config behavior for remote-tracking starts
+- `worktree add --guess-remote` and `--no-guess-remote` now parse correctly,
+  with unique remote-tracking inference enabled or suppressed like stock Git
 
 Actual durable census after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `1892 / 3212`
-- represented documented command-option pairs: `1900 / 3212`
-- matrix rows: `5953`
-- verified rows: `5180`
+- complete documented command-option pairs: `1897 / 3212`
+- represented documented command-option pairs: `1905 / 3212`
+- matrix rows: `5958`
+- verified rows: `5185`
 - invalid-input rows: `737`
 - open or partial exact rows: `12`
 
 Per-command position on the active shared surface:
 
-- `worktree`: `19 / 24` reviewed-complete documented option pairs, `28`
-  written rows, `28` classified rows, `27` stock-matching rows, `1`
+- `worktree`: `24 / 24` reviewed-complete documented option pairs, `33`
+  written rows, `33` classified rows, `32` stock-matching rows, `1`
   invalid-input row, `0` exact-open rows
 
-The next best helper-free follow-up should stay on the remaining dense
-`worktree` documented-option tail: `--guess-remote`, `--no-guess-remote`,
-`--track`, `--no-track`, and `--orphan`, rather than falling back to the
-helper-blocked command gaps.
+The next best helper-free follow-up should move to the next dense local
+documented-option family outside worktree. Current census evidence points to
+`update-index` as the largest remaining helper-free local tail, rather than
+the helper-blocked `cvsimport` / `cvsexportcommit` / `archimport` gaps.
 
 As of 2026-06-26 the latest completed batch is a zero-code shared
 history-query reviewed-complete promotion for `git log` and
