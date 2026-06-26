@@ -300,25 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git shortlog` grouping and
-reflog evidence expansion. Zmin already matched stock Git for repeated and
-composed `--group` lanes plus repeated/ordered reflog-family combinations, so
-the slice adds exact stock-Git rows for multi-group accumulation,
-group-duplication stability, trailer-plus-format summary grouping, repeated
-`--grep-reflog`, and `--reflog` with `-g` in both orders on the modeled
-helper-free local shortlog lanes.
+The latest completed slice is a zero-code reviewed-complete `git shortlog`
+promotion cluster. Zmin now promotes the remaining represented shortlog
+documented options `--all-match`, `--grep`, `--grep-reflog`, `--group`,
+`--invert-grep`, `--reflog`, `--regexp-ignore-case`, `--walk-reflogs`, `-g`,
+and `-i` into the reviewed-complete census list and promotes `shortlog`
+itself into the reviewed-complete command set because the full currently
+modeled helper-free shortlog surface is classified with no exact-open rows.
 
-Current counts are `102/151` complete command matrices,
-`1489/3156` complete documented option pairs,
+Current counts are `103/151` complete command matrices,
+`1499/3156` complete documented option pairs,
 `1508/3156` represented documented option pairs, `5509` written rows,
 `4793` verified rows, `12` open rows, and `701` invalid-input rows.
-`shortlog` now sits at `18/29` reviewed-complete documented option pairs,
+`shortlog` now sits at `28/29` reviewed-complete documented option pairs,
 `29/125` represented documented option pairs, `59/59` classified rows, `54`
-stock-matching rows, and `5` invalid-input rows. The next bounded
-high-throughput follow-up can stay on the remaining `shortlog` review tail for
-`--group`, `--grep`, and reflog-family completion or move to another dense
-helper-free represented family, but should continue selecting from the
-refreshed census queue instead of raw chat memory.
+stock-matching rows, `5` invalid-input rows, and is now a reviewed-complete
+command. The next bounded high-throughput follow-up should move to another
+dense helper-free represented family or another zero-code reviewed-complete
+promotion cluster from the refreshed census queue.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

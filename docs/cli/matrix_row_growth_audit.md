@@ -11,6 +11,25 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
+`git shortlog` promotion cluster. The selected change promotes the remaining
+represented shortlog documented options `--all-match`, `--grep`,
+`--grep-reflog`, `--group`, `--invert-grep`, `--reflog`,
+`--regexp-ignore-case`, `--walk-reflogs`, `-g`, and `-i` into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, then promotes
+`shortlog` into `docs/cli/census/reviewed_complete_command_matrices.tsv`
+because the command already had `29/125` represented documented options,
+`59/59` classified rows, and `0` exact-open rows on the currently modeled
+helper-free local surface. Expected delta was `+0` matrix rows, `+10`
+complete documented option pairs, `+1` complete command matrix, `+0`
+represented documented option pairs, `+0` verified rows, and `+0`
+invalid-input rows. Actual delta matched. `shortlog` now sits at `28/29`
+reviewed-complete documented option pairs, `29/125` represented documented
+option pairs, `59/59` classified rows, `54` stock-matching rows, `5`
+invalid-input rows, and `0` exact-open rows. The next best helper-free
+follow-up should move to another dense represented family or another zero-code
+review-promotion cluster if it offers a larger safe closure batch.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
 grouping and reflog evidence expansion. The selected change adds exact
 stock-Git evidence for repeated and composed `--group` lanes
