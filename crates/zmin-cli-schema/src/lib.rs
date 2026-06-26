@@ -1016,12 +1016,22 @@ pub enum Command {
         show_index_version: u8,
         #[arg(long = "no-split-index", action = ArgAction::Count)]
         no_split_index: u8,
+        #[arg(long = "untracked-cache", action = ArgAction::Count)]
+        untracked_cache: u8,
         #[arg(long = "no-untracked-cache", action = ArgAction::Count)]
         no_untracked_cache: u8,
+        #[arg(long = "force-untracked-cache", action = ArgAction::Count)]
+        force_untracked_cache: u8,
         #[arg(long = "test-untracked-cache", action = ArgAction::Count)]
         test_untracked_cache: u8,
+        #[arg(long = "fsmonitor", action = ArgAction::Count)]
+        fsmonitor: u8,
         #[arg(long = "no-fsmonitor", action = ArgAction::Count)]
         no_fsmonitor: u8,
+        #[arg(long = "fsmonitor-valid", action = ArgAction::Count)]
+        fsmonitor_valid: u8,
+        #[arg(long = "no-fsmonitor-valid", action = ArgAction::Count)]
+        no_fsmonitor_valid: u8,
         #[arg(long = "verbose", action = ArgAction::Count)]
         verbose: u8,
         #[arg(long = "chmod")]

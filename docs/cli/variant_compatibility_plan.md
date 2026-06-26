@@ -22,6 +22,49 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+helper-extension documented-option expansion on the current extensionless local
+lane. The selected change added five exact stock-Git rows for
+`update-index --force-untracked-cache`, `update-index --fsmonitor`,
+`update-index --fsmonitor-valid a.txt`,
+`update-index --no-fsmonitor-valid a.txt`, and
+`update-index --untracked-cache`, then promoted those five newly represented
+documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+
+The batch fixed one concrete runtime gap on the update-index path:
+
+- Zmin now accepts the remaining helper-like local `update-index` cache and
+  fsmonitor options except split-index, including stock warning output for
+  `--fsmonitor` and stock-compatible synthetic `FSMN` / `UNTR`
+  index-extension writes on the modeled extensionless local lane, while
+  `--fsmonitor-valid` and `--no-fsmonitor-valid` now match stock Git's
+  accepted no-op behavior on that same lane
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1918 / 3212`
+- represented documented command-option pairs: `1926 / 3212`
+- matrix rows: `5983`
+- verified rows: `5209`
+- invalid-input rows: `738`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `update-index`: `37 / 38` reviewed-complete documented option pairs, `68`
+  written rows, `68` classified rows, `60` stock-matching rows, `8`
+  invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up should isolate the final
+`update-index --split-index` tail. It is no longer grouped with the other
+cache/fsmonitor families because stock Git writes the required lowercase
+`link` extension and creates `sharedindex.*`, which Zmin still cannot read or
+manage. The next slice should either add real split-index/shared-index support
+or explicitly defer it with evidence rather than mixing it into helper-free
+local batches.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 disable-helper-toggle documented-option expansion on the current local lane.
 The selected change added four exact stock-Git rows for
 `update-index --no-split-index`, `update-index --no-untracked-cache`,

@@ -12,6 +12,28 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+helper-extension documented-option expansion on the current extensionless local
+lane. The selected change added five exact stock-Git rows for
+`update-index --force-untracked-cache`, `update-index --fsmonitor`,
+`update-index --fsmonitor-valid a.txt`,
+`update-index --no-fsmonitor-valid a.txt`, and
+`update-index --untracked-cache`, then promoted those five represented
+documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+5`
+matrix rows, `+5` complete documented option pairs, `+5` represented
+documented option pairs, `+5` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `5983` matrix rows,
+`5209` verified rows, `738` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1918/3212` complete documented option
+pairs, and `1926/3212` represented documented option pairs. `update-index`
+now sits at `37/38` reviewed-complete documented option pairs with `68`
+written rows, `68` classified rows, `60` stock-matching rows, `8`
+invalid-input rows, and `0` exact-open rows. The next default follow-up
+should isolate the final `update-index --split-index` tail, because the stock
+lane writes the required lowercase `link` extension and `sharedindex.*`
+artifacts that still need real support or an explicit defer decision.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 disable-helper-toggle documented-option expansion on the current local lane.
 The selected change added four exact stock-Git rows for
 `update-index --no-split-index`, `update-index --no-untracked-cache`,

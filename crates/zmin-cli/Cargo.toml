@@ -23,6 +23,7 @@ flate2 = { version = "1.0.35", default-features = false, features = ["zlib"] }
 memmap2 = "0.9.9"
 regex = "1.11.1"
 native-tls = { version = "0.2.14", optional = true }
+sha1 = "0.10.6"
 similar = { version = "2.7.0" }
 zmin-cli-schema = { path = "../zmin-cli-schema" }
 zmin-cli-runtime = { path = "../zmin-cli-runtime" }

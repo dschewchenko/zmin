@@ -204,6 +204,86 @@ fn normalize_test_untracked_cache_output(
     )
 }
 
+fn normalized_index_extensions(repo: &std::path::Path) -> Vec<(String, Vec<u8>)> {
+    let data = fs::read(repo.join(".git/index")).expect("read index");
+    if data.len() < 32 {
+        return Vec::new();
+    }
+    let checksum_offset = data.len() - 20;
+    let version = u32::from_be_bytes(data[4..8].try_into().expect("version slice"));
+    let count = u32::from_be_bytes(data[8..12].try_into().expect("count slice")) as usize;
+    let mut cursor = 12usize;
+    for _ in 0..count {
+        let entry_start = cursor;
+        let flags = u16::from_be_bytes(data[cursor + 60..cursor + 62].try_into().expect("flags"));
+        let path_start = cursor + 62 + usize::from(flags & 0x4000 != 0) * 2;
+        let suffix_start = if version == 4 {
+            let mut value_cursor = path_start + 1;
+            let mut byte = *data.get(path_start).expect("v4 byte");
+            while byte & 0x80 != 0 {
+                byte = *data.get(value_cursor).expect("v4 byte");
+                value_cursor += 1;
+            }
+            value_cursor
+        } else {
+            path_start
+        };
+        let path_end = data[suffix_start..checksum_offset]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|offset| suffix_start + offset)
+            .expect("path terminator");
+        cursor = path_end + 1;
+        if version != 4 {
+            while !(cursor - entry_start).is_multiple_of(8) {
+                cursor += 1;
+            }
+        }
+    }
+
+    let mut extensions = Vec::new();
+    while cursor < checksum_offset {
+        let signature = &data[cursor..cursor + 4];
+        let len = u32::from_be_bytes(data[cursor + 4..cursor + 8].try_into().expect("len")) as usize;
+        let body = &data[cursor + 8..cursor + 8 + len];
+        let mut normalized = body.to_vec();
+        if signature == b"FSMN" && normalized.len() >= 23 {
+            normalized[4..23].fill(b'0');
+        } else if signature == b"UNTR" {
+            normalized[0] = 0;
+            if let Some(prefix_end) = normalized.windows(9).position(|window| window == b"Location ") {
+                let path_start = prefix_end + 9;
+                if let Some(marker) = normalized[path_start..]
+                    .windows(9)
+                    .position(|window| window == b", system ")
+                {
+                    let marker_start = path_start + marker;
+                    let mut rebuilt = Vec::new();
+                    rebuilt.push(0);
+                    rebuilt.extend_from_slice(b"Location <repo>");
+                    if normalized
+                        .windows(12)
+                        .position(|window| window == b".gitignore\0\0")
+                        .is_some()
+                    {
+                        rebuilt.extend_from_slice(&normalized[marker_start..marker_start + 16]);
+                        rebuilt.extend_from_slice(b".gitignore\0\0");
+                    } else {
+                        rebuilt.extend_from_slice(&normalized[marker_start..]);
+                    }
+                    normalized = rebuilt;
+                }
+            }
+        }
+        extensions.push((
+            String::from_utf8_lossy(signature).into_owned(),
+            normalized,
+        ));
+        cursor += 8 + len;
+    }
+    extensions
+}
+
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -1929,6 +2009,58 @@ fn update_index_disable_helper_toggles_and_probe_match_stock_git() {
         git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
         git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
     );
+}
+
+#[test]
+fn update_index_helper_extensions_match_stock_git_on_extensionless_index() {
+    for args in [
+        ["update-index", "--fsmonitor-valid", "a.txt"].as_slice(),
+        ["update-index", "--no-fsmonitor-valid", "a.txt"].as_slice(),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        assert_eq!(normalized_index_extensions(git_repo.path()), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(normalized_index_extensions(zmin_repo.path()), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git")
+        );
+        assert_eq!(
+            normalized_index_extensions(zmin_repo.path()),
+            normalized_index_extensions(git_repo.path())
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+    }
+
+    for args in [
+        ["update-index", "--fsmonitor"].as_slice(),
+        ["update-index", "--untracked-cache"].as_slice(),
+        ["update-index", "--force-untracked-cache"].as_slice(),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        assert_eq!(normalized_index_extensions(git_repo.path()), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(normalized_index_extensions(zmin_repo.path()), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git")
+        );
+        assert_eq!(
+            normalized_index_extensions(zmin_repo.path()),
+            normalized_index_extensions(git_repo.path())
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+            git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+    }
 }
 
 #[test]

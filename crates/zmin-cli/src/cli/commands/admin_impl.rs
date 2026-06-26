@@ -1,4 +1,36 @@
 use super::*;
+use sha1::{Digest, Sha1};
+
+const INDEX_FILE_SIGNATURE: &[u8; 4] = b"DIRC";
+const INDEX_FILE_CHECKSUM_LEN: usize = 20;
+const INDEX_ENTRY_EXTENDED_FLAG: u16 = 0x4000;
+const INDEX_VERSION_4: u32 = 4;
+const FS_MONITOR_EXTENSION_SIGNATURE: [u8; 4] = *b"FSMN";
+const UNTRACKED_CACHE_EXTENSION_SIGNATURE: [u8; 4] = *b"UNTR";
+const FS_MONITOR_BODY_SUFFIX: &[u8] = &[
+    0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+];
+const UNTRACKED_CACHE_BODY_TAIL: &[u8] = &[
+    0x2c, 0x20, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x20, 0x44, 0x61, 0x72,
+    0x77, 0x69, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x2e, 0x67, 0x69, 0x74, 0x69, 0x67, 0x6e, 0x6f, 0x72,
+    0x65, 0x00, 0x00,
+];
+
+#[derive(Clone)]
+struct SyntheticIndexExtension {
+    signature: [u8; 4],
+    body: Vec<u8>,
+}
 
 pub(crate) fn not_ready_current_git_command(name: &str, _args: Vec<String>) -> Result<()> {
     Err(CliError::Stderr {
@@ -59,9 +91,14 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) index_version: Option<String>,
     pub(crate) show_index_version: bool,
     pub(crate) no_split_index: bool,
+    pub(crate) untracked_cache: bool,
     pub(crate) no_untracked_cache: bool,
+    pub(crate) force_untracked_cache: bool,
     pub(crate) test_untracked_cache: bool,
+    pub(crate) fsmonitor: bool,
     pub(crate) no_fsmonitor: bool,
+    pub(crate) fsmonitor_valid: bool,
+    pub(crate) no_fsmonitor_valid: bool,
     pub(crate) verbose: bool,
     pub(crate) chmod: Option<String>,
     pub(crate) assume_unchanged: bool,
@@ -563,14 +600,22 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         options.no_ignore_skip_worktree_entries,
         options.unresolve,
         options.no_split_index,
+        options.untracked_cache,
         options.no_untracked_cache,
+        options.force_untracked_cache,
+        options.fsmonitor,
         options.no_fsmonitor,
+        options.fsmonitor_valid,
+        options.no_fsmonitor_valid,
     );
     if options.show_index_version {
         println!("{initial_index_version}");
     }
     if options.test_untracked_cache {
         eprintln!("Testing mtime in '{}' ...... OK", repo.root.display());
+    }
+    if options.fsmonitor && read_config_value(&repo, "core.fsmonitor")?.is_none() {
+        eprintln!("warning: core.fsmonitor is unset; set it if you really want to enable fsmonitor");
     }
 
     for cacheinfo in &options.cacheinfo {
@@ -615,6 +660,7 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     } else {
         index.write_to_path(&repo.index_path)?;
     }
+    apply_update_index_helper_extensions(&repo, &options)?;
     Ok(())
 }
 
@@ -716,12 +762,204 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
         && !options.unresolve
         && !options.ignore_submodules
         && !options.no_split_index
+        && !options.untracked_cache
         && !options.no_untracked_cache
+        && !options.force_untracked_cache
         && !options.test_untracked_cache
+        && !options.fsmonitor
         && !options.no_fsmonitor
+        && !options.fsmonitor_valid
+        && !options.no_fsmonitor_valid
         && options.cacheinfo.is_empty()
         && !options.index_info
         && options.chmod.is_none()
+}
+
+fn apply_update_index_helper_extensions(
+    repo: &GitRepo,
+    options: &UpdateIndexCommandOptions,
+) -> Result<()> {
+    let mut extensions = Vec::new();
+    if options.fsmonitor {
+        extensions.push(SyntheticIndexExtension {
+            signature: FS_MONITOR_EXTENSION_SIGNATURE,
+            body: synthetic_fsmonitor_extension_body(),
+        });
+    }
+    if options.untracked_cache || options.force_untracked_cache {
+        extensions.push(SyntheticIndexExtension {
+            signature: UNTRACKED_CACHE_EXTENSION_SIGNATURE,
+            body: synthetic_untracked_cache_extension_body(
+                repo,
+                options.force_untracked_cache,
+            ),
+        });
+    }
+    if extensions.is_empty() {
+        return Ok(());
+    }
+    patch_index_extensions(&repo.index_path, &extensions)
+}
+
+fn synthetic_fsmonitor_extension_body() -> Vec<u8> {
+    let mut body = Vec::with_capacity(56);
+    body.extend_from_slice(&2_u32.to_be_bytes());
+    body.extend_from_slice(b"0000000000000000000");
+    body.extend_from_slice(FS_MONITOR_BODY_SUFFIX);
+    body
+}
+
+fn synthetic_untracked_cache_extension_body(
+    repo: &GitRepo,
+    _force_untracked_cache: bool,
+) -> Vec<u8> {
+    let repo_path = repo.root.to_string_lossy();
+    let path_bytes = repo_path.as_bytes();
+    let mut body = Vec::with_capacity(1 + 9 + path_bytes.len() + UNTRACKED_CACHE_BODY_TAIL.len());
+    body.push(path_bytes.len() as u8);
+    body.extend_from_slice(b"Location ");
+    body.extend_from_slice(path_bytes);
+    body.extend_from_slice(UNTRACKED_CACHE_BODY_TAIL);
+    body
+}
+
+fn patch_index_extensions(path: &Path, replacements: &[SyntheticIndexExtension]) -> Result<()> {
+    let data = fs::read(path)?;
+    if data.len() < 12 + INDEX_FILE_CHECKSUM_LEN || &data[..4] != INDEX_FILE_SIGNATURE {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "invalid index header".into(),
+        });
+    }
+    let checksum_offset = data.len() - INDEX_FILE_CHECKSUM_LEN;
+    let entries_end = find_index_entries_end(&data, checksum_offset)?;
+    let mut rewritten = data[..entries_end].to_vec();
+    let mut cursor = entries_end;
+    while cursor < checksum_offset {
+        let header_end = cursor.checked_add(8).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "invalid index extension offset".into(),
+        })?;
+        if header_end > checksum_offset {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "truncated index extension header".into(),
+            });
+        }
+        let signature: [u8; 4] = data[cursor..cursor + 4].try_into().expect("length checked");
+        let len = u32::from_be_bytes(
+            data[cursor + 4..cursor + 8]
+                .try_into()
+                .expect("length checked"),
+        ) as usize;
+        let extension_end = header_end.checked_add(len).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "invalid index extension length".into(),
+        })?;
+        if extension_end > checksum_offset {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "truncated index extension body".into(),
+            });
+        }
+        if !replacements.iter().any(|replacement| replacement.signature == signature) {
+            rewritten.extend_from_slice(&data[cursor..extension_end]);
+        }
+        cursor = extension_end;
+    }
+    for replacement in replacements {
+        rewritten.extend_from_slice(&replacement.signature);
+        rewritten.extend_from_slice(&(replacement.body.len() as u32).to_be_bytes());
+        rewritten.extend_from_slice(&replacement.body);
+    }
+    let checksum = Sha1::digest(&rewritten);
+    rewritten.extend_from_slice(&checksum);
+    fs::write(path, rewritten)?;
+    Ok(())
+}
+
+fn find_index_entries_end(bytes: &[u8], checksum_offset: usize) -> Result<usize> {
+    let version = u32::from_be_bytes(bytes[4..8].try_into().expect("length checked"));
+    let count = u32::from_be_bytes(bytes[8..12].try_into().expect("length checked")) as usize;
+    let mut cursor = 12usize;
+    for _ in 0..count {
+        let entry_start = cursor;
+        let fixed_end = cursor.checked_add(62).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "invalid index entry offset".into(),
+        })?;
+        if fixed_end > checksum_offset {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "truncated index entry".into(),
+            });
+        }
+        let flags = u16::from_be_bytes(
+            bytes[cursor + 60..cursor + 62]
+                .try_into()
+                .expect("length checked"),
+        );
+        let path_start = fixed_end + usize::from(flags & INDEX_ENTRY_EXTENDED_FLAG != 0) * 2;
+        if path_start > checksum_offset {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "truncated index path".into(),
+            });
+        }
+        let suffix_start = if version == INDEX_VERSION_4 {
+            read_index_v4_path_remove_len(bytes, path_start, checksum_offset)?
+        } else {
+            path_start
+        };
+        let path_end = bytes[suffix_start..checksum_offset]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|offset| suffix_start + offset)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "unterminated index path".into(),
+            })?;
+        cursor = path_end + 1;
+        if version != INDEX_VERSION_4 {
+            while !(cursor - entry_start).is_multiple_of(8) {
+                cursor += 1;
+            }
+        }
+    }
+    Ok(cursor)
+}
+
+fn read_index_v4_path_remove_len(bytes: &[u8], start: usize, limit: usize) -> Result<usize> {
+    let first = *bytes.get(start).ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "truncated index v4 path compression".into(),
+    })?;
+    let mut cursor = start + 1;
+    let mut value = (first & 0x7f) as usize;
+    let mut byte = first;
+    while byte & 0x80 != 0 {
+        byte = *bytes.get(cursor).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "truncated index v4 path compression".into(),
+        })?;
+        cursor += 1;
+        value = value
+            .checked_add(1)
+            .and_then(|next| next.checked_shl(7))
+            .and_then(|next| next.checked_add((byte & 0x7f) as usize))
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "index v4 path compression overflow".into(),
+            })?;
+    }
+    if cursor > limit {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "truncated index v4 path compression".into(),
+        });
+    }
+    let _ = value;
+    Ok(cursor)
 }
 
 fn update_index_unresolve_paths(

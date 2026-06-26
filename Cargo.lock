@@ -2701,6 +2701,7 @@ dependencies = [
  "memmap2",
  "native-tls",
  "regex",
+ "sha1",
  "similar",
  "tempfile",
  "zmin-cli-runtime",
