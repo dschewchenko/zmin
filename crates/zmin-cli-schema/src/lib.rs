@@ -1516,6 +1516,10 @@ pub enum Command {
         no_sparse: u8,
         #[arg(long = "no-warn-embedded-repo", action = ArgAction::Count)]
         no_warn_embedded_repo: u8,
+        #[arg(short = 'i', long = "interactive", action = ArgAction::Count)]
+        interactive: u8,
+        #[arg(short = 'p', long = "patch", action = ArgAction::Count)]
+        patch: u8,
         #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
         edit: u8,
         #[arg(long = "chmod")]
@@ -1580,6 +1584,10 @@ pub enum Command {
         no_sparse: u8,
         #[arg(long = "no-warn-embedded-repo", action = ArgAction::Count)]
         no_warn_embedded_repo: u8,
+        #[arg(short = 'i', long = "interactive", action = ArgAction::Count)]
+        interactive: u8,
+        #[arg(short = 'p', long = "patch", action = ArgAction::Count)]
+        patch: u8,
         #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
         edit: u8,
         #[arg(long = "chmod")]

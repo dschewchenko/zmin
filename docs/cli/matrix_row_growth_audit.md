@@ -11,6 +11,23 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git add`
+interactive and patch quit-lane closure plus reviewed-complete promotion. The
+selected change adds four exact stock-Git rows for `--interactive`,
+`--patch`, `-i`, and `-p` on the tracked-modification quit lane, then
+promotes those four documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv` and promotes `add`
+into `docs/cli/census/reviewed_complete_command_matrices.tsv` because the
+current modeled helper-free `add` surface is now fully represented with `0`
+exact-open rows. Expected delta was `+4` matrix rows, `+4` complete
+documented option pairs, `+1` complete command matrix, `+4` represented
+documented option pairs, `+4` verified rows, and `+0` invalid-input rows.
+Actual delta matched. `add` now sits at `30/30` reviewed-complete documented
+option pairs, `30/30` represented documented option pairs, `130/130`
+classified rows, `114` stock-matching rows, `16` invalid-input rows, and `0`
+exact-open rows. The next best helper-free follow-up should move to another
+dense represented family such as `config`.
+
 As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
 `git shortlog` promotion cluster. The selected change promotes the remaining
 represented shortlog documented options `--all-match`, `--grep`,

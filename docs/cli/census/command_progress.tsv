@@ -1,17 +1,17 @@
 metric	count	total	note
-complete_command_matrices	103	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1499	3156	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	104	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	1503	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1508	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5509	5509	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4793	5509	closed written rows only
-behavior_rows_classified	5494	5509	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5509	written rows with incomplete parity
-behavior_rows_open	12	5509	written rows not implemented or not matching yet
-invalid_input_rows	701	5509	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1512	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5513	5513	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4797	5513	closed written rows only
+behavior_rows_classified	5498	5513	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5513	written rows with incomplete parity
+behavior_rows_open	12	5513	written rows not implemented or not matching yet
+invalid_input_rows	701	5513	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
-add	30	26	26	86.7	126	126	100.0	110	87.3	0	0	16	no
+add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
 am	54	0	0	0.0	2	2	100.0	2	100.0	0	0	0	no
 annotate	25	0	0	0.0	1	1	100.0	1	100.0	0	0	0	no
 apply	38	5	5	13.2	22	22	100.0	21	95.5	0	0	1	no

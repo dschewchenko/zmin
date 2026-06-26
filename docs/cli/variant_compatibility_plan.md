@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`101/151 complete command matrices / 1467/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1475/3156 represented doc-option pairs / 5437 written rows / 4732/5437 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`104/151 complete command matrices / 1503/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1512/3156 represented doc-option pairs / 5513 written rows / 4797/5513 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,24 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a zero-code reviewed-complete `git shortlog`
-promotion cluster. Zmin now promotes the remaining represented shortlog
-documented options `--all-match`, `--grep`, `--grep-reflog`, `--group`,
-`--invert-grep`, `--reflog`, `--regexp-ignore-case`, `--walk-reflogs`, `-g`,
-and `-i` into the reviewed-complete census list and promotes `shortlog`
-itself into the reviewed-complete command set because the full currently
-modeled helper-free shortlog surface is classified with no exact-open rows.
+The latest completed slice is a helper-free `git add` interactive and patch
+quit-lane closure plus reviewed-complete promotion. Zmin now accepts
+`git add --interactive`, `git add -i`, `git add --patch`, and `git add -p`
+on the tracked-modification quit lane, matches stock Git's exact interactive
+menu or patch prompt output for `q`, leaves repository state unchanged, and
+promotes those four documented option pairs plus the full currently modeled
+`add` command into the reviewed-complete census lists.
 
-Current counts are `103/151` complete command matrices,
-`1499/3156` complete documented option pairs,
-`1508/3156` represented documented option pairs, `5509` written rows,
-`4793` verified rows, `12` open rows, and `701` invalid-input rows.
-`shortlog` now sits at `28/29` reviewed-complete documented option pairs,
-`29/125` represented documented option pairs, `59/59` classified rows, `54`
-stock-matching rows, `5` invalid-input rows, and is now a reviewed-complete
+Current counts are `104/151` complete command matrices,
+`1503/3156` complete documented option pairs,
+`1512/3156` represented documented option pairs, `5513` written rows,
+`4797` verified rows, `12` open rows, and `701` invalid-input rows.
+`add` now sits at `30/30` reviewed-complete documented option pairs,
+`30/30` represented documented option pairs, `130/130` classified rows, `114`
+stock-matching rows, `16` invalid-input rows, and is now a reviewed-complete
 command. The next bounded high-throughput follow-up should move to another
-dense helper-free represented family or another zero-code reviewed-complete
-promotion cluster from the refreshed census queue.
+dense helper-free represented family from the refreshed census queue, with
+`config` still the most practical next local code batch.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

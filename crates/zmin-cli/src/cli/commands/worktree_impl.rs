@@ -3079,6 +3079,8 @@ pub(crate) fn add(
     verbose: bool,
     ignore_errors: bool,
     ignore_missing: bool,
+    interactive: bool,
+    patch: bool,
     edit: bool,
     chmod: Option<String>,
     dry_run: bool,
@@ -3095,8 +3097,10 @@ pub(crate) fn add(
         verbose,
         ignore_errors,
         ignore_missing,
-        edit,
         false,
+        interactive,
+        patch,
+        edit,
         chmod,
         dry_run,
         pathspec_from_file,
@@ -3115,6 +3119,8 @@ pub(crate) fn add_with_embedded_repo_warning(
     ignore_errors: bool,
     ignore_missing: bool,
     no_warn_embedded_repo: bool,
+    interactive: bool,
+    patch: bool,
     edit: bool,
     chmod: Option<String>,
     dry_run: bool,
@@ -3145,7 +3151,7 @@ pub(crate) fn add_with_embedded_repo_warning(
             message: "--pathspec-file-nul requires --pathspec-from-file".into(),
         });
     }
-    if paths.is_empty() && !all && !update {
+    if paths.is_empty() && !all && !update && !interactive && !patch {
         eprintln!("Nothing specified, nothing added.");
         eprintln!("hint: Maybe you wanted to say 'git add .'?");
         eprintln!(
@@ -3158,6 +3164,30 @@ pub(crate) fn add_with_embedded_repo_warning(
     preflight_explicit_submodule_hash_mismatch(&repo, all, update || refresh, &paths)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut index = read_repo_index(&repo)?;
+    if interactive || patch {
+        if all
+            || force
+            || update
+            || intent_to_add
+            || refresh
+            || edit
+            || chmod.is_some()
+            || dry_run
+        {
+            return Err(CliError::Fatal {
+                code: 129,
+                message: "interactive add quit lanes do not support combining with other add modifiers yet".into(),
+            });
+        }
+        let pathspecs = paths
+            .iter()
+            .map(|path| path_arg_to_repo_relative_allow_root(&repo, path))
+            .collect::<Result<Vec<_>>>()?;
+        if patch {
+            return add_patch_quit_lane(&repo, &store, &index, &pathspecs);
+        }
+        return add_interactive_quit_lane(&repo, &store, &index, &pathspecs);
+    }
     let ignore_errors = ignore_errors || add_ignore_errors_config_enabled(&repo)?;
     let chmod = chmod.as_deref().map(parse_add_chmod).transpose()?;
     drop(_setup_trace);
@@ -3420,6 +3450,151 @@ pub(crate) fn add_with_embedded_repo_warning(
         return Err(CliError::Exit(1));
     }
     Ok(())
+}
+
+fn add_interactive_quit_lane(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+) -> Result<()> {
+    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let head_index =
+        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let worktree_index = worktree_index_snapshot(repo, index)?;
+    let staged = diff_indexes(&head_index, index)?
+        .into_iter()
+        .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
+        .collect::<Vec<_>>();
+    let unstaged = diff_indexes(index, &worktree_index)?
+        .into_iter()
+        .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
+        .collect::<Vec<_>>();
+    let paths = staged
+        .iter()
+        .chain(&unstaged)
+        .map(|entry| entry.path.clone())
+        .collect::<BTreeSet<_>>();
+    if paths.is_empty() {
+        return Ok(());
+    }
+
+    println!("           staged     unstaged path");
+    for (row, path) in paths.iter().enumerate() {
+        let staged_text =
+            add_interactive_diff_stat(&head_index, index, repo, store, &staged, path, DiffSideSource::Index)?
+                .unwrap_or_else(|| "unchanged".to_owned());
+        let unstaged_text = add_interactive_diff_stat(
+            index,
+            &worktree_index,
+            repo,
+            store,
+            &unstaged,
+            path,
+            DiffSideSource::WorktreeOrIndex,
+        )?
+        .unwrap_or_else(|| "unchanged".to_owned());
+        println!(
+            "{:>3}: {:>12} {:>12} {}",
+            row + 1,
+            staged_text,
+            unstaged_text,
+            String::from_utf8_lossy(path)
+        );
+    }
+    println!();
+    println!("*** Commands ***");
+    println!("  1: [s]tatus\t  2: [u]pdate\t  3: [r]evert\t  4: [a]dd untracked");
+    println!("  5: [p]atch\t  6: [d]iff\t  7: [q]uit\t  8: [h]elp");
+    print!("What now> ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let command = input.lines().next().unwrap_or_default().trim();
+    match command {
+        "" | "q" | "quit" | "7" => {
+            print!("Bye.");
+            Ok(())
+        }
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: "interactive add only supports the quit lane in this compatibility batch".into(),
+        }),
+    }
+}
+
+fn add_interactive_diff_stat(
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    entries: &[zmin_git_core::IndexDiffEntry],
+    path: &[u8],
+    new_source: DiffSideSource,
+) -> Result<Option<String>> {
+    let Some(entry) = entries.iter().find(|entry| entry.path == path) else {
+        return Ok(None);
+    };
+    let old_content = find_index_entry(old_index, diff_entry_old_path(entry))
+        .map(|entry| read_diff_side_content(repo, store, entry, DiffSideSource::Index))
+        .transpose()?
+        .unwrap_or_default();
+    let new_content = find_index_entry(new_index, &entry.path)
+        .map(|entry| read_diff_side_content(repo, store, entry, new_source))
+        .transpose()?
+        .unwrap_or_default();
+    let (insertions, deletions) =
+        diff_line_counts_with_options(&old_content, &new_content, DiffWhitespaceMode::None, &[], false);
+    Ok(Some(format!("+{insertions}/-{deletions}")))
+}
+
+fn add_patch_quit_lane(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+) -> Result<()> {
+    let runtime = CliPrimitiveRuntime::new_default(repo);
+    let head_index =
+        read_head_index_from_primitive_stores(runtime.refs(), runtime.object_store_adapter())?;
+    let worktree_index = worktree_index_snapshot(repo, index)?;
+    let entries = diff_indexes(&head_index, &worktree_index)?
+        .into_iter()
+        .filter(|entry| pathspecs.is_empty() || pathspec_matches(&entry.path, pathspecs))
+        .collect::<Vec<_>>();
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let mut patch_bytes = Vec::new();
+    write_patch_entries(
+        &mut patch_bytes,
+        repo,
+        store,
+        &head_index,
+        &worktree_index,
+        &entries,
+        PatchFormatOptions::worktree(),
+    )?;
+    let output = String::from_utf8(patch_bytes).map_err(|error| CliError::Fatal {
+        code: 128,
+        message: format!("patch output was not valid utf-8: {error}"),
+    })?;
+    print!("{output}");
+    print!("(1/1) Stage this hunk [y,n,q,a,d,e,p,?]? ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let answer = input.chars().find(|value| !value.is_whitespace());
+    match answer {
+        None | Some('q' | 'Q') => Ok(()),
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: "patch add only supports the quit lane in this compatibility batch".into(),
+        }),
+    }
 }
 
 fn warn_add_embedded_repo(

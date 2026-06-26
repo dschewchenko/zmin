@@ -5,10 +5,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, command_output, command_output_with_env, command_stdout_bytes,
-    configure_identity, git, git_failure_output, git_init, git_status, git_with_env,
-    git_with_stdin, run_zmin, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
-    run_zmin_with_stdin, write_file, zmin_bin,
+    command_any_output, command_any_output_with_stdin, command_output, command_output_with_env,
+    command_stdout_bytes, configure_identity, git, git_failure_output, git_init, git_status,
+    git_with_env, git_with_stdin, run_zmin, run_zmin_failure_output, run_zmin_status,
+    run_zmin_with_env, run_zmin_with_stdin, write_file, zmin_bin,
 };
 
 fn committed_repo() -> TempDir {
@@ -43,6 +43,24 @@ fn mv_fixture_repo() -> TempDir {
     git_with_env(repo.path(), ["commit", "-m", "initial"]);
     fs::write(repo.path().join("dir/untracked.txt"), b"untracked\n").expect("write untracked");
     repo
+}
+
+fn dirty_tracked_file_repos() -> (TempDir, TempDir) {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "one\n");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "two\n");
+    }
+    (git_repo, zmin_repo)
 }
 
 #[cfg(unix)]
@@ -108,6 +126,60 @@ fn add_force_stages_explicit_ignored_paths_like_stock_git() {
         git(zmin_repo.path(), ["ls-files", "--stage"]),
         git(git_repo.path(), ["ls-files", "--stage"])
     );
+}
+
+#[test]
+fn add_patch_quit_matches_stock_git() {
+    for flag in ["--patch", "-p"] {
+        let (git_repo, zmin_repo) = dirty_tracked_file_repos();
+        assert_eq!(
+            command_any_output_with_stdin(
+                common::zmin_bin(),
+                zmin_repo.path(),
+                &["add", flag, "a.txt"],
+                "q\n",
+                "zmin add patch quit lane",
+            ),
+            command_any_output_with_stdin(
+                "git",
+                git_repo.path(),
+                &["add", flag, "a.txt"],
+                "q\n",
+                "git add patch quit lane",
+            )
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+    }
+}
+
+#[test]
+fn add_interactive_quit_matches_stock_git() {
+    for flag in ["--interactive", "-i"] {
+        let (git_repo, zmin_repo) = dirty_tracked_file_repos();
+        assert_eq!(
+            command_any_output_with_stdin(
+                common::zmin_bin(),
+                zmin_repo.path(),
+                &["add", flag, "a.txt"],
+                "q\n",
+                "zmin add interactive quit lane",
+            ),
+            command_any_output_with_stdin(
+                "git",
+                git_repo.path(),
+                &["add", flag, "a.txt"],
+                "q\n",
+                "git add interactive quit lane",
+            )
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+    }
 }
 
 #[test]
