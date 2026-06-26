@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1667/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1675/3156 represented doc-option pairs / 5716 written rows / 4963/5716 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1689/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1697/3156 represented doc-option pairs / 5740 written rows / 4986/5740 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,34 +300,34 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git fetch` documented-option
-family expansion on the current named-local-remote lane. Zmin now accepts and
-matches stock Git for `--auto-gc`, `--auto-maintenance`, `--ipv4`, `--ipv6`,
-`--keep`, `--no-all`, `--no-auto-gc`, `--no-auto-maintenance`,
-`--recurse-submodules-default`, `--refetch`, `--show-forced-updates`,
-`--no-show-forced-updates`, `--submodule-prefix`, `--write-commit-graph`,
-`--no-write-commit-graph`, `-4`, `-6`, `-P`, `-k`, `-o`, and `-u`, while
-leaving `--progress` and `--porcelain` explicitly open for a later slice.
+The latest completed slice is a helper-free `git pull` fetch-inherited
+documented-option family expansion on the current named-local ff-only lane.
+Zmin now accepts and matches stock Git for `--show-forced-updates`,
+`--no-show-forced-updates`, `--ipv4`, `--ipv6`, `--keep`, `--no-all`,
+`--prune`, `--tags`, `--no-tags`, `--verbose`, `--recurse-submodules`,
+`--no-recurse-submodules`, `--server-option`, `--jobs`, `-4`, `-6`, `-k`,
+`-o`, `-p`, `-t`, `-v`, and `-j`, plus the documented invalid-input
+rejection for `pull --jobs=bad --recurse-submodules`.
 Focused gates were
+`cargo test -p zmin-cli --test git_transport_local_compat pull_fetch_inherited_option_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_fetch_inherited_short_aliases_match_stock_git -- --nocapture`,
 `cargo test -p zmin-cli --test git_transport_local_compat fetch_documented_local_transport_option_family_matches_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat fetch_show_forced_updates_documented_flags_match_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat fetch_write_commit_graph_documented_flags_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(fetch|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(pull|summary)\t'`, and
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1667/3156` complete documented option pairs,
-`1675/3156` represented documented option pairs, `5716` written rows,
-`4963` verified rows, `12` open rows, and `718` invalid-input rows.
-`fetch` now sits at `61/61` reviewed-complete represented option pairs,
-`377` written rows, `356` classified rows, `341` stock-matching rows,
-`15` invalid-input rows, and `0` exact-open rows on its current modeled
-surface. The next bounded high-throughput follow-up should stay on `fetch`
-only if it closes one of the two remaining documented tails
+`1689/3156` complete documented option pairs,
+`1697/3156` represented documented option pairs, `5740` written rows,
+`4986` verified rows, `12` open rows, and `719` invalid-input rows.
+`pull` now sits at `36/36` reviewed-complete represented option pairs,
+`61` written rows, `61` classified rows, `59` stock-matching rows,
+`2` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next bounded high-throughput follow-up should avoid returning to
+`pull` unless it closes a larger remaining documented family such as
 `--progress` or `--porcelain`; otherwise it should move to the next larger
 helper-free represented-family candidate from
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.

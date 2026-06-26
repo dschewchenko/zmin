@@ -200,6 +200,89 @@ fn assert_named_local_fetch_matches_stock_git(label: &str, args: &[&str]) {
     );
 }
 
+fn setup_named_local_pull_clients(
+    label: &str,
+) -> (
+    TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join(format!("{label}-source"));
+    let git_client = dir.path().join(format!("{label}-git-client"));
+    let zmin_client = dir.path().join(format!("{label}-zmin-client"));
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file"), b"base\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "base"]);
+
+    git(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            git_client.to_str().expect("git client path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+    );
+
+    fs::write(source.join("file"), format!("{label} update\n")).expect("write update");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "next"]);
+
+    (dir, source, git_client, zmin_client)
+}
+
+fn assert_named_local_pull_matches_stock_git(label: &str, args: &[&str]) {
+    let (_dir, source, git_client, zmin_client) = setup_named_local_pull_clients(label);
+    let git_output = command_any_output("git", &git_client, args, label);
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, args, label);
+    assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+    assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+    let source_path = source.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path),
+        "{label} stderr"
+    );
+    assert_eq!(git(&zmin_client, ["rev-parse", "HEAD"]), git(&git_client, ["rev-parse", "HEAD"]));
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "HEAD^{tree}"]),
+        git(&git_client, ["cat-file", "-p", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        run_zmin(&zmin_client, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_client, ["status", "--porcelain=v1", "--branch"])
+    );
+    let git_fetch_head = git_client.join(".git/FETCH_HEAD");
+    let zmin_fetch_head = zmin_client.join(".git/FETCH_HEAD");
+    assert_eq!(
+        zmin_fetch_head.exists(),
+        git_fetch_head.exists(),
+        "{label} FETCH_HEAD presence"
+    );
+    if git_fetch_head.exists() {
+        assert_eq!(
+            fs::read_to_string(zmin_fetch_head).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_fetch_head).expect("git FETCH_HEAD"),
+            "{label} FETCH_HEAD"
+        );
+    }
+}
+
 fn pack_dir_files(repo: &Path) -> Vec<std::path::PathBuf> {
     let pack_dir = repo.join(".git/objects/pack");
     if !pack_dir.exists() {
@@ -429,6 +512,99 @@ fn fetch_write_commit_graph_documented_flags_match_stock_git() {
             .join(".git/objects/info/commit-graphs/commit-graph-chain")
             .is_file()
     );
+}
+
+#[test]
+fn pull_fetch_inherited_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str]); 20] = [
+        (
+            "pull --show-forced-updates",
+            &["pull", "--ff-only", "--show-forced-updates", "origin", "main"],
+        ),
+        (
+            "pull --no-show-forced-updates",
+            &["pull", "--ff-only", "--no-show-forced-updates", "origin", "main"],
+        ),
+        ("pull --ipv4", &["pull", "--ff-only", "--ipv4", "origin", "main"]),
+        ("pull --ipv6", &["pull", "--ff-only", "--ipv6", "origin", "main"]),
+        ("pull --keep", &["pull", "--ff-only", "--keep", "origin", "main"]),
+        ("pull --no-all", &["pull", "--ff-only", "--no-all", "origin", "main"]),
+        ("pull --prune", &["pull", "--ff-only", "--prune", "origin", "main"]),
+        ("pull --tags", &["pull", "--ff-only", "--tags", "origin", "main"]),
+        ("pull --no-tags", &["pull", "--ff-only", "--no-tags", "origin", "main"]),
+        ("pull --verbose", &["pull", "--ff-only", "--verbose", "origin", "main"]),
+        (
+            "pull --recurse-submodules",
+            &["pull", "--ff-only", "--recurse-submodules", "origin", "main"],
+        ),
+        (
+            "pull --no-recurse-submodules",
+            &["pull", "--ff-only", "--no-recurse-submodules", "origin", "main"],
+        ),
+        (
+            "pull --server-option equals",
+            &["pull", "--ff-only", "--server-option=trace", "origin", "main"],
+        ),
+        (
+            "pull --server-option separate",
+            &["pull", "--ff-only", "--server-option", "trace", "origin", "main"],
+        ),
+        (
+            "pull --jobs",
+            &[
+                "pull",
+                "--ff-only",
+                "--jobs=2",
+                "--recurse-submodules",
+                "origin",
+                "main",
+            ],
+        ),
+        ("pull -4", &["pull", "--ff-only", "-4", "origin", "main"]),
+        ("pull -6", &["pull", "--ff-only", "-6", "origin", "main"]),
+        ("pull -k", &["pull", "--ff-only", "-k", "origin", "main"]),
+        ("pull -o", &["pull", "--ff-only", "-o", "trace", "origin", "main"]),
+        ("pull -p", &["pull", "--ff-only", "-p", "origin", "main"]),
+    ];
+
+    for (label, args) in cases {
+        assert_named_local_pull_matches_stock_git(label, args);
+    }
+}
+
+#[test]
+fn pull_fetch_inherited_short_aliases_match_stock_git() {
+    let cases: [(&str, &[&str]); 4] = [
+        ("pull -t", &["pull", "--ff-only", "-t", "origin", "main"]),
+        ("pull -v", &["pull", "--ff-only", "-v", "origin", "main"]),
+        (
+            "pull -j",
+            &[
+                "pull",
+                "--ff-only",
+                "-j",
+                "2",
+                "--recurse-submodules",
+                "origin",
+                "main",
+            ],
+        ),
+        (
+            "pull --jobs invalid",
+            &[
+                "pull",
+                "--ff-only",
+                "--jobs=bad",
+                "--recurse-submodules",
+                "origin",
+                "main",
+            ],
+        ),
+    ];
+
+    for (label, args) in cases {
+        assert_named_local_pull_matches_stock_git(label, args);
+    }
 }
 
 #[test]

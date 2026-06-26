@@ -1472,6 +1472,42 @@ pub enum Command {
         branch: Vec<String>,
     },
     Pull {
+        #[arg(long = "all", action = ArgAction::SetTrue)]
+        all: bool,
+        #[arg(long = "no-all", action = ArgAction::SetTrue)]
+        no_all: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
+        verbose: bool,
+        #[arg(short = 'p', long = "prune", action = ArgAction::SetTrue)]
+        prune: bool,
+        #[arg(long = "no-tags", action = ArgAction::SetTrue)]
+        no_tags: bool,
+        #[arg(short = 't', long = "tags", action = ArgAction::SetTrue)]
+        tags: bool,
+        #[arg(short = 'j', long = "jobs", allow_hyphen_values = true)]
+        jobs: Option<String>,
+        #[arg(short = 'k', long = "keep", action = ArgAction::SetTrue)]
+        keep: bool,
+        #[arg(short = '4', long = "ipv4", action = ArgAction::SetTrue)]
+        ipv4: bool,
+        #[arg(short = '6', long = "ipv6", action = ArgAction::SetTrue)]
+        ipv6: bool,
+        #[arg(
+            long = "recurse-submodules",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "yes",
+            action = ArgAction::Append
+        )]
+        recurse_submodules: Vec<String>,
+        #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
+        no_recurse_submodules: bool,
+        #[arg(short = 'o', long = "server-option")]
+        server_option: Vec<String>,
+        #[arg(long = "show-forced-updates", action = ArgAction::SetTrue)]
+        show_forced_updates: bool,
+        #[arg(long = "no-show-forced-updates", action = ArgAction::SetTrue)]
+        no_show_forced_updates: bool,
         #[arg(long = "ff", action = ArgAction::SetTrue)]
         ff: bool,
         #[arg(long = "ff-only", action = ArgAction::SetTrue)]

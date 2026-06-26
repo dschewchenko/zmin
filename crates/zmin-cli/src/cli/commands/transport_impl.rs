@@ -9639,6 +9639,14 @@ fn fetch_server_options(raw_args: &[String]) -> Result<Vec<String>> {
 }
 
 fn validate_fetch_jobs(raw_args: &[String]) -> Result<()> {
+    validate_fetch_jobs_with_exit_code(raw_args, 129)
+}
+
+fn validate_pull_jobs(raw_args: &[String]) -> Result<()> {
+    validate_fetch_jobs_with_exit_code(raw_args, 1)
+}
+
+fn validate_fetch_jobs_with_exit_code(raw_args: &[String], code: i32) -> Result<()> {
     let Some((value, subject)) = fetch_jobs_value(raw_args) else {
         return Ok(());
     };
@@ -9646,7 +9654,7 @@ fn validate_fetch_jobs(raw_args: &[String]) -> Result<()> {
         return Ok(());
     }
     Err(CliError::Stderr {
-        code: 129,
+        code,
         text: format!("error: {subject} expects an integer value with an optional k/m/g suffix\n"),
     })
 }
@@ -11297,6 +11305,10 @@ pub(crate) fn run_pull(
     ff: bool,
     ff_only: bool,
     no_ff: bool,
+    no_all: bool,
+    prune: bool,
+    no_tags: bool,
+    tags: bool,
     strategies: Vec<String>,
     rebase_mode: Option<String>,
     no_rebase: bool,
@@ -11309,10 +11321,16 @@ pub(crate) fn run_pull(
     upload_pack: Option<String>,
     remote: Option<String>,
     branch: Option<String>,
+    raw_args: &[String],
 ) -> Result<()> {
     let _trace = phase_trace("pull.total");
     let _ = ff;
+    let _ = no_all;
     let repo = find_repo_or_bare()?;
+    let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
+    let show_forced_updates_mode = fetch_show_forced_updates_mode(raw_args);
+    validate_pull_jobs(raw_args)?;
+    let server_options = fetch_server_options(raw_args)?;
     let refs = refs_adapter_from_git_dir(&repo.git_dir);
     let current_branch = current_branch_ref(&refs)?.ok_or_else(|| CliError::Fatal {
         code: 128,
@@ -11420,22 +11438,23 @@ fatal: the remote end hung up unexpectedly\n"
                 false,
                 false,
                 false,
+                prune,
                 false,
                 false,
-                false,
-                false,
-                false,
+                no_tags,
+                tags,
                 false,
                 false,
                 false,
                 true,
                 &[],
                 false,
-                FetchRecurseSubmodulesMode::Default,
-                &[],
+                recurse_submodules_mode,
+                &server_options,
                 upload_pack.as_deref(),
             )?;
         }
+        write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         "FETCH_HEAD".to_owned()
     } else {
         validate_remote_name(&remote)?;
@@ -11455,22 +11474,23 @@ fatal: the remote end hung up unexpectedly\n"
                 false,
                 false,
                 false,
+                prune,
                 false,
                 false,
-                false,
-                false,
-                false,
+                no_tags,
+                tags,
                 false,
                 false,
                 false,
                 true,
                 &[],
                 false,
-                FetchRecurseSubmodulesMode::Default,
-                &[],
+                recurse_submodules_mode,
+                &server_options,
                 upload_pack.as_deref(),
             )?;
         }
+        write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         format!("refs/remotes/{remote}/{branch}")
     };
     if pull_rebase_mode.rebases() && !ff_only {

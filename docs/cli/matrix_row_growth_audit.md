@@ -11,6 +11,31 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git pull`
+fetch-inherited documented-option family expansion on the current named-local
+ff-only lane. The selected change added twenty-four exact stock-Git `pull`
+rows for `--show-forced-updates`, `--no-show-forced-updates`, `--ipv4`,
+`--ipv6`, `--keep`, `--no-all`, `--prune`, `--tags`, `--no-tags`,
+`--verbose`, `--recurse-submodules`, `--no-recurse-submodules`,
+`--server-option`, `--jobs`, `-4`, `-6`, `-k`, `-o`, `-p`, `-t`, `-v`,
+and `-j`, plus the documented invalid-input rejection for
+`pull --jobs=bad --recurse-submodules`, then promoted those twenty-two
+represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+24` matrix rows, `+22` complete documented option pairs, `+22`
+represented documented option pairs, `+23` verified rows, `+1`
+invalid-input row, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5740` matrix rows, `4986` verified rows, `719`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1689/3156` complete documented option pairs, and
+`1697/3156` represented documented option pairs. `pull` now sits at
+`36/36` reviewed-complete represented option pairs with `61` written rows,
+`61` classified rows, `59` stock-matching rows, `2` invalid-input rows, and
+`0` exact-open rows on the current modeled surface. The next default
+follow-up should either close another dense helper-free represented family
+from the refreshed census queue or spend a bounded slice on a larger
+remaining `pull` tail only if it closes more than a single micro-row.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git fetch`
 documented-option family expansion on the current named-local-remote lane.
 The selected change added twenty-one exact stock-Git `fetch` rows for
