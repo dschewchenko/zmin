@@ -66,8 +66,8 @@ Per-command position on the active shared surface:
 The next best high-throughput follow-up should focus on the last oracle
 availability blockers rather than more represented-row harvesting, because the
 represented documented-option backlog is now fully closed. The default next
-queue should start with `git svn` helper-oracle availability, then reassess the
-remaining `citool` and `scalar` local-oracle gaps.
+queue should start with `git svn` helper-oracle availability, then finish the
+remaining top-level `scalar` local-oracle gap.
 
 As of 2026-06-26 the latest completed batch is the final helper-like
 `git update-index --split-index` documented-option tail on the modeled
@@ -844,37 +844,17 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `filter-branch` completion, the exact-open queue in this
-environment is still down to helper-oracle-unavailable rows only:
-`citool` (`5`), `cvsimport` (`2`), `svn` (`2`), `archimport` (`1`),
-`cvsexportcommit` (`1`) and `scalar` (`1`). `filter-branch` is now
-command-complete at `15/15` reviewed-complete documented option pairs,
-`15/15` represented documented option pairs, `19/19` classified rows, and
-`0` exact-open written rows after adding real `--prune-empty` parity and
-stopping the docs inventory from seeding the prose-only `--ignore-unmatch`
-example token. The smallest raw documented gap is still `http-fetch`, but
-`--index-pack-args` remains blocked on clean local stock-Git evidence, and
-`http-fetch` is now command-complete at `9/9` reviewed-complete documented
-option pairs, `9/9` represented documented option pairs, `14/14` classified
-rows, and `0` exact-open written rows after closing the documented plural
-`--index-pack-args` lane with exact stock-Git rejection evidence. The next
-bounded helper-free follow-up should therefore move to another small supported
-subgroup with clear semantics, with `mergetool` (`8/10`) as the current best
-compact candidate before returning to the heavier `multi-pack-index` tail. The primary
+After the latest `citool` closure, the exact-open queue in this environment is
+down to only three helper-oracle-unavailable rows: `svn` (`2`) and `scalar`
+(`1`). `citool` is now fully represented and fully classified at `5/5` written
+rows with `5/5` stock-matching rows after switching the GUI surface to launch
+the stock `git citool` helper path instead of performing an internal commit.
+The next bounded follow-up should therefore stay on oracle enablement rather
+than represented-row harvesting: either a usable `git svn` helper oracle or a
+real top-level stock `scalar` oracle. The primary
 `remaining_to_fix_or_verify.tsv` backlog still has no real
 implemented-but-unverified family beyond the lone schema-only
-`archive <positional:args>` parser surface. `notes` is fully reviewed complete
-as a command at `28/28` documented option pairs, `28/28` represented
-documented option pairs, `69/69` classified rows, and `0` exact-open written
-rows; `describe` is likewise command-complete at `14/14` documented option
-pairs, `14/14` represented documented option pairs, `19/19` classified rows,
-and `0` exact-open written rows; `bugreport` is now command-complete at
-`7/7` documented option pairs, `7/7` represented documented option pairs,
-`13/13` classified rows, and `0` exact-open written rows after closing the
-`--no-diagnose` ordering family; `stash` is now command-complete at
-`18/18` documented option pairs, `18/18` represented documented option pairs,
-`211/211` classified rows, and `0` exact-open written rows after making the
-short `-S` and `-p` aliases durable.
+`archive <positional:args>` parser surface.
 
 ### Latest Completed Slice
 
@@ -961,13 +941,14 @@ The latest stock-compatible invalid-input guard classification is
 diagnostic, so this source hit is parser validation mapped to the existing
 `status_v2_47.tsv` invalid-input row.
 
-The latest deferred guard classification is the `git gui` / `git citool`
-external GUI surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`.
-Local stock Git advertises `gui` and `citool` in `git help -a`, but this
-environment does not ship the `git-gui` executable, so it cannot provide a
-stdout/stderr/exit/side-effect oracle for GUI behavior. Keep those guards out
-of closed Git compatibility counts until a real `git-gui` oracle environment
-or an explicit product decision brings the GUI surface into scope.
+The latest deferred guard classification is now only the `git gui` external GUI
+surface in `crates/zmin-cli/src/cli/commands/commit_impl.rs`. `git citool` is
+no longer deferred in this environment: stock `git-gui` is now installed, the
+focused `git_citool_compat::citool_helper_option_shapes_match_stock_git` oracle
+proves launch/exit/side-effect parity for the modeled `--amend`, `--nocommit`,
+`-m`, `--file`, and `-F` rows, and those matrix rows are closed. Keep the
+remaining `git gui` surface out of closed Git compatibility counts until a real
+GUI oracle or explicit product decision brings that broader surface into scope.
 
 The latest platform-oracle deferral is `crates/zmin-git-core/src/checkout.rs`
 non-UTF8 index path handling. The guard is compiled only on non-Unix targets.
@@ -1591,7 +1572,7 @@ keeps the behavior explicitly out of scope.
 
 | Guard | Classification | Evidence | Next action |
 | --- | --- | --- | --- |
-| `commit_impl.rs` `git gui` / `git citool` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` and `citool` in `git help -a`, but `git gui --help` and `git citool --help` fail because the `git-gui` executable is not installed in this oracle environment | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the GUI surface into current CLI scope |
+| `commit_impl.rs` `git gui` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` in `git help -a`, but the broader GUI surface still lacks a durable non-interactive oracle beyond the closed `citool` helper rows | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the remaining GUI surface into current CLI scope |
 | `admin_impl.rs` `unsupported svn command '{command}'` in `git svn` dispatch | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-svn`: `/usr/bin/git svn unknown` exits `1` with `git: 'svn' is not a git command` | revisit only with a real `git-svn` oracle environment or an explicit decision to scope the legacy SVN bridge |
 | `admin_impl.rs` `unsupported archimport option '{arg}'` and intentionally unsupported `git archimport -o` mode | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-archimport`: `/usr/bin/git archimport --bad` exits `1` with `git: 'archimport' is not a git command` | revisit only with a real `git-archimport` oracle environment or an explicit decision to scope the legacy GNU Arch bridge |
 | `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |

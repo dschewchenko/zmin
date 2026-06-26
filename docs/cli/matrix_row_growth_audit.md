@@ -11,25 +11,22 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
-foreign-SCM helper-oracle unlock closure for `git archimport`,
-`git cvsexportcommit`, and `git cvsimport` on the modeled fake-helper local
-lanes. The selected change added `+0` matrix rows and instead reclassified four
-existing exact rows from `open` to `closed`, then promoted eight already
-represented documented option pairs into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+0`
-matrix rows, `+8` complete documented option pairs, `+0` represented
-documented option pairs, `+4` verified rows, `+0` invalid-input rows, and `+0`
-complete command matrices. Current census counts are `5984` matrix rows,
-`5214` verified rows, `738` invalid-input rows, `8` exact-open rows,
-`146/151` complete command matrices, `1927/3212` complete documented option
-pairs, and `1927/3212` represented documented option pairs. `archimport` now
-sits at `1/8`, `cvsexportcommit` at `1/12`, and `cvsimport` at `6/20`
-reviewed-complete documented option pairs, with all currently represented
-foreign-SCM helper rows closed on the modeled fake-helper lanes. The next
-default follow-up should target the remaining oracle-availability blockers,
-starting with `git svn` helper discovery or oracle enablement before revisiting
-GUI-only `citool` and environment-specific `scalar`.
+As of 2026-06-26 the latest completed batch is a helper-oracle unlock closure
+for the five modeled `git citool` GUI rows. The selected change added `+1`
+focused stock-oracle test file, `+0` matrix rows, and reclassified the five
+existing `citool --amend/--file/-F/--nocommit/-m` rows from `open` to
+`closed`; no documented-option counts changed because those rows were already
+represented. Actual delta is `+0` matrix rows, `+0` complete documented option
+pairs, `+0` represented documented option pairs, `+5` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `5984` matrix rows, `5219` verified rows, `738` invalid-input rows,
+`3` exact-open rows, `146/151` complete command matrices,
+`1927/3212` complete documented option pairs, and `1927/3212` represented
+documented option pairs. `citool` now sits at `5/5` classified rows with
+`5/5` stock-matching rows, while the only remaining exact-open backlog is
+`svn` (`2`) plus top-level `scalar` (`1`). The next default follow-up should
+stay on oracle availability, starting with a usable `git svn` helper oracle
+before the final top-level `scalar` gap.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 `--split-index` documented-option tail closure on the modeled single-entry

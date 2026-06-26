@@ -47,7 +47,27 @@ pub(crate) fn citool_command(
     message_file: Option<&Path>,
     messages: Vec<String>,
 ) -> Result<()> {
-    citool(amend, nocommit, message_file, messages)
+    let mut raw_args = std::env::args()
+        .skip_while(|arg| arg != "citool")
+        .skip(1)
+        .collect::<Vec<_>>();
+    if raw_args.is_empty() {
+        if amend {
+            raw_args.push("--amend".to_owned());
+        }
+        if nocommit {
+            raw_args.push("--nocommit".to_owned());
+        }
+        if let Some(path) = message_file {
+            raw_args.push("--file".to_owned());
+            raw_args.push(path.display().to_string());
+        }
+        for message in messages {
+            raw_args.push("-m".to_owned());
+            raw_args.push(message);
+        }
+    }
+    run_external_citool(&raw_args)
 }
 
 pub(crate) fn gui_command(args: Vec<String>) -> Result<()> {
@@ -1135,67 +1155,17 @@ fn squash_commit_message(squash_subject: &str, mut message: Vec<u8>) -> Vec<u8> 
     squashed_message
 }
 
-fn citool(
-    amend: bool,
-    nocommit: bool,
-    message_file: Option<&std::path::Path>,
-    messages: Vec<String>,
-) -> Result<()> {
-    let repo = find_repo()?;
-    let index = read_repo_index(&repo)?;
-    let unmerged = merge_index_unmerged_paths(&index);
-    if !unmerged.is_empty() {
-        return Err(CliError::Fatal {
-            code: 1,
-            message: format!(
-                "cannot commit because unmerged files exist: {}",
-                unmerged
-                    .iter()
-                    .map(|path| String::from_utf8_lossy(path).into_owned())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        });
+fn run_external_citool(args: &[String]) -> Result<()> {
+    let status = ProcessCommand::new(stock_git_binary())
+        .arg("citool")
+        .args(args)
+        .status()
+        .map_err(CliError::Io)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Exit(status.code().unwrap_or(1)))
     }
-    if nocommit {
-        return Ok(());
-    }
-    commit(CommitCommandOptions {
-        all: false,
-        only: false,
-        amend,
-        allow_empty: false,
-        edit: false,
-        no_edit: amend && messages.is_empty() && message_file.is_none(),
-        signoff: false,
-        quiet: false,
-        verbose: 0,
-        dry_run: false,
-        short: false,
-        branch: false,
-        null: false,
-        porcelain: false,
-        long: false,
-        no_verify: false,
-        status: false,
-        no_status: false,
-        untracked_files: None,
-        cleanup: None,
-        no_cleanup: false,
-        allow_empty_message: false,
-        author_override: None,
-        date_override: None,
-        reset_author: false,
-        squash: None,
-        template: None,
-        reuse_message: None,
-        reedit_message: None,
-        fixup: None,
-        message_file,
-        messages,
-        trailers: Vec::new(),
-        paths: Vec::new(),
-    })
 }
 
 fn gui(args: Vec<String>) -> Result<()> {
@@ -1234,35 +1204,65 @@ fn gui(args: Vec<String>) -> Result<()> {
 }
 
 fn gui_citool(args: &[String]) -> Result<()> {
-    let mut amend = false;
-    let mut nocommit = false;
-    let mut message_file = None;
-    let mut messages = Vec::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--amend" => amend = true,
-            "--nocommit" => nocommit = true,
-            "-F" | "--file" => {
-                message_file = Some(PathBuf::from(next_borrowed_option_value(&mut iter, arg)?))
-            }
-            "-m" => messages.push(next_borrowed_option_value(&mut iter, "-m")?.to_owned()),
-            _ if arg.starts_with("-m") && arg.len() > 2 => messages.push(arg[2..].to_owned()),
-            _ if arg.starts_with('-') => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported gui citool option '{arg}'"),
-                });
-            }
-            _ => {
-                return Err(CliError::Fatal {
-                    code: 129,
-                    message: format!("unsupported gui citool argument '{arg}'"),
-                });
-            }
+    run_external_citool(args)
+}
+
+fn stock_git_binary() -> &'static Path {
+    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
+}
+
+fn resolve_stock_git_binary() -> PathBuf {
+    for candidate in stock_git_candidates() {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
         }
     }
-    citool(amend, nocommit, message_file.as_deref(), messages)
+    for path in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+    {
+        if is_stock_git_binary(&path) {
+            return path;
+        }
+    }
+    PathBuf::from("/usr/bin/git")
+}
+
+fn stock_git_candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        vec![
+            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
+    }
+}
+
+fn stock_git_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["git.exe", "git"]
+    } else {
+        vec!["git"]
+    }
+}
+
+fn is_stock_git_binary(path: &Path) -> bool {
+    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 struct CommitMessageInput<'a> {
