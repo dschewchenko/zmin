@@ -572,6 +572,27 @@ fn submodule_update_remote_checks_out_remote_head_like_stock_git() {
         git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
         git(&git_clone.join("deps/sub"), ["rev-parse", "HEAD"])
     );
+
+    git(&git_clone.join("deps/sub"), ["checkout", &initial_head]);
+    git(&zmin_clone.join("deps/sub"), ["checkout", &initial_head]);
+    assert_eq!(
+        command_any_output(
+            "git",
+            &git_clone,
+            &["submodule", "-q", "update", "--remote", "-N", "deps/sub"],
+            "git short no-fetch",
+        ),
+        command_any_output(
+            zmin_bin(),
+            &zmin_clone,
+            &["submodule", "-q", "update", "--remote", "-N", "deps/sub"],
+            "zmin short no-fetch",
+        )
+    );
+    assert_eq!(
+        git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
+        git(&git_clone.join("deps/sub"), ["rev-parse", "HEAD"])
+    );
 }
 
 #[test]
@@ -719,6 +740,7 @@ fn submodule_summary_modes_match_stock_git() {
         ["submodule", "summary"].as_slice(),
         ["submodule", "summary", "--files"].as_slice(),
         ["submodule", "summary", "--summary-limit", "1"].as_slice(),
+        ["submodule", "summary", "-n", "1"].as_slice(),
         ["submodule", "--quiet", "summary"].as_slice(),
     ] {
         assert_eq!(
@@ -1495,6 +1517,556 @@ fn submodule_update_init_sync_foreach_deinit_match_stock_git_state() {
         )
         .0
     );
+}
+
+#[test]
+fn submodule_update_checkout_and_jobs_aliases_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = submodule_child_repo();
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let output = Command::new(common::stock_git_bin())
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.path().to_str().expect("submodule path"),
+            "deps/sub",
+        ])
+        .current_dir(&source)
+        .output()
+        .expect("git submodule add");
+    assert!(
+        output.status.success(),
+        "git submodule add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    git_with_env(&source, ["commit", "-m", "submodule"]);
+
+    for (git_name, zmin_name, args) in [
+        (
+            "git-submodule-j-short",
+            "zmin-submodule-j-short",
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--checkout",
+                "-q",
+                "-j",
+                "1",
+                "deps/sub",
+            ][..],
+        ),
+        (
+            "git-submodule-j-long",
+            "zmin-submodule-j-long",
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--checkout",
+                "--jobs",
+                "1",
+                "deps/sub",
+            ][..],
+        ),
+    ] {
+        git(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), git_name],
+        );
+        run_zmin(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), zmin_name],
+        );
+        let git_clone = dir.path().join(git_name);
+        let zmin_clone = dir.path().join(zmin_name);
+        let mut git_args = vec!["-c", "protocol.file.allow=always"];
+        git_args.extend_from_slice(args);
+        assert_eq!(
+            command_any_output(
+                "git",
+                &git_clone,
+                &git_args,
+                "git submodule update alias batch",
+            )
+            .0,
+            0,
+            "git submodule update alias failed for {args:?}"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                args,
+                "zmin submodule update alias batch",
+            )
+            .0,
+            0,
+            "zmin submodule update alias failed for {args:?}"
+        );
+        assert_eq!(
+            visible_worktree_files(&zmin_clone),
+            visible_worktree_files(&git_clone),
+            "submodule update alias worktree mismatch for {args:?}"
+        );
+        assert_eq!(
+            run_zmin(&zmin_clone, ["submodule", "status"]),
+            git(&git_clone, ["submodule", "status"]),
+            "submodule update alias status mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn submodule_update_merge_rebase_and_dissociate_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = dir.path().join("submodule");
+    git(
+        dir.path(),
+        [
+            "init",
+            "-b",
+            "main",
+            submodule.to_str().expect("submodule path"),
+        ],
+    );
+    configure_identity(&submodule);
+    write_file(&submodule, "sub.txt", "one\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "one"]);
+    let first = git(&submodule, ["rev-parse", "HEAD"]);
+    write_file(&submodule, "sub.txt", "two\n");
+    git(&submodule, ["add", "-A"]);
+    git_with_env(&submodule, ["commit", "-m", "two"]);
+    let second = git(&submodule, ["rev-parse", "HEAD"]);
+
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let output = Command::new(common::stock_git_bin())
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.to_str().expect("submodule path"),
+            "deps/sub",
+        ])
+        .current_dir(&source)
+        .output()
+        .expect("git submodule add");
+    assert!(
+        output.status.success(),
+        "git submodule add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    git_with_env(&source, ["commit", "-m", "submodule"]);
+
+    let reference = dir.path().join("reference");
+    git(
+        dir.path(),
+        [
+            "clone",
+            submodule.to_str().expect("submodule path"),
+            reference.to_str().expect("reference path"),
+        ],
+    );
+
+    for (mode, git_name, zmin_name) in [
+        ("--merge", "git-submodule-merge", "zmin-submodule-merge"),
+        ("--rebase", "git-submodule-rebase", "zmin-submodule-rebase"),
+    ] {
+        git(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), git_name],
+        );
+        run_zmin(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), zmin_name],
+        );
+        let git_clone = dir.path().join(git_name);
+        let zmin_clone = dir.path().join(zmin_name);
+        let init_args = [
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "deps/sub",
+        ];
+        assert_eq!(
+            command_any_output("git", &git_clone, &init_args, "git submodule init").0,
+            0,
+            "git submodule init failed for {mode}"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                &["submodule", "update", "--init", "deps/sub"],
+                "zmin submodule init",
+            )
+            .0,
+            0,
+            "zmin submodule init failed for {mode}"
+        );
+        git(&git_clone.join("deps/sub"), ["checkout", "-b", "topic", &first]);
+        git(&zmin_clone.join("deps/sub"), ["checkout", "-b", "topic", &first]);
+
+        assert_eq!(
+            command_any_output(
+                "git",
+                &git_clone,
+                &["submodule", "update", mode, "deps/sub"],
+                "git submodule update mode",
+            )
+            .0,
+            0,
+            "git submodule update {mode} failed"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                &["submodule", "update", mode, "deps/sub"],
+                "zmin submodule update mode",
+            )
+            .0,
+            0,
+            "zmin submodule update {mode} failed"
+        );
+        assert_eq!(
+            git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
+            second,
+            "zmin submodule HEAD mismatch for {mode}"
+        );
+        assert_eq!(
+            git(&zmin_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
+            git(&git_clone.join("deps/sub"), ["rev-parse", "HEAD"]),
+            "submodule HEAD parity mismatch for {mode}"
+        );
+        assert_eq!(
+            git(&zmin_clone.join("deps/sub"), ["rev-parse", "--abbrev-ref", "HEAD"]),
+            git(&git_clone.join("deps/sub"), ["rev-parse", "--abbrev-ref", "HEAD"]),
+            "submodule branch attachment mismatch for {mode}"
+        );
+        assert_eq!(
+            visible_worktree_files(&zmin_clone),
+            visible_worktree_files(&git_clone),
+            "superproject worktree mismatch for {mode}"
+        );
+        assert_eq!(
+            git(&zmin_clone, ["status", "--short"]),
+            git(&git_clone, ["status", "--short"]),
+            "superproject status mismatch for {mode}"
+        );
+    }
+
+    git(
+        dir.path(),
+        ["clone", source.to_str().expect("source path"), "git-submodule-dissociate"],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            "zmin-submodule-dissociate",
+        ],
+    );
+    let git_clone = dir.path().join("git-submodule-dissociate");
+    let zmin_clone = dir.path().join("zmin-submodule-dissociate");
+    let mut git_args = vec!["-c", "protocol.file.allow=always", "submodule", "update", "--init"];
+    git_args.extend(["--reference", reference.to_str().expect("reference path")]);
+    git_args.extend(["--dissociate", "deps/sub"]);
+    assert_eq!(
+        command_any_output("git", &git_clone, &git_args, "git submodule update dissociate").0,
+        0,
+        "git submodule update --dissociate failed"
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            &zmin_clone,
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--reference",
+                reference.to_str().expect("reference path"),
+                "--dissociate",
+                "deps/sub",
+            ],
+            "zmin submodule update dissociate",
+        )
+        .0,
+        0,
+        "zmin submodule update --dissociate failed"
+    );
+    let git_alternates = git_clone
+        .join(".git/modules/deps/sub/objects/info/alternates")
+        .exists();
+    let zmin_alternates = zmin_clone
+        .join(".git/modules/deps/sub/objects/info/alternates")
+        .exists();
+    assert_eq!(zmin_alternates, git_alternates);
+    assert!(
+        !git_alternates,
+        "stock git should remove submodule alternates under --dissociate"
+    );
+    assert_eq!(
+        run_zmin(&zmin_clone, ["submodule", "status"]),
+        git(&git_clone, ["submodule", "status"])
+    );
+    assert_eq!(
+        git(&zmin_clone.join("deps/sub"), ["cat-file", "-t", "HEAD"]),
+        git(&git_clone.join("deps/sub"), ["cat-file", "-t", "HEAD"])
+    );
+}
+
+#[test]
+fn submodule_update_shallow_and_branch_recommendation_flags_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = submodule_child_repo();
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let output = Command::new(common::stock_git_bin())
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.path().to_str().expect("submodule path"),
+            "deps/sub",
+        ])
+        .current_dir(&source)
+        .output()
+        .expect("git submodule add");
+    assert!(
+        output.status.success(),
+        "git submodule add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    git_with_env(&source, ["commit", "-m", "submodule"]);
+
+    for (git_name, zmin_name, args) in [
+        (
+            "git-submodule-recommend-shallow",
+            "zmin-submodule-recommend-shallow",
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--recommend-shallow",
+                "deps/sub",
+            ][..],
+        ),
+        (
+            "git-submodule-no-recommend-shallow",
+            "zmin-submodule-no-recommend-shallow",
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--no-recommend-shallow",
+                "deps/sub",
+            ][..],
+        ),
+        (
+            "git-submodule-no-single-branch",
+            "zmin-submodule-no-single-branch",
+            &[
+                "submodule",
+                "update",
+                "--init",
+                "--no-single-branch",
+                "deps/sub",
+            ][..],
+        ),
+    ] {
+        git(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), git_name],
+        );
+        run_zmin(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), zmin_name],
+        );
+        let git_clone = dir.path().join(git_name);
+        let zmin_clone = dir.path().join(zmin_name);
+        let mut git_args = vec!["-c", "protocol.file.allow=always"];
+        git_args.extend_from_slice(args);
+        assert_eq!(
+            command_any_output(
+                "git",
+                &git_clone,
+                &git_args,
+                "git submodule update shallow recommendation flags",
+            )
+            .0,
+            0,
+            "git submodule update failed for {args:?}"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                args,
+                "zmin submodule update shallow recommendation flags",
+            )
+            .0,
+            0,
+            "zmin submodule update failed for {args:?}"
+        );
+        assert_eq!(
+            visible_worktree_files(&zmin_clone),
+            visible_worktree_files(&git_clone),
+            "submodule update worktree mismatch for {args:?}"
+        );
+        assert_eq!(
+            run_zmin(&zmin_clone, ["submodule", "status"]),
+            git(&git_clone, ["submodule", "status"]),
+            "submodule status mismatch for {args:?}"
+        );
+        assert_eq!(
+            run_zmin(&zmin_clone, ["config", "--get", "submodule.deps/sub.url"]),
+            git(&git_clone, ["config", "--get", "submodule.deps/sub.url"]),
+            "submodule config mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn submodule_deinit_all_and_force_aliases_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let submodule = submodule_child_repo();
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    let output = Command::new(common::stock_git_bin())
+        .args([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            submodule.path().to_str().expect("submodule path"),
+            "deps/sub",
+        ])
+        .current_dir(&source)
+        .output()
+        .expect("git submodule add");
+    assert!(
+        output.status.success(),
+        "git submodule add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    git_with_env(&source, ["commit", "-m", "submodule"]);
+
+    for (git_name, zmin_name) in [
+        ("git-deinit-all-force", "zmin-deinit-all-force"),
+        ("git-deinit-short-force", "zmin-deinit-short-force"),
+    ] {
+        git(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), git_name],
+        );
+        run_zmin(
+            dir.path(),
+            ["clone", source.to_str().expect("source path"), zmin_name],
+        );
+        let git_clone = dir.path().join(git_name);
+        let zmin_clone = dir.path().join(zmin_name);
+        let init_args = [
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "update",
+            "--init",
+            "deps/sub",
+        ];
+        assert_eq!(
+            command_any_output("git", &git_clone, &init_args, "git submodule init").0,
+            0,
+            "git submodule init failed for {git_name}"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                &["submodule", "update", "--init", "deps/sub"],
+                "zmin submodule init",
+            )
+            .0,
+            0,
+            "zmin submodule init failed for {zmin_name}"
+        );
+        let (git_args, zmin_args): (&[&str], &[&str]) = if git_name.contains("short") {
+            (
+                &["submodule", "-q", "deinit", "-f", "deps/sub"],
+                &["submodule", "-q", "deinit", "-f", "deps/sub"],
+            )
+        } else {
+            (
+                &["submodule", "--quiet", "deinit", "--force", "--all"],
+                &["submodule", "--quiet", "deinit", "--force", "--all"],
+            )
+        };
+        assert_eq!(
+            command_any_output("git", &git_clone, git_args, "git submodule deinit aliases").0,
+            0,
+            "git submodule deinit aliases failed for {git_args:?}"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                zmin_args,
+                "zmin submodule deinit aliases",
+            )
+            .0,
+            0,
+            "zmin submodule deinit aliases failed for {git_args:?}"
+        );
+        assert_eq!(
+            visible_worktree_files(&zmin_clone),
+            visible_worktree_files(&git_clone),
+            "submodule deinit alias worktree mismatch for {git_args:?}"
+        );
+        assert_eq!(
+            command_any_output(
+                zmin_bin(),
+                &zmin_clone,
+                &["config", "--get", "submodule.deps/sub.url"],
+                "zmin config get submodule url",
+            )
+            .0,
+            command_any_output(
+                "git",
+                &git_clone,
+                &["config", "--get", "submodule.deps/sub.url"],
+                "git config get submodule url",
+            )
+            .0,
+            "submodule url config visibility mismatch for {git_args:?}"
+        );
+    }
 }
 
 #[test]

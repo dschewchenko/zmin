@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`145/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1621/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1630/3156 represented doc-option pairs / 5667 written rows / 4935/5667 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,41 +300,34 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a zero-code reviewed-complete command-surface
-promotion cluster. Zmin now promotes `index-pack`, `daemon`, `show`,
-`switch`, `worktree`, `tag`, `update-index`, `commit`, `ls-remote`,
-`for-each-ref`, `fetch`, `log`, `pull`, `rev-list`, `format-patch`,
-`grep`, `pack-objects`, `merge`, `apply`, `revert`, `cherry-pick`,
-`rebase`, `send-email`, `replay`, `range-diff`, `fast-import`, `p4`,
-`am`, `cvsserver`, `fast-export`, `help`, and `reset`
-into the reviewed-complete command set because each command
-already had all represented documented option pairs reviewed complete,
-`100%` classified written rows, and `0` exact-open rows on the current
-modeled surface. The remaining unrepresented documented tails for each
-promoted command stay explicitly outside these modeled reviewed-complete
-surfaces, including the documented-but-locally-unmodeled `index-pack
---progress-title` tail.
+The latest completed slice is a helper-free `git submodule` documented-option
+closure batch plus command promotion. Zmin now covers the remaining modeled
+`submodule` tails for `-n`, `--merge`, `--rebase`, `--dissociate`,
+`--recommend-shallow`, `--no-recommend-shallow`, and `--no-single-branch`,
+then promotes `submodule` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` because the command
+now has all `30/30` documented option pairs represented and reviewed complete,
+`0` partial rows, and `0` exact-open rows on the current modeled local
+surface. Focused gates were
+`cargo test -p zmin-cli --test git_submodule_compat submodule_ -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(submodule|summary)\t'`,
+`tools/git-compat-audit-summary.sh --tsv`, and `git diff --check`.
 
-Current counts are `145/151` complete command matrices,
-`1605/3156` complete documented option pairs,
-`1614/3156` represented documented option pairs, `5654` written rows,
-`4922` verified rows, `12` open rows, and `718` invalid-input rows.
-The promoted cluster now sits at:
-`index-pack 15/15`, `daemon 13/13`, `show 3/3`, `switch 7/7`,
-`worktree 8/8`, `tag 21/21`, `update-index 16/16`, `commit 37/37`,
-`ls-remote 3/3`, `for-each-ref 2/2`, `fetch 40/40`, `log 18/18`,
-`pull 14/14`, `rev-list 12/12`, `format-patch 12/12`, `grep 7/7`,
-`pack-objects 10/10`, `merge 8/8`, `apply 5/5`, `revert 4/4`,
-`cherry-pick 4/4`, `rebase 3/3`, `send-email 2/2`, `replay 2/2`,
-`range-diff 1/1`, `fast-import 1/1`, `p4 1/1`, `am 0/0`,
-`cvsserver 0/0`, `fast-export 0/0`, `help 0/0`, and `reset 0/0`
-reviewed-complete represented option pairs on their current modeled
-surfaces, all with `0` exact-open rows. The next bounded high-throughput
-follow-up should move to a new represented-family expansion, with
-`submodule` now the densest current candidate at `14/14` represented
-documented option pairs, `0` open rows, and `16` remaining documented
-tails to expand, rather than spending the next slice on the lone
-`rev-parse --exclude-hidden` micro-tail.
+Current counts are `146/151` complete command matrices,
+`1621/3156` complete documented option pairs,
+`1630/3156` represented documented option pairs, `5667` written rows,
+`4935` verified rows, `12` open rows, and `718` invalid-input rows.
+`submodule` now sits at `30/30` reviewed-complete represented option pairs,
+`51` written rows, `50` classified rows, `43` stock-matching rows,
+`7` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next bounded high-throughput follow-up should pivot back to the
+refreshed exact-open queue or the next dense represented-family candidate from
+`docs/cli/census/remaining_to_fix_or_verify.tsv`; `submodule` is no longer a
+pending expansion target.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

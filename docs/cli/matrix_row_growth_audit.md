@@ -11,6 +11,20 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git submodule`
+documented-option closure plus command promotion. The selected change added
+thirteen exact stock-Git `submodule` rows for `-n`, `--merge`, `--rebase`,
+`--dissociate`, `--recommend-shallow`, `--no-recommend-shallow`, and
+`--no-single-branch`, then promoted `submodule` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` after the command
+reached `30/30` reviewed-complete represented option pairs with `0` exact-open
+rows on the current modeled surface. Current census counts are `5667` matrix
+rows, `4935` verified rows, `718` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1621/3156` complete documented option
+pairs, and `1630/3156` represented documented option pairs. The next default
+follow-up should move off `submodule` and back to the refreshed exact-open
+queue or the next dense represented-family candidate from the census.
+
 As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
 command-surface promotion cluster. The selected change promotes
 `index-pack`, `daemon`, `show`, `switch`, `worktree`, `tag`,

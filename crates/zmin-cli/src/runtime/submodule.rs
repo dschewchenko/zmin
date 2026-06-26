@@ -1,4 +1,8 @@
 use super::*;
+use crate::cli::commands::{
+    merge_commands::{MergeOptions, merge},
+    sequencer_commands::rebase,
+};
 use crate::cli::commands::transport_commands::{
     fetch_with_repo_and_remote, is_git_daemon_transport_url, is_http_transport_url,
     is_ssh_transport_url,
@@ -10,6 +14,13 @@ struct GitmodulesEntry {
     path: String,
     url: String,
     branch: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SubmoduleUpdateStrategy {
+    Checkout,
+    Merge,
+    Rebase,
 }
 
 fn submodule_usage() -> &'static str {
@@ -231,10 +242,12 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
     let mut recursive = false;
     let mut quiet = false;
     let mut depth = None;
+    let mut dissociate = false;
     let mut single_branch = false;
     let mut no_single_branch = false;
     let mut remote = false;
     let mut no_fetch = false;
+    let mut strategy = SubmoduleUpdateStrategy::Checkout;
     let mut references = Vec::new();
     let mut paths = Vec::new();
     let mut path_args = false;
@@ -262,6 +275,14 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
         } else if !path_args && arg == "--no-single-branch" {
             single_branch = false;
             no_single_branch = true;
+        } else if !path_args && arg == "--checkout" {
+            strategy = SubmoduleUpdateStrategy::Checkout;
+        } else if !path_args && arg == "--merge" {
+            strategy = SubmoduleUpdateStrategy::Merge;
+        } else if !path_args && arg == "--rebase" {
+            strategy = SubmoduleUpdateStrategy::Rebase;
+        } else if !path_args && arg == "--dissociate" {
+            dissociate = true;
         } else if !path_args && arg == "--depth" {
             cursor += 1;
             let Some(value) = args.get(cursor) else {
@@ -276,7 +297,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
         } else if !path_args
             && matches!(
                 arg.as_str(),
-                "--checkout" | "--force" | "-f" | "--recommend-shallow" | "--no-recommend-shallow"
+                "--force" | "-f" | "--recommend-shallow" | "--no-recommend-shallow"
             )
         {
         } else if !path_args && arg == "--reference" {
@@ -343,7 +364,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
                 references: references.clone(),
                 reference_if_able: Vec::new(),
                 shared: false,
-                dissociate: false,
+                dissociate,
                 no_hardlinks: false,
                 no_local: false,
                 depth: depth.clone(),
@@ -359,7 +380,7 @@ pub(crate) fn update_submodules(args: &[String]) -> Result<()> {
         } else {
             entry.id.clone()
         };
-        checkout_submodule_gitlink(&path, &checkout_id)?;
+        update_submodule_checkout(&path, &checkout_id, strategy)?;
         absorb_submodule_gitdir(&repo, &module.path)?;
         if !quiet {
             println!(
@@ -692,6 +713,15 @@ fn parse_submodule_summary_options(args: &[String]) -> Result<SubmoduleSummaryOp
                 });
             };
             summary_limit = parse_submodule_summary_limit(value)?;
+        } else if !path_args && arg == "-n" {
+            cursor += 1;
+            let Some(value) = args.get(cursor) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "-n requires a value".into(),
+                });
+            };
+            summary_limit = parse_submodule_summary_limit(value)?;
         } else if !path_args && arg.starts_with("--summary-limit=") {
             summary_limit = parse_submodule_summary_limit(&arg["--summary-limit=".len()..])?;
         } else if !path_args && arg.starts_with('-') {
@@ -920,6 +950,56 @@ fn checkout_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<(
     checkout_worktree(&repo, &store, id)?;
     refs.write_head_direct(id)?;
     Ok(())
+}
+
+fn update_submodule_checkout(
+    path: &std::path::Path,
+    id: &ObjectId,
+    strategy: SubmoduleUpdateStrategy,
+) -> Result<()> {
+    match strategy {
+        SubmoduleUpdateStrategy::Checkout => checkout_submodule_gitlink(path, id),
+        SubmoduleUpdateStrategy::Merge => merge_submodule_gitlink(path, id),
+        SubmoduleUpdateStrategy::Rebase => rebase_submodule_gitlink(path, id),
+    }
+}
+
+fn merge_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> {
+    with_submodule_current_dir(path, || {
+        merge(MergeOptions {
+            abort: false,
+            continue_: false,
+            ff_only: false,
+            no_ff: false,
+            no_commit: false,
+            squash: false,
+            strategies: Vec::new(),
+            commits: vec![id.to_hex()],
+            commit_label: None,
+        })
+    })
+}
+
+fn rebase_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> {
+    with_submodule_current_dir(path, || {
+        rebase(false, false, None, vec![id.to_hex()], false, false)
+    })
+}
+
+fn with_submodule_current_dir<T>(
+    path: &std::path::Path,
+    run: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let previous = std::env::current_dir()?;
+    std::env::set_current_dir(path)?;
+    let result = run();
+    let restore = std::env::set_current_dir(previous);
+    match (result, restore) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error.into()),
+        (Err(error), Err(_)) => Err(error),
+    }
 }
 
 fn update_submodule_remote_head(
