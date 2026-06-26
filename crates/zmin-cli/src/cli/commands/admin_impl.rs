@@ -58,6 +58,10 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) index_info: bool,
     pub(crate) index_version: Option<String>,
     pub(crate) show_index_version: bool,
+    pub(crate) no_split_index: bool,
+    pub(crate) no_untracked_cache: bool,
+    pub(crate) test_untracked_cache: bool,
+    pub(crate) no_fsmonitor: bool,
     pub(crate) verbose: bool,
     pub(crate) chmod: Option<String>,
     pub(crate) assume_unchanged: bool,
@@ -558,9 +562,15 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         options.ignore_skip_worktree_entries,
         options.no_ignore_skip_worktree_entries,
         options.unresolve,
+        options.no_split_index,
+        options.no_untracked_cache,
+        options.no_fsmonitor,
     );
     if options.show_index_version {
         println!("{initial_index_version}");
+    }
+    if options.test_untracked_cache {
+        eprintln!("Testing mtime in '{}' ...... OK", repo.root.display());
     }
 
     for cacheinfo in &options.cacheinfo {
@@ -705,6 +715,10 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
         && !options.refresh
         && !options.unresolve
         && !options.ignore_submodules
+        && !options.no_split_index
+        && !options.no_untracked_cache
+        && !options.test_untracked_cache
+        && !options.no_fsmonitor
         && options.cacheinfo.is_empty()
         && !options.index_info
         && options.chmod.is_none()

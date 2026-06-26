@@ -192,6 +192,18 @@ fn dirty_submodule_repos() -> (TempDir, TempDir) {
     (git_root, zmin_root)
 }
 
+fn normalize_test_untracked_cache_output(
+    output: (i32, String, String),
+    repo: &std::path::Path,
+) -> (i32, String, String) {
+    let placeholder = "<repo>";
+    (
+        output.0,
+        output.1.replace(&repo.display().to_string(), placeholder),
+        output.2.replace(&repo.display().to_string(), placeholder),
+    )
+}
+
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -1865,6 +1877,57 @@ fn update_index_ignore_submodules_and_skip_worktree_remove_match_stock_git() {
     assert_eq!(
         run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
         git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+}
+
+#[test]
+fn update_index_disable_helper_toggles_and_probe_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    for args in [
+        ["update-index", "--no-split-index"].as_slice(),
+        ["update-index", "--no-untracked-cache"].as_slice(),
+        ["update-index", "--no-fsmonitor"].as_slice(),
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git")
+        );
+    }
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    assert_eq!(
+        normalize_test_untracked_cache_output(
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["update-index", "--test-untracked-cache"],
+                "zmin",
+            ),
+            zmin_repo.path(),
+        ),
+        normalize_test_untracked_cache_output(
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["update-index", "--test-untracked-cache"],
+                "git",
+            ),
+            git_repo.path(),
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
     );
 }
 

@@ -22,6 +22,47 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+disable-helper-toggle documented-option expansion on the current local lane.
+The selected change added four exact stock-Git rows for
+`update-index --no-split-index`, `update-index --no-untracked-cache`,
+`update-index --test-untracked-cache`, and `update-index --no-fsmonitor`, then
+promoted those four newly represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+
+The batch fixed one concrete parser/runtime gap on the update-index path:
+
+- Zmin now accepts the helper-disable local `update-index` toggles
+  `--no-split-index`, `--no-untracked-cache`, `--test-untracked-cache`, and
+  `--no-fsmonitor`, with stock-matching silent no-op behavior for the disable
+  forms and the stock stderr mtime probe report for `--test-untracked-cache`
+  on the modeled single-file local lane
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1913 / 3212`
+- represented documented command-option pairs: `1921 / 3212`
+- matrix rows: `5978`
+- verified rows: `5204`
+- invalid-input rows: `738`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `update-index`: `32 / 38` reviewed-complete documented option pairs, `63`
+  written rows, `63` classified rows, `55` stock-matching rows, `8`
+  invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up should stay on the final six
+`update-index` documented tails, which are now only
+`--force-untracked-cache`, `--fsmonitor`, `--fsmonitor-valid`,
+`--no-fsmonitor-valid`, `--split-index`, and `--untracked-cache`. Treat them
+as one batched helper-like closure attempt: start from stock-Git oracle probes
+on the current local lane, then either close the densest safe subset in one
+test-first pass or explicitly defer the stateful tails if they would require
+non-trivial shared-index or UNTR/FSMN extension modeling.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 skip-worktree/remove plus submodule-refresh documented-option expansion on the
 current local lane. The selected change added three exact stock-Git rows for
 `update-index --refresh --ignore-submodules submod`,

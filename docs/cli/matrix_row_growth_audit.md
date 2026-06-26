@@ -12,6 +12,28 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+disable-helper-toggle documented-option expansion on the current local lane.
+The selected change added four exact stock-Git rows for
+`update-index --no-split-index`, `update-index --no-untracked-cache`,
+`update-index --test-untracked-cache`, and `update-index --no-fsmonitor`, then
+promoted those four represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+4`
+matrix rows, `+4` complete documented option pairs, `+4` represented
+documented option pairs, `+4` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `5978` matrix rows,
+`5204` verified rows, `738` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1913/3212` complete documented option
+pairs, and `1921/3212` represented documented option pairs. `update-index`
+now sits at `32/38` reviewed-complete documented option pairs with `63`
+written rows, `63` classified rows, `55` stock-matching rows, `8`
+invalid-input rows, and `0` exact-open rows. The next default follow-up
+should stay on the last six `update-index` documented tails as one batched
+helper-like closure attempt: `--force-untracked-cache`, `--fsmonitor`,
+`--fsmonitor-valid`, `--no-fsmonitor-valid`, `--split-index`, and
+`--untracked-cache`, closing the densest safe subset first and deferring only
+the parts that truly require shared-index or index-extension modeling.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 skip-worktree/remove plus submodule-refresh documented-option expansion on the
 current local lane. The selected change added three exact stock-Git rows for
 `update-index --refresh --ignore-submodules submod`,

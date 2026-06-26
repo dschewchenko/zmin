@@ -1014,6 +1014,14 @@ pub enum Command {
         index_version: Option<String>,
         #[arg(long = "show-index-version", action = ArgAction::Count)]
         show_index_version: u8,
+        #[arg(long = "no-split-index", action = ArgAction::Count)]
+        no_split_index: u8,
+        #[arg(long = "no-untracked-cache", action = ArgAction::Count)]
+        no_untracked_cache: u8,
+        #[arg(long = "test-untracked-cache", action = ArgAction::Count)]
+        test_untracked_cache: u8,
+        #[arg(long = "no-fsmonitor", action = ArgAction::Count)]
+        no_fsmonitor: u8,
         #[arg(long = "verbose", action = ArgAction::Count)]
         verbose: u8,
         #[arg(long = "chmod")]
