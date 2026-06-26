@@ -240,7 +240,18 @@ fn shortlog_documented_option_family_matches_stock_git() {
 
     for args in [
         ["shortlog", "--group=committer", "HEAD"].as_slice(),
+        ["shortlog", "--group=author", "--group=committer", "HEAD"].as_slice(),
+        ["shortlog", "--group=committer", "--group=author", "HEAD"].as_slice(),
+        ["shortlog", "--group=author", "--group=author", "HEAD"].as_slice(),
         ["shortlog", "--group=trailer:reviewed-by", "-sne", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--group=trailer:reviewed-by",
+            "--group=format:%an",
+            "-sne",
+            "HEAD",
+        ]
+        .as_slice(),
         ["shortlog", "--group=format:%an", "-sn", "HEAD"].as_slice(),
         ["shortlog", "--format=%h %s", "HEAD"].as_slice(),
         ["shortlog", "--date=short", "--group=format:%ad", "-sn", "HEAD"].as_slice(),
@@ -429,7 +440,17 @@ fn shortlog_reflog_option_family_matches_stock_git() {
         ["shortlog", "--reflog", "HEAD"].as_slice(),
         ["shortlog", "--walk-reflogs", "HEAD"].as_slice(),
         ["shortlog", "--grep-reflog=one", "--walk-reflogs", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--grep-reflog=one",
+            "--walk-reflogs",
+            "--grep-reflog=two",
+            "HEAD",
+        ]
+        .as_slice(),
         ["shortlog", "-g", "HEAD"].as_slice(),
+        ["shortlog", "-g", "--reflog", "HEAD"].as_slice(),
+        ["shortlog", "--reflog", "-g", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
