@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1696	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1741	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1749	3212	documented command-option pairs with at least one behavior row
 behavior_rows_written	5747	5747	current written command option value combination state transport platform rows
@@ -33,7 +33,7 @@ cherry	1	1	1	100.0	14	14	100.0	12	85.7	0	0	2	yes
 cherry-pick	24	4	4	16.7	7	7	100.0	5	71.4	0	0	2	yes
 citool	0	0	0	0.0	5	0	0.0	0	0.0	0	5	0	no
 clean	13	13	13	100.0	68	68	100.0	62	91.2	0	0	6	yes
-clone	47	0	36	76.6	96	96	100.0	86	89.6	0	0	10	yes
+clone	47	36	36	76.6	96	96	100.0	86	89.6	0	0	10	yes
 column	7	7	7	100.0	54	54	100.0	46	85.2	0	0	8	yes
 commit	58	46	46	79.3	93	93	100.0	88	94.6	0	0	5	yes
 commit-graph	3	3	3	100.0	14	14	100.0	11	78.6	0	0	3	yes
@@ -76,7 +76,7 @@ http-fetch	9	9	9	100.0	14	14	100.0	10	71.4	0	0	4	yes
 http-push	6	6	6	100.0	10	10	100.0	10	100.0	0	0	0	yes
 imap-send	6	6	6	100.0	7	7	100.0	7	100.0	0	0	0	yes
 index-pack	16	15	15	93.8	33	33	100.0	23	69.7	0	0	10	yes
-init	9	0	9	100.0	12	12	100.0	10	83.3	0	0	2	yes
+init	9	9	9	100.0	12	12	100.0	10	83.3	0	0	2	yes
 instaweb	13	13	13	100.0	13	13	100.0	13	100.0	0	0	0	yes
 interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes
 log	131	18	18	13.7	111	111	100.0	106	95.5	0	0	5	yes

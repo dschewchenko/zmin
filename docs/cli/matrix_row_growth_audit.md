@@ -11,6 +11,36 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
+`git clone` plus `git init` documented-option promotion cluster on the current
+modeled surface. The selected change promotes the currently represented
+documented `clone` options `--bare`, `--branch`, `--config`, `--depth`,
+`--dissociate`, `--jobs`, `--local`, `--mirror`, `--no-checkout`,
+`--no-hardlinks`, `--no-reject-shallow`, `--no-single-branch`, `--no-tags`,
+`--origin`, `--progress`, `--quiet`, `--recurse-submodules`, `--ref-format`,
+`--reference`, `--reject-shallow`, `--remote-submodules`,
+`--separate-git-dir`, `--shallow-submodules`, `--shared`,
+`--single-branch`, `--template`, `--verbose`, `-b`, `-c`, `-j`, `-l`, `-n`,
+`-o`, `-q`, `-s`, and `-v`, plus the currently represented `init` options
+`--bare`, `--initial-branch`, `--object-format`, `--quiet`,
+`--ref-format`, `--separate-git-dir`, `--template`, `-b`, and `-q`, into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv` because both
+commands already had `100%` classified rows and `0` exact-open rows on their
+current modeled surfaces after the doc-option extractor repair restored the
+correct seed. Expected delta was `+45` complete documented option pairs,
+`+0` represented documented option pairs, `+0` matrix rows, `+0` verified
+rows, `+0` invalid-input rows, and `+0` complete command matrices. Actual
+delta matched. Current census counts are `5747` matrix rows, `4993`
+verified rows, `719` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1741/3212` complete documented option
+pairs, and `1749/3212` represented documented option pairs. `clone` now sits
+at `36/47` reviewed-complete documented option pairs with `96/96` classified
+rows and `0` exact-open rows, while `init` is now fully reviewed complete at
+`9/9` documented option pairs with `12/12` classified rows and `0` exact-open
+rows. The next default follow-up should keep using the corrected denominator
+and prioritize another dense helper-free represented family or promotion
+cluster, rather than returning to stale pre-fix queue ordering.
+
 As of 2026-06-26 the latest completed batch is a helper-free Git-doc option
 inventory extractor repair for markup-wrapped option definitions on the
 current local lane. The selected change broadens
