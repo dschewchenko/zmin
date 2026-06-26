@@ -318,6 +318,9 @@ fn checkout_path_modifier_family_matches_stock_git() {
         ["checkout", "--progress", "."].as_slice(),
         ["checkout", "--overlay", "."].as_slice(),
         ["checkout", "--no-overlay", "."].as_slice(),
+        ["checkout", "--overwrite-ignore", "."].as_slice(),
+        ["checkout", "--no-overwrite-ignore", "."].as_slice(),
+        ["checkout", "--ignore-other-worktrees", "."].as_slice(),
         ["checkout", "--ignore-skip-worktree-bits", "."].as_slice(),
         ["checkout", "--ours", "."].as_slice(),
         ["checkout", "--theirs", "."].as_slice(),
@@ -385,6 +388,7 @@ fn checkout_track_family_matches_stock_git_invalid_input() {
     for args in [
         ["checkout", "--track", "."].as_slice(),
         ["checkout", "-t", "."].as_slice(),
+        ["checkout", "-d", "."].as_slice(),
         ["checkout", "--no-track", "."].as_slice(),
         ["checkout", "--track", "a.txt"].as_slice(),
         ["checkout", "-t", "a.txt"].as_slice(),

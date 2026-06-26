@@ -10229,6 +10229,9 @@ pub(crate) fn checkout(
     theirs: bool,
     overlay: bool,
     no_overlay: bool,
+    _overwrite_ignore: bool,
+    _no_overwrite_ignore: bool,
+    _ignore_other_worktrees: bool,
     _ignore_skip_worktree_bits: bool,
     track: Option<String>,
     no_track: bool,
@@ -10347,6 +10350,20 @@ pub(crate) fn checkout(
     let path_mode = checkout_path_mode(&args)?;
     let implicit_path_checkout =
         path_mode.is_none() && args.first().is_some_and(|target| !checkout_target_exists(target).unwrap_or(false));
+    if detach
+        && args.len() == 1
+        && args
+            .first()
+            .is_some_and(|target| checkout_worktree_path_exists(target).unwrap_or(false))
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "git checkout: --detach does not take a path argument '{}'",
+                args[0]
+            ),
+        });
+    }
     if path_mode.is_none() && !implicit_path_checkout {
         if overlay || no_overlay {
             return Err(CliError::Fatal {
@@ -10456,6 +10473,11 @@ fn checkout_target_exists(target: &str) -> Result<bool> {
         return Ok(true);
     }
     Ok(resolve_commitish(&repo, &store, target).is_ok())
+}
+
+fn checkout_worktree_path_exists(target: &str) -> Result<bool> {
+    let repo = find_repo()?;
+    Ok(repo.root.join(target).exists())
 }
 
 fn resolve_checkout_detach_target(target: &str) -> Result<ObjectId> {

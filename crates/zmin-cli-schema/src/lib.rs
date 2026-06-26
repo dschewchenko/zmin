@@ -2083,7 +2083,7 @@ pub enum Command {
         progress: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
         no_progress: bool,
-        #[arg(long = "detach", action = ArgAction::SetTrue)]
+        #[arg(short = 'd', long = "detach", action = ArgAction::SetTrue)]
         detach: bool,
         #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
         recurse_submodules: bool,
@@ -2097,6 +2097,12 @@ pub enum Command {
         overlay: bool,
         #[arg(long = "no-overlay", action = ArgAction::SetTrue)]
         no_overlay: bool,
+        #[arg(long = "overwrite-ignore", action = ArgAction::SetTrue)]
+        overwrite_ignore: bool,
+        #[arg(long = "no-overwrite-ignore", action = ArgAction::SetTrue)]
+        no_overwrite_ignore: bool,
+        #[arg(long = "ignore-other-worktrees", action = ArgAction::SetTrue)]
+        ignore_other_worktrees: bool,
         #[arg(long = "ignore-skip-worktree-bits", action = ArgAction::SetTrue)]
         ignore_skip_worktree_bits: bool,
         #[arg(short = 't', long = "track", num_args = 0..=1, require_equals = true, default_missing_value = "direct")]

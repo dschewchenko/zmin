@@ -6,9 +6,9 @@ git_doc_option_seed_rows	3156	documented option spelling seed, not final denomin
 zmin_schema_commands	206	commands emitted by zmin compat schema
 zmin_schema_baseline_commands	151	baseline command names present in schema
 zmin_schema_additional_commands	55	schema commands outside Git 2.47.1 baseline
-matrix_rows	5625	existing behavior rows used as evidence layer
-verified_rows	4893	closed exact behavior rows
-invalid_input_rows	717	stock-compatible rejection rows
+matrix_rows	5629	existing behavior rows used as evidence layer
+verified_rows	4896	closed exact behavior rows
+invalid_input_rows	718	stock-compatible rejection rows
 open_or_partial_matrix_rows	12	exact rows still open or partial
 exact_open_local_oracle_unavailable_rows	12	exact open rows blocked by missing local stock Git oracle command/tool
 implemented_but_unverified_rows	2	schema args without exact matrix evidence
@@ -17,4 +17,4 @@ extension_or_deferred_rows	69	Zmin-only or deferred/non-Git scope items
 oracle_evidence_layer_rows	969	existing oracle inventory rows, not primary backlog
 hard_fail_scan_rows	94	source guard hits
 hard_fail_scan_unclassified_rows	0	source guard hits not matched to classification docs
-all_census_rows	8372	union of generated census output rows
+all_census_rows	8376	union of generated census output rows

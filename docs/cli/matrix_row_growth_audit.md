@@ -11,6 +11,21 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git checkout`
+overwrite-ignore/toggle plus short-detach batch. The selected change adds
+four exact stock-Git rows for `checkout --overwrite-ignore .`,
+`checkout --no-overwrite-ignore .`, `checkout --ignore-other-worktrees .`,
+and the short `checkout -d .` detach/path invalid-input diagnostic on the
+current local path-style lane. Expected delta was `+4` matrix rows,
+`+4` represented documented option pairs, `+3` verified rows, `+1`
+invalid-input row, `+0` complete documented option pairs, and `+0` complete
+command matrices. Actual delta matched. `checkout` now sits at `32/34`
+represented documented option pairs, `73/73` written rows, `72/73`
+classified rows, `60` stock-matching rows, `12` invalid-input rows, and `0`
+exact-open rows. The next best default follow-up should keep the same
+helper-free `checkout` momentum and decide whether the remaining interactive
+`patch` family is worth a bounded dedicated slice.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git annotate`
 documented-option family closure plus reviewed-complete promotion. The
 selected change adds twenty-five exact stock-Git rows for the full documented
