@@ -301,15 +301,17 @@ source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
 The latest completed slice is a helper-free shared `git rev-list`
-grep/regex documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `rev-list --grep`,
-`--all-match`, `--invert-grep`, `--regexp-ignore-case`, `--basic-regexp`,
-`--extended-regexp`, `--fixed-strings`, `--perl-regexp`, and the short
-aliases `-E`, `-F`, `-P`, and `-i` on the modeled three-commit history lane,
-including case-insensitive matching and last-selector-wins override ordering
-between regex-mode toggles.
+formatting/text documented-option family expansion on the current local lane.
+Zmin now accepts and matches stock Git for `rev-list --no-notes`,
+`--notes`, `--abbrev-commit`, `--no-abbrev-commit`, `--oneline`,
+`--pretty`, `--expand-tabs`, `--no-expand-tabs`, `--encoding`, `--date`,
+and `--format` on modeled one-commit local history lanes, including the stock
+unsupported-notes fatal, short-hash raw output, oneline full-hash restore,
+medium/format commit rendering, and the stock commit-header prefix for custom
+format placeholders.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_grep_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat rev_list_notes_abbrev_and_text_rendering_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat rev_list_date_and_format_modes_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -338,12 +340,12 @@ Focused gates were
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1842/3212` complete documented option pairs,
-`1850/3212` represented documented option pairs, `5859` written rows,
-`5099` verified rows, `12` open rows, and `723` invalid-input rows.
-`rev-list` now sits at `50/117` reviewed-complete documented option pairs
-with `77/77` classified rows, `77` stock-matching rows, `0` invalid-input
-rows, and `0` exact-open rows, while `log` remains at `64/131`
+`1853/3212` complete documented option pairs,
+`1861/3212` represented documented option pairs, `5871` written rows,
+`5110` verified rows, `12` open rows, and `724` invalid-input rows.
+`rev-list` now sits at `61/117` reviewed-complete documented option pairs
+with `89/89` classified rows, `88` stock-matching rows, `1` invalid-input
+row, and `0` exact-open rows, while `log` remains at `64/131`
 reviewed-complete documented option pairs with `160` written rows, `159`
 classified rows, `153` stock-matching rows, `6` invalid-input rows, and `0`
 exact-open rows. The next bounded high-throughput follow-up should keep

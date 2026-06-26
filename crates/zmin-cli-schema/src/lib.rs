@@ -3664,12 +3664,28 @@ pub enum Command {
         args: Vec<String>,
     },
     RevList {
+        #[arg(long, action = ArgAction::SetTrue)]
+        oneline: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
         #[arg(long = "author")]
         author: Option<String>,
         #[arg(long = "committer")]
         committer: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "grep")]
         grep: Vec<String>,
         #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
@@ -3767,6 +3783,12 @@ pub enum Command {
         since: Option<String>,
         #[arg(long = "until", alias = "before")]
         until: Option<String>,
+        #[arg(long = "date")]
+        date: Option<String>,
+        #[arg(long = "format")]
+        format: Option<String>,
+        #[arg(long = "pretty")]
+        pretty: Option<String>,
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },

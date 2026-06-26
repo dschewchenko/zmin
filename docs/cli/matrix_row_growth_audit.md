@@ -12,6 +12,26 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
+`git rev-list` formatting/text documented-option family expansion on the
+current local lane. The selected change added twelve exact stock-Git rows for
+`rev-list --no-notes`, `--notes`, `--abbrev-commit`, `--no-abbrev-commit`,
+`--oneline`, `--pretty`, `--expand-tabs`, `--no-expand-tabs`, `--encoding`,
+`--date`, and `--format`, then promoted eleven represented documented options
+into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta
+was `+12` matrix rows, `+11` complete documented option pairs, `+11`
+represented documented option pairs, `+11` verified rows, `+1`
+invalid-input row, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5871` matrix rows, `5110` verified rows, `724`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1853/3212` complete documented option pairs, and
+`1861/3212` represented documented option pairs. `rev-list` now sits at
+`61/117` reviewed-complete documented option pairs with `89/89` classified
+rows, `88` stock-matching rows, `1` invalid-input row, and `0` exact-open
+rows on its current modeled surface. The next default follow-up should keep
+harvesting shared history-query represented families before switching back to
+isolated tails.
+
+As of 2026-06-26 the latest completed batch is a helper-free shared
 `git rev-list` grep/regex documented-option family expansion on the current
 local lane. The selected change added eighteen exact stock-Git rows for
 `rev-list --grep`, `--all-match`, `--invert-grep`, `--regexp-ignore-case`,

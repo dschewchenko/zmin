@@ -9501,9 +9501,17 @@ fn signature_without_timestamp(signature: &[u8]) -> &[u8] {
 }
 
 pub(crate) struct RevListOptions<'a> {
+    pub(crate) oneline: bool,
     pub(crate) all: bool,
     pub(crate) author: Option<&'a str>,
     pub(crate) committer: Option<&'a str>,
+    pub(crate) encoding: Option<&'a str>,
+    pub(crate) expand_tabs: bool,
+    pub(crate) no_expand_tabs: bool,
+    pub(crate) notes: bool,
+    pub(crate) no_notes: bool,
+    pub(crate) abbrev_commit: bool,
+    pub(crate) no_abbrev_commit: bool,
     pub(crate) grep: Vec<String>,
     pub(crate) invert_grep: bool,
     pub(crate) all_match: bool,
@@ -9543,6 +9551,9 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) max_count: Option<usize>,
     pub(crate) since: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
+    pub(crate) date: Option<&'a str>,
+    pub(crate) format: Option<&'a str>,
+    pub(crate) pretty: Option<&'a str>,
     pub(crate) revs: Vec<String>,
 }
 
@@ -9568,9 +9579,17 @@ enum RevListObjectFilter {
 pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let history_order = rev_list_history_order(&options);
     let RevListOptions {
+        oneline,
         all,
         author,
         committer,
+        encoding,
+        expand_tabs,
+        no_expand_tabs,
+        notes,
+        no_notes: _,
+        abbrev_commit,
+        no_abbrev_commit,
         grep,
         invert_grep,
         all_match,
@@ -9610,6 +9629,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         max_count,
         since,
         until,
+        date,
+        format,
+        pretty,
         revs,
     } = options;
     let _accepted_full_history = full_history;
@@ -9624,8 +9646,34 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
+    if notes {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "rev-list does not support display of notes".into(),
+        });
+    }
     let grep_mode =
         parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
+    let rendered_format = if oneline
+        || format.is_some()
+        || pretty.is_some()
+        || date.is_some()
+        || encoding.is_some()
+        || expand_tabs
+        || no_expand_tabs
+    {
+        Some(LogFormat::parse(oneline, format, pretty)?)
+    } else {
+        None
+    };
+    let date_mode = parse_log_date_mode(date)?;
+    let expand_tabs = false;
+    let abbrev_len = if no_abbrev_commit {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else {
+        7
+    };
+    let default_commit_abbrev = abbrev_commit && !no_abbrev_commit;
     let (min_parents, max_parents) = parse_log_parent_bounds(
         min_parents,
         no_min_parents,
@@ -9896,12 +9944,33 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     } else {
         HashMap::new()
     };
+    let decorations = LogDecorations::empty();
+    let notes = LogNotes::empty();
     let mut out = io::stdout().lock();
     for id in &commit_ids {
-        if let Some(marker) = traversal.markers.get(id) {
-            write!(out, "{}", marker.rev_list_prefix())?;
-        }
-        if parents {
+        let marker = traversal.markers.get(id).copied();
+        if let Some(format) = rendered_format.as_ref() {
+            let commit = commit_cache.read_commit(id)?;
+            let rendered = format.render_with_context(
+                id,
+                commit.as_ref(),
+                parents,
+                abbrev_len,
+                marker,
+                default_commit_abbrev,
+                expand_tabs,
+                &decorations,
+                &notes,
+                date_mode,
+            )?;
+            if matches!(format, LogFormat::Custom { .. }) {
+                writeln!(out, "commit {}", id.to_hex())?;
+            }
+            out.write_all(rendered.as_bytes())?;
+            if format.terminates_lines() {
+                out.write_all(b"\n")?;
+            }
+        } else if parents {
             let parents = read_commit_parents_uncached(&store, &id)?;
             write!(out, "{id}")?;
             for parent in parents {
@@ -9917,7 +9986,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             }
             writeln!(out)?;
         } else {
-            writeln!(out, "{id}")?;
+            if let Some(marker) = marker {
+                write!(out, "{}", marker.rev_list_prefix())?;
+            }
+            if default_commit_abbrev {
+                writeln!(out, "{}", short_object_id_len(id, abbrev_len))?;
+            } else {
+                writeln!(out, "{id}")?;
+            }
         }
     }
     if objects {

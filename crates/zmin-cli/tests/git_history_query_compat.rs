@@ -1015,6 +1015,60 @@ fn rev_list_identity_time_and_parent_filters_match_stock_git() {
 }
 
 #[test]
+fn rev_list_notes_abbrev_and_text_rendering_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "body.txt", "body\n");
+    git(repo.path(), ["add", "-A"]);
+    let message_path = repo.path().join("message.txt");
+    fs::write(&message_path, "subject\n\nline\twith\ttabs\n").expect("write message");
+    git(repo.path(), ["commit", "-F", "message.txt"]);
+    git(repo.path(), ["notes", "add", "-m", "note body"]);
+
+    for args in [
+        ["rev-list", "--no-notes", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--abbrev-commit", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--oneline", "--no-abbrev-commit", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--pretty=medium", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--pretty=medium", "--expand-tabs", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--pretty=medium", "--no-expand-tabs", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--pretty=medium", "--encoding=UTF-8", "-1", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["rev-list", "--format=%N", "--notes", "-1", "HEAD"]),
+        git_failure_output(repo.path(), &["rev-list", "--format=%N", "--notes", "-1", "HEAD"])
+    );
+}
+
+#[test]
+fn rev_list_date_and_format_modes_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+
+    for args in [
+        ["rev-list", "--date=iso", "--format=%ad|%cd", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--pretty=format:%ad|%cd", "--date=iso", "-1", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_notes_and_abbrev_commit_family_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
