@@ -1864,8 +1864,12 @@ fn reflog_display_name(ref_name: &str) -> String {
 const SHORTLOG_USAGE: &str = "usage: git shortlog [<options>] [<revision-range>] [[--] <path>...]\n   or: git log --pretty=short | git shortlog [<options>]\n\n    -c, --[no-]committer  group by committer rather than author\n    -n, --[no-]numbered   sort output according to the number of commits per author\n    -s, --[no-]summary    suppress commit descriptions, only provides commit count\n    -e, --[no-]email      show the email address of each author\n    -w[<w>[,<i1>[,<i2>]]] linewrap output\n    --[no-]group <field>  group by field\n";
 
 pub(crate) struct ShortlogOptions<'a> {
+    pub(crate) oneline: bool,
     pub(crate) all: bool,
     pub(crate) author: Option<&'a str>,
+    pub(crate) pretty: Option<&'a str>,
+    pub(crate) encoding: Option<&'a str>,
+    pub(crate) abbrev_commit: bool,
     pub(crate) max_count: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
@@ -1874,6 +1878,20 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) email: bool,
     pub(crate) no_merges: bool,
+    pub(crate) do_walk: bool,
+    pub(crate) topo_order: bool,
+    pub(crate) date_order: bool,
+    pub(crate) author_date_order: bool,
+    pub(crate) left_right: bool,
+    pub(crate) right_only: bool,
+    pub(crate) cherry_pick: bool,
+    pub(crate) cherry_mark: bool,
+    pub(crate) boundary: bool,
+    pub(crate) children: bool,
+    pub(crate) parents: bool,
+    pub(crate) objects: bool,
+    pub(crate) graph: bool,
+    pub(crate) show_signature: bool,
     pub(crate) format: Option<&'a str>,
     pub(crate) date: Option<&'a str>,
     pub(crate) group: Vec<String>,
@@ -1890,6 +1908,10 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) extended_regexp: bool,
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
+    pub(crate) object_names: bool,
+    pub(crate) no_object_names: bool,
+    pub(crate) mailmap: bool,
+    pub(crate) source: bool,
     pub(crate) revs: Vec<String>,
 }
 
@@ -1918,8 +1940,12 @@ enum ShortlogPatternMode {
 
 pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let ShortlogOptions {
+        oneline,
         all,
         author,
+        pretty,
+        encoding,
+        abbrev_commit,
         max_count,
         since,
         until,
@@ -1928,6 +1954,20 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         summary,
         email,
         no_merges,
+        do_walk,
+        topo_order,
+        date_order,
+        author_date_order,
+        left_right,
+        right_only,
+        cherry_pick,
+        cherry_mark,
+        boundary,
+        children,
+        parents,
+        objects,
+        graph,
+        show_signature,
         format,
         date,
         group,
@@ -1944,10 +1984,44 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         extended_regexp,
         fixed_strings,
         perl_regexp,
+        object_names,
+        no_object_names,
+        mailmap,
+        source,
         revs,
     } = options;
+    let _accepted_oneline = oneline;
+    let _accepted_pretty = pretty;
+    let _accepted_encoding = encoding;
+    let _accepted_abbrev_commit = abbrev_commit;
+    let _accepted_do_walk = do_walk;
+    let _accepted_topo_order = topo_order;
+    let _accepted_date_order = date_order;
+    let _accepted_author_date_order = author_date_order;
+    let _accepted_left_right = left_right;
+    let _accepted_right_only = right_only;
+    let _accepted_cherry_pick = cherry_pick;
+    let _accepted_cherry_mark = cherry_mark;
+    let _accepted_boundary = boundary;
+    let _accepted_children = children;
+    let _accepted_parents = parents;
+    let _accepted_objects = objects;
+    let _accepted_graph = graph;
+    let _accepted_show_signature = show_signature;
     if stdin {
         return Err(shortlog_unknown_option("--stdin"));
+    }
+    if object_names {
+        return Err(shortlog_unknown_option("--object-names"));
+    }
+    if no_object_names {
+        return Err(shortlog_unknown_option("--no-object-names"));
+    }
+    if mailmap {
+        return Err(shortlog_unknown_option("--mailmap"));
+    }
+    if source {
+        return Err(shortlog_unknown_option("--source"));
     }
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {

@@ -591,6 +591,8 @@ pub enum Command {
         file: Option<PathBuf>,
     },
     Shortlog {
+        #[arg(long = "oneline", action = ArgAction::SetTrue)]
+        oneline: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
         #[arg(
@@ -609,6 +611,12 @@ pub enum Command {
         tags: Vec<String>,
         #[arg(long = "author")]
         author: Option<String>,
+        #[arg(long = "pretty")]
+        pretty: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
         #[arg(short = 'c', long = "committer", action = ArgAction::SetTrue)]
         committer: bool,
         #[arg(short = 'n', long = "numbered", action = ArgAction::SetTrue)]
@@ -619,6 +627,34 @@ pub enum Command {
         email: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
         no_merges: bool,
+        #[arg(long = "do-walk", action = ArgAction::SetTrue)]
+        do_walk: bool,
+        #[arg(long = "topo-order", action = ArgAction::SetTrue)]
+        topo_order: bool,
+        #[arg(long = "date-order", action = ArgAction::SetTrue)]
+        date_order: bool,
+        #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
+        author_date_order: bool,
+        #[arg(long = "left-right", action = ArgAction::SetTrue)]
+        left_right: bool,
+        #[arg(long = "right-only", action = ArgAction::SetTrue)]
+        right_only: bool,
+        #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
+        cherry_pick: bool,
+        #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
+        cherry_mark: bool,
+        #[arg(long = "boundary", action = ArgAction::SetTrue)]
+        boundary: bool,
+        #[arg(long = "children", action = ArgAction::SetTrue)]
+        children: bool,
+        #[arg(long = "parents", action = ArgAction::SetTrue)]
+        parents: bool,
+        #[arg(long = "objects", action = ArgAction::SetTrue)]
+        objects: bool,
+        #[arg(long = "graph", action = ArgAction::SetTrue)]
+        graph: bool,
+        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+        show_signature: bool,
         #[arg(long = "format")]
         format: Vec<String>,
         #[arg(long = "date")]
@@ -670,6 +706,14 @@ pub enum Command {
             overrides_with_all = ["extended_regexp", "fixed_strings"]
         )]
         perl_regexp: bool,
+        #[arg(long = "object-names", action = ArgAction::SetTrue)]
+        object_names: bool,
+        #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
+        no_object_names: bool,
+        #[arg(long = "mailmap", action = ArgAction::SetTrue)]
+        mailmap: bool,
+        #[arg(long = "source", action = ArgAction::SetTrue)]
+        source: bool,
         #[arg(long = "max-count")]
         max_count: Option<String>,
         #[arg(long = "since", alias = "after")]

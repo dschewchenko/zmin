@@ -609,6 +609,70 @@ fn shortlog_history_selector_and_filter_batch_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_option_surface_batch_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "one",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Bob",
+        "b@example.test",
+        "1700000600 +0000",
+        "two",
+    );
+
+    for args in [
+        ["shortlog", "--do-walk", "HEAD"].as_slice(),
+        ["shortlog", "--topo-order", "HEAD"].as_slice(),
+        ["shortlog", "--date-order", "HEAD"].as_slice(),
+        ["shortlog", "--author-date-order", "HEAD"].as_slice(),
+        ["shortlog", "--left-right", "HEAD"].as_slice(),
+        ["shortlog", "--right-only", "HEAD"].as_slice(),
+        ["shortlog", "--cherry-pick", "HEAD"].as_slice(),
+        ["shortlog", "--cherry-mark", "HEAD"].as_slice(),
+        ["shortlog", "--boundary", "HEAD"].as_slice(),
+        ["shortlog", "--children", "HEAD"].as_slice(),
+        ["shortlog", "--parents", "HEAD"].as_slice(),
+        ["shortlog", "--objects", "HEAD"].as_slice(),
+        ["shortlog", "--graph", "HEAD"].as_slice(),
+        ["shortlog", "--show-signature", "HEAD"].as_slice(),
+        ["shortlog", "--abbrev-commit", "HEAD"].as_slice(),
+        ["shortlog", "--oneline", "HEAD"].as_slice(),
+        ["shortlog", "--pretty=oneline", "HEAD"].as_slice(),
+        ["shortlog", "--encoding=UTF-8", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["shortlog", "--object-names", "HEAD"].as_slice(),
+        ["shortlog", "--no-object-names", "HEAD"].as_slice(),
+        ["shortlog", "--mailmap", "HEAD"].as_slice(),
+        ["shortlog", "--source", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_family_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

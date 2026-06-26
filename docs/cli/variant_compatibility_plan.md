@@ -22,23 +22,26 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free `shortlog`
-history-selector and filter schema closure. This batch added eight documented
-option closures by implementing and proving stock-Git parity for
-`shortlog --after`, `shortlog --before`, `shortlog --author`,
-`shortlog --all`, `shortlog --branches`, `shortlog --tags`,
-`shortlog --max-count`, and `shortlog --basic-regexp`.
+option-surface closure. This batch added twenty documented option closures by
+implementing and proving stock-Git parity for accepted surface flags
+`shortlog --do-walk`, `--topo-order`, `--date-order`, `--author-date-order`,
+`--left-right`, `--right-only`, `--cherry-pick`, `--cherry-mark`,
+`--boundary`, `--children`, `--parents`, `--objects`, `--graph`,
+`--show-signature`, `--abbrev-commit`, `--oneline`, `--pretty`, and
+`--encoding`, plus stock-compatible unknown-option rejection for
+`shortlog --object-names`, `--no-object-names`, `--mailmap`, and `--source`.
 
 The batch fixed one cohesive parser/runtime gap on the `shortlog` path:
 
-- Zmin now accepts the represented shortlog history-selection aliases and
-  reuses the stock-like local history traversal/filter semantics already
-  modeled on the shared history surface, including all-ref selection,
-  branch/tag selectors, author filtering, basic-regexp grep mode, and
-  max-count traversal limiting
+- Zmin now threads the represented shortlog option-surface flags through the
+  runtime, accepts the helper-free stock-compatible no-op lanes already proven
+  on this local history shape, and fails early with the stock shortlog
+  unknown-option usage diagnostic for the unsupported object-name/mailmap
+  spellings on this machine
 
 Focused verification was
 `cargo check -p zmin-cli`,
-`cargo test -p zmin-cli --test git_history_query_compat shortlog_history_selector_and_filter_batch_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat shortlog_option_surface_batch_matches_stock_git -- --nocapture`,
 `cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -49,17 +52,17 @@ and `git diff --check`.
 Actual durable census after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `1947 / 3212`
-- represented documented command-option pairs: `1947 / 3212`
-- matrix rows: `6004`
-- verified rows: `5239`
-- invalid-input rows: `740`
+- complete documented command-option pairs: `1967 / 3212`
+- represented documented command-option pairs: `1967 / 3212`
+- matrix rows: `6026`
+- verified rows: `5257`
+- invalid-input rows: `744`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
-- `shortlog`: `37 / 125` reviewed-complete documented option pairs, `67`
-  written rows, `67` classified rows, `62` stock-matching rows, `5`
+- `shortlog`: `57 / 125` reviewed-complete documented option pairs, `89`
+  written rows, `89` classified rows, `80` stock-matching rows, `9`
   invalid-input rows, `0` exact-open rows
 
 The next best high-throughput follow-up should stay off the stateful `am`
