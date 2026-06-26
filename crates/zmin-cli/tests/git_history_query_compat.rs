@@ -811,6 +811,40 @@ fn log_notes_and_abbrev_commit_family_matches_stock_git() {
 }
 
 #[test]
+fn show_notes_aliases_and_abbrev_commit_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "1700000000 +0000",
+        "feat: base",
+    );
+    git(repo.path(), ["notes", "add", "-m", "note body"]);
+
+    for args in [
+        ["show", "--notes", "HEAD"].as_slice(),
+        ["show", "--no-notes", "HEAD"].as_slice(),
+        ["show", "--show-notes", "HEAD"].as_slice(),
+        ["show", "--standard-notes", "HEAD"].as_slice(),
+        ["show", "--show-notes-by-default", "HEAD"].as_slice(),
+        ["show", "--no-standard-notes", "HEAD"].as_slice(),
+        ["show", "--abbrev-commit", "HEAD"].as_slice(),
+        ["show", "--oneline", "--no-abbrev-commit", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_line_range_forms_match_stock_git() {
     let git_repo = blame_line_range_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

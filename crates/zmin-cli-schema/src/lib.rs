@@ -3579,6 +3579,22 @@ pub enum Command {
         name_only: bool,
         #[arg(long = "name-status", action = ArgAction::SetTrue)]
         name_status: bool,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
+        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+        show_notes: bool,
+        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+        show_notes_by_default: bool,
+        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+        standard_notes: bool,
+        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+        no_standard_notes: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "root", action = ArgAction::SetTrue)]
         root: bool,
         #[arg(short = 'c', action = ArgAction::SetTrue)]

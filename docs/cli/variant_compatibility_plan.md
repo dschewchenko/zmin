@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1770/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1778/3212 represented doc-option pairs / 5777 written rows / 5022/5777 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1778/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1786/3212 represented doc-option pairs / 5785 written rows / 5030/5785 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,34 +300,38 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git log` notes plus
+The latest completed slice is a helper-free `git show` notes-alias plus
 abbrev-commit documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `--notes`, `--no-notes`,
-`--abbrev-commit`, and the order-sensitive `--oneline --no-abbrev-commit`
-lane, including custom `%N` note rendering, default note suppression, default
-medium-format commit-header abbreviation, and full oneline hash restoration
-when `--no-abbrev-commit` follows `--oneline`.
+Zmin now accepts and matches stock Git for `show --notes`, `--no-notes`,
+`--show-notes`, `--standard-notes`, `--show-notes-by-default`,
+`--no-standard-notes`, `--abbrev-commit`, and
+`--oneline --no-abbrev-commit`, including the current stock default-note
+show lane, stock note suppression aliases, the current standalone
+`standard-notes` and `no-standard-notes` no-note lanes on this machine,
+default commit-header abbreviation, and full oneline hash restoration.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat log_notes_and_abbrev_commit_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat show_notes_aliases_and_abbrev_commit_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_object_plumbing_compat show_matches_stock_git_for_raw_commits_trees_blobs_and_tags -- --nocapture`,
+`cargo test -p zmin-cli --test git_diff_compat show_patch_with_stat_matches_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(show|summary)\t'`, and
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1770/3212` complete documented option pairs,
-`1778/3212` represented documented option pairs, `5777` written rows,
-`5022` verified rows, `12` open rows, and `720` invalid-input rows.
-`log` now sits at `47/131` reviewed-complete documented option pairs,
-`141` written rows, `141` classified rows, `135` stock-matching rows,
-`6` invalid-input rows, and `0` exact-open rows on its current modeled
-surface. The next bounded high-throughput follow-up should stay on shared
-history-query surfaces and prioritize another helper-free family with broad
-reuse, such as `log` topology and object-selection filters or a `rev-list`
-object/filter expansion, rather than returning to already saturated `tag`,
-`clone`, `init`, `fetch`, `pull`, or `shortlog` lanes.
+`1778/3212` complete documented option pairs,
+`1786/3212` represented documented option pairs, `5785` written rows,
+`5030` verified rows, `12` open rows, and `720` invalid-input rows.
+`show` now sits at `11/15` reviewed-complete documented option pairs,
+`46` written rows, `46` classified rows, `46` stock-matching rows,
+`0` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next bounded high-throughput follow-up can either finish the
+small remaining `show` tail (`--encoding`, `--expand-tabs`,
+`--no-expand-tabs`, `--show-signature`) or return to a denser shared
+history-query family such as `log` topology/object-selection filters or a
+`rev-list` object/filter expansion.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

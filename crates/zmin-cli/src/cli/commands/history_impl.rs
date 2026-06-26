@@ -7841,6 +7841,14 @@ pub(crate) struct ShowOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) name_only: bool,
     pub(crate) name_status: bool,
+    pub(crate) notes: bool,
+    pub(crate) no_notes: bool,
+    pub(crate) show_notes: bool,
+    pub(crate) show_notes_by_default: bool,
+    pub(crate) standard_notes: bool,
+    pub(crate) no_standard_notes: bool,
+    pub(crate) abbrev_commit: bool,
+    pub(crate) no_abbrev_commit: bool,
     pub(crate) root: bool,
     pub(crate) combined: bool,
     pub(crate) separate_merges: bool,
@@ -8035,13 +8043,13 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         summary: options.summary,
         name_only: options.name_only,
         name_status: options.name_status,
-        notes: false,
-        no_notes: false,
+        notes: options.notes || options.show_notes || options.show_notes_by_default,
+        no_notes: options.no_notes || options.standard_notes || options.no_standard_notes,
         diff_required: false,
         decorate: None,
         clear_decorations: false,
-        abbrev_commit: false,
-        no_abbrev_commit: false,
+        abbrev_commit: options.abbrev_commit,
+        no_abbrev_commit: options.no_abbrev_commit,
         pickaxe_string: None,
         pickaxe_regex: None,
         pickaxe_regex_mode: false,
@@ -8148,13 +8156,39 @@ fn show_object(
         GitObjectKind::Tree => show_tree_object(store, objectish, &object.id),
         GitObjectKind::Commit => {
             let commit = decode_commit(GitHashAlgorithm::Sha1, &object.content)?;
+            let repo = find_repo()?;
+            let notes = LogNotes::load(
+                &repo,
+                store,
+                show_notes_enabled(
+                    options.notes,
+                    options.no_notes,
+                    options.show_notes,
+                    options.show_notes_by_default,
+                    options.standard_notes,
+                    options.no_standard_notes,
+                ),
+            )?;
+            let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
+            let abbrev_len = if options.no_abbrev_commit {
+                GitHashAlgorithm::Sha1.digest_len() * 2
+            } else {
+                default_abbrev_len(store)?
+            };
             if options.no_patch {
                 if show_raw_format_requested(&options) {
                     return show_raw_commit(&object.id, &object.content);
                 }
                 let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
-                let rendered =
-                    format.render(&object.id, &commit, false, default_abbrev_len(store)?)?;
+                let rendered = format.render_with_context_default_date(
+                    &object.id,
+                    &commit,
+                    false,
+                    abbrev_len,
+                    default_commit_abbrev,
+                    &LogDecorations::empty(),
+                    &notes,
+                )?;
                 io::stdout().write_all(rendered.as_bytes())?;
                 if format.terminates_lines() {
                     io::stdout().write_all(b"\n")?;
@@ -8167,7 +8201,6 @@ fn show_object(
                     return Ok(());
                 }
                 io::stdout().write_all(b"\n")?;
-                let repo = find_repo()?;
                 return show_commit_diff(
                     &repo,
                     store,
@@ -8184,10 +8217,7 @@ fn show_object(
             }
             let format = LogFormat::parse(options.oneline, options.format, options.pretty)?;
             if options.separate_merges && commit.parents.len() > 1 {
-                let repo = find_repo()?;
                 let decorations = LogDecorations::empty();
-                let notes = LogNotes::empty();
-                let abbrev_len = default_abbrev_len(store)?;
                 let diff_format = options.diff_format();
                 let mut out = io::stdout().lock();
                 for (idx, parent) in commit.parents.iter().enumerate() {
@@ -8197,7 +8227,7 @@ fn show_object(
                         Some(parent),
                         false,
                         abbrev_len,
-                        false,
+                        default_commit_abbrev,
                         &decorations,
                         &notes,
                         LogDateMode::Builtin(BlameDateMode::Default),
@@ -8232,7 +8262,15 @@ fn show_object(
                 }
                 return Ok(());
             }
-            let rendered = format.render(&object.id, &commit, false, default_abbrev_len(store)?)?;
+            let rendered = format.render_with_context_default_date(
+                &object.id,
+                &commit,
+                false,
+                abbrev_len,
+                default_commit_abbrev,
+                &LogDecorations::empty(),
+                &notes,
+            )?;
             io::stdout().write_all(rendered.as_bytes())?;
             if format.terminates_lines() {
                 io::stdout().write_all(b"\n")?;
@@ -8268,7 +8306,6 @@ fn show_object(
             if commit.parents.len() > 1 && format.terminates_lines() && !format.separates_patch() {
                 io::stdout().write_all(b"\n")?;
             }
-            let repo = find_repo()?;
             show_commit_diff(
                 &repo,
                 store,
@@ -8322,6 +8359,20 @@ fn show_commit_diff_has_entries(
         new_source: DiffSideSource::Index,
     };
     Ok(!apply_pickaxe_filter(&context, entries, pickaxe_options)?.is_empty())
+}
+
+fn show_notes_enabled(
+    _notes: bool,
+    no_notes: bool,
+    _show_notes: bool,
+    _show_notes_by_default: bool,
+    standard_notes: bool,
+    no_standard_notes: bool,
+) -> bool {
+    if no_notes || standard_notes || no_standard_notes {
+        return false;
+    }
+    true
 }
 
 fn show_tree_object(store: &LooseObjectStore, objectish: &str, tree_id: &ObjectId) -> Result<()> {

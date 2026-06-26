@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git show`
+notes-alias plus abbrev-commit documented-option family expansion on the
+current local lane. The selected change added eight exact stock-Git `show`
+rows for `--notes`, `--no-notes`, `--show-notes`, `--standard-notes`,
+`--show-notes-by-default`, `--no-standard-notes`, `--abbrev-commit`, and
+`--oneline --no-abbrev-commit`, then promoted eight represented documented
+options into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+Expected delta was `+8` matrix rows, `+8` complete documented option pairs,
+`+8` represented documented option pairs, `+8` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5785` matrix rows, `5030` verified rows, `720`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1778/3212` complete documented option pairs, and
+`1786/3212` represented documented option pairs. `show` now sits at
+`11/15` reviewed-complete documented option pairs with `46/46` classified
+rows, `46` stock-matching rows, `0` invalid-input rows, and `0`
+exact-open rows on the current modeled surface. The next default follow-up
+can either finish the small remaining `show` tail around encoding, tab
+expansion and signature display, or return to a denser shared history-query
+family such as `log` topology/object selection or `rev-list` object/filter
+expansion.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git log`
 notes plus abbrev-commit documented-option family expansion on the current
 local lane. The selected change added four exact stock-Git `log` rows for
