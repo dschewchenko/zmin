@@ -7106,6 +7106,46 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+2` represented doc-option pairs, `+0` implemented-but-unverified
 schema rows and `+0` remaining checklist rows.
 
+## 2026-06-26 - checkout pathspec-file family
+
+Expected movement:
+
+- behavior rows: `+4`
+- closed rows: `+3`
+- open rows: `+0`
+- invalid-input rows: `+1`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+2`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git checkout --pathspec-from-file=paths.txt`
+- `git checkout --pathspec-from-file paths.txt`
+- `git checkout --pathspec-from-file paths.nul --pathspec-file-nul`
+- `git checkout --pathspec-file-nul`
+
+This batch closes the helper-free local `git checkout` pathspec-file family by
+adding `--pathspec-from-file` and `--pathspec-file-nul` to the schema/runtime
+and proving stock parity for LF-delimited and NUL-delimited tracked-path
+restore plus the missing-`--pathspec-from-file` rejection. The focused
+evidence uses `git_worktree_state_compat` against stock Git 2.53.0 through the
+shared `stock_git_bin` test helper.
+
+Actual post-import movement matched the durable shape with one backlog nuance:
+`+4` behavior rows, `+3` closed rows, `+0` open rows, `+1` invalid-input row,
+`+0` represented oracle functions, `+0` missing-or-unclassified oracle
+functions, `+0` commands with rows, `+2` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows, and `+0` remaining checklist rows.
+The `checkout` pathspec options moved from `doc_option_not_in_zmin_schema` to
+`doc_option_expansion_required`, so they remain in the checklist until the
+full newer-option family covers negations, repeated forms and other stateful
+lanes.
+
 ## 2026-06-25 - repack cruft-family schema-tail closure
 
 Expected movement:

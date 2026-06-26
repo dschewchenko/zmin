@@ -2087,6 +2087,10 @@ pub enum Command {
         create_reflog: bool,
         #[arg(long = "orphan")]
         orphan: Option<String>,
+        #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
+        pathspec_from_file: Option<PathBuf>,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
+        pathspec_file_nul: bool,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

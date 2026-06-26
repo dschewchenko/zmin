@@ -304,6 +304,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             reset_create,
             create_reflog,
             orphan,
+            pathspec_from_file,
+            pathspec_file_nul,
             args,
         } => super::worktree_commands::checkout(
             force,
@@ -316,6 +318,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             reset_create,
             create_reflog,
             orphan,
+            pathspec_from_file,
+            pathspec_file_nul,
             args,
         ),
         runtime::Command::CheckoutIndex {

@@ -10224,8 +10224,24 @@ pub(crate) fn checkout(
     reset_create: Option<String>,
     create_reflog: bool,
     orphan: Option<String>,
-    args: Vec<String>,
+    pathspec_from_file: Option<PathBuf>,
+    pathspec_file_nul: bool,
+    mut args: Vec<String>,
 ) -> Result<()> {
+    let has_pathspec_file = pathspec_from_file.is_some();
+    if let Some(pathspec_file) = pathspec_from_file {
+        let loaded = read_pathspec_file(&pathspec_file, pathspec_file_nul)?;
+        args.extend(
+            loaded
+                .into_iter()
+                .map(|path| path.into_os_string().to_string_lossy().into_owned()),
+        );
+    } else if pathspec_file_nul {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--pathspec-file-nul' requires '--pathspec-from-file'".into(),
+        });
+    }
     let branch_modes = [create.is_some(), reset_create.is_some(), orphan.is_some()]
         .into_iter()
         .filter(|mode| *mode)
@@ -10281,7 +10297,7 @@ pub(crate) fn checkout(
     if let Some(branch) = orphan {
         return checkout_orphan(force, &branch);
     }
-    let explicit_pathspec_separator = checkout_raw_args_have_separator();
+    let explicit_pathspec_separator = checkout_raw_args_have_separator() || has_pathspec_file;
     if detach && args.len() > 1 {
         resolve_checkout_detach_target(&args[0])?;
         let path_arg = if args.get(1).is_some_and(|arg| arg == "--") {

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1574/3156 represented doc-option pairs / 5592 written rows / 4870/5592 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1576/3156 represented doc-option pairs / 5596 written rows / 4873/5596 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,25 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git annotate` documented-option
-family closure plus reviewed-complete promotion. Zmin now exposes and matches
-stock Git on the current modeled helper-free local lanes for all documented
-`annotate` option spellings, including porcelain and incremental modes,
-alternate contents, progress and color toggles, date and raw-timestamp
-rendering, line-range and ancestry-file selection, first-parent and
-ignore-revision acceptance lanes, and the current short-help and reverse
-invalid-input shapes.
+The latest completed slice is a helper-free `git checkout` pathspec-file
+family expansion. Zmin now exposes and matches stock Git on the current
+modeled helper-free local `checkout --pathspec-from-file` and
+`checkout --pathspec-file-nul` lanes for LF-delimited and NUL-delimited
+tracked-path restores, plus the stock fatal rejection when
+`--pathspec-file-nul` appears without `--pathspec-from-file`.
 
 Current counts are `106/151` complete command matrices,
 `1540/3156` complete documented option pairs,
-`1574/3156` represented documented option pairs, `5592` written rows,
-`4870` verified rows, `12` open rows, and `707` invalid-input rows.
-`annotate` now sits at `25/25` reviewed-complete documented option pairs with
-`26/26` classified rows, `24` stock-matching rows, `2` invalid-input rows,
-and `0` exact-open written rows on the current modeled surface. The next
-bounded high-throughput follow-up should return to another dense helper-free
-family from the refreshed census queue rather than spending a full iteration
-on the lone config-driven `rev-parse --exclude-hidden` micro-tail.
+`1576/3156` represented documented option pairs, `5596` written rows,
+`4873` verified rows, `12` open rows, and `708` invalid-input rows.
+`checkout` now sits at `14/34` represented documented option pairs with
+`40/40` written rows, `39/40` classified rows, `37` stock-matching rows,
+`2` invalid-input rows, and `0` exact-open written rows on the current
+modeled pathspec/branch surface. The next bounded high-throughput follow-up
+should either continue another modern `checkout` documented family with the
+2.50+/2.53 local stock-Git oracles now confirmed, or move to the next dense
+helper-free family from the refreshed census queue.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

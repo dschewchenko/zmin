@@ -224,6 +224,93 @@ fn checkout_separator_pathspec_omits_updated_paths_like_stock_git() {
 }
 
 #[test]
+fn checkout_pathspec_from_file_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+        fs::write(repo.join("b.txt"), b"world\n").expect("write b");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "initial"]);
+        fs::remove_file(repo.join("a.txt")).expect("remove a");
+        fs::remove_file(repo.join("b.txt")).expect("remove b");
+        fs::write(repo.join("paths.txt"), b"a.txt\nb.txt\n").expect("write pathspec file");
+        fs::write(repo.join("paths.nul"), b"a.txt\0b.txt\0").expect("write nul pathspec file");
+    }
+
+    assert_eq!(
+        command_output(
+            "git",
+            git_repo.path(),
+            &["checkout", "--pathspec-from-file=paths.txt"],
+            "git",
+        ),
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["checkout", "--pathspec-from-file=paths.txt"],
+            "zmin",
+        )
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+        fs::read(git_repo.path().join("a.txt")).expect("read git a")
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("b.txt")).expect("read zmin b"),
+        fs::read(git_repo.path().join("b.txt")).expect("read git b")
+    );
+
+    fs::remove_file(git_repo.path().join("a.txt")).expect("remove git a again");
+    fs::remove_file(git_repo.path().join("b.txt")).expect("remove git b again");
+    fs::remove_file(zmin_repo.path().join("a.txt")).expect("remove zmin a again");
+    fs::remove_file(zmin_repo.path().join("b.txt")).expect("remove zmin b again");
+
+    assert_eq!(
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "checkout",
+                "--pathspec-from-file",
+                "paths.nul",
+                "--pathspec-file-nul",
+            ],
+            "git",
+        ),
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "checkout",
+                "--pathspec-from-file",
+                "paths.nul",
+                "--pathspec-file-nul",
+            ],
+            "zmin",
+        )
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a nul"),
+        fs::read(git_repo.path().join("a.txt")).expect("read git a nul")
+    );
+    assert_eq!(
+        fs::read(zmin_repo.path().join("b.txt")).expect("read zmin b nul"),
+        fs::read(git_repo.path().join("b.txt")).expect("read git b nul")
+    );
+}
+
+#[test]
+fn checkout_pathspec_file_nul_requires_pathspec_from_file_like_stock_git() {
+    let repo = committed_repo();
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["checkout", "--pathspec-file-nul"]),
+        git_failure_output(repo.path(), &["checkout", "--pathspec-file-nul"])
+    );
+}
+
+#[test]
 fn checkout_recurse_submodules_flag_keeps_dot_pathspec_like_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();
