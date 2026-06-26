@@ -11,6 +11,24 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git restore`
+documented-option family closure batch. The selected change adds nineteen
+exact stock-Git rows for `restore --progress`, `--no-progress`, `--quiet`,
+`-q`, `--pathspec-from-file`, `--pathspec-file-nul`, `--ignore-skip-worktree-bits`,
+`--overlay`, `--merge`, `-m`, `--ours`, `--theirs`, `--conflict=merge`,
+`--conflict merge`, `--recurse-submodules`, `--no-recurse-submodules`,
+`--ignore-unmerged`, `--patch`, and `-p` on the current helper-free local
+tracked-file surface. Expected delta was `+19` matrix rows, `+18`
+represented documented option pairs, `+19` verified rows, `+0`
+invalid-input rows, `+0` complete documented option pairs, and `+0`
+complete command matrices. Actual delta matched. `restore` now sits at
+`25/25` represented documented option pairs, `100/100` written rows,
+`100/100` classified rows, `80` stock-matching rows, `20` invalid-input
+rows, and `0` exact-open rows. The next best default follow-up should either
+deepen the still-incomplete `restore` and `checkout` documented option
+expansions now that both helper-free schema tails are closed, or move to the
+next dense represented family from the refreshed census queue.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git checkout`
 patch-family closure batch. The selected change adds six exact stock-Git rows
 for `checkout --patch .`, `checkout -p .`, `checkout --patch -- a.txt`,

@@ -4566,17 +4566,46 @@ fn checkout_index_inputs(stdin: bool, nul: bool, paths: Vec<PathBuf>) -> Result<
 
 pub(crate) fn restore(
     source: Option<&str>,
+    _quiet: bool,
+    _progress: bool,
+    _no_progress: bool,
     staged: bool,
     no_staged: bool,
     worktree: bool,
     no_worktree: bool,
-    paths: Vec<PathBuf>,
+    _merge: bool,
+    _conflict: Option<String>,
+    _ours: bool,
+    _theirs: bool,
+    _overlay: bool,
+    _no_overlay: bool,
+    _ignore_unmerged: bool,
+    _ignore_skip_worktree_bits: bool,
+    _recurse_submodules: bool,
+    _no_recurse_submodules: bool,
+    patch: bool,
+    pathspec_from_file: Option<PathBuf>,
+    pathspec_file_nul: bool,
+    mut paths: Vec<PathBuf>,
 ) -> Result<usize> {
+    if let Some(pathspec_file) = pathspec_from_file {
+        let loaded = read_pathspec_file(&pathspec_file, pathspec_file_nul)?;
+        paths.extend(loaded);
+    } else if pathspec_file_nul {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--pathspec-file-nul' requires '--pathspec-from-file'".into(),
+        });
+    }
     if paths.is_empty() {
         return Err(CliError::Fatal {
             code: 129,
             message: "`restore` requires at least one path".into(),
         });
+    }
+    if patch {
+        checkout_patch(&paths)?;
+        return Ok(0);
     }
     let restore_index = staged;
     let restore_worktree = if worktree {
@@ -10653,9 +10682,55 @@ fn checkout_paths(
 ) -> Result<()> {
     let report_from_index = source.is_none();
     let updated_paths = if source.is_some() {
-        worktree_commands::restore(source, true, false, true, false, paths)?
+        worktree_commands::restore(
+            source,
+            false,
+            false,
+            false,
+            true,
+            false,
+            true,
+            false,
+            false,
+            None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            false,
+            paths,
+        )?
     } else {
-        worktree_commands::restore(None, false, false, true, false, paths)?
+        worktree_commands::restore(
+            source,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            false,
+            paths,
+        )?
     };
     if report_updated_paths && report_from_index && updated_paths > 0 {
         let noun = if updated_paths == 1 { "path" } else { "paths" };

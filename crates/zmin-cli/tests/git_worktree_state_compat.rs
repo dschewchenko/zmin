@@ -1612,6 +1612,108 @@ fn restore_source_can_remove_paths_from_index_and_worktree() {
 }
 
 #[test]
+fn restore_documented_option_family_matches_stock_git() {
+    for args in [
+        ["restore", "--progress", "a.txt"].as_slice(),
+        ["restore", "--no-progress", "a.txt"].as_slice(),
+        ["restore", "--quiet", "a.txt"].as_slice(),
+        ["restore", "-q", "a.txt"].as_slice(),
+        ["restore", "--ignore-skip-worktree-bits", "a.txt"].as_slice(),
+        ["restore", "--overlay", "a.txt"].as_slice(),
+        ["restore", "--merge", "a.txt"].as_slice(),
+        ["restore", "-m", "a.txt"].as_slice(),
+        ["restore", "--ours", "a.txt"].as_slice(),
+        ["restore", "--theirs", "a.txt"].as_slice(),
+        ["restore", "--conflict=merge", "a.txt"].as_slice(),
+        ["restore", "--conflict", "merge", "a.txt"].as_slice(),
+        ["restore", "--recurse-submodules", "a.txt"].as_slice(),
+        ["restore", "--no-recurse-submodules", "a.txt"].as_slice(),
+        ["restore", "--ignore-unmerged", "a.txt"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            configure_identity(repo);
+            fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "initial"]);
+            fs::write(repo.join("a.txt"), b"changed\n").expect("modify a");
+        }
+
+        assert_eq!(
+            command_any_output("git", git_repo.path(), args, "git"),
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+            fs::read(git_repo.path().join("a.txt")).expect("read git a"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"]),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn restore_pathspec_file_and_patch_families_match_stock_git() {
+    for (args, stdin) in [
+        (["restore", "--pathspec-from-file=paths.txt"].as_slice(), ""),
+        (
+            [
+                "restore",
+                "--pathspec-from-file",
+                "paths.nul",
+                "--pathspec-file-nul",
+            ]
+            .as_slice(),
+            "",
+        ),
+        (["restore", "--patch", "a.txt"].as_slice(), "q\n"),
+        (["restore", "-p", "a.txt"].as_slice(), "q\n"),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            configure_identity(repo);
+            fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "initial"]);
+            fs::write(repo.join("a.txt"), b"changed\n").expect("modify a");
+            fs::write(repo.join("paths.txt"), b"a.txt\n").expect("write pathspec file");
+            fs::write(repo.join("paths.nul"), b"a.txt\0").expect("write pathspec nul file");
+        }
+
+        if stdin.is_empty() {
+            assert_eq!(
+                command_any_output("git", git_repo.path(), args, "git"),
+                command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+                "args: {args:?}"
+            );
+        } else {
+            assert_eq!(
+                command_any_output_with_stdin("git", git_repo.path(), args, stdin, "git"),
+                command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, stdin, "zmin"),
+                "args: {args:?}, stdin: {stdin:?}"
+            );
+        }
+        assert_eq!(
+            fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+            fs::read(git_repo.path().join("a.txt")).expect("read git a"),
+            "args: {args:?}, stdin: {stdin:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"]),
+            "args: {args:?}, stdin: {stdin:?}"
+        );
+    }
+}
+
+#[test]
 fn reset_modes_match_stock_git_state() {
     for mode in ["--soft", "--mixed", "--hard"] {
         let git_repo = two_commit_repo();
