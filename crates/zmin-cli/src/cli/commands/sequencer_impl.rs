@@ -911,6 +911,7 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         no_notes: false,
         show_notes: false,
         show_notes_by_default: false,
+        standard_notes: false,
         no_standard_notes: false,
         diff_required: false,
         pickaxe_string: None,

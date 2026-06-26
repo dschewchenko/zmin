@@ -5825,6 +5825,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) no_notes: bool,
     pub(crate) show_notes: bool,
     pub(crate) show_notes_by_default: bool,
+    pub(crate) standard_notes: bool,
     pub(crate) no_standard_notes: bool,
     pub(crate) diff_required: bool,
     pub(crate) decorate: Option<&'a str>,
@@ -6253,7 +6254,7 @@ pub(crate) fn log(options: LogOptions<'_>) -> Result<()> {
 fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _trace = phase_trace("log.total");
     let _ = options.count;
-    let _ = options.quiet;
+    let _accepted_quiet = options.quiet;
     let (revs, max_count, parsed_zero) =
         split_log_revs_and_count(options.revs.clone(), options.max_count)?;
     let zero = options.zero || parsed_zero;
@@ -6405,7 +6406,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         log_notes_enabled(
             &format,
             options.notes || options.show_notes || options.show_notes_by_default,
-            options.no_notes || options.no_standard_notes,
+            options.no_notes || options.standard_notes || options.no_standard_notes,
         ),
     )?;
     let pickaxe_options = PickaxeOptions {
@@ -6626,7 +6627,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 } else {
                     commit.parents.get(parent_index)
                 };
-                let rendered = format.render_with_from_parent(
+                let rendered = render_log_with_note_mode(
+                    &format,
                     &entry.id,
                     commit,
                     from_parent,
@@ -6638,6 +6640,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     &decorations,
                     &notes,
                     date_mode,
+                    options.standard_notes,
                 )?;
                 out.write_all(rendered.as_bytes())?;
                 if let Some(diff_format) = diff_format {
@@ -6694,9 +6697,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         } else {
             idx + 1 < commits.len()
         };
-        let rendered = format.render_with_context(
+        let rendered = render_log_with_note_mode(
+            &format,
             &entry.id,
             commit,
+            None,
             options.parents,
             abbrev_len,
             traversal_markers.get(&entry.id).copied(),
@@ -6705,6 +6710,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             &decorations,
             &notes,
             date_mode,
+            options.standard_notes,
         )?;
         out.write_all(rendered.as_bytes())?;
         let root_patch_separator =
@@ -8777,6 +8783,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         no_notes: options.no_notes || options.standard_notes || options.no_standard_notes,
         show_notes: false,
         show_notes_by_default: false,
+        standard_notes: false,
         no_standard_notes: false,
         diff_required: false,
         decorate: None,
@@ -9749,6 +9756,65 @@ fn render_rev_list_format(
     }
 }
 
+fn render_log_with_note_mode(
+    format: &LogFormat<'_>,
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    from_parent: Option<&ObjectId>,
+    parents: bool,
+    abbrev_len: usize,
+    marker: Option<HistoryTraversalMarker>,
+    default_commit_abbrev: bool,
+    expand_tabs: bool,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+    literal_standard_notes: bool,
+) -> Result<String> {
+    if literal_standard_notes
+        && let LogFormat::Custom { pattern, .. } = format
+        && log_format_uses_placeholder(pattern, 'N')
+    {
+        let literal_pattern = pattern.replace("%N", "%%N");
+        return render_log_format(
+            &literal_pattern,
+            id,
+            commit,
+            abbrev_len,
+            decorations,
+            notes,
+            date_mode,
+        );
+    }
+    if from_parent.is_some() {
+        return format.render_with_from_parent(
+            id,
+            commit,
+            from_parent,
+            parents,
+            abbrev_len,
+            marker,
+            default_commit_abbrev,
+            expand_tabs,
+            decorations,
+            notes,
+            date_mode,
+        );
+    }
+    format.render_with_context(
+        id,
+        commit,
+        parents,
+        abbrev_len,
+        marker,
+        default_commit_abbrev,
+        expand_tabs,
+        decorations,
+        notes,
+        date_mode,
+    )
+}
+
 #[derive(Debug, Clone, Copy)]
 enum RevListObjectFilter {
     BlobNone,
@@ -9964,7 +10030,6 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
     if quiet
-        && rendered_format.is_none()
         && !objects
         && !count
         && !parents

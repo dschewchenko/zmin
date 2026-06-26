@@ -11,27 +11,32 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-26 the latest completed batch is a helper-free `git rev-list`
-reflog/date/notes schema-tail parser-plus-evidence expansion on the current
+As of 2026-06-26 the latest completed batch is a helper-free shared
+`git log`/`git rev-list` notes-plus-quiet precedence expansion on the current
 local lane. The selected change added seven exact stock-Git rows for
-`rev-list --quiet`, `--relative-date`, `--reflog`, `--show-notes`,
-`--show-notes-by-default`, `--no-standard-notes`, and `--standard-notes`,
-covering the current stock empty-output `--quiet` lane, the long-form
-relative-date alias, the explicit `--format=%H` reflog-walk surface behind
-the long `--reflog` spelling, the stock unsupported-notes fatal for the
-show-notes aliases, and the current stock literal `%N` pretty-format lanes
-for `--no-standard-notes` and `--standard-notes`. Actual delta is `+7`
-matrix rows, `+0` complete documented option pairs, `+7` represented
-documented option pairs, `+5` verified rows, `+2` invalid-input rows, and
-`+0` complete command matrices. Current census counts are `5910` matrix rows,
-`5141` verified rows, `732` invalid-input rows, `12` exact-open rows,
-`146/151` complete command matrices, `1867/3212` complete documented option
-pairs, and `1888/3212` represented documented option pairs. `rev-list` now
-sits at `68/117` reviewed-complete documented option pairs with `112`
-written rows, `112` classified rows, `107` stock-matching rows, `5`
-invalid-input rows, and `0` exact-open rows on its current modeled surface.
-The next default follow-up should keep expanding the newly represented shared
-history-query tails rather than switching back to isolated one-row tails.
+`log --standard-notes`, `log --standard-notes --no-standard-notes`,
+`log --show-notes --no-standard-notes`, `log --quiet --format=%H`,
+`rev-list --quiet --format=%H`, `rev-list --standard-notes --no-standard-notes`,
+and `rev-list --show-notes --no-standard-notes`, covering the current stock
+literal `%N` custom-format lanes for `standard-notes` precedence, the stock
+blank note-suppressed `log --show-notes --no-standard-notes` lane, the stock
+empty-output `rev-list --quiet --format=%H` surface, and the stock
+unsupported-notes fatal even when `rev-list --show-notes` is followed by
+`--no-standard-notes`. Actual delta is `+7` matrix rows, `+0` complete
+documented option pairs, `+1` represented documented option pair, `+6`
+verified rows, `+1` invalid-input row, and `+0` complete command matrices.
+Current census counts are `5917` matrix rows, `5147` verified rows, `733`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1867/3212` complete documented option pairs, and
+`1889/3212` represented documented option pairs. `log` now sits at `71/131`
+reviewed-complete documented option pairs with `180` written rows, `179`
+classified rows, `169` stock-matching rows, `10` invalid-input rows, and `0`
+exact-open rows, while `rev-list` now sits at `68/117`
+reviewed-complete documented option pairs with `115` written rows, `115`
+classified rows, `109` stock-matching rows, `6` invalid-input rows, and `0`
+exact-open rows on their current modeled surfaces. The next default
+follow-up should keep expanding the newly represented shared history-query
+tails rather than switching back to isolated one-row tails.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
 `git rev-list` formatting/text documented-option family expansion on the

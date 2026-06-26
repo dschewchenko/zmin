@@ -3180,6 +3180,8 @@ pub enum Command {
         show_notes: bool,
         #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
         show_notes_by_default: bool,
+        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+        standard_notes: bool,
         #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
         no_standard_notes: bool,
         #[arg(
