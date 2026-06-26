@@ -882,6 +882,8 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         dense: false,
         sparse: false,
         show_pulls: false,
+        simplify_merges: false,
+        simplify_by_decoration: false,
         topo_order: false,
         date_order: false,
         author_date_order: false,

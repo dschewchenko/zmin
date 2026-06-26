@@ -8827,6 +8827,31 @@ rows. The remaining `fetch-pack` doc tail is now only the lighter
 follow-up can either finish `fetch-pack` outright or return to the heavier
 `multi-pack-index` bitmap/incremental family.
 As of 2026-06-26 the latest completed batch is a helper-free shared `git log`
+and `git rev-list` `simplify-merges` plus `simplify-by-decoration`
+documented-option family expansion on the current local lane. The selected
+change added six exact stock-Git rows for `log --simplify-merges`,
+`log --simplify-by-decoration`, the composed `log --simplify-merges
+--simplify-by-decoration` lane, `rev-list --simplify-merges`,
+`rev-list --simplify-by-decoration`, and the composed
+`rev-list --simplify-merges --simplify-by-decoration` lane, then promoted
+four represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+6` matrix rows, `+4` complete documented option pairs, `+4` represented
+documented option pairs, `+6` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Actual delta matched. Current census counts
+are `5823` matrix rows, `5067` verified rows, `720` invalid-input rows, `12`
+exact-open rows, `146/151` complete command matrices, `1812/3212` complete
+documented option pairs, and `1820/3212` represented documented option pairs.
+`log` now sits at `64/131` reviewed-complete documented option pairs with
+`160` written rows, `159` classified rows, `153` stock-matching rows, `6`
+invalid-input rows, and `0` exact-open rows, while `rev-list` now sits at
+`26/117` reviewed-complete documented option pairs with `47/47` classified
+rows, `47` stock-matching rows, `0` invalid-input rows, and `0` exact-open
+rows on their current modeled surfaces. The next default follow-up should
+move off this shared history-query topology tail and return to the next
+largest census-first represented family.
+
+As of 2026-06-26 the latest completed batch is a helper-free shared `git log`
 and `git rev-list` history-simplification acceptance plus ancestry-path
 documented-option family expansion on the current local lane. The selected
 change added twelve exact stock-Git rows for `log --full-history`,

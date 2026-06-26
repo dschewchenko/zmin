@@ -301,6 +301,23 @@ source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
 The latest completed slice is a helper-free shared `git log`/`git rev-list`
+`simplify-merges` plus `simplify-by-decoration` documented-option family
+expansion on the current local lane. Zmin now accepts and matches stock Git
+for `log --simplify-merges`, `log --simplify-by-decoration`,
+`rev-list --simplify-merges`, and `rev-list --simplify-by-decoration` on a
+decorated merge graph lane, including the stock topological simplification
+order and default-decoration filtering, both standalone and in combination.
+Focused gates were
+`cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_traversal_order_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_simplify_merges_and_decoration_match_stock_git -- --nocapture`,
+`cargo check -p zmin-cli --bin zmin --profile compat`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
+`git diff --check`.
+
+The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family
 expansion on the current local lane. Zmin now accepts and matches stock Git
 for `log --full-history`, `log --dense`, `log --sparse`,
@@ -320,36 +337,19 @@ Focused gates were
 `tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
 `git diff --check`.
 
-The previous completed slice was a helper-free shared `git log`/`git rev-list`
-traversal-order documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `log --topo-order`,
-`log --date-order`, `log --author-date-order`, `rev-list --topo-order`,
-`rev-list --date-order`, and `rev-list --author-date-order` on a modeled
-merge graph with intentionally diverged author and committer timestamps,
-including merge-tip-first topological release ordering and author-date
-preference once parent eligibility is satisfied.
-Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_traversal_order_family_matches_stock_git -- --nocapture`,
-`cargo check -p zmin-cli --bin zmin --profile compat`,
-`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
-`git diff --check`.
-
 Current counts are `146/151` complete command matrices,
-`1808/3212` complete documented option pairs,
-`1816/3212` represented documented option pairs, `5817` written rows,
-`5061` verified rows, `12` open rows, and `720` invalid-input rows.
-`log` now sits at `62/131` reviewed-complete documented option pairs with
-`157` written rows, `156` classified rows, `150` stock-matching rows, `6`
+`1812/3212` complete documented option pairs,
+`1820/3212` represented documented option pairs, `5823` written rows,
+`5067` verified rows, `12` open rows, and `720` invalid-input rows.
+`log` now sits at `64/131` reviewed-complete documented option pairs with
+`160` written rows, `159` classified rows, `153` stock-matching rows, `6`
 invalid-input rows, and `0` exact-open rows, while `rev-list` now sits at
-`24/117` reviewed-complete documented option pairs with `44/44` classified
-rows, `44` stock-matching rows, `0` invalid-input rows, and `0` exact-open
-rows. The next bounded high-throughput follow-up should move to the remaining
-shared history-query topology family centered on `simplify-merges` and
-`simplify-by-decoration`, rather than spending the next iteration on the
-one-row `show-signature` tail.
+`26/117` reviewed-complete documented option pairs with `47/47` classified
+rows, `47` stock-matching rows, `0` invalid-input rows, and `0` exact-open
+rows. The next bounded high-throughput follow-up should move off this shared
+history-query topology tail and return to the next largest census-first
+represented family, rather than spending the next iteration on the one-row
+`show-signature` tail.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

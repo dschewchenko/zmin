@@ -5799,6 +5799,8 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) dense: bool,
     pub(crate) sparse: bool,
     pub(crate) show_pulls: bool,
+    pub(crate) simplify_merges: bool,
+    pub(crate) simplify_by_decoration: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
@@ -5977,6 +5979,7 @@ fn history_order_timestamp(commit: &CommitObject, order: HistoryCommitOrder) -> 
 
 fn reorder_history_from_metadata(
     commits: Vec<HistoryOrderMetadata>,
+    order: HistoryCommitOrder,
 ) -> Result<Vec<ObjectId>> {
     let included = commits
         .iter()
@@ -5995,41 +5998,73 @@ fn reorder_history_from_metadata(
         metadata_by_id.insert(commit.id.clone(), commit);
     }
 
-    let mut ready = std::collections::BinaryHeap::new();
-    for commit in metadata_by_id.values() {
-        if remaining_children.get(&commit.id).copied().unwrap_or(0) == 0 {
-            ready.push(HistoryOrderReady {
-                timestamp: commit.timestamp,
-                original_index: commit.original_index,
-                id: commit.id.clone(),
-            });
-        }
-    }
-
     let mut ordered = Vec::with_capacity(metadata_by_id.len());
-    while let Some(next) = ready.pop() {
-        let Some(commit) = metadata_by_id.get(&next.id) else {
-            continue;
-        };
-        ordered.push(next.id.clone());
-        for parent in &commit.parents {
-            if !included.contains(parent) {
-                continue;
-            }
-            let Some(remaining) = remaining_children.get_mut(parent) else {
+    if matches!(order, HistoryCommitOrder::Topo) {
+        let mut ready = metadata_by_id
+            .values()
+            .filter(|commit| remaining_children.get(&commit.id).copied().unwrap_or(0) == 0)
+            .map(|commit| (commit.original_index, commit.id.clone()))
+            .collect::<Vec<_>>();
+        ready.sort_by_key(|(original_index, _)| *original_index);
+        while let Some((_, next_id)) = ready.pop() {
+            let Some(commit) = metadata_by_id.get(&next_id) else {
                 continue;
             };
-            *remaining -= 1;
-            if *remaining == 0 {
-                let parent_commit = metadata_by_id.get(parent).ok_or_else(|| CliError::Fatal {
-                    code: 128,
-                    message: "history order parent metadata missing".into(),
-                })?;
+            ordered.push(next_id.clone());
+            for parent in &commit.parents {
+                if !included.contains(parent) {
+                    continue;
+                }
+                let Some(remaining) = remaining_children.get_mut(parent) else {
+                    continue;
+                };
+                *remaining -= 1;
+                if *remaining == 0 {
+                    let parent_commit =
+                        metadata_by_id.get(parent).ok_or_else(|| CliError::Fatal {
+                            code: 128,
+                            message: "history order parent metadata missing".into(),
+                        })?;
+                    ready.push((parent_commit.original_index, parent.clone()));
+                }
+            }
+        }
+    } else {
+        let mut ready = std::collections::BinaryHeap::new();
+        for commit in metadata_by_id.values() {
+            if remaining_children.get(&commit.id).copied().unwrap_or(0) == 0 {
                 ready.push(HistoryOrderReady {
-                    timestamp: parent_commit.timestamp,
-                    original_index: parent_commit.original_index,
-                    id: parent.clone(),
+                    timestamp: commit.timestamp,
+                    original_index: commit.original_index,
+                    id: commit.id.clone(),
                 });
+            }
+        }
+        while let Some(next) = ready.pop() {
+            let Some(commit) = metadata_by_id.get(&next.id) else {
+                continue;
+            };
+            ordered.push(next.id.clone());
+            for parent in &commit.parents {
+                if !included.contains(parent) {
+                    continue;
+                }
+                let Some(remaining) = remaining_children.get_mut(parent) else {
+                    continue;
+                };
+                *remaining -= 1;
+                if *remaining == 0 {
+                    let parent_commit =
+                        metadata_by_id.get(parent).ok_or_else(|| CliError::Fatal {
+                            code: 128,
+                            message: "history order parent metadata missing".into(),
+                        })?;
+                    ready.push(HistoryOrderReady {
+                        timestamp: parent_commit.timestamp,
+                        original_index: parent_commit.original_index,
+                        id: parent.clone(),
+                    });
+                }
             }
         }
     }
@@ -6059,7 +6094,7 @@ fn reorder_collected_commits(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let ordered_ids = reorder_history_from_metadata(metadata)?;
+    let ordered_ids = reorder_history_from_metadata(metadata, order)?;
     let mut commits_by_id = commits
         .into_iter()
         .map(|entry| (entry.id.clone(), entry))
@@ -6096,7 +6131,7 @@ where
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    reorder_history_from_metadata(metadata)
+    reorder_history_from_metadata(metadata, order)
 }
 
 fn filter_commits_by_ancestry_path(
@@ -6154,6 +6189,21 @@ fn resolve_ancestry_path_bounds(
         .iter()
         .map(|rev| resolve_commitish(repo, store, rev))
         .collect()
+}
+
+fn collect_default_log_decoration_ids(repo: &GitRepo) -> Result<HashSet<String>> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let mut decorated = HashSet::new();
+    if let Ok(head_id) = refs.resolve("HEAD") {
+        decorated.insert(head_id.to_hex());
+    }
+    refs.for_each_resolved_ref("refs/", |ref_name, id| {
+        if log_decorates_ref_by_default(ref_name) {
+            decorated.insert(id.to_hex());
+        }
+        Ok::<(), CliError>(())
+    })?;
+    Ok(decorated)
 }
 
 fn parse_log_diff_merges_arg(
@@ -6321,7 +6371,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_dense = options.dense;
     let _accepted_sparse = options.sparse;
     let _accepted_show_pulls = options.show_pulls;
+    let _accepted_simplify_merges = options.simplify_merges;
     let history_order = options.history_order();
+    let simplify_history_topo =
+        options.simplify_merges || options.simplify_by_decoration;
     let post_collection_filters = since.is_some()
         || until.is_some()
         || !options.grep.is_empty()
@@ -6330,6 +6383,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         || min_parents.is_some()
         || max_parents.is_some()
         || options.ancestry_path
+        || options.simplify_by_decoration
+        || simplify_history_topo
         || history_order.is_some();
     let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
@@ -6429,6 +6484,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     if options.ancestry_path {
         commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
     }
+    if options.simplify_by_decoration {
+        let decorated = collect_default_log_decoration_ids(&repo)?;
+        commits.retain(|entry| decorated.contains(&entry.id.to_hex()));
+    }
     let mut traversal_markers = HashMap::new();
     if options.left_right || options.cherry_pick || options.cherry_mark || options.boundary {
         let commit_ids = commits.iter().map(|entry| entry.id.clone()).collect::<Vec<_>>();
@@ -6456,7 +6515,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         }
         traversal_markers = traversal.markers;
     }
-    if let Some(order) = history_order {
+    if let Some(order) = history_order.or_else(|| {
+        simplify_history_topo.then_some(HistoryCommitOrder::Topo)
+    }) {
         commits = reorder_collected_commits(commits, order)?;
     }
     if let Some(max_count) = max_count {
@@ -8590,6 +8651,8 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         dense: false,
         sparse: false,
         show_pulls: false,
+        simplify_merges: false,
+        simplify_by_decoration: false,
         topo_order: false,
         date_order: false,
         author_date_order: false,
@@ -9422,6 +9485,8 @@ pub(crate) struct RevListOptions {
     pub(crate) dense: bool,
     pub(crate) sparse: bool,
     pub(crate) show_pulls: bool,
+    pub(crate) simplify_merges: bool,
+    pub(crate) simplify_by_decoration: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
@@ -9469,6 +9534,8 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         dense,
         sparse,
         show_pulls,
+        simplify_merges,
+        simplify_by_decoration,
         topo_order: _,
         date_order: _,
         author_date_order: _,
@@ -9483,6 +9550,8 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     let _accepted_dense = dense;
     let _accepted_sparse = sparse;
     let _accepted_show_pulls = show_pulls;
+    let _accepted_simplify_merges = simplify_merges;
+    let simplify_history_topo = simplify_merges || simplify_by_decoration;
     let revs = revs
         .into_iter()
         .take_while(|rev| rev != "--")
@@ -9574,7 +9643,7 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         )?;
         return Ok(());
     }
-    if count && !objects && history_order.is_none() && !ancestry_path {
+    if count && !objects && history_order.is_none() && !ancestry_path && !simplify_history_topo {
         println!(
             "{}",
             count_commits_with_exclusions(&repo, &store, &revs, max_count)?
@@ -9620,6 +9689,10 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         commit_ids =
             filter_commit_ids_by_ancestry_path(&repo, &store, &commit_cache, &revs, commit_ids)?;
     }
+    if simplify_by_decoration {
+        let decorated = collect_default_log_decoration_ids(&repo)?;
+        commit_ids.retain(|id| decorated.contains(&id.to_hex()));
+    }
     let traversal = collect_history_traversal_decoration(
         &repo,
         &store,
@@ -9637,7 +9710,9 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     if boundary {
         commit_ids.extend(traversal.boundary_ids.iter().cloned());
     }
-    if let Some(order) = history_order {
+    if let Some(order) = history_order.or_else(|| {
+        simplify_history_topo.then_some(HistoryCommitOrder::Topo)
+    }) {
         commit_ids = reorder_commit_ids(&commit_cache, commit_ids, order)?;
     }
     if reverse {

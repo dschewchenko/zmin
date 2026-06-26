@@ -2605,6 +2605,86 @@ fn log_and_rev_list_history_simplification_acceptance_family_matches_stock_git()
 }
 
 #[test]
+fn log_and_rev_list_simplify_merges_and_decoration_match_stock_git() {
+    fn build_repo(repo: &std::path::Path) {
+        configure_identity(repo);
+        git(repo, ["checkout", "-b", "main"]);
+
+        write_file(repo, "base.txt", "base\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "base"]);
+
+        git(repo, ["checkout", "-b", "topic"]);
+        write_file(repo, "topic.txt", "topic1\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "topic1"]);
+        write_file(repo, "topic.txt", "topic1\ntopic2\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "topic2"]);
+
+        git(repo, ["checkout", "main"]);
+        write_file(repo, "main.txt", "main1\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "main1"]);
+
+        git(repo, ["tag", "anchor", "HEAD~1"]);
+        git(repo, ["branch", "topic-anchor", "topic~1"]);
+
+        let output = Command::new(stock_git_bin())
+            .args(["merge", "--no-ff", "topic", "-m", "merge"])
+            .env("GIT_AUTHOR_NAME", "Merge")
+            .env("GIT_AUTHOR_EMAIL", "merge@example.test")
+            .env("GIT_AUTHOR_DATE", "2024-01-04 00:00:00 +0000")
+            .env("GIT_COMMITTER_NAME", "Merge")
+            .env("GIT_COMMITTER_EMAIL", "merge@example.test")
+            .env("GIT_COMMITTER_DATE", "2024-01-04 00:00:00 +0000")
+            .current_dir(repo)
+            .output()
+            .expect("git merge");
+        assert!(
+            output.status.success(),
+            "git merge failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        git(repo, ["tag", "merged", "HEAD"]);
+    }
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    build_repo(git_repo.path());
+    build_repo(zmin_repo.path());
+
+    for args in [
+        ["rev-list", "--simplify-merges", "HEAD"].as_slice(),
+        ["rev-list", "--simplify-by-decoration", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--simplify-merges",
+            "--simplify-by-decoration",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--simplify-merges", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--simplify-by-decoration", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--simplify-merges",
+            "--simplify-by-decoration",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_relative_since_matches_stock_git_for_recent_commits() {
     let git_repo = git_init();
     let zmin_repo = git_init();

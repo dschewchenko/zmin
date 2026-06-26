@@ -3115,6 +3115,10 @@ pub enum Command {
         sparse: bool,
         #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
         show_pulls: bool,
+        #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
+        simplify_merges: bool,
+        #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
+        simplify_by_decoration: bool,
         #[arg(long = "topo-order", action = ArgAction::SetTrue)]
         topo_order: bool,
         #[arg(long = "date-order", action = ArgAction::SetTrue)]
@@ -3688,6 +3692,10 @@ pub enum Command {
         sparse: bool,
         #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
         show_pulls: bool,
+        #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
+        simplify_merges: bool,
+        #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
+        simplify_by_decoration: bool,
         #[arg(long = "topo-order", action = ArgAction::SetTrue)]
         topo_order: bool,
         #[arg(long = "date-order", action = ArgAction::SetTrue)]
