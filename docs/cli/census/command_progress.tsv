@@ -2,13 +2,13 @@ metric	count	total	note
 complete_command_matrices	106	151	only commands whose full behavior matrix is finished
 complete_doc_option_pairs	1540	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1576	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5596	5596	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4873	5596	closed written rows only
-behavior_rows_classified	5581	5596	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5596	written rows with incomplete parity
-behavior_rows_open	12	5596	written rows not implemented or not matching yet
-invalid_input_rows	708	5596	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1584	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5610	5610	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4887	5610	closed written rows only
+behavior_rows_classified	5595	5610	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5610	written rows with incomplete parity
+behavior_rows_open	12	5610	written rows not implemented or not matching yet
+invalid_input_rows	708	5610	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -27,7 +27,7 @@ check-attr	6	6	6	100.0	17	17	100.0	17	100.0	0	0	0	yes
 check-ignore	9	9	9	100.0	23	23	100.0	13	56.5	0	0	10	yes
 check-mailmap	3	3	3	100.0	30	30	100.0	27	90.0	0	0	3	yes
 check-ref-format	4	4	4	100.0	27	27	100.0	16	59.3	0	0	11	yes
-checkout	34	12	14	41.2	40	39	97.5	37	92.5	0	0	2	no
+checkout	34	12	22	64.7	54	53	98.1	51	94.4	0	0	2	no
 checkout-index	16	16	16	100.0	29	29	100.0	28	96.6	0	0	1	yes
 cherry	1	1	1	100.0	14	14	100.0	12	85.7	0	0	2	yes
 cherry-pick	24	4	4	16.7	7	7	100.0	5	71.4	0	0	2	no

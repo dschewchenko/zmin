@@ -7146,6 +7146,54 @@ The `checkout` pathspec options moved from `doc_option_not_in_zmin_schema` to
 full newer-option family covers negations, repeated forms and other stateful
 lanes.
 
+## 2026-06-26 - checkout path modifiers and negated pathspec flags
+
+Expected movement:
+
+- behavior rows: `+14`
+- closed rows: `+14`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+8`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git checkout --guess .`
+- `git checkout --no-guess .`
+- `git checkout --progress .`
+- `git checkout --overlay .`
+- `git checkout --no-overlay .`
+- `git checkout --ignore-skip-worktree-bits .`
+- `git checkout --ours .`
+- `git checkout --theirs .`
+- `git checkout -2 .`
+- `git checkout -3 .`
+- `git checkout --no-pathspec-from-file a.txt`
+- `git checkout --no-pathspec-from-file --no-pathspec-from-file a.txt`
+- `git checkout --no-pathspec-file-nul a.txt`
+- `git checkout --no-pathspec-file-nul --no-pathspec-file-nul a.txt`
+
+This batch closes a helper-free local `git checkout` path-restore modifier
+family by exposing stock-compatible parser/runtime handling for the documented
+guess, progress, overlay, skip-worktree and ours/theirs spellings on the
+current dot-pathspec lane, plus repeated negated pathspec-file flags on the
+single-path restore lane. The focused evidence uses
+`git_worktree_state_compat` against stock Git 2.53.0 through the shared
+`stock_git_bin` test helper.
+
+Actual post-import movement matched the declared closure size after adding the
+short `-2` / `-3` alias rows to eliminate transient schema-only debt:
+`+14` behavior rows, `+14` closed rows, `+0` open rows, `+0` invalid-input
+rows, `+0` represented oracle functions, `+0` missing-or-unclassified oracle
+functions, `+0` commands with rows, `+8` represented doc-option pairs, `+0`
+implemented-but-unverified schema rows, and `+0` remaining checklist rows.
+
 ## 2026-06-25 - repack cruft-family schema-tail closure
 
 Expected movement:

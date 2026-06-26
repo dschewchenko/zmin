@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1576/3156 represented doc-option pairs / 5596 written rows / 4873/5596 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1584/3156 represented doc-option pairs / 5610 written rows / 4887/5610 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,24 +300,26 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git checkout` pathspec-file
-family expansion. Zmin now exposes and matches stock Git on the current
-modeled helper-free local `checkout --pathspec-from-file` and
-`checkout --pathspec-file-nul` lanes for LF-delimited and NUL-delimited
-tracked-path restores, plus the stock fatal rejection when
-`--pathspec-file-nul` appears without `--pathspec-from-file`.
+The latest completed slice is a helper-free `git checkout` path-restore
+modifier family expansion. Zmin now exposes and matches stock Git on the
+current modeled helper-free local `checkout` lanes for `--guess`,
+`--no-guess`, `--progress`, `--overlay`, `--no-overlay`,
+`--ignore-skip-worktree-bits`, `--ours`, `--theirs`, and the short
+`-2` / `-3` aliases on the non-conflicted dot-pathspec restore lane, plus the
+repeated negated pathspec-file flags on the single-path restore lane.
 
 Current counts are `106/151` complete command matrices,
 `1540/3156` complete documented option pairs,
-`1576/3156` represented documented option pairs, `5596` written rows,
-`4873` verified rows, `12` open rows, and `708` invalid-input rows.
-`checkout` now sits at `14/34` represented documented option pairs with
-`40/40` written rows, `39/40` classified rows, `37` stock-matching rows,
+`1584/3156` represented documented option pairs, `5610` written rows,
+`4887` verified rows, `12` open rows, and `708` invalid-input rows.
+`checkout` now sits at `22/34` represented documented option pairs with
+`54/54` written rows, `53/54` classified rows, `51` stock-matching rows,
 `2` invalid-input rows, and `0` exact-open written rows on the current
 modeled pathspec/branch surface. The next bounded high-throughput follow-up
-should either continue another modern `checkout` documented family with the
-2.50+/2.53 local stock-Git oracles now confirmed, or move to the next dense
-helper-free family from the refreshed census queue.
+should continue the remaining `checkout` documented families that already have
+strong local 2.50+/2.53 stock-Git oracle coverage, especially conflict/merge
+or track-related lanes, before switching back to a different dense helper-free
+command.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

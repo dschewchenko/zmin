@@ -10216,18 +10216,34 @@ fn stash_ref_name() -> &'static str {
 pub(crate) fn checkout(
     force: bool,
     quiet: bool,
+    _guess: bool,
+    _no_guess: bool,
+    _progress: bool,
     _no_progress: bool,
     detach: bool,
     _recurse_submodules: bool,
     _no_recurse_submodules: bool,
+    ours: bool,
+    theirs: bool,
+    overlay: bool,
+    no_overlay: bool,
+    _ignore_skip_worktree_bits: bool,
     create: Option<String>,
     reset_create: Option<String>,
     create_reflog: bool,
     orphan: Option<String>,
-    pathspec_from_file: Option<PathBuf>,
-    pathspec_file_nul: bool,
+    mut pathspec_from_file: Option<PathBuf>,
+    no_pathspec_from_file: bool,
+    mut pathspec_file_nul: bool,
+    no_pathspec_file_nul: bool,
     mut args: Vec<String>,
 ) -> Result<()> {
+    if no_pathspec_from_file {
+        pathspec_from_file = None;
+    }
+    if no_pathspec_file_nul {
+        pathspec_file_nul = false;
+    }
     let has_pathspec_file = pathspec_from_file.is_some();
     if let Some(pathspec_file) = pathspec_from_file {
         let loaded = read_pathspec_file(&pathspec_file, pathspec_file_nul)?;
@@ -10313,7 +10329,24 @@ pub(crate) fn checkout(
             ),
         });
     }
-    if let Some((source, paths, report_updated_paths)) = checkout_path_mode(&args)? {
+    let path_mode = checkout_path_mode(&args)?;
+    let implicit_path_checkout =
+        path_mode.is_none() && args.first().is_some_and(|target| !checkout_target_exists(target).unwrap_or(false));
+    if path_mode.is_none() && !implicit_path_checkout {
+        if overlay || no_overlay {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "'--[no]-overlay' cannot be used with switching branches".into(),
+            });
+        }
+        if ours || theirs {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "'--ours/--theirs' needs the paths to check out".into(),
+            });
+        }
+    }
+    if let Some((source, paths, report_updated_paths)) = path_mode {
         return checkout_paths(
             source,
             paths,

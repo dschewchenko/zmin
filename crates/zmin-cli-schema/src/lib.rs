@@ -2071,6 +2071,12 @@ pub enum Command {
         force: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
+        #[arg(long = "guess", action = ArgAction::SetTrue)]
+        guess: bool,
+        #[arg(long = "no-guess", action = ArgAction::SetTrue)]
+        no_guess: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
         no_progress: bool,
         #[arg(long = "detach", action = ArgAction::SetTrue)]
@@ -2079,6 +2085,16 @@ pub enum Command {
         recurse_submodules: bool,
         #[arg(long = "no-recurse-submodules", action = ArgAction::SetTrue)]
         no_recurse_submodules: bool,
+        #[arg(short = '2', long = "ours", action = ArgAction::SetTrue)]
+        ours: bool,
+        #[arg(short = '3', long = "theirs", action = ArgAction::SetTrue)]
+        theirs: bool,
+        #[arg(long = "overlay", action = ArgAction::SetTrue)]
+        overlay: bool,
+        #[arg(long = "no-overlay", action = ArgAction::SetTrue)]
+        no_overlay: bool,
+        #[arg(long = "ignore-skip-worktree-bits", action = ArgAction::SetTrue)]
+        ignore_skip_worktree_bits: bool,
         #[arg(short = 'b')]
         create: Option<String>,
         #[arg(short = 'B')]
@@ -2089,8 +2105,12 @@ pub enum Command {
         orphan: Option<String>,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
         pathspec_from_file: Option<PathBuf>,
+        #[arg(long = "no-pathspec-from-file", action = ArgAction::Count)]
+        no_pathspec_from_file: u8,
         #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
         pathspec_file_nul: bool,
+        #[arg(long = "no-pathspec-file-nul", action = ArgAction::Count)]
+        no_pathspec_file_nul: u8,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },
