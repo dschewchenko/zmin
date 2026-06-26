@@ -46,6 +46,20 @@ enum FetchRecurseSubmodulesMode {
     No,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FetchWriteCommitGraphMode {
+    Default,
+    Enable,
+    Disable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FetchShowForcedUpdatesMode {
+    Default,
+    Show,
+    NoShow,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct UploadPackOptions {
     pub(crate) strict: bool,
@@ -9251,6 +9265,8 @@ pub(crate) fn run_fetch(
     write_fetch_hidden_refs_trace_if_needed()?;
     write_fetch_negotiation_tip_trace(&negotiation_tips)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
+    let write_commit_graph_mode = fetch_write_commit_graph_mode(raw_args);
+    let show_forced_updates_mode = fetch_show_forced_updates_mode(raw_args);
     validate_fetch_jobs(raw_args)?;
     let server_options = fetch_server_options(raw_args)?;
     let has_server_options = !server_options.is_empty();
@@ -9377,8 +9393,9 @@ pub(crate) fn run_fetch(
             )?;
         }
         if !dry_run {
-            write_fetch_commit_graph_if_enabled()?;
+            write_fetch_commit_graph_if_enabled(write_commit_graph_mode)?;
             write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+            write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         }
         return Ok(());
     }
@@ -9421,8 +9438,9 @@ pub(crate) fn run_fetch(
             )?;
         }
         if !dry_run {
-            write_fetch_commit_graph_if_enabled()?;
+            write_fetch_commit_graph_if_enabled(write_commit_graph_mode)?;
             write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+            write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         }
         return Ok(());
     }
@@ -9459,8 +9477,9 @@ pub(crate) fn run_fetch(
             )?;
         }
         if !dry_run {
-            write_fetch_commit_graph_if_enabled()?;
+            write_fetch_commit_graph_if_enabled(write_commit_graph_mode)?;
             write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+            write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         }
         return Ok(());
     }
@@ -9486,8 +9505,9 @@ pub(crate) fn run_fetch(
             &shallow_exclude,
         )?;
         if !dry_run {
-            write_fetch_commit_graph_if_enabled()?;
+            write_fetch_commit_graph_if_enabled(write_commit_graph_mode)?;
             write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+            write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         }
         return Ok(());
     }
@@ -9521,8 +9541,9 @@ pub(crate) fn run_fetch(
         upload_pack_command.as_deref(),
     )?;
     if !dry_run {
-        write_fetch_commit_graph_if_enabled()?;
+        write_fetch_commit_graph_if_enabled(write_commit_graph_mode)?;
         write_fetch_auto_gc_message_if_enabled(verbose, quiet)?;
+        write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
     }
     Ok(())
 }
@@ -9561,6 +9582,36 @@ fn fetch_recurse_submodules_mode(raw_args: &[String]) -> Result<FetchRecurseSubm
         }
     }
     Ok(mode)
+}
+
+fn fetch_write_commit_graph_mode(raw_args: &[String]) -> FetchWriteCommitGraphMode {
+    let mut mode = FetchWriteCommitGraphMode::Default;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--write-commit-graph" {
+            mode = FetchWriteCommitGraphMode::Enable;
+        } else if arg == "--no-write-commit-graph" {
+            mode = FetchWriteCommitGraphMode::Disable;
+        }
+    }
+    mode
+}
+
+fn fetch_show_forced_updates_mode(raw_args: &[String]) -> FetchShowForcedUpdatesMode {
+    let mut mode = FetchShowForcedUpdatesMode::Default;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--show-forced-updates" {
+            mode = FetchShowForcedUpdatesMode::Show;
+        } else if arg == "--no-show-forced-updates" {
+            mode = FetchShowForcedUpdatesMode::NoShow;
+        }
+    }
+    mode
 }
 
 fn fetch_server_options(raw_args: &[String]) -> Result<Vec<String>> {
@@ -9998,12 +10049,16 @@ fn write_fetch_hidden_refs_trace_if_needed() -> Result<()> {
     Ok(())
 }
 
-fn write_fetch_commit_graph_if_enabled() -> Result<()> {
+fn write_fetch_commit_graph_if_enabled(mode: FetchWriteCommitGraphMode) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    if !read_config_value(&repo, "fetch.writeCommitGraph")?
-        .as_deref()
-        .is_some_and(|value| value.is_empty() || parse_git_bool(value) == Some(true))
-    {
+    let enabled = match mode {
+        FetchWriteCommitGraphMode::Enable => true,
+        FetchWriteCommitGraphMode::Disable => false,
+        FetchWriteCommitGraphMode::Default => read_config_value(&repo, "fetch.writeCommitGraph")?
+            .as_deref()
+            .is_some_and(|value| value.is_empty() || parse_git_bool(value) == Some(true)),
+    };
+    if !enabled {
         return Ok(());
     }
     pack_commands::commit_graph_write(None, true, false, false)?;
@@ -10023,6 +10078,21 @@ fn write_fetch_auto_gc_message_if_enabled(verbose: bool, quiet: bool) -> Result<
         return Ok(());
     }
     eprintln!("Auto packing the repository for optimum performance.");
+    Ok(())
+}
+
+fn write_fetch_show_forced_updates_warning_if_needed(
+    mode: FetchShowForcedUpdatesMode,
+) -> Result<()> {
+    if mode != FetchShowForcedUpdatesMode::NoShow {
+        return Ok(());
+    }
+    let mut stderr = io::stderr().lock();
+    stderr.write_all(
+        b"warning: fetch normally indicates which branches had a forced update,\n\
+but that check has been disabled; to re-enable, use '--show-forced-updates'\n\
+flag or run 'git config fetch.showForcedUpdates true'\n",
+    )?;
     Ok(())
 }
 

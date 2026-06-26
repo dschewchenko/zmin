@@ -130,6 +130,76 @@ fn normalize_fetch_pack_progress(text: &str) -> String {
     out.join("\n")
 }
 
+fn setup_named_local_fetch_clients(
+    label: &str,
+) -> (
+    TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join(format!("{label}-source"));
+    let git_client = dir.path().join(format!("{label}-git-client"));
+    let zmin_client = dir.path().join(format!("{label}-zmin-client"));
+
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("file"), b"main\n").expect("write source");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    git(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            git_client.to_str().expect("git client path"),
+        ],
+    );
+    run_zmin(
+        dir.path(),
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            zmin_client.to_str().expect("zmin client path"),
+        ],
+    );
+
+    fs::write(source.join("file"), format!("{label} update\n")).expect("write update");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "next"]);
+
+    (dir, source, git_client, zmin_client)
+}
+
+fn assert_named_local_fetch_matches_stock_git(label: &str, args: &[&str]) {
+    let (_dir, source, git_client, zmin_client) = setup_named_local_fetch_clients(label);
+    let git_output = command_any_output("git", &git_client, args, label);
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, args, label);
+    assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+    assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+    let source_path = source.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path),
+        "{label} stderr"
+    );
+    assert_eq!(
+        git(&zmin_client, ["rev-parse", "refs/remotes/origin/main"]),
+        git(&git_client, ["rev-parse", "refs/remotes/origin/main"]),
+        "{label} remote-tracking ref"
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+        "{label} FETCH_HEAD"
+    );
+}
+
 fn pack_dir_files(repo: &Path) -> Vec<std::path::PathBuf> {
     let pack_dir = repo.join(".git/objects/pack");
     if !pack_dir.exists() {
@@ -238,6 +308,126 @@ fn fetch_local_remote_updates_remote_refs_like_stock_git() {
     assert_eq!(
         fs::read_to_string(zmin_file_client.join(".git/shallow")).expect("zmin shallow"),
         fs::read_to_string(git_file_client.join(".git/shallow")).expect("git shallow")
+    );
+}
+
+#[test]
+fn fetch_documented_local_transport_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str]); 17] = [
+        ("fetch --auto-gc", &["fetch", "--auto-gc", "origin"]),
+        (
+            "fetch --auto-maintenance",
+            &["fetch", "--auto-maintenance", "origin"],
+        ),
+        ("fetch --ipv4", &["fetch", "--ipv4", "origin"]),
+        ("fetch --ipv6", &["fetch", "--ipv6", "origin"]),
+        ("fetch --keep", &["fetch", "--keep", "origin"]),
+        ("fetch --no-all", &["fetch", "--no-all", "origin"]),
+        ("fetch --no-auto-gc", &["fetch", "--no-auto-gc", "origin"]),
+        (
+            "fetch --no-auto-maintenance",
+            &["fetch", "--no-auto-maintenance", "origin"],
+        ),
+        (
+            "fetch --recurse-submodules-default",
+            &["fetch", "--recurse-submodules-default=yes", "origin"],
+        ),
+        ("fetch --refetch", &["fetch", "--refetch", "origin"]),
+        (
+            "fetch --submodule-prefix",
+            &["fetch", "--submodule-prefix=foo/", "origin"],
+        ),
+        ("fetch -4", &["fetch", "-4", "origin"]),
+        ("fetch -6", &["fetch", "-6", "origin"]),
+        ("fetch -P", &["fetch", "-P", "origin"]),
+        ("fetch -k", &["fetch", "-k", "origin"]),
+        ("fetch -o", &["fetch", "-o", "trace", "origin"]),
+        ("fetch -u", &["fetch", "-u", "origin"]),
+    ];
+
+    for (label, args) in cases {
+        assert_named_local_fetch_matches_stock_git(label, args);
+    }
+}
+
+#[test]
+fn fetch_show_forced_updates_documented_flags_match_stock_git() {
+    for (label, args) in [
+        (
+            "fetch --show-forced-updates",
+            ["fetch", "--show-forced-updates", "origin"],
+        ),
+        (
+            "fetch --no-show-forced-updates",
+            ["fetch", "--no-show-forced-updates", "origin"],
+        ),
+    ] {
+        assert_named_local_fetch_matches_stock_git(label, &args);
+    }
+}
+
+#[test]
+fn fetch_write_commit_graph_documented_flags_match_stock_git() {
+    let (_dir, source, git_client, zmin_client) =
+        setup_named_local_fetch_clients("write-commit-graph");
+    let git_output = command_any_output(
+        "git",
+        &git_client,
+        &["fetch", "--write-commit-graph", "origin"],
+        "git fetch --write-commit-graph",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--write-commit-graph", "origin"],
+        "zmin fetch --write-commit-graph",
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    let source_path = source.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path)
+    );
+    assert_eq!(
+        zmin_client
+            .join(".git/objects/info/commit-graphs/commit-graph-chain")
+            .is_file(),
+        git_client
+            .join(".git/objects/info/commit-graphs/commit-graph-chain")
+            .is_file()
+    );
+
+    let (_dir, source, git_client, zmin_client) =
+        setup_named_local_fetch_clients("no-write-commit-graph");
+    git(&git_client, ["config", "fetch.writeCommitGraph", "true"]);
+    run_zmin(&zmin_client, ["config", "fetch.writeCommitGraph", "true"]);
+    let git_output = command_any_output(
+        "git",
+        &git_client,
+        &["fetch", "--no-write-commit-graph", "origin"],
+        "git fetch --no-write-commit-graph",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--no-write-commit-graph", "origin"],
+        "zmin fetch --no-write-commit-graph",
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    let source_path = source.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path)
+    );
+    assert_eq!(
+        zmin_client
+            .join(".git/objects/info/commit-graphs/commit-graph-chain")
+            .is_file(),
+        git_client
+            .join(".git/objects/info/commit-graphs/commit-graph-chain")
+            .is_file()
     );
 }
 

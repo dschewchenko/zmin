@@ -11,6 +11,31 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git fetch`
+documented-option family expansion on the current named-local-remote lane.
+The selected change added twenty-one exact stock-Git `fetch` rows for
+`--auto-gc`, `--auto-maintenance`, `--ipv4`, `--ipv6`, `--keep`,
+`--no-all`, `--no-auto-gc`, `--no-auto-maintenance`,
+`--recurse-submodules-default`, `--refetch`, `--show-forced-updates`,
+`--no-show-forced-updates`, `--submodule-prefix`, `--write-commit-graph`,
+`--no-write-commit-graph`, `-4`, `-6`, `-P`, `-k`, `-o`, and `-u`, then
+promoted those twenty-one represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+21` matrix rows, `+21` complete documented option pairs, `+21`
+represented documented option pairs, `+0` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta
+matched. Current census counts are `5716` matrix rows, `4963` verified rows,
+`718` invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1667/3156` complete documented option pairs, and
+`1675/3156` represented documented option pairs. `fetch` now sits at
+`61/61` reviewed-complete represented option pairs with `377` written rows,
+`356` classified rows, `341` stock-matching rows, `15` invalid-input rows,
+and `0` exact-open rows on the current modeled surface. The next default
+follow-up should either close the two remaining documented `fetch` tails
+`--progress` and `--porcelain` with explicit stock behavior, or move to the
+next dense helper-free represented-family candidate from the refreshed
+census queue.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git commit`
 dry-run status-family expansion plus reviewed-complete promotion. The
 selected change added thirteen exact stock-Git `commit` rows for `--dry-run`,

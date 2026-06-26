@@ -1362,6 +1362,8 @@ pub enum Command {
     Fetch {
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "no-all", action = ArgAction::SetTrue)]
+        no_all: bool,
         #[arg(long = "multiple", action = ArgAction::SetTrue)]
         multiple: bool,
         #[arg(long = "prefetch", action = ArgAction::SetTrue)]
@@ -1370,10 +1372,20 @@ pub enum Command {
         quiet: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
         #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
+        #[arg(long = "auto-gc", action = ArgAction::SetTrue)]
+        auto_gc: bool,
+        #[arg(long = "auto-maintenance", action = ArgAction::SetTrue)]
+        auto_maintenance: bool,
+        #[arg(long = "no-auto-gc", action = ArgAction::SetTrue)]
+        no_auto_gc: bool,
+        #[arg(long = "no-auto-maintenance", action = ArgAction::SetTrue)]
+        no_auto_maintenance: bool,
         #[arg(long = "set-upstream", action = ArgAction::SetTrue)]
         set_upstream: bool,
         #[arg(short = 'a', long = "append", action = ArgAction::SetTrue)]
@@ -1382,7 +1394,7 @@ pub enum Command {
         prune: bool,
         #[arg(long = "no-prune", overrides_with = "prune", action = ArgAction::SetTrue)]
         no_prune: bool,
-        #[arg(long = "prune-tags", action = ArgAction::SetTrue)]
+        #[arg(short = 'P', long = "prune-tags", action = ArgAction::SetTrue)]
         prune_tags: bool,
         #[arg(long = "no-tags", action = ArgAction::SetTrue)]
         no_tags: bool,
@@ -1390,6 +1402,12 @@ pub enum Command {
         tags: bool,
         #[arg(long = "atomic", action = ArgAction::SetTrue)]
         atomic: bool,
+        #[arg(short = 'k', long = "keep", action = ArgAction::SetTrue)]
+        keep: bool,
+        #[arg(short = '4', long = "ipv4", action = ArgAction::SetTrue)]
+        ipv4: bool,
+        #[arg(short = '6', long = "ipv6", action = ArgAction::SetTrue)]
+        ipv6: bool,
         #[arg(
             long = "recurse-submodules",
             num_args = 0..=1,
@@ -1402,12 +1420,16 @@ pub enum Command {
         no_recurse_submodules: bool,
         #[arg(short = 'j', long = "jobs", allow_hyphen_values = true)]
         jobs: Option<String>,
-        #[arg(long = "update-head-ok", action = ArgAction::SetTrue)]
+        #[arg(short = 'u', long = "update-head-ok", action = ArgAction::SetTrue)]
         update_head_ok: bool,
         #[arg(long = "write-fetch-head", overrides_with = "no_write_fetch_head", action = ArgAction::SetTrue)]
         write_fetch_head: bool,
         #[arg(long = "no-write-fetch-head", overrides_with = "write_fetch_head", action = ArgAction::SetTrue)]
         no_write_fetch_head: bool,
+        #[arg(long = "write-commit-graph", action = ArgAction::SetTrue)]
+        write_commit_graph: bool,
+        #[arg(long = "no-write-commit-graph", action = ArgAction::SetTrue)]
+        no_write_commit_graph: bool,
         #[arg(long = "refmap", num_args = 0..=1, default_missing_value = "", require_equals = true)]
         refmap: Vec<String>,
         #[arg(long = "depth")]
@@ -1426,14 +1448,26 @@ pub enum Command {
         negotiation_tip: Vec<String>,
         #[arg(long = "negotiate-only", action = ArgAction::SetTrue)]
         negotiate_only: bool,
-        #[arg(long = "server-option")]
+        #[arg(short = 'o', long = "server-option")]
         server_option: Vec<String>,
+        #[arg(long = "show-forced-updates", action = ArgAction::SetTrue)]
+        show_forced_updates: bool,
+        #[arg(long = "no-show-forced-updates", action = ArgAction::SetTrue)]
+        no_show_forced_updates: bool,
         #[arg(long = "upload-pack")]
         upload_pack: Option<String>,
         #[arg(long = "filter")]
         filter: Option<String>,
         #[arg(long = "stdin", action = ArgAction::SetTrue)]
         stdin: bool,
+        #[arg(long = "porcelain", action = ArgAction::SetTrue)]
+        porcelain: bool,
+        #[arg(long = "recurse-submodules-default")]
+        recurse_submodules_default: Option<String>,
+        #[arg(long = "refetch", action = ArgAction::SetTrue)]
+        refetch: bool,
+        #[arg(long = "submodule-prefix")]
+        submodule_prefix: Option<String>,
         remote: Option<String>,
         branch: Vec<String>,
     },

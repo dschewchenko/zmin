@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1637/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1645/3156 represented doc-option pairs / 5682 written rows / 4950/5682 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1667/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1675/3156 represented doc-option pairs / 5716 written rows / 4963/5716 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,33 +300,37 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git commit` dry-run
-status-family expansion plus reviewed-complete promotion. Zmin now covers the
-stable helper-free local `commit` dry-run lanes for `--dry-run`, `--long`,
-`--short`, `--porcelain`, `--branch`, `-z`, `--null`, `-u`, and
-`--untracked-files` on the current staged-tracked-plus-untracked surface,
-then promotes those nine represented documented options into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+The latest completed slice is a helper-free `git fetch` documented-option
+family expansion on the current named-local-remote lane. Zmin now accepts and
+matches stock Git for `--auto-gc`, `--auto-maintenance`, `--ipv4`, `--ipv6`,
+`--keep`, `--no-all`, `--no-auto-gc`, `--no-auto-maintenance`,
+`--recurse-submodules-default`, `--refetch`, `--show-forced-updates`,
+`--no-show-forced-updates`, `--submodule-prefix`, `--write-commit-graph`,
+`--no-write-commit-graph`, `-4`, `-6`, `-P`, `-k`, `-o`, and `-u`, while
+leaving `--progress` and `--porcelain` explicitly open for a later slice.
 Focused gates were
-`cargo test -p zmin-cli --test git_commit_compat commit_dry_run -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat fetch_documented_local_transport_option_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat fetch_show_forced_updates_documented_flags_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat fetch_write_commit_graph_documented_flags_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(fetch|summary)\t'`, and
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1646/3156` complete documented option pairs,
-`1654/3156` represented documented option pairs, `5695` written rows,
+`1667/3156` complete documented option pairs,
+`1675/3156` represented documented option pairs, `5716` written rows,
 `4963` verified rows, `12` open rows, and `718` invalid-input rows.
-`commit` now sits at `46/46` reviewed-complete represented option pairs,
-`93` written rows, `93` classified rows, `88` stock-matching rows,
-`5` invalid-input rows, and `0` exact-open rows on its current modeled
-surface. The next bounded high-throughput follow-up should move off
-`commit` and pick the next larger helper-free represented-family candidate
-from `docs/cli/census/remaining_to_fix_or_verify.tsv`, with
-`format-patch`, `replay`, `log`, and `rev-list` as the current dense tails.
+`fetch` now sits at `61/61` reviewed-complete represented option pairs,
+`377` written rows, `356` classified rows, `341` stock-matching rows,
+`15` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next bounded high-throughput follow-up should stay on `fetch`
+only if it closes one of the two remaining documented tails
+`--progress` or `--porcelain`; otherwise it should move to the next larger
+helper-free represented-family candidate from
+`docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
