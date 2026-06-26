@@ -21,6 +21,46 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+refresh-family documented-option expansion on the current local lane. The
+selected change added five exact stock-Git rows for dirty tracked
+`update-index --refresh`, `update-index --refresh -q`,
+`update-index --refresh --ignore-missing`,
+`update-index --refresh --unmerged`, and the short alias `update-index -g`,
+then promoted four newly represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+
+The batch fixed one concrete runtime gap on the update-index path:
+
+- `update-index --refresh` no longer mutates the index by restaging or
+  removing tracked entries; it now reports stock-style `needs update` /
+  `needs merge` lines and exits `1` while leaving index plus worktree state
+  unchanged on the modeled dirty, missing and conflicted lanes
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1901 / 3212`
+- represented documented command-option pairs: `1909 / 3212`
+- matrix rows: `5963`
+- verified rows: `5190`
+- invalid-input rows: `737`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `update-index`: `20 / 38` reviewed-complete documented option pairs, `48`
+  written rows, `48` classified rows, `41` stock-matching rows, `7`
+  invalid-input rows, `0` exact-open rows
+
+The next best helper-free follow-up should stay on `update-index` and harvest
+the remaining safe local documented-option tail before switching back to the
+helper-blocked foreign-SCM commands. Start by stock-oracle confirming the next
+non-helper local family such as `--verbose`, `--info-only`,
+`--index-version`, `--show-index-version`, and `--unresolve`, and continue to
+defer the helper-like `fsmonitor`, `split-index`, and `untracked-cache`
+families until there is evidence they can close densely on the current lane.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git worktree`
 remote-inference plus unborn-branch documented-option tail closure on the
 current local lane. The selected change added five exact stock-Git rows for

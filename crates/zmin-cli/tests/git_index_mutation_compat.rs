@@ -63,6 +63,37 @@ fn dirty_tracked_file_repos() -> (TempDir, TempDir) {
     (git_repo, zmin_repo)
 }
 
+fn conflicted_index_repos() -> (TempDir, TempDir) {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let mut git_index_info = String::new();
+    let mut zmin_index_info = String::new();
+
+    for stage in 1..=3 {
+        let fixture = format!("stage-{stage}.txt");
+        let content = format!("stage {stage}\n");
+        write_file(git_repo.path(), &fixture, &content);
+        write_file(zmin_repo.path(), &fixture, &content);
+        let git_blob = git(git_repo.path(), ["hash-object", "-w", &fixture]);
+        let zmin_blob = git(zmin_repo.path(), ["hash-object", "-w", &fixture]);
+        assert_eq!(zmin_blob, git_blob);
+        git_index_info.push_str(&format!("100644 {git_blob} {stage}\ta.txt\n"));
+        zmin_index_info.push_str(&format!("100644 {zmin_blob} {stage}\ta.txt\n"));
+    }
+
+    git_with_stdin(
+        git_repo.path(),
+        ["update-index", "--index-info"],
+        &git_index_info,
+    );
+    run_zmin_with_stdin(
+        zmin_repo.path(),
+        ["update-index", "--index-info"],
+        &zmin_index_info,
+    );
+    (git_repo, zmin_repo)
+}
+
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -1369,6 +1400,123 @@ fn update_index_index_info_accepts_missing_object_ids_like_stock_git() {
     assert_eq!(
         run_zmin(zmin_repo.path(), ["write-tree", "--missing-ok"]),
         git(git_repo.path(), ["write-tree", "--missing-ok"])
+    );
+}
+
+#[test]
+fn update_index_refresh_family_matches_stock_git() {
+    let (git_repo, zmin_repo) = dirty_tracked_file_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--refresh", "-q"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--refresh", "-q"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage"]),
+        git(git_repo.path(), ["ls-files", "--stage"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "one\n");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+    fs::remove_file(git_repo.path().join("a.txt")).expect("remove git tracked file");
+    fs::remove_file(zmin_repo.path().join("a.txt")).expect("remove zmin tracked file");
+
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--refresh", "--ignore-missing"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--refresh", "--ignore-missing"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage"]),
+        git(git_repo.path(), ["ls-files", "--stage"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let (git_repo, zmin_repo) = conflicted_index_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--refresh", "--unmerged"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--refresh", "--unmerged"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage"]),
+        git(git_repo.path(), ["ls-files", "--stage"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "one\n");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "two\n");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_file(repo, "a.txt", "three\n");
+    }
+
+    assert_eq!(
+        command_any_output(zmin_bin(), zmin_repo.path(), &["update-index", "-g"], "zmin"),
+        command_any_output("git", git_repo.path(), &["update-index", "-g"], "git")
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage"]),
+        git(git_repo.path(), ["ls-files", "--stage"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
     );
 }
 

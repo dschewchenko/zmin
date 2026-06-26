@@ -11,6 +11,26 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+refresh-family documented-option expansion on the current local lane. The
+selected change added five exact stock-Git rows for dirty tracked
+`update-index --refresh`, `update-index --refresh -q`,
+`update-index --refresh --ignore-missing`,
+`update-index --refresh --unmerged`, and short-alias `update-index -g`, then
+promoted four newly represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+5`
+matrix rows, `+4` complete documented option pairs, `+4` represented
+documented option pairs, `+5` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `5963` matrix rows,
+`5190` verified rows, `737` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1901/3212` complete documented option
+pairs, and `1909/3212` represented documented option pairs. `update-index`
+now sits at `20/38` reviewed-complete documented option pairs with `48`
+written rows, `48` classified rows, `41` stock-matching rows, `7`
+invalid-input rows, and `0` exact-open rows. The next default follow-up
+should stay on the remaining safe helper-free `update-index` local tail before
+switching back to helper-blocked foreign-SCM commands.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git worktree`
 remote-inference plus unborn-branch documented-option tail closure on the
 current local lane. The selected change added five exact stock-Git rows for

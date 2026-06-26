@@ -984,12 +984,18 @@ pub enum Command {
         force_remove: u8,
         #[arg(long = "replace", action = ArgAction::Count)]
         replace: u8,
-        #[arg(long = "again", action = ArgAction::Count)]
+        #[arg(short = 'g', long = "again", action = ArgAction::Count)]
         again: u8,
+        #[arg(short = 'q', action = ArgAction::Count)]
+        quiet: u8,
         #[arg(long = "refresh", action = ArgAction::Count)]
         refresh: u8,
         #[arg(long = "really-refresh", action = ArgAction::Count)]
         really_refresh: u8,
+        #[arg(long = "ignore-missing", action = ArgAction::Count)]
+        ignore_missing: u8,
+        #[arg(long = "unmerged", action = ArgAction::Count)]
+        unmerged: u8,
         #[arg(long = "cacheinfo")]
         cacheinfo: Vec<String>,
         #[arg(long = "index-info", action = ArgAction::Count)]

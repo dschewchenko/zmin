@@ -45,7 +45,10 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) force_remove: bool,
     pub(crate) replace: bool,
     pub(crate) again: bool,
+    pub(crate) quiet: bool,
     pub(crate) refresh: bool,
+    pub(crate) ignore_missing: bool,
+    pub(crate) unmerged: bool,
     pub(crate) cacheinfo: Vec<String>,
     pub(crate) index_info: bool,
     pub(crate) chmod: Option<String>,
@@ -537,6 +540,7 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     } else {
         update_index_paths(&options, &repo)?
     };
+    let _ = (options.quiet, options.ignore_missing, options.unmerged);
 
     for cacheinfo in &options.cacheinfo {
         update_index_cacheinfo(
@@ -553,6 +557,8 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
             let relative = path_arg_to_repo_relative(&repo, path)?;
             index.remove_path(&relative)?;
         }
+    } else if options.refresh {
+        update_index_refresh_tracked(&repo, &index, &paths)?;
     } else if !update_index_has_only_flag_changes(&options) {
         for path in &paths {
             update_index_path(&repo, &store, &mut index, path, &options)?;
@@ -562,9 +568,6 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         update_index_chmod(&repo, &mut index, &paths, chmod)?;
     }
     update_index_entry_flags(&repo, &mut index, &paths, &options)?;
-    if options.refresh && paths.is_empty() {
-        update_index_refresh_tracked(&repo, &store, &mut index)?;
-    }
     index.write_to_path(&repo.index_path)?;
     Ok(())
 }
@@ -953,40 +956,51 @@ fn update_index_flag_conflict_error(left: &str, right: &str) -> CliError {
 
 fn update_index_refresh_tracked(
     repo: &GitRepo,
-    store: &LooseObjectStore,
-    index: &mut GitIndex,
+    index: &GitIndex,
+    paths: &[PathBuf],
 ) -> Result<()> {
-    let paths = index
-        .entries()
-        .iter()
-        .filter(|entry| entry.stage == 0)
-        .map(|entry| PathBuf::from(String::from_utf8_lossy(&entry.path).to_string()))
-        .collect::<Vec<_>>();
-    for path in paths {
-        update_index_path(
-            repo,
-            store,
-            index,
-            &path,
-            &UpdateIndexCommandOptions {
-                add: false,
-                remove: true,
-                force_remove: false,
-                replace: false,
-                again: false,
-                refresh: true,
-                cacheinfo: Vec::new(),
-                index_info: false,
-                chmod: None,
-                assume_unchanged: false,
-                no_assume_unchanged: false,
-                skip_worktree: false,
-                no_skip_worktree: false,
-                stdin: false,
-                nul_terminated: false,
-                paths: Vec::new(),
-            },
-        )?;
+    let mut failed = false;
+    let unmerged = merge_index_unmerged_paths(index)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    let selected = if paths.is_empty() {
+        let mut all = index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+            .map(|entry| entry.path.clone())
+            .collect::<BTreeSet<_>>();
+        all.extend(unmerged.iter().cloned());
+        all.into_iter().collect::<Vec<_>>()
+    } else {
+        paths.iter()
+            .map(|path| path_arg_to_repo_relative(repo, path))
+            .collect::<Result<Vec<_>>>()?
+    };
+
+    for path in selected {
+        if unmerged.contains(&path) {
+            println!("{}: needs merge", String::from_utf8_lossy(&path));
+            failed = true;
+            continue;
+        }
+        let Some(entry) = find_index_entry(index, &path) else {
+            let display = String::from_utf8_lossy(&path);
+            return Err(CliError::Stderr {
+                code: 128,
+                text: format!(
+                    "error: {display}: does not exist and --remove not passed\nfatal: Unable to process path {display}\n"
+                ),
+            });
+        };
+        let absolute = worktree_path_for_index_entry(&repo.root, &path);
+        if !path_exists(&absolute) || worktree_entry_modified(repo, &absolute, entry)? {
+            println!("{}: needs update", String::from_utf8_lossy(&path));
+            failed = true;
+        }
+    }
+    if failed {
+        return Err(CliError::Exit(1));
     }
     Ok(())
 }
