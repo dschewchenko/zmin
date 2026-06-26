@@ -12,6 +12,32 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
+`git checkout` promotion cluster plus one matrix-row shape repair. The
+selected change promotes the remaining twenty-two represented `checkout`
+documented options `--conflict`, `--guess`, `--ignore-other-worktrees`,
+`--ignore-skip-worktree-bits`, `--merge`, `--no-guess`, `--no-overlay`,
+`--no-overwrite-ignore`, `--no-track`, `--ours`, `--overlay`,
+`--overwrite-ignore`, `--patch`, `--pathspec-file-nul`,
+`--pathspec-from-file`, `--progress`, `--theirs`, `--track`, `-d`, `-m`,
+`-p`, and `-t` into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, then promotes
+`checkout` into `docs/cli/census/reviewed_complete_command_matrices.tsv`
+because the command now has `34/34` represented documented options,
+`79/79` classified rows, and `0` exact-open rows on the currently modeled
+helper-free local surface. The batch also fixes the malformed
+`checkout -B feature-reset <default branch>` matrix row so its existing
+stock-Git evidence lands back in the verified census. Expected delta was
+`+0` matrix rows, `+22` complete documented option pairs, `+1` complete
+command matrix, `+0` represented documented option pairs, `+1` verified
+row, and `+0` invalid-input rows. Actual delta matched. `checkout` now
+sits at `34/34` reviewed-complete documented option pairs, `34/34`
+represented documented option pairs, `79/79` classified rows, `67`
+stock-matching rows, `12` invalid-input rows, and `0` exact-open rows. The
+next best default follow-up should move to the next dense represented family
+from the refreshed census queue now that both `checkout` and `restore` are
+reviewed complete.
+
+As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
 `git restore` promotion cluster. The selected change promotes the remaining
 eighteen represented `restore` documented options `--conflict`,
 `--ignore-skip-worktree-bits`, `--ignore-unmerged`, `--merge`,
