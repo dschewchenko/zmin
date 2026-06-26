@@ -1754,12 +1754,31 @@ pub enum Command {
         quiet: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbose: u8,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        #[arg(long = "short", action = ArgAction::SetTrue)]
+        short: bool,
+        #[arg(long = "branch", action = ArgAction::SetTrue)]
+        branch: bool,
+        #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
+        null: bool,
+        #[arg(long = "porcelain", action = ArgAction::SetTrue)]
+        porcelain: bool,
+        #[arg(long = "long", action = ArgAction::SetTrue)]
+        long: bool,
         #[arg(short = 'n', long = "no-verify", action = ArgAction::SetTrue)]
         no_verify: bool,
         #[arg(long = "status", action = ArgAction::SetTrue, overrides_with = "no_status")]
         status: bool,
         #[arg(long = "no-status", action = ArgAction::SetTrue, overrides_with = "status")]
         no_status: bool,
+        #[arg(
+            short = 'u',
+            long = "untracked-files",
+            num_args = 0..=1,
+            default_missing_value = "all"
+        )]
+        untracked_files: Option<String>,
         #[arg(long = "allow-empty", action = ArgAction::SetTrue)]
         allow_empty: bool,
         #[arg(long = "amend", action = ArgAction::SetTrue)]

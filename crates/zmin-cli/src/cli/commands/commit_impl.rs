@@ -10,9 +10,16 @@ pub(crate) struct CommitCommandOptions<'a> {
     pub(crate) signoff: bool,
     pub(crate) quiet: bool,
     pub(crate) verbose: u8,
+    pub(crate) dry_run: bool,
+    pub(crate) short: bool,
+    pub(crate) branch: bool,
+    pub(crate) null: bool,
+    pub(crate) porcelain: bool,
+    pub(crate) long: bool,
     pub(crate) no_verify: bool,
     pub(crate) status: bool,
     pub(crate) no_status: bool,
+    pub(crate) untracked_files: Option<&'a str>,
     pub(crate) cleanup: Option<&'a str>,
     pub(crate) no_cleanup: bool,
     pub(crate) allow_empty_message: bool,
@@ -169,7 +176,7 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         }
         fixup_options
     };
-    if options.all {
+    if options.all && !options.dry_run {
         let _trace = phase_trace("commit.stage_all");
         stage_tracked_worktree_changes(&repo, &store, &mut index)?;
         index.write_to_path(&repo.index_path)?;
@@ -233,6 +240,19 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
             .map(|indexes| &indexes.commit_index)
             .unwrap_or(&index)
     };
+    if options.dry_run {
+        return commit_dry_run(
+            &repo,
+            &store,
+            commit_index,
+            options.short,
+            options.branch,
+            options.null,
+            options.porcelain,
+            options.long,
+            options.untracked_files,
+        );
+    }
     let tree = {
         let _trace = phase_trace("commit.write_tree");
         write_tree_from_index(&store, commit_index)?
@@ -673,6 +693,98 @@ fn print_commit_summary(
     Ok(())
 }
 
+fn commit_dry_run(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_index: &GitIndex,
+    short: bool,
+    branch: bool,
+    null: bool,
+    porcelain: bool,
+    _long: bool,
+    untracked_files: Option<&str>,
+) -> Result<()> {
+    let tracked_paths = worktree_commands::tracked_path_set(commit_index);
+    let ignore = GitIgnore::load_from_root(&repo.root)?;
+    let untracked_mode = worktree_commands::UntrackedMode::parse(untracked_files)?;
+    let staged_entries = commit_staged_entries(store, repo, commit_index)?;
+    let machine_readable = short || porcelain || null;
+    if machine_readable {
+        let mut untracked = if untracked_mode == worktree_commands::UntrackedMode::No {
+            Vec::new()
+        } else {
+            worktree_commands::untracked_files_with_mode(
+                &repo.root,
+                &tracked_paths,
+                &ignore,
+                untracked_mode,
+                true,
+            )?
+        };
+        untracked.sort();
+        if branch {
+            println!("## {}", commit_summary_branch(repo)?);
+        }
+        for entry in staged_entries {
+            if null {
+                print!(
+                    "{}  {}\0",
+                    status_code(entry.status),
+                    String::from_utf8_lossy(&entry.path)
+                );
+            } else {
+                println!(
+                    "{}  {}",
+                    status_code(entry.status),
+                    String::from_utf8_lossy(&entry.path)
+                );
+            }
+        }
+        for path in untracked {
+            if null {
+                print!("?? {}\0", String::from_utf8_lossy(&path));
+            } else {
+                println!("?? {}", String::from_utf8_lossy(&path));
+            }
+        }
+        return Ok(());
+    }
+
+    let untracked_entries = if untracked_mode == worktree_commands::UntrackedMode::No {
+        Vec::new()
+    } else {
+        worktree_commands::untracked_files_with_mode(
+            &repo.root,
+            &tracked_paths,
+            &ignore,
+            untracked_mode,
+            true,
+        )?
+    };
+    println!("On branch {}", commit_summary_branch(repo)?);
+    if !staged_entries.is_empty() {
+        println!("Changes to be committed:");
+        println!("  (use \"git restore --staged <file>...\" to unstage)");
+        for entry in staged_entries {
+            println!(
+                "\t{}   {}",
+                worktree_commands::human_status_label(status_code(entry.status)),
+                String::from_utf8_lossy(&entry.path)
+            );
+        }
+        println!();
+    }
+    if !untracked_entries.is_empty() {
+        println!("Untracked files:");
+        println!("  (use \"git add <file>...\" to include in what will be committed)");
+        for path in untracked_entries {
+            println!("\t{}", String::from_utf8_lossy(&path));
+        }
+        println!();
+    }
+    Ok(())
+}
+
 fn signature_summary_date(signature: &Signature) -> Result<String> {
     let offset = parse_timezone_offset(&signature.timezone).ok_or_else(|| CliError::Fatal {
         code: 128,
@@ -1058,9 +1170,16 @@ fn citool(
         signoff: false,
         quiet: false,
         verbose: 0,
+        dry_run: false,
+        short: false,
+        branch: false,
+        null: false,
+        porcelain: false,
+        long: false,
         no_verify: false,
         status: false,
         no_status: false,
+        untracked_files: None,
         cleanup: None,
         no_cleanup: false,
         allow_empty_message: false,
@@ -1535,6 +1654,20 @@ fn commit_untracked_entries(repo: &GitRepo, index: &GitIndex) -> Result<Vec<Vec<
         worktree_commands::UntrackedMode::Normal,
         true,
     )
+}
+
+fn commit_staged_entries(
+    store: &LooseObjectStore,
+    repo: &GitRepo,
+    commit_index: &GitIndex,
+) -> Result<Vec<zmin_git_core::IndexDiffEntry>> {
+    let parent_index = match resolve_commitish(repo, store, "HEAD") {
+        Ok(_) => read_head_index(repo)?,
+        Err(_) => GitIndex::new(),
+    };
+    let mut entries = diff_indexes(&parent_index, commit_index)?;
+    entries.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(entries)
 }
 
 fn write_worktree_verbose_patch<W: Write>(

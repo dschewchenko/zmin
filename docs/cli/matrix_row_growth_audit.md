@@ -11,6 +11,29 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git commit`
+dry-run status-family expansion plus reviewed-complete promotion. The
+selected change added thirteen exact stock-Git `commit` rows for `--dry-run`,
+`--long`, `--short`, `--porcelain`, `--branch`, `-z`, `--null`, `-u`, and
+`--untracked-files` across the stable local lane with one staged tracked
+modification plus one untracked file, then promoted those nine represented
+documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+13` matrix rows, `+13` verified rows, `+9` complete documented option
+pairs, `+9` represented documented option pairs, `+0` invalid-input rows,
+and `+0` complete command matrices. Actual delta matched. Current census
+counts are `5695` matrix rows, `4963` verified rows, `718` invalid-input
+rows, `12` exact-open rows, `146/151` complete command matrices,
+`1646/3156` complete documented option pairs, and
+`1654/3156` represented documented option pairs. `commit` now sits at
+`46/46` reviewed-complete represented option pairs with `93` written rows,
+`93` classified rows, `88` stock-matching rows, `5` invalid-input rows,
+and `0` exact-open rows on the current modeled surface. The next default
+follow-up should move off `commit` and return to the next largest
+helper-free represented-family candidate from the refreshed census queue,
+such as `format-patch`, `replay`, `log`, or `rev-list`, rather than spending
+another micro-slice on the now-closed `commit` dry-run family.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git switch`
 documented-option family expansion plus reviewed-complete promotion. The
 selected change added fifteen exact stock-Git `switch` rows for `--quiet`,

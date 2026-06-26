@@ -1313,7 +1313,7 @@ pub(crate) enum UntrackedMode {
 }
 
 impl UntrackedMode {
-    fn parse(value: Option<&str>) -> Result<Self> {
+    pub(crate) fn parse(value: Option<&str>) -> Result<Self> {
         match value {
             None | Some("normal") => Ok(Self::Normal),
             Some("no") => Ok(Self::No),

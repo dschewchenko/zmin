@@ -300,37 +300,33 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git switch` documented-option
-family expansion plus reviewed-complete promotion. Zmin now covers the
-remaining stable helper-free local `switch` lanes for `--quiet` / `-q`,
-`--merge` / `-m`, `--conflict=merge`, `--progress`,
-`--no-progress`, `--guess`, `--no-guess`,
-`--recurse-submodules`, `--no-recurse-submodules`,
-`--ignore-other-worktrees`, short detach `-d`, and branch reset
-`--force-create` / `-C`, then promotes those fifteen represented documented
-options into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+The latest completed slice is a helper-free `git commit` dry-run
+status-family expansion plus reviewed-complete promotion. Zmin now covers the
+stable helper-free local `commit` dry-run lanes for `--dry-run`, `--long`,
+`--short`, `--porcelain`, `--branch`, `-z`, `--null`, `-u`, and
+`--untracked-files` on the current staged-tracked-plus-untracked surface,
+then promotes those nine represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 Focused gates were
-`ZMIN_STOCK_GIT=/usr/local/bin/git cargo test -p zmin-cli --test git_worktree_state_compat switch_ -- --nocapture`,
+`cargo test -p zmin-cli --test git_commit_compat commit_dry_run -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(switch|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`, and
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1637/3156` complete documented option pairs,
-`1645/3156` represented documented option pairs, `5682` written rows,
-`4950` verified rows, `12` open rows, and `718` invalid-input rows.
-`switch` now sits at `22/22` reviewed-complete represented option pairs,
-`23` written rows, `23` classified rows, `23` stock-matching rows,
-`0` invalid-input rows, and `0` exact-open rows on its current modeled
-surface. The next bounded high-throughput follow-up should avoid the remaining
-three-row `switch` tracking micro-tail unless it unlocks a broader tracking
-family and instead move to the next larger helper-free represented-family
-candidate from `docs/cli/census/remaining_to_fix_or_verify.tsv`, with the
-`commit` status/dry-run family still the strongest current parser/runtime
-batch.
+`1646/3156` complete documented option pairs,
+`1654/3156` represented documented option pairs, `5695` written rows,
+`4963` verified rows, `12` open rows, and `718` invalid-input rows.
+`commit` now sits at `46/46` reviewed-complete represented option pairs,
+`93` written rows, `93` classified rows, `88` stock-matching rows,
+`5` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next bounded high-throughput follow-up should move off
+`commit` and pick the next larger helper-free represented-family candidate
+from `docs/cli/census/remaining_to_fix_or_verify.tsv`, with
+`format-patch`, `replay`, `log`, and `rev-list` as the current dense tails.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

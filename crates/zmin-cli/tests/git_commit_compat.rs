@@ -4,8 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use common::{
-    clone_repo_fixture, command_failure_output_with_env, command_output_with_env,
-    configure_identity, git, git_init, git_with_env, run_zmin, run_zmin_with_env, zmin_bin,
+    clone_repo_fixture, command_any_output, command_failure_output_with_env,
+    command_output_with_env, configure_identity, git, git_init, git_with_env, run_zmin,
+    run_zmin_with_env, zmin_bin,
 };
 
 const COMMIT_ENV: [(&str, &str); 6] = [
@@ -16,6 +17,29 @@ const COMMIT_ENV: [(&str, &str); 6] = [
     ("GIT_COMMITTER_EMAIL", "bench@example.test"),
     ("GIT_COMMITTER_DATE", "1700000000 +0000"),
 ];
+
+fn commit_dry_run_fixture_repos() -> (tempfile::TempDir, tempfile::TempDir) {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+    run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        fs::write(repo.join("a.txt"), b"tracked\n").expect("write tracked");
+        fs::write(repo.join("b.txt"), b"new\n").expect("write untracked");
+    }
+    git(git_repo.path(), ["add", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+    (git_repo, zmin_repo)
+}
 
 #[test]
 fn commit_amend_matches_stock_git_state() {
@@ -97,6 +121,38 @@ fn commit_amend_matches_stock_git_state() {
         git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
         git(git_repo.path(), ["cat-file", "-p", "HEAD"])
     );
+}
+
+#[test]
+fn commit_dry_run_status_modes_match_stock_git() {
+    for args in [
+        ["commit", "--dry-run"].as_slice(),
+        ["commit", "--dry-run", "--long"].as_slice(),
+        ["commit", "--dry-run", "--short"].as_slice(),
+        ["commit", "--dry-run", "--porcelain"].as_slice(),
+        ["commit", "--dry-run", "--branch"].as_slice(),
+        ["commit", "--dry-run", "-z"].as_slice(),
+        ["commit", "--dry-run", "--null"].as_slice(),
+        ["commit", "--dry-run", "--short", "-z"].as_slice(),
+        ["commit", "--dry-run", "--porcelain", "--branch"].as_slice(),
+        ["commit", "--dry-run", "--short", "-u"].as_slice(),
+        ["commit", "--dry-run", "--short", "-uno"].as_slice(),
+        ["commit", "--dry-run", "--short", "--untracked-files=all"].as_slice(),
+        ["commit", "--dry-run", "--short", "--untracked-files=no"].as_slice(),
+    ] {
+        let (git_repo, zmin_repo) = commit_dry_run_fixture_repos();
+        let git_run = command_any_output("git", git_repo.path(), args, "git commit");
+        let zmin_run = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin commit");
+        assert_eq!(zmin_run, git_run, "commit dry-run output mismatch for {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD"]),
+            git(git_repo.path(), ["rev-parse", "HEAD"])
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+        );
+    }
 }
 
 #[test]
