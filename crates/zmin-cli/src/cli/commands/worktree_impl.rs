@@ -4940,7 +4940,7 @@ enum ResetMode {
 pub(crate) fn worktree(args: Vec<String>) -> Result<()> {
     let subcommand = args.first().map(String::as_str).unwrap_or("list");
     match subcommand {
-        "list" => worktree_list(args.iter().any(|arg| arg == "--porcelain")),
+        "list" => worktree_list(&args[1..]),
         "add" => worktree_add(&args[1..]),
         "move" => worktree_move(&args[1..]),
         "lock" => worktree_lock(&args[1..]),
@@ -5123,7 +5123,7 @@ fn worktree_add(args: &[String]) -> Result<()> {
     let mut cursor = 0usize;
     while cursor < args.len() {
         let arg = &args[cursor];
-        if arg == "--detach" {
+        if arg == "-d" || arg == "--detach" {
             detach = true;
         } else if arg == "--checkout" {
             checkout = true;
@@ -5365,50 +5365,73 @@ fn worktree_add(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn worktree_list(porcelain: bool) -> Result<()> {
+fn worktree_list(args: &[String]) -> Result<()> {
+    let mut porcelain = false;
+    let mut nul_terminated = false;
+    for arg in args {
+        match arg.as_str() {
+            "--porcelain" => porcelain = true,
+            "-z" => nul_terminated = true,
+            "-v" => {}
+            _ => {}
+        }
+    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head = refs.resolve("HEAD")?;
     if porcelain {
-        println!("worktree {}", repo.root.display());
-        println!("HEAD {}", head.to_hex());
-        if let Some(branch) = current_branch_ref(&refs)? {
-            println!("branch {branch}");
-        } else {
-            println!("detached");
-        }
-        println!();
+        write_worktree_list_entry(
+            &mut io::stdout(),
+            &repo.root,
+            &head,
+            current_branch_ref(&refs)?,
+            worktree_lock_reason(&repo.git_dir)?,
+            nul_terminated,
+        )?;
     } else {
+        let mut entries = Vec::new();
         let label = current_branch_ref(&refs)?
             .map(|branch| format!("[{}]", branch_display_name(&branch)))
             .unwrap_or_else(|| "(detached HEAD)".into());
-        println!(
-            "{} {} {}",
-            repo.root.display(),
-            short_object_id(&head),
-            label
-        );
+        entries.push((repo.root.clone(), head, label));
+        for linked in linked_worktrees(&repo)? {
+            let linked_refs = RefStore::new(&linked.git_dir, GitHashAlgorithm::Sha1);
+            let (id, branch) = linked_head_id_and_branch(&repo, &linked_refs)?;
+            let label = branch
+                .map(|branch| format!("[{}]", branch_display_name(&branch)))
+                .unwrap_or_else(|| "(detached HEAD)".into());
+            let _ = store.read_object(&id)?;
+            entries.push((linked.root, id, label));
+        }
+        let width = entries
+            .iter()
+            .map(|(root, _, _)| root.display().to_string().len())
+            .max()
+            .unwrap_or(0);
+        for (root, id, label) in entries {
+            println!(
+                "{:<width$} {} {}",
+                root.display(),
+                short_object_id(&id),
+                label,
+                width = width
+            );
+        }
+        return Ok(());
     }
     for linked in linked_worktrees(&repo)? {
         let linked_refs = RefStore::new(&linked.git_dir, GitHashAlgorithm::Sha1);
         let (id, branch) = linked_head_id_and_branch(&repo, &linked_refs)?;
         if porcelain {
-            println!("worktree {}", linked.root.display());
-            println!("HEAD {}", id.to_hex());
-            if let Some(branch) = branch {
-                println!("branch {branch}");
-            } else {
-                println!("detached");
-            }
-            if let Some(reason) = worktree_lock_reason(&linked.git_dir)? {
-                if reason.is_empty() {
-                    println!("locked");
-                } else {
-                    println!("locked {reason}");
-                }
-            }
-            println!();
+            write_worktree_list_entry(
+                &mut io::stdout(),
+                &linked.root,
+                &id,
+                branch,
+                worktree_lock_reason(&linked.git_dir)?,
+                nul_terminated,
+            )?;
         } else {
             let label = branch
                 .map(|branch| format!("[{}]", branch_display_name(&branch)))
@@ -5422,6 +5445,33 @@ fn worktree_list(porcelain: bool) -> Result<()> {
         }
         let _ = store.read_object(&id)?;
     }
+    Ok(())
+}
+
+fn write_worktree_list_entry(
+    writer: &mut dyn Write,
+    root: &Path,
+    id: &ObjectId,
+    branch: Option<String>,
+    lock_reason: Option<String>,
+    nul_terminated: bool,
+) -> Result<()> {
+    let separator = if nul_terminated { "\0" } else { "\n" };
+    write!(writer, "worktree {}{separator}", root.display())?;
+    write!(writer, "HEAD {}{separator}", id.to_hex())?;
+    if let Some(branch) = branch {
+        write!(writer, "branch {branch}{separator}")?;
+    } else {
+        write!(writer, "detached{separator}")?;
+    }
+    if let Some(reason) = lock_reason {
+        if reason.is_empty() {
+            write!(writer, "locked{separator}")?;
+        } else {
+            write!(writer, "locked {reason}{separator}")?;
+        }
+    }
+    write!(writer, "{separator}")?;
     Ok(())
 }
 

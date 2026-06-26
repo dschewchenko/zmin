@@ -12,6 +12,25 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git worktree`
+short-alias plus list-format documented-option family expansion on the
+current local lane. The selected change added six exact stock-Git rows for
+`worktree add -d`, `worktree add -q`, `worktree add --force`,
+`worktree list -v`, `worktree list --porcelain -z`, and
+`worktree prune -n`, then promoted those six represented documented options
+into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta
+is `+6` matrix rows, `+6` complete documented option pairs, `+6`
+represented documented option pairs, `+6` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `5953` matrix rows, `5180` verified rows, `737` invalid-input rows, `12`
+exact-open rows, `146/151` complete command matrices, `1892/3212` complete
+documented option pairs, and `1900/3212` represented documented option
+pairs. `worktree` now sits at `19/24` reviewed-complete documented option
+pairs with `28` written rows, `28` classified rows, `27` stock-matching
+rows, `1` invalid-input row, and `0` exact-open rows. The next default
+follow-up should stay on the remaining helper-free `worktree` option tail
+instead of dropping back to helper-blocked commands.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git worktree`
 add/list documented-option family expansion on the current local lane. The
 selected change added five exact stock-Git rows for `worktree add
 --checkout`, `worktree add --no-checkout`, `worktree add --quiet`,

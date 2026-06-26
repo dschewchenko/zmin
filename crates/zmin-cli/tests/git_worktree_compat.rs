@@ -40,6 +40,40 @@ fn gitdir_file_target(worktree: &std::path::Path) -> String {
         .to_owned()
 }
 
+fn normalize_worktree_output(
+    output: &str,
+    replacements: &[(&std::path::Path, &std::path::Path)],
+) -> String {
+    let mut normalized = output.to_owned();
+    for (from, to) in replacements {
+        normalized = normalized.replace(&from.display().to_string(), &to.display().to_string());
+    }
+    normalized.replace("/private/var/", "/var/")
+}
+
+fn normalize_worktree_human_list(output: &str) -> String {
+    output
+        .lines()
+        .map(|line| {
+            let mut normalized = String::new();
+            let mut previous_was_space = false;
+            for ch in line.chars() {
+                if ch == ' ' || ch == '\t' {
+                    if !previous_was_space {
+                        normalized.push(' ');
+                    }
+                    previous_was_space = true;
+                } else {
+                    normalized.push(ch);
+                    previous_was_space = false;
+                }
+            }
+            normalized
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn worktree_add_list_remove_creates_stock_readable_linked_worktree() {
     let repo = worktree_fixture_repo();
@@ -1817,6 +1851,286 @@ fn worktree_add_checkout_quiet_lock_and_list_porcelain_match_stock_git() {
     assert_eq!(zmin_porcelain.0, git_porcelain.0);
     assert_eq!(normalized_zmin, normalized_git);
     assert_eq!(zmin_porcelain.2, git_porcelain.2);
+}
+
+#[test]
+fn worktree_add_short_aliases_and_list_flags_match_stock_git() {
+    let git_repo = worktree_fixture_repo();
+    let zmin_repo = worktree_fixture_repo();
+    git(git_repo.path(), ["branch", "feature"]);
+    git(zmin_repo.path(), ["branch", "feature"]);
+
+    let git_detached = git_repo.path().with_file_name(format!(
+        "{}-git-short-detach",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_detached = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-short-detach",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-d",
+                zmin_detached.to_str().expect("zmin detached worktree"),
+                "HEAD~1",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-d",
+                git_detached.to_str().expect("git detached worktree"),
+                "HEAD~1",
+            ],
+            "git",
+        )
+    );
+
+    let git_quiet = git_repo.path().with_file_name(format!(
+        "{}-git-short-quiet",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_quiet = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-short-quiet",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                zmin_quiet.to_str().expect("zmin quiet worktree"),
+                "HEAD~1",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                git_quiet.to_str().expect("git quiet worktree"),
+                "HEAD~1",
+            ],
+            "git",
+        )
+    );
+
+    let git_feature_first = git_repo.path().with_file_name(format!(
+        "{}-git-feature-first-long-force",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_feature_first = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-feature-first-long-force",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    git(
+        git_repo.path(),
+        [
+            "worktree",
+            "add",
+            git_feature_first
+                .to_str()
+                .expect("git first feature worktree"),
+            "feature",
+        ],
+    );
+    run_zmin(
+        zmin_repo.path(),
+        [
+            "worktree",
+            "add",
+            zmin_feature_first
+                .to_str()
+                .expect("zmin first feature worktree"),
+            "feature",
+        ],
+    );
+
+    let git_feature_forced = git_repo.path().with_file_name(format!(
+        "{}-git-feature-forced-long-force",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_feature_forced = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-feature-forced-long-force",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--force",
+                zmin_feature_forced
+                    .to_str()
+                    .expect("zmin forced feature worktree"),
+                "feature",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--force",
+                git_feature_forced
+                    .to_str()
+                    .expect("git forced feature worktree"),
+                "feature",
+            ],
+            "git",
+        )
+    );
+
+    let replacements = [
+        (git_detached.as_path(), zmin_detached.as_path()),
+        (git_quiet.as_path(), zmin_quiet.as_path()),
+        (git_feature_first.as_path(), zmin_feature_first.as_path()),
+        (git_feature_forced.as_path(), zmin_feature_forced.as_path()),
+        (git_repo.path(), zmin_repo.path()),
+    ];
+    let zmin_list_verbose = command_output(zmin_bin(), zmin_repo.path(), &["worktree", "list", "-v"], "zmin");
+    let git_list_verbose = command_output("git", git_repo.path(), &["worktree", "list", "-v"], "git");
+    assert_eq!(zmin_list_verbose.0, git_list_verbose.0);
+    assert_eq!(
+        normalize_worktree_human_list(&normalize_worktree_output(&zmin_list_verbose.1, &[])),
+        normalize_worktree_human_list(&normalize_worktree_output(&git_list_verbose.1, &replacements))
+    );
+    assert_eq!(zmin_list_verbose.2, git_list_verbose.2);
+
+    let zmin_list_porcelain = command_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["worktree", "list", "--porcelain", "-z"],
+        "zmin",
+    );
+    let git_list_porcelain = command_output(
+        "git",
+        git_repo.path(),
+        &["worktree", "list", "--porcelain", "-z"],
+        "git",
+    );
+    assert_eq!(zmin_list_porcelain.0, git_list_porcelain.0);
+    assert_eq!(
+        normalize_worktree_output(&zmin_list_porcelain.1, &[]),
+        normalize_worktree_output(&git_list_porcelain.1, &replacements)
+    );
+    assert_eq!(zmin_list_porcelain.2, git_list_porcelain.2);
+
+    let git_prune_parent = git_repo.path().with_file_name(format!(
+        "{}-git-prune-dry-run-parent",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_prune_parent = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-prune-dry-run-parent",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    fs::create_dir_all(&git_prune_parent).expect("create git prune parent");
+    fs::create_dir_all(&zmin_prune_parent).expect("create zmin prune parent");
+    let git_prune_worktree = git_prune_parent.join("linked-prune-short");
+    let zmin_prune_worktree = zmin_prune_parent.join("linked-prune-short");
+    git(
+        git_repo.path(),
+        [
+            "worktree",
+            "add",
+            "-d",
+            git_prune_worktree.to_str().expect("git prune worktree"),
+        ],
+    );
+    run_zmin(
+        zmin_repo.path(),
+        [
+            "worktree",
+            "add",
+            "-d",
+            zmin_prune_worktree.to_str().expect("zmin prune worktree"),
+        ],
+    );
+    fs::remove_dir_all(&git_prune_worktree).expect("remove git prune worktree");
+    fs::remove_dir_all(&zmin_prune_worktree).expect("remove zmin prune worktree");
+
+    let zmin_prune = command_output(zmin_bin(), zmin_repo.path(), &["worktree", "prune", "-n"], "zmin");
+    let git_prune = command_output("git", git_repo.path(), &["worktree", "prune", "-n"], "git");
+    assert_eq!(zmin_prune.0, git_prune.0);
+    assert_eq!(
+        normalize_worktree_output(&zmin_prune.1, &[]),
+        normalize_worktree_output(
+            &git_prune.1,
+            &[
+                (git_prune_parent.as_path(), zmin_prune_parent.as_path()),
+                (git_prune_worktree.as_path(), zmin_prune_worktree.as_path()),
+            ]
+        )
+    );
+    assert_eq!(
+        normalize_worktree_output(&zmin_prune.2, &[]),
+        normalize_worktree_output(
+            &git_prune.2,
+            &[
+                (git_prune_parent.as_path(), zmin_prune_parent.as_path()),
+                (git_prune_worktree.as_path(), zmin_prune_worktree.as_path()),
+            ]
+        )
+    );
 }
 
 #[test]
