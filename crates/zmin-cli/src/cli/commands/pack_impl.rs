@@ -1821,7 +1821,7 @@ fn fsck_impl(options: FsckOptions) -> Result<()> {
     }
 
     if !options.connectivity_only {
-        let message_config = fsck_message_config(&repo)?;
+        let message_config = fsck_message_config(Some(&repo))?;
         let mut checked_gitmodules_missing_entries = HashSet::new();
         let mut checked_gitmodules_parse_blobs = HashSet::new();
         let mut checked_gitmodules_path_blobs = HashSet::new();
@@ -2541,85 +2541,41 @@ struct FsckMessageConfig {
     zero_padded_filemode: FsckMessageSeverity,
 }
 
-fn fsck_message_config(repo: &GitRepo) -> Result<FsckMessageConfig> {
+fn fsck_message_config(repo: Option<&GitRepo>) -> Result<FsckMessageConfig> {
+    let severity = |key: &str, default| match repo {
+        Some(repo) => fsck_message_severity(repo, key, default),
+        None => Ok(default),
+    };
     Ok(FsckMessageConfig {
-        bad_date: fsck_message_severity(repo, "baddate", FsckMessageSeverity::Error)?,
-        bad_email: fsck_message_severity(repo, "bademail", FsckMessageSeverity::Error)?,
-        bad_filemode: fsck_message_severity(repo, "badfilemode", FsckMessageSeverity::Warn)?,
-        bad_tag_name: fsck_message_severity(repo, "badtagname", FsckMessageSeverity::Warn)?,
-        bad_timezone: fsck_message_severity(repo, "badtimezone", FsckMessageSeverity::Error)?,
-        duplicate_entries: fsck_message_severity(
-            repo,
-            "duplicateentries",
-            FsckMessageSeverity::Error,
-        )?,
-        full_pathname: fsck_message_severity(repo, "fullpathname", FsckMessageSeverity::Warn)?,
-        gitmodules_blob: fsck_message_severity(repo, "gitmodulesblob", FsckMessageSeverity::Error)?,
-        gitmodules_missing: fsck_message_severity(
-            repo,
-            "gitmodulesmissing",
-            FsckMessageSeverity::Error,
-        )?,
-        gitmodules_name: fsck_message_severity(repo, "gitmodulesname", FsckMessageSeverity::Warn)?,
-        gitmodules_parse: fsck_message_severity(
-            repo,
-            "gitmodulesparse",
-            FsckMessageSeverity::Warn,
-        )?,
-        gitmodules_path: fsck_message_severity(repo, "gitmodulespath", FsckMessageSeverity::Error)?,
-        gitmodules_symlink: fsck_message_severity(
-            repo,
-            "gitmodulessymlink",
-            FsckMessageSeverity::Error,
-        )?,
-        gitmodules_update: fsck_message_severity(
-            repo,
-            "gitmodulesupdate",
-            FsckMessageSeverity::Error,
-        )?,
-        gitmodules_url: fsck_message_severity(repo, "gitmodulesurl", FsckMessageSeverity::Error)?,
-        has_dot: fsck_message_severity(repo, "hasdot", FsckMessageSeverity::Warn)?,
-        has_dotdot: fsck_message_severity(repo, "hasdotdot", FsckMessageSeverity::Warn)?,
-        has_dotgit: fsck_message_severity(repo, "hasdotgit", FsckMessageSeverity::Warn)?,
-        missing_author: fsck_message_severity(repo, "missingauthor", FsckMessageSeverity::Error)?,
-        missing_committer: fsck_message_severity(
-            repo,
-            "missingcommitter",
-            FsckMessageSeverity::Error,
-        )?,
-        missing_email: fsck_message_severity(repo, "missingemail", FsckMessageSeverity::Error)?,
-        missing_name_before_email: fsck_message_severity(
-            repo,
-            "missingnamebeforeemail",
-            FsckMessageSeverity::Error,
-        )?,
-        missing_space_before_date: fsck_message_severity(
-            repo,
-            "missingspacebeforedate",
-            FsckMessageSeverity::Error,
-        )?,
-        missing_space_before_email: fsck_message_severity(
-            repo,
-            "missingspacebeforeemail",
-            FsckMessageSeverity::Error,
-        )?,
-        missing_tagger_entry: fsck_message_severity(
-            repo,
-            "missingtaggerentry",
-            FsckMessageSeverity::Warn,
-        )?,
-        null_sha1: fsck_message_severity(repo, "nullsha1", FsckMessageSeverity::Warn)?,
-        tree_not_sorted: fsck_message_severity(repo, "treenotsorted", FsckMessageSeverity::Error)?,
-        zero_padded_date: fsck_message_severity(
-            repo,
-            "zeropaddeddate",
-            FsckMessageSeverity::Error,
-        )?,
-        zero_padded_filemode: fsck_message_severity(
-            repo,
-            "zeropaddedfilemode",
-            FsckMessageSeverity::Warn,
-        )?,
+        bad_date: severity("baddate", FsckMessageSeverity::Error)?,
+        bad_email: severity("bademail", FsckMessageSeverity::Error)?,
+        bad_filemode: severity("badfilemode", FsckMessageSeverity::Warn)?,
+        bad_tag_name: severity("badtagname", FsckMessageSeverity::Warn)?,
+        bad_timezone: severity("badtimezone", FsckMessageSeverity::Error)?,
+        duplicate_entries: severity("duplicateentries", FsckMessageSeverity::Error)?,
+        full_pathname: severity("fullpathname", FsckMessageSeverity::Warn)?,
+        gitmodules_blob: severity("gitmodulesblob", FsckMessageSeverity::Error)?,
+        gitmodules_missing: severity("gitmodulesmissing", FsckMessageSeverity::Error)?,
+        gitmodules_name: severity("gitmodulesname", FsckMessageSeverity::Warn)?,
+        gitmodules_parse: severity("gitmodulesparse", FsckMessageSeverity::Warn)?,
+        gitmodules_path: severity("gitmodulespath", FsckMessageSeverity::Error)?,
+        gitmodules_symlink: severity("gitmodulessymlink", FsckMessageSeverity::Error)?,
+        gitmodules_update: severity("gitmodulesupdate", FsckMessageSeverity::Error)?,
+        gitmodules_url: severity("gitmodulesurl", FsckMessageSeverity::Error)?,
+        has_dot: severity("hasdot", FsckMessageSeverity::Warn)?,
+        has_dotdot: severity("hasdotdot", FsckMessageSeverity::Warn)?,
+        has_dotgit: severity("hasdotgit", FsckMessageSeverity::Warn)?,
+        missing_author: severity("missingauthor", FsckMessageSeverity::Error)?,
+        missing_committer: severity("missingcommitter", FsckMessageSeverity::Error)?,
+        missing_email: severity("missingemail", FsckMessageSeverity::Error)?,
+        missing_name_before_email: severity("missingnamebeforeemail", FsckMessageSeverity::Error)?,
+        missing_space_before_date: severity("missingspacebeforedate", FsckMessageSeverity::Error)?,
+        missing_space_before_email: severity("missingspacebeforeemail", FsckMessageSeverity::Error)?,
+        missing_tagger_entry: severity("missingtaggerentry", FsckMessageSeverity::Warn)?,
+        null_sha1: severity("nullsha1", FsckMessageSeverity::Warn)?,
+        tree_not_sorted: severity("treenotsorted", FsckMessageSeverity::Error)?,
+        zero_padded_date: severity("zeropaddeddate", FsckMessageSeverity::Error)?,
+        zero_padded_filemode: severity("zeropaddedfilemode", FsckMessageSeverity::Warn)?,
     })
 }
 
@@ -5051,7 +5007,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
             text: "fatal: --promisor cannot be used with a pack name\n".into(),
         });
     }
-    if options.stdin && options.object_format.is_some() {
+    if options.stdin && !options.object_format.is_empty() {
         return Err(CliError::Stderr {
             code: 128,
             text: "fatal: options '--object-format' and '--stdin' cannot be used together\n".into(),
@@ -5060,8 +5016,12 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
     let index_version = requested_pack_index_version(options.index_version.as_deref())?;
     let max_input_size =
         parse_index_pack_max_input_size(options.max_input_size.last().map(String::as_str));
-    let algorithm = resolve_index_pack_object_format(options.object_format.as_deref())?;
-    let _ = (options.check_self_contained_and_connected, options.threads);
+    let algorithm =
+        resolve_index_pack_object_format(options.object_format.last().map(String::as_str))?;
+    let _ = (
+        options.check_self_contained_and_connected,
+        options.threads.last(),
+    );
     if options.verify {
         if options.stdin || options.pack_file.is_none() {
             return Err(CliError::Fatal {
@@ -5183,7 +5143,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
             }
         };
         if let Err(error) = index_pack_validate_pack_file(
-            &repo,
+            Some(&repo),
             &temp_pack,
             options.strict.as_deref(),
             options.fsck_objects.as_deref(),
@@ -5251,7 +5211,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         };
         if (options.strict.is_some() || options.fsck_objects.is_some())
             && let Err(error) = index_pack_validate_pack_file(
-                &repo,
+                Some(&repo),
                 &repaired_pack,
                 options.strict.as_deref(),
                 options.fsck_objects.as_deref(),
@@ -5305,7 +5265,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         && !options.fix_thin
         && (options.strict.is_some() || options.fsck_objects.is_some())
     {
-        let repo = find_repo()?;
+        let repo = find_repo().ok();
         let Some(pack_path) = options.pack_file.clone() else {
             return Err(CliError::Fatal {
                 code: 129,
@@ -5316,7 +5276,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         let indexed =
             index_pack_file_for_output(algorithm, &pack_path, index_version, options.no_rev_index)?;
         index_pack_validate_pack_file(
-            &repo,
+            repo.as_ref(),
             &pack_path,
             options.strict.as_deref(),
             options.fsck_objects.as_deref(),
@@ -5472,7 +5432,7 @@ fn resolve_index_pack_object_format(object_format: Option<&str>) -> Result<GitHa
 }
 
 fn index_pack_validate_pack_file(
-    repo: &GitRepo,
+    repo: Option<&GitRepo>,
     pack_path: &std::path::Path,
     strict: Option<&str>,
     fsck_objects: Option<&str>,

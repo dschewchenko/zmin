@@ -12,6 +12,26 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git index-pack`
+documented-option family review closure. The selected change extends the
+previous schema/runtime expansion to cover repeated `--threads` and
+`--object-format` parsing, removes the repository hard requirement from the
+standalone `--strict` and `--fsck-objects` pack-file validation lane, adds
+exact stock-Git evidence for repeated thread counts, connectivity-check plus
+strict/fsck compositions, zero and malformed unlimited size limits, repeated
+last-one-wins size limits, unknown object-format rejection, repeated sha1
+object-format acceptance, and both promisor message side effects and
+pack-name rejection, then promotes those five documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+11` matrix rows, `+5` complete documented option pairs, `+0` represented
+documented option pairs, `+8` verified rows, `+3` invalid-input rows, and `+0`
+complete command matrices. Actual delta matched. `index-pack` now sits at
+`15/16` reviewed-complete documented option pairs, `15/16` represented
+documented option pairs, `33/33` classified rows, `23` stock-matching rows,
+`10` invalid-input rows, and the remaining tail is only the documented
+`--progress-title` option, which current local stock Git `2.50.1` and `2.53.0`
+both reject with generic usage output.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git index-pack`
 documented schema/runtime family expansion. The selected change adds the
 remaining safe schema surface for `--threads`,
 `--check-self-contained-and-connected`, `--max-input-size`,

@@ -3117,13 +3117,37 @@ fn index_pack_documented_option_family_matches_stock_git() {
 
     for args in [
         ["index-pack", "--threads=1", "input.pack"].as_slice(),
+        ["index-pack", "--threads=0", "input.pack"].as_slice(),
+        ["index-pack", "--threads=1", "--threads=0", "input.pack"].as_slice(),
+        ["index-pack", "--threads=0", "--threads=1", "input.pack"].as_slice(),
         [
             "index-pack",
             "--check-self-contained-and-connected",
             "input.pack",
         ]
         .as_slice(),
+        [
+            "index-pack",
+            "--check-self-contained-and-connected",
+            "--strict",
+            "input.pack",
+        ]
+        .as_slice(),
+        [
+            "index-pack",
+            "--check-self-contained-and-connected",
+            "--fsck-objects",
+            "input.pack",
+        ]
+        .as_slice(),
         ["index-pack", "--object-format=sha1", "input.pack"].as_slice(),
+        [
+            "index-pack",
+            "--object-format=sha1",
+            "--object-format=sha1",
+            "input.pack",
+        ]
+        .as_slice(),
     ] {
         let git_target = TempDir::new().expect("git standalone dir");
         let zmin_target = TempDir::new().expect("zmin standalone dir");
@@ -3142,11 +3166,33 @@ fn index_pack_documented_option_family_matches_stock_git() {
     }
 
     for args in [
+        ["index-pack", "--max-input-size=0", "--stdin"].as_slice(),
+        ["index-pack", "--max-input-size=bogus", "--stdin"].as_slice(),
+        [
+            "index-pack",
+            "--max-input-size=1",
+            "--max-input-size=1500",
+            "--stdin",
+        ]
+        .as_slice(),
         ["index-pack", "--max-input-size=1k", "--stdin"].as_slice(),
+        [
+            "index-pack",
+            "--max-input-size=1500",
+            "--max-input-size=1",
+            "--stdin",
+        ]
+        .as_slice(),
         ["index-pack", "--object-format=sha1", "--stdin"].as_slice(),
+        ["index-pack", "--object-format=bogus", "input.pack"].as_slice(),
+        ["index-pack", "--promisor=hello", "input.pack"].as_slice(),
     ] {
         let git_repo = git_init();
         let zmin_repo = git_init();
+        if args.last() == Some(&"input.pack") {
+            fs::write(git_repo.path().join("input.pack"), &pack).expect("write git pack");
+            fs::write(zmin_repo.path().join("input.pack"), &pack).expect("write zmin pack");
+        }
         assert_eq!(
             command_any_output_with_stdin_bytes(zmin_bin(), zmin_repo.path(), args, &pack, "zmin"),
             command_any_output_with_stdin_bytes("git", git_repo.path(), args, &pack, "git"),

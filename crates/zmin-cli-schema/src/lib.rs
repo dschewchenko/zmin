@@ -438,11 +438,11 @@ pub enum Command {
         #[arg(long = "index-version")]
         index_version: Option<String>,
         #[arg(long = "threads", hide = true)]
-        threads: Option<usize>,
+        threads: Vec<usize>,
         #[arg(long = "max-input-size", hide = true, require_equals = true)]
         max_input_size: Vec<String>,
         #[arg(long = "object-format", hide = true, require_equals = true)]
-        object_format: Option<String>,
+        object_format: Vec<String>,
         #[arg(long = "promisor", hide = true, num_args = 0..=1, require_equals = true, default_missing_value = "")]
         promisor: Option<String>,
         #[arg(value_hint = ValueHint::FilePath)]
@@ -4483,9 +4483,9 @@ pub struct IndexPackOptions {
     pub fix_thin: bool,
     pub verbose: bool,
     pub index_version: Option<String>,
-    pub threads: Option<usize>,
+    pub threads: Vec<usize>,
     pub max_input_size: Vec<String>,
-    pub object_format: Option<String>,
+    pub object_format: Vec<String>,
     pub promisor: Option<String>,
     pub pack_file: Option<PathBuf>,
 }
