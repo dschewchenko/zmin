@@ -35,7 +35,10 @@ fn object_files(repo: &Path) -> Vec<String> {
                     let child = child.expect("fanout child").path();
                     format!(
                         "{name}/{}",
-                        child.file_name().and_then(|value| value.to_str()).expect("object file")
+                        child
+                            .file_name()
+                            .and_then(|value| value.to_str())
+                            .expect("object file")
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2590,7 +2593,13 @@ fn unpack_objects_documented_option_combinations_match_stock_git() {
         ["unpack-objects", "--max-input-size=0", "-q"].as_slice(),
         ["unpack-objects", "--max-input-size=1500", "-q"].as_slice(),
         ["unpack-objects", "--max-input-size=bogus", "-q"].as_slice(),
-        ["unpack-objects", "--max-input-size=1", "--max-input-size=1500", "-q"].as_slice(),
+        [
+            "unpack-objects",
+            "--max-input-size=1",
+            "--max-input-size=1500",
+            "-q",
+        ]
+        .as_slice(),
     ] {
         let git_repo = git_init();
         let zmin_repo = git_init();
@@ -2608,7 +2617,13 @@ fn unpack_objects_documented_option_combinations_match_stock_git() {
 
     for args in [
         ["unpack-objects", "--max-input-size=1", "-q"].as_slice(),
-        ["unpack-objects", "--max-input-size=1500", "--max-input-size=1", "-q"].as_slice(),
+        [
+            "unpack-objects",
+            "--max-input-size=1500",
+            "--max-input-size=1",
+            "-q",
+        ]
+        .as_slice(),
         ["unpack-objects", "--max-input-size=1m", "-q"].as_slice(),
         ["unpack-objects", "--max-input-size=3k", "-q"].as_slice(),
     ] {
@@ -3087,6 +3102,122 @@ fn index_pack_version_1_matches_stock_git_output_and_writes_v1_index() {
 }
 
 #[test]
+fn index_pack_documented_option_family_matches_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+    let pack = command_stdout_bytes_with_stdin(
+        "git",
+        source.path(),
+        &["pack-objects", "--stdout", "--revs"],
+        b"HEAD\n",
+    );
+
+    for args in [
+        ["index-pack", "--threads=1", "input.pack"].as_slice(),
+        [
+            "index-pack",
+            "--check-self-contained-and-connected",
+            "input.pack",
+        ]
+        .as_slice(),
+        ["index-pack", "--object-format=sha1", "input.pack"].as_slice(),
+    ] {
+        let git_target = TempDir::new().expect("git standalone dir");
+        let zmin_target = TempDir::new().expect("zmin standalone dir");
+        fs::write(git_target.path().join("input.pack"), &pack).expect("write git pack");
+        fs::write(zmin_target.path().join("input.pack"), &pack).expect("write zmin pack");
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_target.path(), args, "zmin"),
+            command_any_output("git", git_target.path(), args, "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            fs::read(zmin_target.path().join("input.idx")).expect("read zmin idx"),
+            fs::read(git_target.path().join("input.idx")).expect("read git idx"),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["index-pack", "--max-input-size=1k", "--stdin"].as_slice(),
+        ["index-pack", "--object-format=sha1", "--stdin"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        assert_eq!(
+            command_any_output_with_stdin_bytes(zmin_bin(), zmin_repo.path(), args, &pack, "zmin"),
+            command_any_output_with_stdin_bytes("git", git_repo.path(), args, &pack, "git"),
+            "args: {args:?}"
+        );
+    }
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = git_with_stdin_bytes(
+        git_repo.path(),
+        ["index-pack", "--promisor", "--stdin"],
+        &pack,
+    );
+    let zmin_output = run_zmin_with_stdin_bytes(
+        zmin_repo.path(),
+        ["index-pack", "--promisor", "--stdin"],
+        &pack,
+    );
+    assert_eq!(zmin_output, git_output);
+    let pack_id = git_output
+        .strip_prefix("pack\t")
+        .expect("index-pack promisor output pack id");
+    assert_eq!(
+        fs::read(
+            zmin_repo
+                .path()
+                .join(format!(".git/objects/pack/pack-{pack_id}.promisor"))
+        )
+        .expect("read zmin promisor"),
+        fs::read(
+            git_repo
+                .path()
+                .join(format!(".git/objects/pack/pack-{pack_id}.promisor"))
+        )
+        .expect("read git promisor")
+    );
+
+    let git_msg_repo = git_init();
+    let zmin_msg_repo = git_init();
+    let git_msg_output = git_with_stdin_bytes(
+        git_msg_repo.path(),
+        ["index-pack", "--promisor=hello", "--stdin"],
+        &pack,
+    );
+    let zmin_msg_output = run_zmin_with_stdin_bytes(
+        zmin_msg_repo.path(),
+        ["index-pack", "--promisor=hello", "--stdin"],
+        &pack,
+    );
+    assert_eq!(zmin_msg_output, git_msg_output);
+    let msg_pack_id = git_msg_output
+        .strip_prefix("pack\t")
+        .expect("index-pack promisor message output pack id");
+    assert_eq!(
+        fs::read(
+            zmin_msg_repo
+                .path()
+                .join(format!(".git/objects/pack/pack-{msg_pack_id}.promisor"))
+        )
+        .expect("read zmin promisor message"),
+        fs::read(
+            git_msg_repo
+                .path()
+                .join(format!(".git/objects/pack/pack-{msg_pack_id}.promisor"))
+        )
+        .expect("read git promisor message")
+    );
+}
+
+#[test]
 fn pack_objects_index_version_1_writes_stock_compatible_v1_index() {
     let source = git_init();
     configure_identity(source.path());
@@ -3529,10 +3660,42 @@ fn bundle_create_version_values_match_stock_git() {
     let version_bundle = bundle_dir.path().join("version-quiet.bundle");
     let version_bundle_arg = version_bundle.to_str().expect("version quiet bundle path");
     for args in [
-        ["bundle", "create", "--version=2", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--quiet", "--version=2", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "-q", "--version=2", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=2", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=2",
+            "--quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--quiet",
+            "--version=2",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "-q",
+            "--version=2",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=2",
+            "-q",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "bundle",
             "create",
@@ -3551,10 +3714,42 @@ fn bundle_create_version_values_match_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["bundle", "create", "--version=3", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--quiet", "--version=3", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "-q", "--version=3", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=3", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=3",
+            "--quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--quiet",
+            "--version=3",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "-q",
+            "--version=3",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=3",
+            "-q",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "bundle",
             "create",
@@ -3573,10 +3768,42 @@ fn bundle_create_version_values_match_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["bundle", "create", "--version=-1", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--quiet", "--version=-1", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "-q", "--version=-1", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=-1", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=-1",
+            "--quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--quiet",
+            "--version=-1",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "-q",
+            "--version=-1",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=-1",
+            "-q",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "bundle",
             "create",
@@ -3595,10 +3822,42 @@ fn bundle_create_version_values_match_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["bundle", "create", "--version=1", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--quiet", "--version=1", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "-q", "--version=1", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=1", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=1",
+            "--quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--quiet",
+            "--version=1",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "-q",
+            "--version=1",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=1",
+            "-q",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "bundle",
             "create",
@@ -3617,14 +3876,78 @@ fn bundle_create_version_values_match_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["bundle", "create", "--version=foo", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--quiet", "--version=foo", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "-q", "--version=foo", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=foo", "-q", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=", "--quiet", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--quiet", "--version=", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "-q", "--version=", version_bundle_arg, "HEAD"].as_slice(),
-        ["bundle", "create", "--version=", "-q", version_bundle_arg, "HEAD"].as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=foo",
+            "--quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--quiet",
+            "--version=foo",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "-q",
+            "--version=foo",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=foo",
+            "-q",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=",
+            "--quiet",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--quiet",
+            "--version=",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "-q",
+            "--version=",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "bundle",
+            "create",
+            "--version=",
+            "-q",
+            version_bundle_arg,
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             normalize_bundle_progress_result(command_any_output(
@@ -3633,12 +3956,9 @@ fn bundle_create_version_values_match_stock_git() {
                 args,
                 "zmin",
             )),
-            normalize_bundle_progress_result(command_any_output(
-                "git",
-                source.path(),
-                args,
-                "git",
-            )),
+            normalize_bundle_progress_result(
+                command_any_output("git", source.path(), args, "git",)
+            ),
             "bundle create combo {args:?}"
         );
         let bundle_exists = version_bundle.exists();
@@ -3662,10 +3982,7 @@ fn bundle_quiet_flags_match_stock_git() {
     git_with_env(source.path(), ["commit", "-m", "one"]);
 
     let bundle_dir = TempDir::new().expect("bundle dir");
-    for (bundle_name, quiet_arg) in [
-        ("quiet.bundle", "--quiet"),
-        ("short-quiet.bundle", "-q"),
-    ] {
+    for (bundle_name, quiet_arg) in [("quiet.bundle", "--quiet"), ("short-quiet.bundle", "-q")] {
         let git_bundle = bundle_dir.path().join(format!("git-{bundle_name}"));
         let zmin_bundle = bundle_dir.path().join(format!("zmin-{bundle_name}"));
         let verify_bundle = bundle_dir.path().join(format!("verify-{bundle_name}"));
@@ -3712,13 +4029,25 @@ fn bundle_quiet_flags_match_stock_git() {
         command_any_output(
             zmin_bin(),
             source.path(),
-            &["bundle", "create", "--no-quiet", no_quiet_bundle_arg, "HEAD"],
+            &[
+                "bundle",
+                "create",
+                "--no-quiet",
+                no_quiet_bundle_arg,
+                "HEAD"
+            ],
             "zmin",
         ),
         command_any_output(
             "git",
             source.path(),
-            &["bundle", "create", "--no-quiet", no_quiet_bundle_arg, "HEAD"],
+            &[
+                "bundle",
+                "create",
+                "--no-quiet",
+                no_quiet_bundle_arg,
+                "HEAD"
+            ],
             "git",
         ),
         "bundle create --no-quiet"

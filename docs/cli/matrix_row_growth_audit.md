@@ -11,6 +11,23 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git index-pack`
+documented schema/runtime family expansion. The selected change adds the
+remaining safe schema surface for `--threads`,
+`--check-self-contained-and-connected`, `--max-input-size`,
+`--object-format`, and `--promisor`, preserves current help parity by hiding
+those internal-use flags from `-h`, adds exact stock-Git evidence for the
+represented standalone pack-file, stdin rejection, and promisor sidecar lanes,
+and restores the baseline doc cache after local artifact cleanup removed
+`target`. Expected delta was `+5` matrix rows, `+5` represented documented
+option pairs, `+4` verified rows, `+1` invalid-input row, `+0` complete
+documented option pairs, and `+0` complete command matrices. Actual delta
+matched. `index-pack` now sits at `15/16` represented documented option pairs
+with `22/22` classified rows, `15` stock-matching rows, `7` invalid-input
+rows, `10/16` reviewed-complete documented option pairs, and the remaining
+tail is narrowed to `--progress-title` plus review/expansion work for the five
+newly represented option families.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git show-branch`
 documented explicit-schema closure plus command promotion. The selected change
 extends the schema and runtime to cover `--list`, `--more`, `--independent`,

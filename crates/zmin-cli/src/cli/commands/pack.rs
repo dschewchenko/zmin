@@ -58,9 +58,14 @@ pub(crate) fn dispatch(
             verify,
             strict,
             fsck_objects,
+            check_self_contained_and_connected,
             fix_thin,
             verbose,
             index_version,
+            threads,
+            max_input_size,
+            object_format,
+            promisor,
             pack_file,
         } => run_index_pack(runtime::IndexPackOptions {
             stdin,
@@ -71,9 +76,14 @@ pub(crate) fn dispatch(
             verify,
             strict,
             fsck_objects,
+            check_self_contained_and_connected,
             fix_thin,
             verbose,
             index_version,
+            threads,
+            max_input_size,
+            object_format,
+            promisor,
             pack_file,
         }),
         runtime::Command::Fsck {
@@ -145,18 +155,14 @@ pub(crate) fn dispatch(
             raw,
             format,
             tags,
-        } => {
-            super::pack_commands::verify_tag(verbose, raw, format.as_deref(), tags)
-        }
+        } => super::pack_commands::verify_tag(verbose, raw, format.as_deref(), tags),
         runtime::Command::Mktag {
             strict: _,
             no_strict: _,
         } => super::pack_commands::mktag_command(),
-        runtime::Command::CommitGraph { command } => {
-            super::pack_commands::commit_graph_command(
-                resolve_commit_graph_command_toggles(command, raw_args),
-            )
-        }
+        runtime::Command::CommitGraph { command } => super::pack_commands::commit_graph_command(
+            resolve_commit_graph_command_toggles(command, raw_args),
+        ),
         runtime::Command::MultiPackIndex {
             object_dir,
             command,
@@ -325,7 +331,15 @@ pub(crate) fn run_bundle(
     file: PathBuf,
     args: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::pack_commands::bundle(quiet, progress, no_progress, &operation, version, file, args)
+    super::pack_commands::bundle(
+        quiet,
+        progress,
+        no_progress,
+        &operation,
+        version,
+        file,
+        args,
+    )
 }
 
 pub(crate) fn run_index_pack(

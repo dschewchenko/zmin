@@ -144,7 +144,9 @@ pub(crate) fn multi_pack_index_write(
             eprintln!("warning: unknown preferred pack: '{preferred_pack}'");
         }
     }
-    if options.bitmap && let Some(path) = options.refs_snapshot.as_deref() {
+    if options.bitmap
+        && let Some(path) = options.refs_snapshot.as_deref()
+    {
         read_multi_pack_index_refs_snapshot(path)?;
     }
     let write_bitmap = options.bitmap && !options.no_bitmap;
@@ -219,7 +221,9 @@ fn write_multi_pack_index_bitmap_placeholder(pack_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn multi_pack_index_checksum_from_bytes(bytes: &[u8]) -> Result<[u8; MULTI_PACK_INDEX_CHECKSUM_LEN]> {
+fn multi_pack_index_checksum_from_bytes(
+    bytes: &[u8],
+) -> Result<[u8; MULTI_PACK_INDEX_CHECKSUM_LEN]> {
     if bytes.len() < MULTI_PACK_INDEX_CHECKSUM_LEN {
         return Err(CliError::Fatal {
             code: 128,
@@ -273,8 +277,8 @@ fn multi_pack_index_selected_pack_names_from_stdin(
         if trimmed.is_empty() {
             continue;
         }
-        if let Some(normalized) =
-            normalize_multi_pack_index_pack_name(trimmed).filter(|name| available_set.contains(name.as_str()))
+        if let Some(normalized) = normalize_multi_pack_index_pack_name(trimmed)
+            .filter(|name| available_set.contains(name.as_str()))
         {
             selected.push(normalized);
         }
@@ -282,10 +286,7 @@ fn multi_pack_index_selected_pack_names_from_stdin(
     Ok(selected)
 }
 
-fn apply_multi_pack_index_preferred_pack(
-    packs: &mut Vec<String>,
-    preferred_pack: &str,
-) -> bool {
+fn apply_multi_pack_index_preferred_pack(packs: &mut Vec<String>, preferred_pack: &str) -> bool {
     let Some(preferred_pack) = normalize_multi_pack_index_pack_name(preferred_pack) else {
         return false;
     };
@@ -565,20 +566,20 @@ struct IndexPackCommandIndex {
 }
 
 fn index_pack_file_for_output(
+    algorithm: GitHashAlgorithm,
     path: &std::path::Path,
     index_version: PackIndexVersion,
     no_rev_index: bool,
 ) -> Result<IndexPackCommandIndex> {
     if no_rev_index {
-        let indexed =
-            index_pack_file_index_only_with_version(GitHashAlgorithm::Sha1, path, index_version)?;
+        let indexed = index_pack_file_index_only_with_version(algorithm, path, index_version)?;
         Ok(IndexPackCommandIndex {
             pack_id: indexed.pack_id,
             index: indexed.index,
             reverse_index: None,
         })
     } else {
-        let indexed = index_pack_file_with_version(GitHashAlgorithm::Sha1, path, index_version)?;
+        let indexed = index_pack_file_with_version(algorithm, path, index_version)?;
         Ok(IndexPackCommandIndex {
             pack_id: indexed.pack_id,
             index: indexed.index,
@@ -1062,12 +1063,13 @@ fn multi_pack_index_verify_progress_counts(
     let oid_count = read_u32_be(&oidf[255 * 4..256 * 4])? as usize;
     let mut object_count = 0_usize;
     let pack_dir = objects_dir.join("pack");
-    for pack in pnam.split(|byte| *byte == 0).filter(|name| !name.is_empty()) {
-        let pack_name = std::str::from_utf8(pack).map_err(|error| {
-            CliError::Fatal {
-                code: 1,
-                message: format!("multi-pack-index pack name is not valid UTF-8: {error}"),
-            }
+    for pack in pnam
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+    {
+        let pack_name = std::str::from_utf8(pack).map_err(|error| CliError::Fatal {
+            code: 1,
+            message: format!("multi-pack-index pack name is not valid UTF-8: {error}"),
         })?;
         object_count += pack_index_object_count_with_context(&pack_dir.join(pack_name))?;
     }
@@ -1083,10 +1085,7 @@ fn print_multi_pack_index_verify_progress(oid_count: usize, object_count: usize)
         "Verifying OID order in multi-pack-index: 100% ({}/{}), done.",
         oid_count, oid_count
     );
-    eprint!(
-        "Sorting objects by packfile:   0% (0/{})\r",
-        object_count
-    );
+    eprint!("Sorting objects by packfile:   0% (0/{})\r", object_count);
     eprint!(
         "Sorting objects by packfile: 100% ({}/{})\r",
         object_count, object_count
@@ -1171,7 +1170,10 @@ fn commit_graph_verify(
     Ok(())
 }
 
-fn resolve_objects_dir(object_dir: Option<PathBuf>, default_objects_dir: &std::path::Path) -> Result<PathBuf> {
+fn resolve_objects_dir(
+    object_dir: Option<PathBuf>,
+    default_objects_dir: &std::path::Path,
+) -> Result<PathBuf> {
     match object_dir {
         Some(path) if path.is_absolute() => Ok(path),
         Some(path) => Ok(std::env::current_dir()?.join(path)),
@@ -4669,7 +4671,9 @@ fn bundle_unbundle(file: PathBuf, patterns: Vec<String>, show_progress: bool) ->
         }
     };
     if show_progress {
-        print_bundle_unbundle_progress(decode_pack_index(GitHashAlgorithm::Sha1, indexed.index.clone())?.len());
+        print_bundle_unbundle_progress(
+            decode_pack_index(GitHashAlgorithm::Sha1, indexed.index.clone())?.len(),
+        );
     }
     let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
     install_temp_pack_file(
@@ -5041,7 +5045,23 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
             message: "index-pack --rev-index cannot be combined with --no-rev-index".into(),
         });
     }
+    if options.promisor.is_some() && !options.stdin {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: --promisor cannot be used with a pack name\n".into(),
+        });
+    }
+    if options.stdin && options.object_format.is_some() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: options '--object-format' and '--stdin' cannot be used together\n".into(),
+        });
+    }
     let index_version = requested_pack_index_version(options.index_version.as_deref())?;
+    let max_input_size =
+        parse_index_pack_max_input_size(options.max_input_size.last().map(String::as_str));
+    let algorithm = resolve_index_pack_object_format(options.object_format.as_deref())?;
+    let _ = (options.check_self_contained_and_connected, options.threads);
     if options.verify {
         if options.stdin || options.pack_file.is_none() {
             return Err(CliError::Fatal {
@@ -5064,25 +5084,20 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
                 ),
             });
         }
-        let indexed =
-            index_pack_file_index_only_with_version(GitHashAlgorithm::Sha1, path, index_version)
-                .map_err(|error| index_pack_verify_integrity_error(path, error))?;
+        let indexed = index_pack_file_index_only_with_version(algorithm, path, index_version)
+            .map_err(|error| index_pack_verify_integrity_error(path, error))?;
         let idx_path = path.with_extension("idx");
         if idx_path.exists() {
             if !file_bytes_equal(&idx_path, &indexed.index)? {
                 let idx = fs::read(&idx_path)?;
-                let entries = decode_pack_index(GitHashAlgorithm::Sha1, idx)
+                let entries = decode_pack_index(algorithm, idx)
                     .map_err(|_| index_pack_verify_validation_error(&idx_path))?;
                 return Err(index_pack_verify_pack_index_mismatch_error(path, &entries));
             }
             let rev_path = path.with_extension("rev");
             if rev_path.exists() {
-                validate_pack_reverse_index_file(
-                    GitHashAlgorithm::Sha1,
-                    &rev_path,
-                    indexed.objects,
-                )
-                .map_err(|_| index_pack_verify_validation_error(&rev_path))?;
+                validate_pack_reverse_index_file(algorithm, &rev_path, indexed.objects)
+                    .map_err(|_| index_pack_verify_validation_error(&rev_path))?;
             }
         }
         return Ok(());
@@ -5096,19 +5111,23 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         let pack_dir = repo.objects_dir.join("pack");
         fs::create_dir_all(&pack_dir)?;
         let temp_pack = unique_temp_sibling(&pack_dir.join("index-pack-stdin.pack"));
-        let result = copy_index_pack_stdin_to_temp_pack(&temp_pack);
+        let result = copy_index_pack_stdin_to_temp_pack(&temp_pack, max_input_size);
         if result.is_err() {
             let _ = fs::remove_file(&temp_pack);
         }
         result?;
-        let indexed =
-            match index_pack_file_for_output(&temp_pack, index_version, options.no_rev_index) {
-                Ok(indexed) => indexed,
-                Err(error) => {
-                    let _ = fs::remove_file(&temp_pack);
-                    return Err(error);
-                }
-            };
+        let indexed = match index_pack_file_for_output(
+            algorithm,
+            &temp_pack,
+            index_version,
+            options.no_rev_index,
+        ) {
+            Ok(indexed) => indexed,
+            Err(error) => {
+                let _ = fs::remove_file(&temp_pack);
+                return Err(error);
+            }
+        };
         let pack_name = format!("pack-{}", indexed.pack_id.to_hex());
         let pack_path = options
             .pack_file
@@ -5133,8 +5152,9 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
+        write_index_pack_promisor_file(&pack_path, options.promisor.as_deref())?;
         if options.verbose {
-            print_index_pack_verbose_progress(&indexed.index)?;
+            print_index_pack_verbose_progress(algorithm, &indexed.index)?;
         }
         let _ = options.rev_index;
         print_index_pack_installed_output(&indexed.pack_id, kept);
@@ -5145,19 +5165,23 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         let pack_dir = repo.objects_dir.join("pack");
         fs::create_dir_all(&pack_dir)?;
         let temp_pack = unique_temp_sibling(&pack_dir.join("index-pack-stdin-validated.pack"));
-        let result = copy_index_pack_stdin_to_temp_pack(&temp_pack);
+        let result = copy_index_pack_stdin_to_temp_pack(&temp_pack, max_input_size);
         if result.is_err() {
             let _ = fs::remove_file(&temp_pack);
         }
         result?;
-        let indexed =
-            match index_pack_file_for_output(&temp_pack, index_version, options.no_rev_index) {
-                Ok(indexed) => indexed,
-                Err(error) => {
-                    let _ = fs::remove_file(&temp_pack);
-                    return Err(error);
-                }
-            };
+        let indexed = match index_pack_file_for_output(
+            algorithm,
+            &temp_pack,
+            index_version,
+            options.no_rev_index,
+        ) {
+            Ok(indexed) => indexed,
+            Err(error) => {
+                let _ = fs::remove_file(&temp_pack);
+                return Err(error);
+            }
+        };
         if let Err(error) = index_pack_validate_pack_file(
             &repo,
             &temp_pack,
@@ -5191,8 +5215,9 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
+        write_index_pack_promisor_file(&pack_path, options.promisor.as_deref())?;
         if options.verbose {
-            print_index_pack_verbose_progress(&indexed.index)?;
+            print_index_pack_verbose_progress(algorithm, &indexed.index)?;
         }
         let _ = options.rev_index;
         print_index_pack_installed_output(&indexed.pack_id, kept);
@@ -5205,7 +5230,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         let input_pack = unique_temp_sibling(&pack_dir.join("index-pack-thin-input.pack"));
         let repaired_pack = unique_temp_sibling(&pack_dir.join("index-pack-thin-repaired.pack"));
         let result = (|| {
-            copy_index_pack_stdin_to_temp_pack(&input_pack)?;
+            copy_index_pack_stdin_to_temp_pack(&input_pack, max_input_size)?;
             let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
             repair_thin_pack_file_to_path(
                 GitHashAlgorithm::Sha1,
@@ -5262,8 +5287,9 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         } else {
             false
         };
+        write_index_pack_promisor_file(&pack_path, options.promisor.as_deref())?;
         if options.verbose {
-            print_index_pack_verbose_progress(&repair.indexed.index)?;
+            print_index_pack_verbose_progress(algorithm, &repair.indexed.index)?;
         }
         let _ = (options.rev_index, repair.fixed_objects);
         print_index_pack_installed_output(&repair.indexed.pack_id, kept);
@@ -5286,7 +5312,9 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
                 message: "index-pack requires a pack file or --stdin".into(),
             });
         };
-        let indexed = index_pack_file_for_output(&pack_path, index_version, options.no_rev_index)?;
+        enforce_index_pack_max_input_size(pack_path.metadata()?.len(), max_input_size)?;
+        let indexed =
+            index_pack_file_for_output(algorithm, &pack_path, index_version, options.no_rev_index)?;
         index_pack_validate_pack_file(
             &repo,
             &pack_path,
@@ -5310,7 +5338,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
             false
         };
         if options.verbose {
-            print_index_pack_verbose_progress(&indexed.index)?;
+            print_index_pack_verbose_progress(algorithm, &indexed.index)?;
         }
         let _ = options.rev_index;
         print_index_pack_output(&indexed.pack_id, kept);
@@ -5328,7 +5356,9 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
     if let Some(parent) = idx_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let indexed = index_pack_file_for_output(&pack_path, index_version, options.no_rev_index)?;
+    enforce_index_pack_max_input_size(pack_path.metadata()?.len(), max_input_size)?;
+    let indexed =
+        index_pack_file_for_output(algorithm, &pack_path, index_version, options.no_rev_index)?;
     write_content_addressed_file(&idx_path, &indexed.index)?;
     if let Some(reverse_index) = indexed.reverse_index.as_ref() {
         write_content_addressed_file(&pack_path.with_extension("rev"), reverse_index)?;
@@ -5340,15 +5370,15 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         false
     };
     if options.verbose {
-        print_index_pack_verbose_progress(&indexed.index)?;
+        print_index_pack_verbose_progress(algorithm, &indexed.index)?;
     }
     let _ = options.rev_index;
     print_index_pack_output(&indexed.pack_id, kept);
     Ok(())
 }
 
-fn print_index_pack_verbose_progress(index: &[u8]) -> Result<()> {
-    let total = decode_pack_index(GitHashAlgorithm::Sha1, index.to_vec())?.len();
+fn print_index_pack_verbose_progress(algorithm: GitHashAlgorithm, index: &[u8]) -> Result<()> {
+    let total = decode_pack_index(algorithm, index.to_vec())?.len();
     for current in 1..=total {
         let percent = current * 100 / total;
         eprint!("Indexing objects: {percent:3}% ({current}/{total})\r");
@@ -5373,16 +5403,72 @@ fn print_index_pack_installed_output(pack_id: &ObjectId, kept: bool) {
     }
 }
 
-fn copy_index_pack_stdin_to_temp_pack(path: &Path) -> Result<()> {
+fn copy_index_pack_stdin_to_temp_pack(path: &Path, max_input_size: Option<usize>) -> Result<()> {
     let file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)?;
     let mut file = io::BufWriter::with_capacity(INDEX_PACK_STDIN_BUF_CAPACITY, file);
     let mut stdin = io::BufReader::with_capacity(INDEX_PACK_STDIN_BUF_CAPACITY, io::stdin());
-    io::copy(&mut stdin, &mut file)?;
+    let mut total = 0u64;
+    let mut buffer = [0u8; INDEX_PACK_STDIN_BUF_CAPACITY];
+    loop {
+        let read = stdin.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total += read as u64;
+        enforce_index_pack_max_input_size(total, max_input_size)?;
+        file.write_all(&buffer[..read])?;
+    }
     file.flush()?;
     Ok(())
+}
+
+fn write_index_pack_promisor_file(pack_path: &Path, message: Option<&str>) -> Result<()> {
+    let Some(message) = message else {
+        return Ok(());
+    };
+    let content = if message.is_empty() {
+        Vec::new()
+    } else {
+        format!("{message}\n").into_bytes()
+    };
+    fs::write(pack_path.with_extension("promisor"), content)?;
+    Ok(())
+}
+
+fn parse_index_pack_max_input_size(raw: Option<&str>) -> Option<usize> {
+    let raw = raw?;
+    let digits_len = raw.bytes().take_while(|byte| byte.is_ascii_digit()).count();
+    if digits_len == 0 {
+        return Some(0);
+    }
+    raw[..digits_len].parse::<usize>().ok()
+}
+
+fn enforce_index_pack_max_input_size(total: u64, max_input_size: Option<usize>) -> Result<()> {
+    if let Some(limit) = max_input_size.filter(|limit| *limit > 0)
+        && total > limit as u64
+    {
+        let unit = if limit == 1 { "byte" } else { "bytes" };
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!("fatal: pack exceeds maximum allowed size ({limit} {unit})\n"),
+        });
+    }
+    Ok(())
+}
+
+fn resolve_index_pack_object_format(object_format: Option<&str>) -> Result<GitHashAlgorithm> {
+    match object_format.unwrap_or("sha1") {
+        "sha1" => Ok(GitHashAlgorithm::Sha1),
+        "sha256" => Ok(GitHashAlgorithm::Sha256),
+        value => Err(CliError::Stderr {
+            code: 128,
+            text: format!("fatal: unknown hash algorithm '{value}'\n"),
+        }),
+    }
 }
 
 fn index_pack_validate_pack_file(
@@ -5953,13 +6039,9 @@ fn verify_pack_one(
     validate_pack_index_file(algorithm, idx_path)
         .map_err(|error| verify_pack_index_error(algorithm, idx_path, error))?;
     let pack_path = idx_path.with_extension("pack");
-    let verified = zmin_git_core::verify_pack_file_matches_index(
-        algorithm,
-        &pack_path,
-        idx_path,
-        verbose,
-    )
-    .map_err(|error| verify_pack_integrity_error(idx_path, error))?;
+    let verified =
+        zmin_git_core::verify_pack_file_matches_index(algorithm, &pack_path, idx_path, verbose)
+            .map_err(|error| verify_pack_integrity_error(idx_path, error))?;
     if !verbose && !stat_only {
         return Ok(());
     }
@@ -6030,7 +6112,8 @@ fn verify_pack_index_error(
                 ),
             };
         }
-        if algorithm == GitHashAlgorithm::Sha256 || error.to_string() == "wrong index v2 file size" {
+        if algorithm == GitHashAlgorithm::Sha256 || error.to_string() == "wrong index v2 file size"
+        {
             return CliError::Stderr {
                 code: 1,
                 text: format!(

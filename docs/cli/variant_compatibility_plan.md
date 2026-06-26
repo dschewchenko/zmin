@@ -300,26 +300,32 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git show-branch` documented
-explicit-schema closure plus command promotion. Zmin now covers stock Git
-2.47.1 `show-branch` for `--list`, `--more`, `--independent`,
-`--merge-base`, `--topics`, `--topo-order`, `--date-order`, `--sparse`,
-`--color`, `--no-color`, `--reflog`, and the documented `-g` short alias,
-including current-branch reflog header rendering with relative dates under
-fixed `GIT_TEST_DATE_NOW`, while preserving the current helper-free local
-branch-graph output for the previously modeled option families. With those
-rows closed, `show-branch` now sits at `19/19` reviewed-complete documented
-option pairs, `19/19` represented documented option pairs, `23` written rows,
-`23` verified rows, `0` invalid-input rows, and is promoted into
-`docs/cli/census/reviewed_complete_command_matrices.tsv`.
+The latest completed slice is a helper-free `git index-pack` documented
+schema/runtime family expansion. Zmin now parses and exercises the documented
+`--threads`, `--check-self-contained-and-connected`, `--max-input-size`,
+`--object-format`, and `--promisor` surfaces on the current helper-free lanes,
+including stock-matching standalone pack-file acceptance for explicit thread
+count, connectivity-check, and `--object-format=sha1`, stock-matching stdin
+size-limit rejection for `--max-input-size=1k`, stock-matching stdin conflict
+rejection for `--object-format=sha1 --stdin`, and `.promisor` sidecar creation
+for `--promisor` plus `--promisor=<message>`. `--progress-title` remains the
+only documented `index-pack` option still absent from schema because local
+stock `/usr/bin/git` currently rejects that internal-use flag despite the
+Git 2.47.1 docs listing it, so the next exact slice needs a stronger baseline
+oracle or an explicit defer decision before promotion.
 
 Current counts are `101/151` complete command matrices,
 `1467/3156` complete documented option pairs,
-`1475/3156` represented documented option pairs, `5437` written rows,
-`4732` verified rows, `12` open rows, and `690` invalid-input rows. The next
-bounded high-throughput follow-up should return to the compact `index-pack`
-invalid-input verification tail before revisiting heavier commands with
-broader documented-option gaps.
+`1480/3156` represented documented option pairs, `5442` written rows,
+`4736` verified rows, `12` open rows, and `691` invalid-input rows.
+`index-pack` now sits at `15/16` represented documented option pairs with
+`22/22` classified rows, `15` stock-matching rows, `7` invalid-input rows,
+and `10/16` reviewed-complete documented option pairs. The next bounded
+high-throughput follow-up should finish the remaining `index-pack`
+documented-option expansion tail, starting with `--progress-title` plus the
+repeat/combination review needed to promote the newly represented five-option
+family into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, before
+moving back to broader commands with larger documented gaps.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

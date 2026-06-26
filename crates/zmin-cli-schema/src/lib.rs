@@ -429,12 +429,22 @@ pub enum Command {
         strict: Option<String>,
         #[arg(long = "fsck-objects", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         fsck_objects: Option<String>,
+        #[arg(long = "check-self-contained-and-connected", hide = true, action = ArgAction::SetTrue)]
+        check_self_contained_and_connected: bool,
         #[arg(long = "fix-thin", action = ArgAction::SetTrue)]
         fix_thin: bool,
         #[arg(short = 'v', action = ArgAction::SetTrue)]
         verbose: bool,
         #[arg(long = "index-version")]
         index_version: Option<String>,
+        #[arg(long = "threads", hide = true)]
+        threads: Option<usize>,
+        #[arg(long = "max-input-size", hide = true, require_equals = true)]
+        max_input_size: Vec<String>,
+        #[arg(long = "object-format", hide = true, require_equals = true)]
+        object_format: Option<String>,
+        #[arg(long = "promisor", hide = true, num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        promisor: Option<String>,
         #[arg(value_hint = ValueHint::FilePath)]
         pack_file: Option<PathBuf>,
     },
@@ -4469,9 +4479,14 @@ pub struct IndexPackOptions {
     pub verify: bool,
     pub strict: Option<String>,
     pub fsck_objects: Option<String>,
+    pub check_self_contained_and_connected: bool,
     pub fix_thin: bool,
     pub verbose: bool,
     pub index_version: Option<String>,
+    pub threads: Option<usize>,
+    pub max_input_size: Vec<String>,
+    pub object_format: Option<String>,
+    pub promisor: Option<String>,
     pub pack_file: Option<PathBuf>,
 }
 
