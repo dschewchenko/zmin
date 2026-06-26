@@ -3105,6 +3105,16 @@ pub enum Command {
         dd: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "full-history", action = ArgAction::SetTrue)]
+        full_history: bool,
+        #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
+        ancestry_path: bool,
+        #[arg(long = "dense", action = ArgAction::SetTrue)]
+        dense: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
+        show_pulls: bool,
         #[arg(long = "topo-order", action = ArgAction::SetTrue)]
         topo_order: bool,
         #[arg(long = "date-order", action = ArgAction::SetTrue)]
@@ -3668,6 +3678,16 @@ pub enum Command {
         children: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "full-history", action = ArgAction::SetTrue)]
+        full_history: bool,
+        #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
+        ancestry_path: bool,
+        #[arg(long = "dense", action = ArgAction::SetTrue)]
+        dense: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
+        show_pulls: bool,
         #[arg(long = "topo-order", action = ArgAction::SetTrue)]
         topo_order: bool,
         #[arg(long = "date-order", action = ArgAction::SetTrue)]

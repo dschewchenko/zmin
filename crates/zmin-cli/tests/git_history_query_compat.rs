@@ -2540,6 +2540,71 @@ fn log_and_rev_list_traversal_order_family_matches_stock_git() {
 }
 
 #[test]
+fn log_and_rev_list_history_simplification_acceptance_family_matches_stock_git() {
+    fn build_repo(repo: &std::path::Path) {
+        configure_identity(repo);
+        git(repo, ["checkout", "-b", "main"]);
+
+        write_file(repo, "base.txt", "base\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "base"]);
+
+        git(repo, ["checkout", "-b", "side"]);
+        write_file(repo, "side.txt", "side1\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "side1"]);
+        write_file(repo, "side.txt", "side1\nside2\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "side2"]);
+
+        git(repo, ["checkout", "main"]);
+        write_file(repo, "main.txt", "main1\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "main1"]);
+        write_file(repo, "main.txt", "main1\nmain2\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "main2"]);
+
+        let output = Command::new(stock_git_bin())
+            .args(["merge", "--no-ff", "side", "-m", "merge"])
+            .current_dir(repo)
+            .output()
+            .expect("git merge");
+        assert!(
+            output.status.success(),
+            "git merge failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    build_repo(git_repo.path());
+    build_repo(zmin_repo.path());
+
+    for args in [
+        ["rev-list", "--full-history", "HEAD"].as_slice(),
+        ["rev-list", "--dense", "HEAD"].as_slice(),
+        ["rev-list", "--sparse", "HEAD"].as_slice(),
+        ["rev-list", "--show-pulls", "HEAD"].as_slice(),
+        ["rev-list", "--ancestry-path", "HEAD~2..HEAD"].as_slice(),
+        ["rev-list", "--ancestry-path", "side~1..HEAD"].as_slice(),
+        ["log", "--full-history", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--dense", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--sparse", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--show-pulls", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--ancestry-path", "--format=%s", "HEAD~2..HEAD"].as_slice(),
+        ["log", "--ancestry-path", "--format=%s", "side~1..HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_relative_since_matches_stock_git_for_recent_commits() {
     let git_repo = git_init();
     let zmin_repo = git_init();

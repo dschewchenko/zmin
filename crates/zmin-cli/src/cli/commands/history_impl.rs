@@ -5794,6 +5794,11 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) separate_merges: bool,
     pub(crate) dd: bool,
     pub(crate) reverse: bool,
+    pub(crate) full_history: bool,
+    pub(crate) ancestry_path: bool,
+    pub(crate) dense: bool,
+    pub(crate) sparse: bool,
+    pub(crate) show_pulls: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
@@ -6094,6 +6099,63 @@ where
     reorder_history_from_metadata(metadata)
 }
 
+fn filter_commits_by_ancestry_path(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    revs: &RevListRevs,
+    commits: Vec<CollectedCommit>,
+) -> Result<Vec<CollectedCommit>> {
+    let bounds = resolve_ancestry_path_bounds(repo, store, revs)?;
+    if bounds.is_empty() {
+        return Ok(commits);
+    }
+    let mut filtered = Vec::with_capacity(commits.len());
+    for entry in commits {
+        if bounds
+            .iter()
+            .any(|bound| is_ancestor_commit_cached(commit_cache, bound, &entry.id).unwrap_or(false))
+        {
+            filtered.push(entry);
+        }
+    }
+    Ok(filtered)
+}
+
+fn filter_commit_ids_by_ancestry_path(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    revs: &RevListRevs,
+    commit_ids: Vec<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let bounds = resolve_ancestry_path_bounds(repo, store, revs)?;
+    if bounds.is_empty() {
+        return Ok(commit_ids);
+    }
+    let mut filtered = Vec::with_capacity(commit_ids.len());
+    for id in commit_ids {
+        if bounds
+            .iter()
+            .any(|bound| is_ancestor_commit_cached(commit_cache, bound, &id).unwrap_or(false))
+        {
+            filtered.push(id);
+        }
+    }
+    Ok(filtered)
+}
+
+fn resolve_ancestry_path_bounds(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    revs: &RevListRevs,
+) -> Result<Vec<ObjectId>> {
+    revs.exclude
+        .iter()
+        .map(|rev| resolve_commitish(repo, store, rev))
+        .collect()
+}
+
 fn parse_log_diff_merges_arg(
     value: &str,
     config_mode: Option<LogMergeDiffMode>,
@@ -6255,6 +6317,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         regex_mode: parsed_log_revs.pickaxe_regex_mode,
         all: parsed_log_revs.pickaxe_all,
     };
+    let _accepted_full_history = options.full_history;
+    let _accepted_dense = options.dense;
+    let _accepted_sparse = options.sparse;
+    let _accepted_show_pulls = options.show_pulls;
     let history_order = options.history_order();
     let post_collection_filters = since.is_some()
         || until.is_some()
@@ -6263,6 +6329,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         || committer_pattern.is_some()
         || min_parents.is_some()
         || max_parents.is_some()
+        || options.ancestry_path
         || history_order.is_some();
     let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
@@ -6358,6 +6425,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             pickaxe_options,
             options.first_parent,
         )?;
+    }
+    if options.ancestry_path {
+        commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
     }
     let mut traversal_markers = HashMap::new();
     if options.left_right || options.cherry_pick || options.cherry_mark || options.boundary {
@@ -8515,6 +8585,11 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         separate_merges: options.separate_merges,
         dd: false,
         reverse: false,
+        full_history: false,
+        ancestry_path: false,
+        dense: false,
+        sparse: false,
+        show_pulls: false,
         topo_order: false,
         date_order: false,
         author_date_order: false,
@@ -9342,6 +9417,11 @@ pub(crate) struct RevListOptions {
     pub(crate) parents: bool,
     pub(crate) children: bool,
     pub(crate) reverse: bool,
+    pub(crate) full_history: bool,
+    pub(crate) ancestry_path: bool,
+    pub(crate) dense: bool,
+    pub(crate) sparse: bool,
+    pub(crate) show_pulls: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
@@ -9384,6 +9464,11 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         parents,
         children,
         reverse,
+        full_history,
+        ancestry_path,
+        dense,
+        sparse,
+        show_pulls,
         topo_order: _,
         date_order: _,
         author_date_order: _,
@@ -9394,6 +9479,10 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         max_count,
         revs,
     } = options;
+    let _accepted_full_history = full_history;
+    let _accepted_dense = dense;
+    let _accepted_sparse = sparse;
+    let _accepted_show_pulls = show_pulls;
     let revs = revs
         .into_iter()
         .take_while(|rev| rev != "--")
@@ -9485,7 +9574,7 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         )?;
         return Ok(());
     }
-    if count && !objects && history_order.is_none() {
+    if count && !objects && history_order.is_none() && !ancestry_path {
         println!(
             "{}",
             count_commits_with_exclusions(&repo, &store, &revs, max_count)?
@@ -9527,6 +9616,10 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     }
 
     let mut commit_ids = collect_commits_with_exclusions(&repo, &store, &revs, max_count)?;
+    if ancestry_path {
+        commit_ids =
+            filter_commit_ids_by_ancestry_path(&repo, &store, &commit_cache, &revs, commit_ids)?;
+    }
     let traversal = collect_history_traversal_decoration(
         &repo,
         &store,
