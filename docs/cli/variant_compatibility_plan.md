@@ -21,6 +21,40 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-26 the latest completed batch is a helper-free `git worktree`
+add/list documented-option family expansion on the current local lane. The
+selected change added five exact stock-Git rows for `worktree add
+--checkout`, `worktree add --no-checkout`, `worktree add --quiet`,
+`worktree add --lock --reason why`, and `worktree list --porcelain`, then
+promoted those five represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+
+The batch fixed one concrete runtime gap on the worktree add path:
+
+- detached `worktree add --checkout ...` now prints the stock `HEAD is now
+  at ...` stdout line while preserving the existing detached-head stderr line
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1886 / 3212`
+- represented documented command-option pairs: `1894 / 3212`
+- matrix rows: `5947`
+- verified rows: `5174`
+- invalid-input rows: `737`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `worktree`: `13 / 24` reviewed-complete documented option pairs, `22`
+  written rows, `22` classified rows, `21` stock-matching rows, `1`
+  invalid-input row, `0` exact-open rows
+
+The next best helper-free follow-up should stay census-first on another dense
+documented-option family such as the remaining `worktree add` options
+(`--orphan`, `--track`, `--guess-remote`) or an adjacent local-only command
+family, rather than falling back to helper-blocked open rows.
+
 As of 2026-06-26 the latest completed batch is a zero-code shared
 history-query reviewed-complete promotion for `git log` and
 `git rev-list`. The selected change promoted fourteen already-represented

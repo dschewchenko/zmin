@@ -1578,6 +1578,248 @@ fn worktree_add_missing_ref_failure_matches_stock_git() {
 }
 
 #[test]
+fn worktree_add_checkout_quiet_lock_and_list_porcelain_match_stock_git() {
+    let git_repo = worktree_fixture_repo();
+    let zmin_repo = worktree_fixture_repo();
+
+    let git_checkout = git_repo.path().with_file_name(format!(
+        "{}-git-checkout",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_checkout = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-checkout",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--checkout",
+                zmin_checkout.to_str().expect("zmin checkout worktree"),
+                "HEAD~1",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--checkout",
+                git_checkout.to_str().expect("git checkout worktree"),
+                "HEAD~1",
+            ],
+            "git",
+        )
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_checkout.join("a.txt")).expect("read zmin checkout file"),
+        fs::read_to_string(git_checkout.join("a.txt")).expect("read git checkout file")
+    );
+
+    let git_no_checkout = git_repo.path().with_file_name(format!(
+        "{}-git-no-checkout",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_no_checkout = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-no-checkout",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--no-checkout",
+                zmin_no_checkout
+                    .to_str()
+                    .expect("zmin no-checkout worktree"),
+                "HEAD~1",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--no-checkout",
+                git_no_checkout.to_str().expect("git no-checkout worktree"),
+                "HEAD~1",
+            ],
+            "git",
+        )
+    );
+    assert!(!zmin_no_checkout.join("a.txt").exists());
+    assert!(!git_no_checkout.join("a.txt").exists());
+    let zmin_no_checkout_admin = gitdir_file_target(&zmin_no_checkout);
+    let git_no_checkout_admin = gitdir_file_target(&git_no_checkout);
+    assert!(!std::path::Path::new(&zmin_no_checkout_admin).join("index").exists());
+    assert!(!std::path::Path::new(&git_no_checkout_admin).join("index").exists());
+
+    let git_quiet = git_repo.path().with_file_name(format!(
+        "{}-git-quiet",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_quiet = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-quiet",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                zmin_quiet.to_str().expect("zmin quiet worktree"),
+                "HEAD~1",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--quiet",
+                git_quiet.to_str().expect("git quiet worktree"),
+                "HEAD~1",
+            ],
+            "git",
+        )
+    );
+
+    let git_lock = git_repo.path().with_file_name(format!(
+        "{}-git-lock-add",
+        git_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("git temp dir name")
+    ));
+    let zmin_lock = zmin_repo.path().with_file_name(format!(
+        "{}-zmin-lock-add",
+        zmin_repo
+            .path()
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("zmin temp dir name")
+    ));
+    assert_eq!(
+        command_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--lock",
+                "--reason",
+                "why",
+                zmin_lock.to_str().expect("zmin lock worktree"),
+                "HEAD~1",
+            ],
+            "zmin",
+        ),
+        command_output(
+            "git",
+            git_repo.path(),
+            &[
+                "worktree",
+                "add",
+                "--lock",
+                "--reason",
+                "why",
+                git_lock.to_str().expect("git lock worktree"),
+                "HEAD~1",
+            ],
+            "git",
+        )
+    );
+    let zmin_lock_admin = gitdir_file_target(&zmin_lock);
+    let git_lock_admin = gitdir_file_target(&git_lock);
+    assert_eq!(
+        fs::read_to_string(std::path::Path::new(&zmin_lock_admin).join("locked"))
+            .expect("read zmin locked reason"),
+        fs::read_to_string(std::path::Path::new(&git_lock_admin).join("locked"))
+            .expect("read git locked reason")
+    );
+
+    let zmin_porcelain = command_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["worktree", "list", "--porcelain"],
+        "zmin",
+    );
+    let git_porcelain = command_output(
+        "git",
+        git_repo.path(),
+        &["worktree", "list", "--porcelain"],
+        "git",
+    );
+    let normalized_git = git_porcelain
+        .1
+        .replace(
+            &git_checkout.display().to_string(),
+            &zmin_checkout.display().to_string(),
+        )
+        .replace(
+            &git_no_checkout.display().to_string(),
+            &zmin_no_checkout.display().to_string(),
+        )
+        .replace(
+            &git_quiet.display().to_string(),
+            &zmin_quiet.display().to_string(),
+        )
+        .replace(
+            &git_lock.display().to_string(),
+            &zmin_lock.display().to_string(),
+        )
+        .replace(
+            &git_repo.path().display().to_string(),
+            &zmin_repo.path().display().to_string(),
+        )
+        .replace("/private/var/", "/var/");
+    let normalized_zmin = zmin_porcelain.1.replace("/private/var/", "/var/");
+    assert_eq!(zmin_porcelain.0, git_porcelain.0);
+    assert_eq!(normalized_zmin, normalized_git);
+    assert_eq!(zmin_porcelain.2, git_porcelain.2);
+}
+
+#[test]
 fn worktree_main_worktree_failures_match_stock_git() {
     let git_repo = worktree_fixture_repo();
     let zmin_repo = worktree_fixture_repo();

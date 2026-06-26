@@ -5114,15 +5114,35 @@ fn parse_worktree_expire(value: &str) -> Option<i64> {
 fn worktree_add(args: &[String]) -> Result<()> {
     let mut detach = false;
     let mut branch_option: Option<(&str, bool)> = None;
+    let mut checkout = true;
     let mut force_count = 0usize;
+    let mut lock = false;
+    let mut lock_reason = String::new();
+    let mut quiet = false;
     let mut values = Vec::new();
     let mut cursor = 0usize;
     while cursor < args.len() {
         let arg = &args[cursor];
         if arg == "--detach" {
             detach = true;
+        } else if arg == "--checkout" {
+            checkout = true;
+        } else if arg == "--no-checkout" {
+            checkout = false;
         } else if arg == "-f" || arg == "--force" {
             force_count += 1;
+        } else if arg == "-q" || arg == "--quiet" {
+            quiet = true;
+        } else if arg == "--lock" {
+            lock = true;
+        } else if arg == "--reason" {
+            cursor += 1;
+            lock_reason = args.get(cursor).cloned().ok_or_else(|| CliError::Fatal {
+                code: 129,
+                message: "--reason requires a value".into(),
+            })?;
+        } else if let Some(value) = arg.strip_prefix("--reason=") {
+            lock_reason = value.to_owned();
         } else if arg == "-b" || arg == "-B" {
             cursor += 1;
             let branch = args
@@ -5293,40 +5313,54 @@ fn worktree_add(args: &[String]) -> Result<()> {
         "worktree: Created from HEAD",
     )?;
     let commit = commit_cache.read_commit(&id)?;
-    let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
-    new_index.write_to_path(&linked_repo.index_path)?;
-    checkout_index(
-        &store,
-        &new_index,
-        &linked_repo.root,
-        CheckoutIndexOptions { force: true },
-    )?;
-    if let Some(branch_ref) = &branch_ref {
-        let action = if let Some((_, reset)) = branch_option {
-            if reset {
-                "resetting branch"
-            } else {
+    if checkout {
+        let new_index = tree_cache.read_tree_to_index(&commit.tree)?;
+        new_index.write_to_path(&linked_repo.index_path)?;
+        checkout_index(
+            &store,
+            &new_index,
+            &linked_repo.root,
+            CheckoutIndexOptions { force: true },
+        )?;
+    }
+    if lock {
+        fs::write(linked_repo.git_dir.join("locked"), format!("{lock_reason}\n"))?;
+    }
+    if !quiet {
+        if let Some(branch_ref) = &branch_ref {
+            let action = if let Some((_, reset)) = branch_option {
+                if reset {
+                    "resetting branch"
+                } else {
+                    "new branch"
+                }
+            } else if values.len() == 1 {
                 "new branch"
-            }
-        } else if values.len() == 1 {
-            "new branch"
+            } else {
+                "checking out"
+            };
+            eprintln!(
+                "Preparing worktree ({action} '{}')",
+                branch_display_name(branch_ref)
+            );
+            println!(
+                "HEAD is now at {} {}",
+                short_object_id(&id),
+                commit_subject(&commit.message)
+            );
         } else {
-            "checking out"
-        };
-        eprintln!(
-            "Preparing worktree ({action} '{}')",
-            branch_display_name(branch_ref)
-        );
-        println!(
-            "HEAD is now at {} {}",
-            short_object_id(&id),
-            commit_subject(&commit.message)
-        );
-    } else {
-        eprintln!(
-            "Preparing worktree (detached HEAD {})",
-            short_object_id(&id)
-        );
+            eprintln!(
+                "Preparing worktree (detached HEAD {})",
+                short_object_id(&id)
+            );
+            if checkout {
+                println!(
+                    "HEAD is now at {} {}",
+                    short_object_id(&id),
+                    commit_subject(&commit.message)
+                );
+            }
+        }
     }
     Ok(())
 }
