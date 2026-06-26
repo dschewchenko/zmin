@@ -300,24 +300,23 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a zero-code reviewed-complete `git blame`
-promotion cluster. Zmin now promotes the remaining documented blame options
-from the explicit-schema family into the reviewed-complete census list and
-promotes `blame` itself into the reviewed-complete command set because all
-`36/36` documented options are represented, all `180/180` rows are
-classified, and there are no exact-open rows left on the currently modeled
-helper-free local blame surface.
+The latest completed slice is a helper-free `git shortlog` repeated
+scalar-option closure plus reviewed-complete promotion. Zmin now accepts
+repeated `--format`, `--date`, and `-w` values with stock last-one-wins
+ordering, carries exact stock-Git evidence for both repeated orderings on the
+modeled local helper-free shortlog lanes, and promotes those three documented
+option pairs into the reviewed-complete census list.
 
 Current counts are `102/151` complete command matrices,
-`1480/3156` complete documented option pairs,
-`1508/3156` represented documented option pairs, `5488` written rows,
-`4772` verified rows, `12` open rows, and `701` invalid-input rows.
-`blame` now sits at `36/36` reviewed-complete documented option pairs,
-`36/36` represented documented option pairs, `180/180` classified rows, `98`
-stock-matching rows, and `82` invalid-input rows. The next bounded
-high-throughput follow-up should return to the next densest helper-free
-represented family such as the remaining `shortlog` expansion tail, using the
-refreshed census queue instead of raw chat memory.
+`1483/3156` complete documented option pairs,
+`1508/3156` represented documented option pairs, `5494` written rows,
+`4778` verified rows, `12` open rows, and `701` invalid-input rows.
+`shortlog` now sits at `12/29` reviewed-complete documented option pairs,
+`29/125` represented documented option pairs, `44/44` classified rows, `39`
+stock-matching rows, and `5` invalid-input rows. The next bounded
+high-throughput follow-up can stay on the remaining `shortlog` expansion tail
+or move to another dense helper-free represented family, but should continue
+selecting from the refreshed census queue instead of raw chat memory.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

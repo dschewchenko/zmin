@@ -244,6 +244,26 @@ fn shortlog_documented_option_family_matches_stock_git() {
         ["shortlog", "--group=format:%an", "-sn", "HEAD"].as_slice(),
         ["shortlog", "--format=%h %s", "HEAD"].as_slice(),
         ["shortlog", "--date=short", "--group=format:%ad", "-sn", "HEAD"].as_slice(),
+        ["shortlog", "--format=%s", "--format=%h", "HEAD"].as_slice(),
+        ["shortlog", "--format=%h", "--format=%s", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--date=short",
+            "--date=human",
+            "--group=format:%ad",
+            "-sn",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "shortlog",
+            "--date=human",
+            "--date=short",
+            "--group=format:%ad",
+            "-sn",
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -280,6 +300,8 @@ fn shortlog_documented_option_family_matches_stock_git() {
     for args in [
         ["shortlog", "-w20,4,6", "HEAD"].as_slice(),
         ["shortlog", "-w0,4,6", "HEAD"].as_slice(),
+        ["shortlog", "-w20,4,6", "-w0,4,6", "HEAD"].as_slice(),
+        ["shortlog", "-w0,4,6", "-w20,4,6", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(wrap_repo.path(), args),

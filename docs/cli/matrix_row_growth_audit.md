@@ -11,6 +11,22 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
+repeated scalar-option closure plus reviewed-complete promotion. The selected
+change makes repeated `--format`, `--date`, and `-w` accept stock
+last-one-wins ordering, adds exact stock-Git evidence for both repeated
+orderings on the modeled helper-free local shortlog lanes, and then promotes
+those three documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+6` matrix rows, `+3` complete documented option pairs, `+0` represented
+documented option pairs, `+6` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Actual delta matched. `shortlog` now sits at
+`12/29` reviewed-complete documented option pairs, `29/125` represented
+documented option pairs, `44/44` classified rows, `39` stock-matching rows,
+`5` invalid-input rows, and `0` exact-open rows. The next best helper-free
+follow-up can stay on the remaining shortlog expansion tail or move to
+another dense represented family if it offers a larger safe closure batch.
+
 As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
 `git blame` promotion cluster. The selected change promotes the remaining
 represented documented options `--contents`, `--encoding`, `--first-parent`,
