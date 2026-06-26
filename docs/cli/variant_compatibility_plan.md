@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1587/3156 represented doc-option pairs / 5616 written rows / 4893/5616 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1590/3156 represented doc-option pairs / 5625 written rows / 4893/5625 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,26 +300,25 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git checkout` merge/conflict path
-family expansion. Zmin now exposes and matches stock Git on the current
-modeled helper-free local `checkout` lanes for `--merge`, `-m`, and the
-documented `--conflict` style spellings (`merge`, `diff3`, `zdiff3`) on the
-non-conflicted dot-pathspec restore lane, including both equals and separate
-value forms for `--conflict`.
+The latest completed slice is a helper-free `git checkout` track-family
+invalid-input expansion. Zmin now exposes and matches stock Git on the current
+modeled helper-free local `checkout` lanes for `--track`, `-t`, and
+`--no-track` across the path-like and explicit-separator forms that stock Git
+rejects with stable branch-name diagnostics.
 
 Current counts are `106/151` complete command matrices,
 `1540/3156` complete documented option pairs,
-`1587/3156` represented documented option pairs, `5616` written rows,
-`4893` verified rows, `12` open rows, and `708` invalid-input rows.
-`checkout` now sits at `25/34` represented documented option pairs with
-`60/60` written rows, `59/60` classified rows, `57` stock-matching rows,
-`2` invalid-input rows, and `0` exact-open written rows on the current
+`1590/3156` represented documented option pairs, `5625` written rows,
+`4893` verified rows, `12` open rows, and `717` invalid-input rows.
+`checkout` now sits at `28/34` represented documented option pairs with
+`69/69` written rows, `68/69` classified rows, `57` stock-matching rows,
+`11` invalid-input rows, and `0` exact-open written rows on the current
 modeled pathspec/branch surface. The next bounded high-throughput follow-up
 should continue the remaining `checkout` documented families that already have
-strong local 2.50+/2.53 stock-Git oracle coverage, with `track` / `-t` /
-`--no-track` and the remaining path-style toggles now the strongest immediate
-local follow-ups before switching back to a different dense helper-free
-command.
+strong local 2.50+/2.53 stock-Git oracle coverage, with the remaining
+path-style toggles such as `overwrite-ignore`, `ignore-other-worktrees`, `-d`
+or the `patch` family now the strongest immediate local follow-ups before
+switching back to a different dense helper-free command.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

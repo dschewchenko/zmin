@@ -381,6 +381,42 @@ fn checkout_merge_conflict_path_family_matches_stock_git() {
 }
 
 #[test]
+fn checkout_track_family_matches_stock_git_invalid_input() {
+    for args in [
+        ["checkout", "--track", "."].as_slice(),
+        ["checkout", "-t", "."].as_slice(),
+        ["checkout", "--no-track", "."].as_slice(),
+        ["checkout", "--track", "a.txt"].as_slice(),
+        ["checkout", "-t", "a.txt"].as_slice(),
+        ["checkout", "--no-track", "a.txt"].as_slice(),
+        ["checkout", "--track", "--", "a.txt"].as_slice(),
+        ["checkout", "-t", "--", "a.txt"].as_slice(),
+        ["checkout", "--no-track", "--", "a.txt"].as_slice(),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            configure_identity(repo);
+            fs::write(repo.join("a.txt"), b"hello\n").expect("write a");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "initial"]);
+            fs::remove_file(repo.join("a.txt")).expect("remove a");
+        }
+
+        assert_eq!(
+            git_failure_output(git_repo.path(), args),
+            run_zmin_failure_output(zmin_repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            zmin_repo.path().join("a.txt").exists(),
+            git_repo.path().join("a.txt").exists(),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn checkout_negated_pathspec_file_flags_match_stock_git() {
     for args in [
         ["checkout", "--no-pathspec-from-file", "a.txt"].as_slice(),

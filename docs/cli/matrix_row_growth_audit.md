@@ -7233,6 +7233,47 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+3` represented doc-option pairs, `+0` implemented-but-unverified
 schema rows, and `+0` remaining checklist rows.
 
+## 2026-06-26 - checkout track invalid-input family
+
+Expected movement:
+
+- behavior rows: `+9`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+9`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- represented doc-option pairs: `+3`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Expected rows:
+
+- `git checkout --track .`
+- `git checkout -t .`
+- `git checkout --no-track .`
+- `git checkout --track -- a.txt`
+- `git checkout -t -- a.txt`
+- `git checkout --no-track -- a.txt`
+- `git checkout --track a.txt`
+- `git checkout -t a.txt`
+- `git checkout --no-track a.txt`
+
+This batch closes the helper-free local `git checkout` track-family parser
+surface as stock-compatible invalid input. The focused rows capture the two
+stock fatal shapes that matter locally: `missing branch name; try -b` for the
+path-like forms and `--track needs a branch name` for explicit separator
+forms. The evidence uses `git_worktree_state_compat` against stock Git 2.53.0
+through the shared `stock_git_bin` test helper.
+
+Actual post-import movement matched the declaration: `+9` behavior rows, `+0`
+closed rows, `+0` open rows, `+9` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+3` represented doc-option pairs, `+0` implemented-but-unverified
+schema rows, and `+0` remaining checklist rows.
+
 ## 2026-06-25 - repack cruft-family schema-tail closure
 
 Expected movement:

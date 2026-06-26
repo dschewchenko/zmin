@@ -10230,6 +10230,8 @@ pub(crate) fn checkout(
     overlay: bool,
     no_overlay: bool,
     _ignore_skip_worktree_bits: bool,
+    track: Option<String>,
+    no_track: bool,
     create: Option<String>,
     reset_create: Option<String>,
     create_reflog: bool,
@@ -10274,6 +10276,17 @@ pub(crate) fn checkout(
         return Err(CliError::Fatal {
             code: 128,
             message: "'--detach' cannot be used with '-b/-B/--orphan'".into(),
+        });
+    }
+    if track.is_some() || no_track {
+        let message = if checkout_raw_args_have_separator() {
+            "--track needs a branch name"
+        } else {
+            "missing branch name; try -b"
+        };
+        return Err(CliError::Fatal {
+            code: 128,
+            message: message.into(),
         });
     }
     if let Some(branch) = create {

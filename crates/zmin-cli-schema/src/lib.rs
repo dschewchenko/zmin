@@ -2099,6 +2099,10 @@ pub enum Command {
         no_overlay: bool,
         #[arg(long = "ignore-skip-worktree-bits", action = ArgAction::SetTrue)]
         ignore_skip_worktree_bits: bool,
+        #[arg(short = 't', long = "track", num_args = 0..=1, require_equals = true, default_missing_value = "direct")]
+        track: Option<String>,
+        #[arg(long = "no-track", action = ArgAction::SetTrue)]
+        no_track: bool,
         #[arg(short = 'b')]
         create: Option<String>,
         #[arg(short = 'B')]
