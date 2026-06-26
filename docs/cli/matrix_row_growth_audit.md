@@ -1137,6 +1137,18 @@ command matrices, `+0` verified rows, `+0` invalid-input rows, and `-25`
 remaining checklist rows. Rust behavior changes are not expected. Actual
 delta matched.
 
+As of 2026-06-26 the next batch is a helper-free `rev-parse` ref-selection
+and discovery family expansion. The selected rows add exact stock-Git local
+evidence for `--all`, `--branches[=<pattern>]`, `--tags[=<pattern>]`,
+`--remotes[=<pattern>]`, `--glob=<pattern>`, next-selector `--exclude`,
+`--local-env-vars`, and `--resolve-git-dir <path>`, including the outside
+repository invalid `--resolve-git-dir .` failure. Expected delta is `+11`
+matrix rows, `+0` complete documented option pairs, `+0` complete command
+matrices, `+10` verified rows, `+1` invalid-input row, and `+8`
+represented documented option pairs. Rust behavior changes are expected in
+`rev-parse` raw-argument ordered handling and lazy repository loading.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `diff-files`
 surface. The selected rows do not add new behavior evidence; they promote

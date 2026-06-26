@@ -300,26 +300,26 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git config --url` urlmatch
-closure plus reviewed-complete command promotion. Zmin now matches stock Git
-on the helper-free local urlmatch get family for best-match lookup,
-section-wide listing, `--name-only`, `--show-origin`, no-match exit `1`, and
-the documented `--all` conflict under `--url`, which closes the last
-represented `config` documented option tail and promotes the full current
-helper-free `config` surface into reviewed-complete census status.
+The latest completed slice is a helper-free `git rev-parse` ref-selection and
+discovery family expansion. Zmin now matches stock Git on helper-free local
+`rev-parse --all`, `--branches[=<pattern>]`, `--tags[=<pattern>]`,
+`--remotes[=<pattern>]`, `--glob=<pattern>`, next-selector `--exclude`,
+`--local-env-vars`, and `--resolve-git-dir <path>` lanes, including outside
+repository behavior for `--local-env-vars` and invalid `--resolve-git-dir .`.
 
 Current counts are `105/151` complete command matrices,
 `1515/3156` complete documented option pairs,
-`1524/3156` represented documented option pairs, `5536` written rows,
-`4818` verified rows, `12` open rows, and `703` invalid-input rows.
-`config` now sits at `30/30` reviewed-complete documented option pairs,
-`30/30` represented documented option pairs, `160/160` classified rows, `145`
-stock-matching rows, and `15` invalid-input rows. No larger represented
-helper-free `config` tail remains. The next bounded high-throughput follow-up
-should return to `docs/cli/census/remaining_to_fix_or_verify.tsv` and choose a
-new dense helper-free schema family instead of taking a one-row micro-slice;
-the lone remaining represented-only gap is `shortlog --stdin`, which is too
-small to be the default next batch unless it unlocks a broader cluster.
+`1532/3156` represented documented option pairs, `5547` written rows,
+`4828` verified rows, `12` open rows, and `704` invalid-input rows.
+`rev-parse` now sits at `33/51` represented documented option pairs with
+`91/91` classified rows, `83` stock-matching rows, `8` invalid-input rows,
+and `0` exact-open written rows on the current modeled surface. This batch
+raised represented coverage and verified rows, but did not yet promote new
+reviewed-complete documented option pairs. The next bounded high-throughput
+follow-up should either continue the remaining helper-free `rev-parse`
+parse/quoting tail if it still clusters densely, or return to
+`docs/cli/census/remaining_to_fix_or_verify.tsv` for the next larger safe
+helper-free family instead of taking a one-row micro-slice.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

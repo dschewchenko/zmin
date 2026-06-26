@@ -7376,6 +7376,13 @@ pub(crate) fn tag_command(
 
 #[derive(Debug, Clone)]
 struct RevParseOptions {
+    all: bool,
+    branches: Vec<String>,
+    tags: Vec<String>,
+    remotes: Vec<String>,
+    glob: Vec<String>,
+    exclude: Vec<String>,
+    local_env_vars: bool,
     short: Option<usize>,
     abbrev_ref: Option<String>,
     verify: bool,
@@ -7394,6 +7401,7 @@ struct RevParseOptions {
     git_dir: bool,
     absolute_git_dir: bool,
     git_common_dir: bool,
+    resolve_git_dir: Vec<PathBuf>,
     git_paths: Vec<PathBuf>,
     is_inside_git_dir: bool,
     is_inside_work_tree: bool,
@@ -7407,6 +7415,22 @@ enum RevParsePathFormat {
     Default,
     Absolute,
     Relative,
+}
+
+struct RevParseRepoContext {
+    repo: GitRepo,
+    bare: bool,
+    inside_git_dir: bool,
+    inside_work_tree: bool,
+}
+
+#[derive(Clone, Copy)]
+enum RevParseRefSelectionKind {
+    All,
+    Branches,
+    Tags,
+    Remotes,
+    Glob,
 }
 
 impl RevParsePathFormat {
@@ -7424,16 +7448,23 @@ impl RevParsePathFormat {
 
 fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
     let _quiet = options.quiet;
-    let discovery_modes = [
+    let ordered_modes = [
+        options.all,
+        !options.branches.is_empty(),
+        !options.tags.is_empty(),
+        !options.remotes.is_empty(),
+        !options.glob.is_empty(),
+        !options.exclude.is_empty(),
+        options.local_env_vars,
         options.show_toplevel,
         options.show_prefix,
         options.show_cdup,
         options.show_superproject_working_tree,
         !options.show_object_format.is_empty(),
-        options.show_ref_format,
         options.git_dir,
         options.absolute_git_dir,
         options.git_common_dir,
+        !options.resolve_git_dir.is_empty(),
         !options.git_paths.is_empty(),
         !options.since.is_empty(),
         !options.until.is_empty(),
@@ -7445,19 +7476,8 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
     .into_iter()
     .filter(|mode| *mode)
     .count();
-    if discovery_modes > 0 {
-        let repo = find_repo_or_bare()?;
-        let bare = rev_parse_repo_is_bare(&repo)?;
-        let inside_git_dir = is_inside_git_dir(&repo)?;
-        let inside_work_tree = !bare && !inside_git_dir;
-        print_rev_parse_ordered(
-            &repo,
-            &options,
-            raw_args,
-            bare,
-            inside_git_dir,
-            inside_work_tree,
-        )?;
+    if ordered_modes > 0 {
+        print_rev_parse_ordered(&options, raw_args)?;
         return Ok(());
     }
     let repo = (!options.show_object_format.is_empty() || options.show_ref_format)
@@ -7530,6 +7550,27 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn rev_parse_repo_context() -> Result<RevParseRepoContext> {
+    let repo = find_repo_or_bare()?;
+    let bare = rev_parse_repo_is_bare(&repo)?;
+    let inside_git_dir = is_inside_git_dir(&repo)?;
+    Ok(RevParseRepoContext {
+        inside_work_tree: !bare && !inside_git_dir,
+        repo,
+        bare,
+        inside_git_dir,
+    })
+}
+
+fn cached_rev_parse_repo_context(
+    cache: &mut Option<RevParseRepoContext>,
+) -> Result<&RevParseRepoContext> {
+    if cache.is_none() {
+        *cache = Some(rev_parse_repo_context()?);
+    }
+    Ok(cache.as_ref().expect("rev-parse repo context"))
+}
+
 fn validate_rev_parse_repository_extensions(repo: &GitRepo) -> Result<()> {
     repo_object_format(repo)?;
     repo_ref_format(repo)?;
@@ -7544,14 +7585,7 @@ fn rev_parse_repo_is_bare(repo: &GitRepo) -> Result<bool> {
     }
 }
 
-fn print_rev_parse_ordered(
-    repo: &GitRepo,
-    options: &RevParseOptions,
-    raw_args: &[String],
-    bare: bool,
-    inside_git_dir: bool,
-    inside_work_tree: bool,
-) -> Result<()> {
+fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Result<()> {
     let mut index = usize::from(raw_args.first().is_some_and(|arg| arg == "rev-parse"));
     let mut path_format = options
         .path_format
@@ -7559,15 +7593,109 @@ fn print_rev_parse_ordered(
         .map(|value| RevParsePathFormat::parse(value))
         .transpose()?
         .unwrap_or(RevParsePathFormat::Default);
+    let mut repo_context = None;
+    let mut pending_excludes = Vec::new();
     while index < raw_args.len() {
         let arg = &raw_args[index];
         match arg.as_str() {
-            "--git-dir" => println!("{}", git_dir_display(repo, path_format)?),
+            "--all" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::All,
+                    None,
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            "--branches" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Branches,
+                    None,
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            "--tags" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Tags,
+                    None,
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            "--remotes" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Remotes,
+                    None,
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            "--glob" => {
+                let Some(pattern) = raw_args.get(index + 1) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `glob' requires a value".into(),
+                    });
+                };
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Glob,
+                    Some(pattern),
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+                index += 1;
+            }
+            "--exclude" => {
+                let Some(pattern) = raw_args.get(index + 1) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `exclude' requires a value".into(),
+                    });
+                };
+                pending_excludes.push(pattern.clone());
+                index += 1;
+            }
+            "--local-env-vars" => print_rev_parse_local_env_vars(),
+            "--resolve-git-dir" => {
+                let Some(path) = raw_args.get(index + 1) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `resolve-git-dir' requires a value".into(),
+                    });
+                };
+                println!(
+                    "{}",
+                    rev_parse_resolve_git_dir_display(Path::new(path), path_format)?
+                );
+                index += 1;
+            }
+            "--git-dir" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                println!("{}", git_dir_display(&ctx.repo, path_format)?);
+            }
             "--absolute-git-dir" => println!(
                 "{}",
-                git_path_output(&canonical_or_absolute(repo.git_dir.clone()))
+                git_path_output(&canonical_or_absolute(
+                    cached_rev_parse_repo_context(&mut repo_context)?
+                        .repo
+                        .git_dir
+                        .clone()
+                ))
             ),
-            "--git-common-dir" => println!("{}", git_common_dir_display(repo, path_format)?),
+            "--git-common-dir" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                println!("{}", git_common_dir_display(&ctx.repo, path_format)?);
+            }
             "--git-path" => {
                 let Some(path) = raw_args.get(index + 1) else {
                     return Err(CliError::Fatal {
@@ -7575,21 +7703,30 @@ fn print_rev_parse_ordered(
                         message: "--git-path requires a value".into(),
                     });
                 };
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 println!(
                     "{}",
-                    git_path_display(repo, std::path::Path::new(path), path_format)?
+                    git_path_display(&ctx.repo, std::path::Path::new(path), path_format)?
                 );
                 index += 1;
             }
-            "--is-inside-git-dir" => println!("{}", if inside_git_dir { "true" } else { "false" }),
-            "--is-inside-work-tree" => {
-                println!("{}", if inside_work_tree { "true" } else { "false" });
+            "--is-inside-git-dir" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                println!("{}", if ctx.inside_git_dir { "true" } else { "false" });
             }
-            "--is-bare-repository" => println!("{}", if bare { "true" } else { "false" }),
+            "--is-inside-work-tree" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                println!("{}", if ctx.inside_work_tree { "true" } else { "false" });
+            }
+            "--is-bare-repository" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                println!("{}", if ctx.bare { "true" } else { "false" });
+            }
             "--is-shallow-repository" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 println!(
                     "{}",
-                    if repo.git_dir.join("shallow").is_file() {
+                    if ctx.repo.git_dir.join("shallow").is_file() {
                         "true"
                     } else {
                         "false"
@@ -7597,35 +7734,48 @@ fn print_rev_parse_ordered(
                 );
             }
             "--show-toplevel" => {
-                if !inside_work_tree {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                if !ctx.inside_work_tree {
                     return Err(CliError::Fatal {
                         code: 128,
                         message: "this operation must be run in a work tree".into(),
                     });
                 }
-                println!("{}", rev_parse_path_output(&repo.root, path_format, true)?);
+                println!(
+                    "{}",
+                    rev_parse_path_output(&ctx.repo.root, path_format, true)?
+                );
             }
             "--show-prefix" => {
-                if bare || inside_git_dir {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                if ctx.bare || ctx.inside_git_dir {
                     println!();
                 } else {
-                    println!("{}", repo_relative_prefix(repo)?);
+                    println!("{}", repo_relative_prefix(&ctx.repo)?);
                 }
             }
             "--show-cdup" => {
-                if bare || inside_git_dir {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                if ctx.bare || ctx.inside_git_dir {
                     println!();
                 } else {
-                    println!("{}", repo_relative_cdup(repo)?);
+                    println!("{}", repo_relative_cdup(&ctx.repo)?);
                 }
             }
             "--show-superproject-working-tree" => {
-                if let Some(path) = superproject_working_tree(repo)? {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                if let Some(path) = superproject_working_tree(&ctx.repo)? {
                     println!("{}", git_path_output(&path));
                 }
             }
-            "--show-object-format" => print_rev_parse_object_format(Some(repo), "storage")?,
-            "--show-ref-format" => print_rev_parse_ref_format(Some(repo))?,
+            "--show-object-format" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_object_format(Some(&ctx.repo), "storage")?;
+            }
+            "--show-ref-format" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                print_rev_parse_ref_format(Some(&ctx.repo))?;
+            }
             "--verify" => {}
             "--symbolic-full-name" => {}
             "--bisect" => {}
@@ -7684,17 +7834,82 @@ fn print_rev_parse_ordered(
                 println!("--min-age={}", parse_rev_parse_date(value)?);
             }
             other if other.starts_with("--show-object-format=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 print_rev_parse_object_format(
-                    Some(repo),
+                    Some(&ctx.repo),
                     other
                         .split_once('=')
                         .map(|(_, mode)| mode)
                         .unwrap_or("storage"),
                 )?;
             }
+            other if other.starts_with("--branches=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Branches,
+                    Some(pattern),
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            other if other.starts_with("--tags=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Tags,
+                    Some(pattern),
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            other if other.starts_with("--remotes=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Remotes,
+                    Some(pattern),
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            other if other.starts_with("--glob=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
+                print_rev_parse_ref_selection(
+                    &ctx.repo,
+                    RevParseRefSelectionKind::Glob,
+                    Some(pattern),
+                    &pending_excludes,
+                )?;
+                pending_excludes.clear();
+            }
+            other if other.starts_with("--exclude=") => {
+                pending_excludes.push(
+                    other
+                        .split_once('=')
+                        .map(|(_, value)| value)
+                        .unwrap_or_default()
+                        .to_owned(),
+                );
+            }
+            other if other.starts_with("--resolve-git-dir=") => {
+                let path = other
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or_default();
+                println!(
+                    "{}",
+                    rev_parse_resolve_git_dir_display(Path::new(path), path_format)?
+                );
+            }
             other if other.starts_with("--short=") || other.starts_with("--abbrev-ref=") => {}
             other if other.starts_with('-') => {}
             rev => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 if let Some(mode) = options.abbrev_ref.as_deref() {
                     if mode != "loose" && mode != "strict" {
                         return Err(CliError::Fatal {
@@ -7702,10 +7917,10 @@ fn print_rev_parse_ordered(
                             message: format!("unknown mode for --abbrev-ref: {mode}"),
                         });
                     }
-                    println!("{}", abbrev_ref_name(repo, rev)?);
+                    println!("{}", abbrev_ref_name(&ctx.repo, rev)?);
                 } else {
                     print_rev_parse_object(
-                        repo,
+                        &ctx.repo,
                         rev,
                         options.short,
                         options.verify,
@@ -7716,6 +7931,154 @@ fn print_rev_parse_ordered(
         }
         index += 1;
     }
+    Ok(())
+}
+
+fn rev_parse_has_glob_magic(value: &str) -> bool {
+    value.contains('*') || value.contains('?') || value.contains('[')
+}
+
+fn rev_parse_normalize_ref_pattern(
+    kind: RevParseRefSelectionKind,
+    value: &str,
+    for_exclude: bool,
+) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    let mut pattern = match kind {
+        RevParseRefSelectionKind::All => {
+            if value.starts_with("refs/") {
+                value.to_owned()
+            } else {
+                format!("refs/{value}")
+            }
+        }
+        RevParseRefSelectionKind::Branches => {
+            if value.starts_with("refs/") {
+                value.to_owned()
+            } else {
+                format!("refs/heads/{value}")
+            }
+        }
+        RevParseRefSelectionKind::Tags => {
+            if value.starts_with("refs/") {
+                value.to_owned()
+            } else {
+                format!("refs/tags/{value}")
+            }
+        }
+        RevParseRefSelectionKind::Remotes => {
+            if value.starts_with("refs/") {
+                value.to_owned()
+            } else {
+                format!("refs/remotes/{value}")
+            }
+        }
+        RevParseRefSelectionKind::Glob => {
+            if value.starts_with("refs/") {
+                value.to_owned()
+            } else {
+                format!("refs/{value}")
+            }
+        }
+    };
+    if !for_exclude
+        && matches!(
+            kind,
+            RevParseRefSelectionKind::Branches
+                | RevParseRefSelectionKind::Tags
+                | RevParseRefSelectionKind::Remotes
+                | RevParseRefSelectionKind::Glob
+        )
+        && !rev_parse_has_glob_magic(value)
+    {
+        pattern.push_str("/*");
+    }
+    Some(pattern)
+}
+
+fn print_rev_parse_local_env_vars() {
+    for name in [
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_GRAFT_FILE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_PREFIX",
+        "GIT_SHALLOW_FILE",
+        "GIT_COMMON_DIR",
+    ] {
+        println!("{name}");
+    }
+}
+
+fn rev_parse_resolve_git_dir_display(path: &Path, path_format: RevParsePathFormat) -> Result<String> {
+    let absolute = absolute_path_from_arg(path)?;
+    let valid = if absolute.is_file() {
+        let git_dir = read_gitdir_file(&absolute)?;
+        is_git_dir_or_linked_worktree_git_dir(&git_dir)
+    } else {
+        is_git_dir_or_linked_worktree_git_dir(&absolute)
+    };
+    if !valid {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("not a gitdir '{}'", path.display()),
+        });
+    }
+    match path_format {
+        RevParsePathFormat::Absolute => Ok(git_path_output(&canonical_or_absolute(absolute))),
+        RevParsePathFormat::Default | RevParsePathFormat::Relative => {
+            relative_display_from_cwd(&absolute)
+        }
+    }
+}
+
+fn print_rev_parse_ref_selection(
+    repo: &GitRepo,
+    kind: RevParseRefSelectionKind,
+    pattern: Option<&str>,
+    excludes: &[String],
+) -> Result<()> {
+    let refs = RefStore::new(
+        &read_common_git_dir(&repo.git_dir)?,
+        symbolic_ref_object_format(repo)?,
+    );
+    let prefix = match kind {
+        RevParseRefSelectionKind::All | RevParseRefSelectionKind::Glob => "refs/",
+        RevParseRefSelectionKind::Branches => "refs/heads/",
+        RevParseRefSelectionKind::Tags => "refs/tags/",
+        RevParseRefSelectionKind::Remotes => "refs/remotes/",
+    };
+    let pattern = pattern.and_then(|value| rev_parse_normalize_ref_pattern(kind, value, false));
+    let excludes = excludes
+        .iter()
+        .filter_map(|value| rev_parse_normalize_ref_pattern(kind, value, true))
+        .collect::<Vec<_>>();
+    refs.for_each_resolved_ref(prefix, |ref_name, object_id| {
+        if pattern
+            .as_deref()
+            .is_some_and(|pattern| !wildcard_match(pattern, ref_name))
+        {
+            return Ok(());
+        }
+        if excludes
+            .iter()
+            .any(|exclude_pattern| wildcard_match(exclude_pattern, ref_name))
+        {
+            return Ok(());
+        }
+        println!("{}", object_id.to_hex());
+        Ok::<(), CliError>(())
+    })?;
     Ok(())
 }
 
@@ -8081,6 +8444,13 @@ fn repo_relative_cdup(repo: &GitRepo) -> Result<String> {
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn rev_parse_command(
+    all: bool,
+    branches: Vec<String>,
+    tags: Vec<String>,
+    remotes: Vec<String>,
+    glob: Vec<String>,
+    exclude: Vec<String>,
+    local_env_vars: bool,
     short: Option<usize>,
     abbrev_ref: Option<String>,
     verify: bool,
@@ -8099,6 +8469,7 @@ pub(crate) fn rev_parse_command(
     git_dir: bool,
     absolute_git_dir: bool,
     git_common_dir: bool,
+    resolve_git_dir: Vec<PathBuf>,
     git_paths: Vec<PathBuf>,
     is_inside_git_dir: bool,
     is_inside_work_tree: bool,
@@ -8109,6 +8480,13 @@ pub(crate) fn rev_parse_command(
 ) -> Result<()> {
     rev_parse(
         RevParseOptions {
+            all,
+            branches,
+            tags,
+            remotes,
+            glob,
+            exclude,
+            local_env_vars,
             short,
             abbrev_ref,
             verify,
@@ -8127,6 +8505,7 @@ pub(crate) fn rev_parse_command(
             git_dir,
             absolute_git_dir,
             git_common_dir,
+            resolve_git_dir,
             git_paths,
             is_inside_git_dir,
             is_inside_work_tree,

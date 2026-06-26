@@ -3527,6 +3527,35 @@ pub enum Command {
         args: Vec<String>,
     },
     RevParse {
+        #[arg(long = "all", action = ArgAction::SetTrue)]
+        all: bool,
+        #[arg(
+            long = "branches",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        branches: Vec<String>,
+        #[arg(
+            long = "tags",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        tags: Vec<String>,
+        #[arg(
+            long = "remotes",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        remotes: Vec<String>,
+        #[arg(long = "glob")]
+        glob: Vec<String>,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
+        #[arg(long = "local-env-vars", action = ArgAction::SetTrue)]
+        local_env_vars: bool,
         #[arg(
             long = "short",
             num_args = 0..=1,
@@ -3578,6 +3607,8 @@ pub enum Command {
         absolute_git_dir: bool,
         #[arg(long = "git-common-dir", action = ArgAction::SetTrue)]
         git_common_dir: bool,
+        #[arg(long = "resolve-git-dir")]
+        resolve_git_dir: Vec<PathBuf>,
         #[arg(long = "git-path")]
         git_paths: Vec<PathBuf>,
         #[arg(long = "is-inside-git-dir", action = ArgAction::SetTrue)]

@@ -766,6 +766,57 @@ fn rev_parse_symbolic_full_name_bisect_matches_stock_git() {
 }
 
 #[test]
+fn rev_parse_ref_selection_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    configure_identity(&repo);
+    fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+    git(&repo, ["add", "-A"]);
+    git_with_env(&repo, ["commit", "-m", "base"]);
+    git(&repo, ["branch", "feature"]);
+    git(&repo, ["tag", "v1"]);
+    git(&repo, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    for args in [
+        ["rev-parse", "--all"].as_slice(),
+        ["rev-parse", "--branches"].as_slice(),
+        ["rev-parse", "--branches=main*"].as_slice(),
+        ["rev-parse", "--tags"].as_slice(),
+        ["rev-parse", "--remotes"].as_slice(),
+        ["rev-parse", "--glob=refs/heads/main*"].as_slice(),
+        ["rev-parse", "--exclude=feature", "--branches"].as_slice(),
+        ["rev-parse", "--exclude=refs/heads/feature", "--all"].as_slice(),
+        ["rev-parse", "--local-env-vars"].as_slice(),
+        ["rev-parse", "--resolve-git-dir", ".git"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), &repo, args, "zmin"),
+            command_output("git", &repo, args, "git"),
+            "rev-parse ref selection mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn rev_parse_local_env_vars_and_resolve_git_dir_outside_repo_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    for args in [
+        ["rev-parse", "--local-env-vars"].as_slice(),
+        ["rev-parse", "--resolve-git-dir", "."].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), dir.path(), args, "zmin"),
+            command_output("git", dir.path(), args, "git"),
+            "rev-parse outside-repo mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
 fn global_config_option_overrides_runtime_config_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let zmin_repo = dir.path().join("zmin-repo");
