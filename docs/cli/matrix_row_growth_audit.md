@@ -11,6 +11,25 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git tag`
+documented creation and listing family expansion on the current local lane.
+The selected change added seven exact stock-Git `tag` rows for `--message`,
+`--file`, `-F`, `--create-reflog`, `--points-at`, `--omit-empty`, and
+`--column`, then promoted those seven represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+7` matrix rows, `+7` complete documented option pairs, `+7`
+represented documented option pairs, `+7` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5747` matrix rows, `4993` verified rows, `719`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1696/3156` complete documented option pairs, and
+`1704/3156` represented documented option pairs. `tag` now sits at
+`28/28` reviewed-complete represented option pairs with `47` written rows,
+`47` classified rows, `37` stock-matching rows, `10` invalid-input rows, and
+`0` exact-open rows on the current modeled surface. The next default
+follow-up should move to another dense helper-free represented family unless a
+bounded `tag` signing/editor slice closes a larger than micro-sized remainder.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git pull`
 fetch-inherited documented-option family expansion on the current named-local
 ff-only lane. The selected change added twenty-four exact stock-Git `pull`

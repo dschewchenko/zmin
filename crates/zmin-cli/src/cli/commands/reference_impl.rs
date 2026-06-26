@@ -4419,6 +4419,7 @@ struct TagOptions {
     delete: bool,
     verify: bool,
     list: bool,
+    column: Option<String>,
     no_column: bool,
     ignore_case: bool,
     color: Option<String>,
@@ -4426,11 +4427,15 @@ struct TagOptions {
     force: bool,
     annotate: bool,
     messages: Vec<String>,
+    message_files: Vec<PathBuf>,
+    create_reflog: bool,
     contains: Option<String>,
     no_contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
+    omit_empty: bool,
     sort: Vec<String>,
+    points_at: Option<String>,
     format: Option<String>,
     args: Vec<String>,
 }
@@ -6887,14 +6892,21 @@ fn tag(options: TagOptions) -> Result<()> {
     let has_list_filter = options.contains.is_some()
         || options.no_contains.is_some()
         || options.merged.is_some()
-        || options.no_merged.is_some();
-    let has_list_modifier = has_list_filter || !options.sort.is_empty() || options.format.is_some();
+        || options.no_merged.is_some()
+        || options.points_at.is_some();
+    let has_list_modifier = has_list_filter
+        || !options.sort.is_empty()
+        || options.format.is_some()
+        || options.column.is_some()
+        || options.omit_empty;
     if options.verify {
         if options.delete
             || options.list
             || options.force
             || options.annotate
             || !options.messages.is_empty()
+            || !options.message_files.is_empty()
+            || options.create_reflog
             || has_list_modifier
         {
             return Err(CliError::Fatal {
@@ -6905,7 +6917,12 @@ fn tag(options: TagOptions) -> Result<()> {
         return verify_tag(true, false, None, options.args);
     }
     if options.delete {
-        if options.annotate || !options.messages.is_empty() || has_list_modifier {
+        if options.annotate
+            || !options.messages.is_empty()
+            || !options.message_files.is_empty()
+            || options.create_reflog
+            || has_list_modifier
+        {
             return Err(CliError::Fatal {
                 code: 129,
                 message: "-a/-m/list modifiers cannot be combined with -d".into(),
@@ -6925,7 +6942,12 @@ fn tag(options: TagOptions) -> Result<()> {
         return Ok(());
     }
 
-    if options.args.is_empty() && (options.annotate || !options.messages.is_empty()) {
+    if options.args.is_empty()
+        && (options.annotate
+            || !options.messages.is_empty()
+            || !options.message_files.is_empty()
+            || options.create_reflog)
+    {
         return Err(CliError::Stderr {
             code: 129,
             text: tag_usage(),
@@ -6933,10 +6955,14 @@ fn tag(options: TagOptions) -> Result<()> {
     }
 
     if options.list || options.args.is_empty() || has_list_modifier {
-        if options.annotate || !options.messages.is_empty() {
+        if options.annotate
+            || !options.messages.is_empty()
+            || !options.message_files.is_empty()
+            || options.create_reflog
+        {
             return Err(CliError::Fatal {
                 code: 129,
-                message: "-a/-m cannot be combined with tag listing".into(),
+                message: "-a/-m/-F cannot be combined with tag listing".into(),
             });
         }
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -6989,11 +7015,13 @@ fn tag(options: TagOptions) -> Result<()> {
         reference_commands::apply_for_each_ref_sort(&mut rows, &options.sort)?;
         if let Some(format) = options.format.as_deref() {
             for row in rows {
-                println!(
-                    "{}",
-                    reference_commands::render_for_each_ref_row(format, &row)?
-                );
+                let rendered = reference_commands::render_for_each_ref_row(format, &row)?;
+                if !options.omit_empty || !rendered.is_empty() {
+                    println!("{rendered}");
+                }
             }
+        } else if options.column.is_some() {
+            print_tag_list_columns(&rows);
         } else {
             for row in rows {
                 println!("{}", tag_display_name(&row.ref_name));
@@ -7022,8 +7050,11 @@ fn tag(options: TagOptions) -> Result<()> {
         code: 128,
         message: format!("Failed to resolve '{target}' as a valid ref."),
     })?;
-    let id = if options.annotate || !options.messages.is_empty() {
-        if options.messages.is_empty() {
+    let create_annotated = options.annotate
+        || !options.messages.is_empty()
+        || !options.message_files.is_empty();
+    let id = if create_annotated {
+        if options.messages.is_empty() && options.message_files.is_empty() {
             return Err(editor_required_message_error());
         }
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -7034,6 +7065,12 @@ fn tag(options: TagOptions) -> Result<()> {
                 .messages
                 .into_iter()
                 .map(commit_commands::CommitTreeMessageSource::Message)
+                .chain(
+                    options
+                        .message_files
+                        .into_iter()
+                        .map(commit_commands::CommitTreeMessageSource::File),
+                )
                 .collect(),
         )?;
         let tag = TagBuilder::new(id, target_object.kind, name, tagger)?
@@ -7043,7 +7080,17 @@ fn tag(options: TagOptions) -> Result<()> {
     } else {
         id
     };
-    refs.write_ref(&ref_name, &id)?;
+    if options.create_reflog {
+        write_ref_with_reflog(
+            &repo,
+            &refs,
+            &ref_name,
+            &id,
+            &tag_create_reflog_message(&repo, target)?,
+        )?;
+    } else {
+        refs.write_ref(&ref_name, &id)?;
+    }
     if options.force
         && let Some(previous_id) = previous_id
         && previous_id != id
@@ -7062,6 +7109,7 @@ struct TagListFilter {
     no_contains: Option<ObjectId>,
     merged: Option<ObjectId>,
     no_merged: Option<ObjectId>,
+    points_at: Option<ObjectId>,
 }
 
 fn tag_list_filter(
@@ -7073,7 +7121,17 @@ fn tag_list_filter(
     let no_contains = tag_filter_target(repo, store, options.no_contains.as_deref(), true)?;
     let merged = tag_filter_target(repo, store, options.merged.as_deref(), false)?;
     let no_merged = tag_filter_target(repo, store, options.no_merged.as_deref(), false)?;
-    if contains.is_none() && no_contains.is_none() && merged.is_none() && no_merged.is_none() {
+    let points_at = options
+        .points_at
+        .as_deref()
+        .map(|target| resolve_objectish(repo, target))
+        .transpose()?;
+    if contains.is_none()
+        && no_contains.is_none()
+        && merged.is_none()
+        && no_merged.is_none()
+        && points_at.is_none()
+    {
         return Ok(None);
     }
     Ok(Some(TagListFilter {
@@ -7081,6 +7139,7 @@ fn tag_list_filter(
         no_contains,
         merged,
         no_merged,
+        points_at,
     }))
 }
 
@@ -7141,7 +7200,80 @@ fn tag_filter_matches(
     {
         return Ok(false);
     }
+    if let Some(target) = &filter.points_at {
+        let peeled = peel_show_ref_tag(store, tag_id)?;
+        if target != tag_id && peeled.as_ref() != Some(target) {
+            return Ok(false);
+        }
+    }
     Ok(true)
+}
+
+fn print_tag_list_columns(rows: &[reference_commands::ForEachRefRow]) {
+    if rows.is_empty() {
+        return;
+    }
+    let items = rows
+        .iter()
+        .map(|row| tag_display_name(&row.ref_name))
+        .collect::<Vec<_>>();
+    let term_width = std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(80)
+        .max(1);
+    let (rows_count, widths) = tag_column_layout(&items, term_width);
+    let columns = widths.len();
+    for row in 0..rows_count {
+        let mut line = String::new();
+        for (column, width) in widths.iter().enumerate() {
+            let index = column * rows_count + row;
+            let Some(item) = items.get(index) else {
+                continue;
+            };
+            if column + 1 == columns || index + rows_count >= items.len() {
+                line.push_str(item);
+            } else {
+                line.push_str(&format!("{item:<width$}"));
+            }
+        }
+        println!("{}", line.trim_end());
+    }
+}
+
+fn tag_column_layout(items: &[String], term_width: usize) -> (usize, Vec<usize>) {
+    let column_width = items.iter().map(String::len).max().unwrap_or(0) + 2;
+    for columns in (1..=items.len()).rev() {
+        let rows = items.len().div_ceil(columns);
+        let widths = vec![column_width; columns];
+        let total = widths.iter().take(columns.saturating_sub(1)).sum::<usize>()
+            + widths.last().copied().unwrap_or(0).saturating_sub(2);
+        if total <= term_width {
+            return (rows, widths);
+        }
+    }
+    (items.len(), vec![0])
+}
+
+fn tag_create_reflog_message(repo: &GitRepo, target: &str) -> Result<String> {
+    let target_id = resolve_objectish(repo, target).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("Failed to resolve '{target}' as a valid ref."),
+    })?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let object = store.read_object(&target_id)?;
+    let metadata = reference_commands::object_ref_metadata(&object)?;
+    let short = short_object_id(&target_id);
+    if let (subject, Some(timestamp), Some(timezone)) = (
+        metadata.subject,
+        metadata.creator_timestamp,
+        metadata.creator_timezone.as_deref(),
+    ) && !subject.is_empty()
+    {
+        let date = format_for_each_ref_offset_date(timestamp, timezone, "%Y-%m-%d")?;
+        return Ok(format!("tag: tagging {short} ({subject}, {date})"));
+    }
+    Ok(format!("tag: tagging {short}"))
 }
 
 fn tag_usage() -> String {
@@ -7339,6 +7471,7 @@ pub(crate) fn tag_command(
     delete: bool,
     verify: bool,
     list: bool,
+    column: Option<String>,
     no_column: bool,
     ignore_case: bool,
     color: Option<String>,
@@ -7346,11 +7479,15 @@ pub(crate) fn tag_command(
     force: bool,
     annotate: bool,
     messages: Vec<String>,
+    message_files: Vec<PathBuf>,
+    create_reflog: bool,
     contains: Option<String>,
     no_contains: Option<String>,
     merged: Option<String>,
     no_merged: Option<String>,
+    omit_empty: bool,
     sort: Vec<String>,
+    points_at: Option<String>,
     format: Option<String>,
     args: Vec<String>,
 ) -> Result<()> {
@@ -7358,6 +7495,7 @@ pub(crate) fn tag_command(
         delete,
         verify,
         list,
+        column,
         no_column,
         ignore_case,
         color,
@@ -7365,11 +7503,15 @@ pub(crate) fn tag_command(
         force,
         annotate,
         messages,
+        message_files,
+        create_reflog,
         contains,
         no_contains,
         merged,
         no_merged,
+        omit_empty,
         sort,
+        points_at,
         format,
         args,
     })

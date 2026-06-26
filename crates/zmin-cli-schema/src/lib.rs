@@ -4069,7 +4069,15 @@ pub enum Command {
         verify: bool,
         #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
         list: bool,
-        #[arg(long = "no-column", action = ArgAction::SetTrue)]
+        #[arg(
+            long = "column",
+            overrides_with = "no_column",
+            num_args = 0..=1,
+            default_missing_value = "always",
+            require_equals = true
+        )]
+        column: Option<String>,
+        #[arg(long = "no-column", overrides_with = "column", action = ArgAction::SetTrue)]
         no_column: bool,
         #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
         ignore_case: bool,
@@ -4081,8 +4089,12 @@ pub enum Command {
         force: bool,
         #[arg(short = 'a', long = "annotate", action = ArgAction::SetTrue)]
         annotate: bool,
-        #[arg(short = 'm')]
+        #[arg(short = 'm', long = "message")]
         messages: Vec<String>,
+        #[arg(short = 'F', long = "file", value_hint = ValueHint::FilePath)]
+        message_files: Vec<PathBuf>,
+        #[arg(long = "create-reflog", action = ArgAction::SetTrue)]
+        create_reflog: bool,
         #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
         contains: Option<String>,
         #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
@@ -4091,8 +4103,12 @@ pub enum Command {
         merged: Option<String>,
         #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
         no_merged: Option<String>,
+        #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
+        omit_empty: bool,
         #[arg(long = "sort")]
         sort: Vec<String>,
+        #[arg(long = "points-at")]
+        points_at: Option<String>,
         #[arg(long = "format")]
         format: Option<String>,
         args: Vec<String>,

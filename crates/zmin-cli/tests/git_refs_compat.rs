@@ -1900,3 +1900,71 @@ fn tag_create_list_delete_and_annotated_objects_match_stock_git_state() {
         git(git_repo.path(), ["cat-file", "-p", "refs/tags/v1.0.1"])
     );
 }
+
+#[test]
+fn tag_documented_creation_flags_match_stock_git() {
+    let cases = [
+        ["tag", "--message", "release long", "v-msg"].as_slice(),
+        ["tag", "--file", "msg.txt", "v-file"].as_slice(),
+        ["tag", "-F", "msg.txt", "v-file-short"].as_slice(),
+        ["tag", "--create-reflog", "v-log"].as_slice(),
+    ];
+
+    for args in cases {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            write_file(repo, "msg.txt", "msg from file\n");
+            git(repo, ["tag", "base-light"]);
+        }
+
+        let git_output = command_any_output("git", git_repo.path(), args, "git tag");
+        let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin tag");
+        assert_eq!(zmin_output, git_output, "tag args should match for {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
+            git(git_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
+            "tag refs should match for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "status should match for {args:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.path().join(".git/logs/refs/tags/v-log")).ok(),
+            fs::read_to_string(git_repo.path().join(".git/logs/refs/tags/v-log")).ok(),
+            "tag reflog state should match for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn tag_documented_listing_flags_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["tag", "alpha"]);
+        git(repo, ["tag", "gamma"]);
+        git_with_env(repo, ["tag", "--message", "release long", "beta"]);
+    }
+
+    let alpha = git(git_repo.path(), ["rev-parse", "alpha"]);
+    for args in [
+        vec!["tag", "--points-at", alpha.trim()],
+        vec!["tag", "--format=", "--omit-empty"],
+        vec!["tag", "--column"],
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), &args),
+            git_args(git_repo.path(), &args),
+            "tag listing output should match for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
+            git(git_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
+            "tag refs should remain unchanged for {args:?}"
+        );
+    }
+}
