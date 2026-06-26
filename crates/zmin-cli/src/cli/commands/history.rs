@@ -296,6 +296,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             oneline,
             zero,
             all,
+            tags,
             author,
             committer,
             count,
@@ -326,6 +327,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             cherry_pick,
             cherry_mark,
             boundary,
+            children,
             root,
             patch,
             patch_with_stat,
@@ -347,6 +349,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             clear_decorations,
             abbrev_commit,
             no_abbrev_commit,
+            objects,
+            no_object_names,
+            filter,
+            filter_provided_objects,
             pickaxe_string,
             pickaxe_regex,
             pickaxe_regex_mode,
@@ -448,7 +454,12 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             until: until.as_deref(),
             date: date.as_deref(),
             pretty: pretty.as_deref(),
-            revs,
+            children,
+            objects,
+            no_object_names,
+            filter,
+            filter_provided_objects,
+            revs: extend_history_ref_selector_revs(revs, Vec::new(), tags, Vec::new()),
         }),
         runtime::Command::Whatchanged {
             oneline,
@@ -512,6 +523,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             cherry_pick: false,
             cherry_mark: false,
             boundary: false,
+            children: false,
             root,
             patch: patch || combined || dense_combined,
             patch_with_stat,
@@ -542,6 +554,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             pickaxe_regex: pickaxe_regex.as_deref(),
             pickaxe_regex_mode,
             pickaxe_all,
+            objects: false,
+            no_object_names: false,
+            filter: None,
+            filter_provided_objects: false,
             decorate: None,
             clear_decorations: false,
             ignore_matching_lines: Vec::new(),
@@ -749,7 +765,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             date: date.as_deref(),
             format: format.as_deref(),
             pretty: pretty.as_deref(),
-            revs: extend_rev_list_ref_selector_revs(revs, branches, tags, remotes),
+            revs: extend_history_ref_selector_revs(revs, branches, tags, remotes),
         }),
         runtime::Command::MergeBase {
             all,
@@ -774,7 +790,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
     }
 }
 
-fn extend_rev_list_ref_selector_revs(
+fn extend_history_ref_selector_revs(
     mut revs: Vec<String>,
     branches: Vec<String>,
     tags: Vec<String>,

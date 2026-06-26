@@ -3073,6 +3073,13 @@ pub enum Command {
         zero: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(
+            long = "tags",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        tags: Vec<String>,
         #[arg(long = "author")]
         author: Option<String>,
         #[arg(long = "committer")]
@@ -3133,6 +3140,8 @@ pub enum Command {
         cherry_mark: bool,
         #[arg(long = "boundary", action = ArgAction::SetTrue)]
         boundary: bool,
+        #[arg(long = "children", action = ArgAction::SetTrue)]
+        children: bool,
         #[arg(long = "root", action = ArgAction::SetTrue)]
         root: bool,
         #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
@@ -3180,6 +3189,14 @@ pub enum Command {
         abbrev_commit: bool,
         #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
         no_abbrev_commit: bool,
+        #[arg(long = "objects", action = ArgAction::SetTrue)]
+        objects: bool,
+        #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
+        no_object_names: bool,
+        #[arg(long = "filter")]
+        filter: Option<String>,
+        #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
+        filter_provided_objects: bool,
         #[arg(short = 'S')]
         pickaxe_string: Option<String>,
         #[arg(short = 'G')]

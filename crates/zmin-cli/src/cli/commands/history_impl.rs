@@ -5805,6 +5805,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
     pub(crate) boundary: bool,
+    pub(crate) children: bool,
     pub(crate) root: bool,
     pub(crate) patch: bool,
     pub(crate) patch_with_stat: bool,
@@ -5827,6 +5828,10 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) clear_decorations: bool,
     pub(crate) abbrev_commit: bool,
     pub(crate) no_abbrev_commit: bool,
+    pub(crate) objects: bool,
+    pub(crate) no_object_names: bool,
+    pub(crate) filter: Option<String>,
+    pub(crate) filter_provided_objects: bool,
     pub(crate) pickaxe_string: Option<&'a str>,
     pub(crate) pickaxe_regex: Option<&'a str>,
     pub(crate) pickaxe_regex_mode: bool,
@@ -6284,6 +6289,24 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
         });
     }
+    if options.filter.is_some() && !options.objects {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "object filtering requires --objects".into(),
+        });
+    }
+    if options.filter_provided_objects {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "unrecognized argument: --filter-provided-objects".into(),
+        });
+    }
+    if options.no_object_names {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "unrecognized argument: --no-object-names".into(),
+        });
+    }
     if options.walk_reflogs {
         return log_reflog(&options, parsed_log_revs.revs, max_count);
     }
@@ -6373,6 +6396,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_sparse = options.sparse;
     let _accepted_show_pulls = options.show_pulls;
     let _accepted_simplify_merges = options.simplify_merges;
+    let _accepted_children = options.children;
+    let _accepted_objects = options.objects;
+    let _accepted_filter = options.filter.as_deref();
     let history_order = options.history_order();
     let simplify_history_topo = options.simplify_merges || options.simplify_by_decoration;
     let post_collection_filters = since.is_some()
@@ -8694,6 +8720,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         cherry_pick: false,
         cherry_mark: false,
         boundary: false,
+        children: false,
         root: options.root,
         patch: !(options.no_patch
             || options.stat
@@ -8723,6 +8750,10 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         clear_decorations: false,
         abbrev_commit: options.abbrev_commit,
         no_abbrev_commit: options.no_abbrev_commit,
+        objects: false,
+        no_object_names: false,
+        filter: None,
+        filter_provided_objects: false,
         pickaxe_string: None,
         pickaxe_regex: None,
         pickaxe_regex_mode: false,

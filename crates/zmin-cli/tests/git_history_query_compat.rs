@@ -2687,6 +2687,62 @@ fn log_and_show_ide_formats_match_stock_git() {
 }
 
 #[test]
+fn log_object_and_selector_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    write_file(repo.path(), "b.txt", "new\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    git(repo.path(), ["tag", "v1", "HEAD"]);
+
+    for args in [
+        ["log", "--tags", "--format=%H"].as_slice(),
+        ["log", "--tags=v*", "--format=%H"].as_slice(),
+        ["log", "HEAD", "--not", "HEAD~1", "--format=%H"].as_slice(),
+        ["log", "--children", "--format=%H", "HEAD"].as_slice(),
+        ["log", "--objects", "HEAD"].as_slice(),
+        ["log", "--filter=blob:none", "--objects", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["log", "--filter=blob:none", "HEAD"].as_slice(),
+        [
+            "log",
+            "--filter=blob:none",
+            "--filter-provided-objects",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--filter=blob:none",
+            "--filter-provided-objects",
+            "--objects",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--no-object-names", "HEAD"].as_slice(),
+        ["log", "--objects", "--no-object-names", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_default_short_hash_matches_stock_git_with_unrelated_object_prefix_collision() {
     let repo = git_init();
     configure_identity(repo.path());

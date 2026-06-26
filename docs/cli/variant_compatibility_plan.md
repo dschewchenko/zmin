@@ -300,14 +300,18 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git rev-list` ref-selection
-documented-option family expansion on the current local lane. Zmin now
-accepts and matches stock Git for `rev-list --branches`, `--remotes`, and
-`--tags` on modeled local branch, remote-tracking, and tag ref lanes,
-including wildcard-filtered `--branches=fea*`, `--remotes=origin/*`, and
-`--tags=v*` selection.
+The latest completed slice is a helper-free `git log` object-selector plus
+tag-selection documented-option family expansion on the current local lane.
+Zmin now accepts and matches stock Git for `log --tags`, `--not`,
+`--children`, `--objects`, and `--filter` on modeled local tagged and
+two-commit history lanes, and matches the current stock invalid-input
+behavior for `log --filter-provided-objects` and `--no-object-names`,
+including wildcard-filtered `--tags=v*`, explicit negative revision ordering,
+the current stock no-op `--children` / `--objects` lanes on formatted/default
+log output, the stock `object filtering requires --objects` fatal, and the
+stock `unrecognized argument` fatals for unsupported object-adjacent forms.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_ref_selection_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_object_and_selector_family_matches_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -315,16 +319,16 @@ Focused gates were
 `tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
 `git diff --check`.
 Current census counts should be refreshed from the generated census artifacts
-after this slice lands. Actual delta from the prior reflog/first-parent
-closure is `+6` matrix rows, `+3` complete documented option pairs, `+3`
-represented documented option pairs, `+6` verified rows, `+0` invalid-input
-rows, and `+0` complete command matrices. Current census counts are `5887`
-matrix rows, `5124` verified rows, `726` invalid-input rows, `12` exact-open
-rows, `146/151` complete command matrices, `1860/3212` complete documented
-option pairs, and `1868/3212` represented documented option pairs. `rev-list`
-now sits at `68/117` reviewed-complete documented option pairs with
-`105/105` classified rows, `102` stock-matching rows, `3` invalid-input rows,
-and `0` exact-open rows.
+after this slice lands. Actual delta from the prior `rev-list` ref-selection
+closure is `+10` matrix rows, `+7` complete documented option pairs, `+7`
+represented documented option pairs, `+6` verified rows, `+4` invalid-input
+rows, and `+0` complete command matrices. Current census counts are `5897`
+matrix rows, `5130` verified rows, `730` invalid-input rows, `12` exact-open
+rows, `146/151` complete command matrices, `1867/3212` complete documented
+option pairs, and `1875/3212` represented documented option pairs. `log` now
+sits at `71/131` reviewed-complete documented option pairs with `170/170`
+classified rows, `159` stock-matching rows, `11` invalid-input rows, and `0`
+exact-open rows.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family
