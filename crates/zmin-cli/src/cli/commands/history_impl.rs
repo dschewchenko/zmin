@@ -1888,6 +1888,18 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
     pub(crate) reverse: bool,
+    pub(crate) alternate_refs: bool,
+    pub(crate) bisect: bool,
+    pub(crate) bisect_all: bool,
+    pub(crate) bisect_vars: bool,
+    pub(crate) cherry: bool,
+    pub(crate) count: bool,
+    pub(crate) dense: bool,
+    pub(crate) full_history: bool,
+    pub(crate) glob: Option<&'a str>,
+    pub(crate) in_commit_order: bool,
+    pub(crate) expand_tabs: bool,
+    pub(crate) show_linear_break: bool,
     pub(crate) left_right: bool,
     pub(crate) right_only: bool,
     pub(crate) cherry_pick: bool,
@@ -1943,6 +1955,12 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) no_object_names: bool,
     pub(crate) mailmap: bool,
     pub(crate) source: bool,
+    pub(crate) commit_header: bool,
+    pub(crate) disk_usage: bool,
+    pub(crate) single_worktree: bool,
+    pub(crate) filter: Option<&'a str>,
+    pub(crate) filter_print_omitted: bool,
+    pub(crate) filter_provided_objects: bool,
     pub(crate) header: bool,
     pub(crate) progress: bool,
     pub(crate) no_filter: bool,
@@ -2002,6 +2020,18 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         date_order,
         author_date_order,
         reverse,
+        alternate_refs,
+        bisect,
+        bisect_all,
+        bisect_vars,
+        cherry,
+        count,
+        dense,
+        full_history,
+        glob,
+        in_commit_order,
+        expand_tabs,
+        show_linear_break,
         left_right,
         right_only,
         cherry_pick,
@@ -2057,6 +2087,12 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         no_object_names,
         mailmap,
         source,
+        commit_header,
+        disk_usage,
+        single_worktree,
+        filter,
+        filter_print_omitted,
+        filter_provided_objects,
         header,
         progress,
         no_filter,
@@ -2075,6 +2111,16 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let _accepted_date_order = date_order;
     let _accepted_author_date_order = author_date_order;
     let _accepted_reverse = reverse;
+    let _accepted_alternate_refs = alternate_refs;
+    let _accepted_bisect = bisect;
+    let _accepted_cherry = cherry;
+    let _accepted_count = count;
+    let _accepted_dense = dense;
+    let _accepted_full_history = full_history;
+    let _accepted_glob = glob;
+    let _accepted_in_commit_order = in_commit_order;
+    let _accepted_expand_tabs = expand_tabs;
+    let _accepted_show_linear_break = show_linear_break;
     let _accepted_left_right = left_right;
     let _accepted_right_only = right_only;
     let _accepted_cherry_pick = cherry_pick;
@@ -2119,6 +2165,26 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     if source {
         return Err(shortlog_unknown_option("--source"));
     }
+    if commit_header {
+        return Err(shortlog_unknown_option("--commit-header"));
+    }
+    if disk_usage {
+        return Err(shortlog_unknown_option("--disk-usage"));
+    }
+    if single_worktree {
+        return Err(shortlog_unknown_option("--single-worktree"));
+    }
+    if let Some(filter_value) = filter {
+        return Err(shortlog_unknown_option(&format!(
+            "--filter={filter_value}"
+        )));
+    }
+    if filter_print_omitted {
+        return Err(shortlog_unknown_option("--filter-print-omitted"));
+    }
+    if filter_provided_objects {
+        return Err(shortlog_unknown_option("--filter-provided-objects"));
+    }
     if header {
         return Err(shortlog_unknown_option("--header"));
     }
@@ -2136,6 +2202,12 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     }
     if timestamp {
         return Err(shortlog_unknown_option("--timestamp"));
+    }
+    if bisect_all {
+        return Err(shortlog_unknown_option("--bisect-all"));
+    }
+    if bisect_vars {
+        return Err(shortlog_unknown_option("--bisect-vars"));
     }
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {

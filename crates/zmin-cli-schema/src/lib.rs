@@ -641,6 +641,30 @@ pub enum Command {
         author_date_order: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
+        alternate_refs: bool,
+        #[arg(long = "bisect", action = ArgAction::SetTrue)]
+        bisect: bool,
+        #[arg(long = "bisect-all", action = ArgAction::SetTrue)]
+        bisect_all: bool,
+        #[arg(long = "bisect-vars", action = ArgAction::SetTrue)]
+        bisect_vars: bool,
+        #[arg(long = "cherry", action = ArgAction::SetTrue)]
+        cherry: bool,
+        #[arg(long = "count", action = ArgAction::SetTrue)]
+        count: bool,
+        #[arg(long = "dense", action = ArgAction::SetTrue)]
+        dense: bool,
+        #[arg(long = "full-history", action = ArgAction::SetTrue)]
+        full_history: bool,
+        #[arg(long = "glob")]
+        glob: Option<String>,
+        #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
+        in_commit_order: bool,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "show-linear-break", action = ArgAction::SetTrue)]
+        show_linear_break: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
         #[arg(long = "right-only", action = ArgAction::SetTrue)]
@@ -770,6 +794,18 @@ pub enum Command {
         mailmap: bool,
         #[arg(long = "source", action = ArgAction::SetTrue)]
         source: bool,
+        #[arg(long = "commit-header", action = ArgAction::SetTrue)]
+        commit_header: bool,
+        #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
+        disk_usage: bool,
+        #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
+        single_worktree: bool,
+        #[arg(long = "filter")]
+        filter: Option<String>,
+        #[arg(long = "filter-print-omitted", action = ArgAction::SetTrue)]
+        filter_print_omitted: bool,
+        #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
+        filter_provided_objects: bool,
         #[arg(long = "header", action = ArgAction::SetTrue)]
         header: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]

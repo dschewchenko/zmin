@@ -757,6 +757,51 @@ fn shortlog_proof_only_option_surface_batch_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_proof_only_history_tail_batch_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
+    write_commit_with_date(repo.path(), "a.txt", "three\n", "1700001200 +0000", "three");
+
+    for args in [
+        ["shortlog", "-sne", "--alternate-refs", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--bisect", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--cherry", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--count", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--dense", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--full-history", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--glob=main", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--in-commit-order", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--expand-tabs", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--show-linear-break", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["shortlog", "-sne", "--bisect-all", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--bisect-vars", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--commit-header", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--disk-usage", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--single-worktree", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--filter=blob:none", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--filter-print-omitted", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--filter-provided-objects", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_family_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

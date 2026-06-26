@@ -22,28 +22,25 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
-`shortlog` option-surface closure. This batch added twenty-six documented
-option closures by proving stock-Git parity for accepted summary-lane flags
-`shortlog --ignore-missing`, `--indexed-objects`, `--objects-edge`,
-`--objects-edge-aggressive`, `--quiet`, `--standard-notes`,
-`--no-standard-notes`, `--notes`, `--no-notes`, `--show-notes`,
-`--show-notes-by-default`, `--no-abbrev-commit`, `--no-expand-tabs`,
-`--show-pulls`, `--simplify-merges`, `--sparse`, `--unpacked`, `--remotes`,
-`--remove-empty`, and `--relative-date`, plus stock-compatible
-unknown-option rejection for `shortlog --header`, `--progress`,
-`--no-filter`, `--missing`, `--use-bitmap-index`, and `--timestamp`.
+`shortlog` history-tail closure. This batch added eighteen documented option
+closures by proving stock-Git parity for accepted summary-lane flags
+`shortlog --alternate-refs`, `--bisect`, `--cherry`, `--count`, `--dense`,
+`--full-history`, `--glob=main`, `--in-commit-order`, `--expand-tabs`, and
+`--show-linear-break`, plus stock-compatible unknown-option rejection for
+`shortlog --bisect-all`, `--bisect-vars`, `--commit-header`,
+`--disk-usage`, `--single-worktree`, `--filter=blob:none`,
+`--filter-print-omitted`, and `--filter-provided-objects`.
 
 The batch fixed one cohesive parser/runtime gap on the `shortlog` path:
 
-- Zmin now exposes the represented shortlog surface that stock Git already
-  accepts or rejects on the modeled helper-free summary lanes, instead of
-  misparsing those spellings as revisions or silently leaving them outside the
-  compatibility schema; `--relative-date` now also reuses the existing shared
-  raw-date helper for format-based date grouping
+- Zmin now exposes the represented proof-only shortlog history tail that stock
+  Git already accepts or rejects on the modeled helper-free summary lane, and
+  the parameterized `--filter=...` rejection now preserves the full stock
+  unknown-option token instead of collapsing to bare `--filter`
 
 Focused verification was
 `cargo check -p zmin-cli`,
-`cargo test -p zmin-cli --test git_history_query_compat shortlog_proof_only_option_surface_batch_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat shortlog_proof_only_history_tail_batch_matches_stock_git -- --nocapture`,
 `cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -54,24 +51,23 @@ and `git diff --check`.
 Actual durable census after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2006 / 3212`
-- represented documented command-option pairs: `2006 / 3212`
-- matrix rows: `6065`
-- verified rows: `5290`
-- invalid-input rows: `750`
+- complete documented command-option pairs: `2024 / 3212`
+- represented documented command-option pairs: `2024 / 3212`
+- matrix rows: `6083`
+- verified rows: `5300`
+- invalid-input rows: `758`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
-- `shortlog`: `96 / 125` reviewed-complete documented option pairs, `128`
-  written rows, `128` classified rows, `113` stock-matching rows, `15`
+- `shortlog`: `114 / 125` reviewed-complete documented option pairs, `146`
+  written rows, `146` classified rows, `123` stock-matching rows, `23`
   invalid-input rows, `0` exact-open rows
 
-The next best high-throughput follow-up should stay off the stateful `am`
-family unless a larger proof-only rejection batch emerges. The default next
-queue should be reselected from the refreshed `remaining_to_fix_or_verify.tsv`
-head, with likely candidates now shifting toward another represented
-history-adjacent schema family or a dense proof-only command cluster.
+The next best high-throughput follow-up should move off `shortlog` again. The
+refreshed `remaining_to_fix_or_verify.tsv` head is back to dense stateful
+`am` and `apply` doc-option seeds, so the default next queue should be
+reselected there rather than continuing into smaller proof-only shortlog tails.
 
 As of 2026-06-27 the latest completed batch closes the final two shared
 `log` schema-tail doc-option seeds by proving stock-compatible rejection for
