@@ -1,6 +1,6 @@
 metric	count	total	note
-complete_command_matrices	108	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1580	3156	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	109	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	1605	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	1614	3156	documented command-option pairs with at least one behavior row
 behavior_rows_written	5654	5654	current written command option value combination state transport platform rows
@@ -124,7 +124,7 @@ rerere	0	0	0	0.0	8	8	100.0	7	87.5	0	0	1	yes
 reset	6	0	0	0.0	11	11	100.0	6	54.5	0	0	5	no
 restore	25	25	25	100.0	100	100	100.0	80	80.0	0	0	20	yes
 rev-list	117	12	12	10.3	31	31	100.0	31	100.0	0	0	0	no
-rev-parse	51	25	50	98.0	111	111	100.0	102	91.9	0	0	9	no
+rev-parse	51	50	50	98.0	111	111	100.0	102	91.9	0	0	9	yes
 revert	19	4	4	21.1	7	7	100.0	5	71.4	0	0	2	no
 rm	12	12	12	100.0	50	50	100.0	41	82.0	0	0	9	yes
 send-email	64	2	2	3.1	18	18	100.0	17	94.4	0	0	1	no
