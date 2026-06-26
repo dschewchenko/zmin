@@ -1582,6 +1582,27 @@ fn switch_documented_branch_flags_match_stock_git() {
 }
 
 #[test]
+fn switch_track_flags_require_branch_creation_like_stock_git() {
+    for args in [
+        ["switch", "--track", "feature"].as_slice(),
+        ["switch", "--no-track", "feature"].as_slice(),
+        ["switch", "-t", "feature"].as_slice(),
+    ] {
+        let (git_repo, zmin_repo) = switch_branch_fixture_repos();
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn switch_detach_short_matches_stock_git_for_branch_targets() {
     let (git_repo, zmin_repo) = switch_branch_fixture_repos();
     let git_run = command_any_output("git", git_repo.path(), &["switch", "-d", "feature"], "git switch");

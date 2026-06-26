@@ -434,6 +434,38 @@ fn fetch_documented_local_transport_option_family_matches_stock_git() {
 }
 
 #[test]
+fn fetch_porcelain_and_progress_match_stock_git_for_named_local_remote() {
+    assert_named_local_fetch_matches_stock_git(
+        "fetch --porcelain",
+        ["fetch", "--porcelain", "origin"].as_slice(),
+    );
+
+    let (_dir, source, git_client, zmin_client) = setup_named_local_fetch_clients("fetch-progress");
+    git(&git_client, ["fetch", "origin"]);
+    run_zmin(&zmin_client, ["fetch", "origin"]);
+
+    let git_output = command_any_output(
+        "git",
+        &git_client,
+        &["fetch", "--progress", "origin"],
+        "git fetch --progress",
+    );
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &["fetch", "--progress", "origin"],
+        "zmin fetch --progress",
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    let source_path = source.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path)
+    );
+}
+
+#[test]
 fn fetch_show_forced_updates_documented_flags_match_stock_git() {
     for (label, args) in [
         (
@@ -511,6 +543,60 @@ fn fetch_write_commit_graph_documented_flags_match_stock_git() {
         git_client
             .join(".git/objects/info/commit-graphs/commit-graph-chain")
             .is_file()
+    );
+}
+
+#[test]
+fn pull_all_fetches_all_remotes_then_reports_missing_tracking_like_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let one = dir.path().join("one");
+    let two = dir.path().join("two");
+    let git_client = dir.path().join("git-client");
+    let zmin_client = dir.path().join("zmin-client");
+
+    for (remote, file) in [(&one, "one.txt"), (&two, "two.txt")] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", remote.to_str().expect("remote path")],
+        );
+        configure_identity(remote);
+        fs::write(remote.join(file), format!("{file}\n")).expect("write remote file");
+        git(remote, ["add", "-A"]);
+        git_with_env(remote, ["commit", "-m", file]);
+    }
+
+    for client in [&git_client, &zmin_client] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", client.to_str().expect("client path")],
+        );
+        git(client, ["remote", "add", "one", one.to_str().expect("one path")]);
+        git(client, ["remote", "add", "two", two.to_str().expect("two path")]);
+    }
+
+    let git_output = command_any_output("git", &git_client, &["pull", "--all"], "git pull --all");
+    let zmin_output =
+        command_any_output(zmin_bin(), &zmin_client, &["pull", "--all"], "zmin pull --all");
+
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    let one_path = one.to_string_lossy();
+    let two_path = two.to_string_lossy();
+    assert_eq!(
+        normalize_remote_output(&normalize_remote_output(&zmin_output.2, &one_path), &two_path),
+        normalize_remote_output(&normalize_remote_output(&git_output.2, &one_path), &two_path)
+    );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+    assert_eq!(
+        run_zmin(&zmin_client, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_client, ["status", "--porcelain=v1", "--branch"])
     );
 }
 

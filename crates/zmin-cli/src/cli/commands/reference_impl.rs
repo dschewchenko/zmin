@@ -4228,6 +4228,7 @@ fn remote_update(repo: &GitRepo, prune: bool, remotes: Vec<String>) -> Result<()
             false,
             false,
             false,
+            false,
             &[],
             None,
         )?;

@@ -11213,8 +11213,8 @@ pub(crate) fn switch(
     _ignore_other_worktrees: bool,
     orphan: Option<String>,
     detach: bool,
-    _track: Option<String>,
-    _no_track: bool,
+    track: Option<String>,
+    no_track: bool,
     target: Option<String>,
 ) -> Result<()> {
     if [force_create.is_some(), create.is_some(), orphan.is_some()]
@@ -11232,6 +11232,12 @@ pub(crate) fn switch(
         return Err(CliError::Fatal {
             code: 128,
             message: "'--detach' cannot be used with '-b/-B/--orphan'".into(),
+        });
+    }
+    if track.is_some() || no_track {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "missing branch name; try -c".into(),
         });
     }
     let force = force || discard_changes;

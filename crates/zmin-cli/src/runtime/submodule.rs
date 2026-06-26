@@ -1149,6 +1149,7 @@ fn fetch_network_submodule_target(
         true,
         false,
         false,
+        false,
         &[],
         None,
     )?;

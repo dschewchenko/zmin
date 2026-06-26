@@ -147,7 +147,7 @@ pub(crate) fn dispatch(
             upload_pack: _,
             filter,
             stdin,
-            porcelain: _,
+            porcelain,
             recurse_submodules_default: _,
             refetch: _,
             submodule_prefix: _,
@@ -179,12 +179,13 @@ pub(crate) fn dispatch(
             negotiate_only,
             filter,
             stdin,
+            porcelain,
             remote,
             refspecs,
             raw_args,
         ),
         runtime::Command::Pull {
-            all: _,
+            all,
             no_all,
             verbose: _,
             prune,
@@ -215,6 +216,7 @@ pub(crate) fn dispatch(
             remote,
             branch,
         } => run_pull(
+            all,
             ff,
             ff_only,
             no_ff,
@@ -471,6 +473,7 @@ pub(crate) fn run_fetch(
     negotiate_only: bool,
     filter: Option<String>,
     stdin: bool,
+    porcelain: bool,
     remote: Option<String>,
     refspecs: Vec<String>,
     raw_args: &[String],
@@ -501,6 +504,7 @@ pub(crate) fn run_fetch(
         negotiate_only,
         filter,
         stdin,
+        porcelain,
         remote,
         refspecs,
         raw_args,
@@ -508,6 +512,7 @@ pub(crate) fn run_fetch(
 }
 
 pub(crate) fn run_pull(
+    all: bool,
     ff: bool,
     ff_only: bool,
     no_ff: bool,
@@ -530,6 +535,7 @@ pub(crate) fn run_pull(
     raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
     super::transport_commands::run_pull(
+        all,
         ff,
         ff_only,
         no_ff,

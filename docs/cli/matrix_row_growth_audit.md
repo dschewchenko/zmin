@@ -11,30 +11,29 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-26 the latest completed batch is a helper-free `git show`
-As of 2026-06-26 the latest completed batch is a helper-free shared `git log`
-and `git rev-list` symmetric-difference marker documented-option family
-expansion on the current local lane. The selected change added eight exact
-stock-Git rows for `log --left-right`, `log --cherry-pick`,
-`log --cherry-mark`, `log --boundary`, `rev-list --left-right`,
-`rev-list --cherry-pick`, `rev-list --cherry-mark`, and
-`rev-list --boundary`, then promoted eight represented documented options into
+As of 2026-06-26 the latest completed batch is a helper-free shared
+`git switch`/`git fetch`/`git pull` transport-and-invalid-input closure on
+the current local lane. The selected change added six exact stock-Git rows for
+`switch --track`, `switch --no-track`, `switch -t`, `fetch --porcelain`,
+`fetch --progress`, and `pull --all`, then promoted six represented
+documented options into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
-`+8` matrix rows, `+8` complete documented option pairs, `+8`
-represented documented option pairs, `+8` verified rows, `+0`
+`+6` matrix rows, `+6` complete documented option pairs, `+6`
+represented documented option pairs, `+2` verified rows, `+3`
 invalid-input rows, and `+0` complete command matrices. Actual delta matched.
-Current census counts are `5799` matrix rows, `5043` verified rows, `720`
+Current census counts are `5829` matrix rows, `5069` verified rows, `723`
 invalid-input rows, `12` exact-open rows, `146/151` complete command
-matrices, `1792/3212` complete documented option pairs, and
-`1800/3212` represented documented option pairs. `log` now sits at
-`54/131` reviewed-complete documented option pairs with `148` written rows,
-`147` classified rows, `141` stock-matching rows, `6` invalid-input rows,
-and `0` exact-open rows, while `rev-list` now sits at `16/117`
-reviewed-complete documented option pairs with `35/35` classified rows,
-`35` stock-matching rows, `0` invalid-input rows, and `0` exact-open rows on
-their current modeled surfaces. The next default follow-up should stay on
-shared history-query traversal families such as `topo/date/author-date order`
-or a larger `full-history`/`simplify-merges`/`ancestry-path` closure batch.
+matrices, `1818/3212` complete documented option pairs, and
+`1826/3212` represented documented option pairs. `switch` is now fully
+reviewed complete at `25/25` documented option pairs with `26/26` classified
+rows and `0` exact-open rows, `fetch` is now fully reviewed complete at
+`63/63` documented option pairs with `379/379` classified rows and
+`0` exact-open rows, and `pull` now sits at `37/99`
+reviewed-complete documented option pairs with `62/62` classified rows,
+`60` stock-matching rows, `2` invalid-input rows, and `0` exact-open rows on
+their current modeled surfaces. The next default follow-up should return to
+the next largest census-first represented family instead of another
+single-lane transport tail.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared `git log`
 and `git show` text-rendering documented-option family expansion on the

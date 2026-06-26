@@ -9256,6 +9256,7 @@ pub(crate) fn run_fetch(
     negotiate_only: bool,
     filter: Option<String>,
     stdin: bool,
+    porcelain: bool,
     remote: Option<String>,
     mut refspecs: Vec<String>,
     raw_args: &[String],
@@ -9432,6 +9433,7 @@ pub(crate) fn run_fetch(
                 write_fetch_head,
                 &refmap,
                 prefetch,
+                porcelain,
                 recurse_submodules_mode,
                 &server_options,
                 None,
@@ -9471,6 +9473,7 @@ pub(crate) fn run_fetch(
                 write_fetch_head,
                 &refmap,
                 prefetch,
+                porcelain,
                 recurse_submodules_mode,
                 &server_options,
                 None,
@@ -9536,6 +9539,7 @@ pub(crate) fn run_fetch(
         write_fetch_head,
         &refmap,
         prefetch,
+        porcelain,
         recurse_submodules_mode,
         &server_options,
         upload_pack_command.as_deref(),
@@ -11302,6 +11306,7 @@ fn fetch_remote_url(repo: &GitRepo, remote: &str) -> Result<String> {
 }
 
 pub(crate) fn run_pull(
+    all: bool,
     ff: bool,
     ff_only: bool,
     no_ff: bool,
@@ -11337,6 +11342,55 @@ pub(crate) fn run_pull(
         message: "cannot pull into detached HEAD".into(),
     })?;
     let current_branch_short = branch_display_name(&current_branch);
+    if all {
+        if remote.is_some() || branch.is_some() {
+            return Err(CliError::Stderr {
+                code: 1,
+                text: "fatal: fetch --all does not make sense with refspecs\n".into(),
+            });
+        }
+        for (idx, remote_name) in configured_remotes(&repo)?.into_iter().enumerate() {
+            println!("Fetching {remote_name}");
+            run_fetch(
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false,
+                idx > 0,
+                prune,
+                false,
+                false,
+                no_tags,
+                tags,
+                false,
+                false,
+                true,
+                Vec::new(),
+                depth.clone(),
+                unshallow,
+                update_shallow,
+                Vec::new(),
+                false,
+                None,
+                false,
+                false,
+                Some(remote_name),
+                Vec::new(),
+                raw_args,
+            )?;
+        }
+        let upstream_remote =
+            read_config_section_value(&repo, "branch", &current_branch_short, "remote")?;
+        let upstream_branch =
+            read_config_section_value(&repo, "branch", &current_branch_short, "merge")?;
+        if upstream_remote.is_none() || upstream_branch.is_none() {
+            return Err(missing_pull_tracking_info(&current_branch_short));
+        }
+    }
     let rebase_mode = if no_rebase {
         Some("false")
     } else {
@@ -11449,6 +11503,7 @@ fatal: the remote end hung up unexpectedly\n"
                 true,
                 &[],
                 false,
+                false,
                 recurse_submodules_mode,
                 &server_options,
                 upload_pack.as_deref(),
@@ -11484,6 +11539,7 @@ fatal: the remote end hung up unexpectedly\n"
                 false,
                 true,
                 &[],
+                false,
                 false,
                 recurse_submodules_mode,
                 &server_options,
@@ -11533,6 +11589,18 @@ fatal: the remote end hung up unexpectedly\n"
     {
         let _trace = phase_trace("pull.fast_forward");
         fast_forward_to(&repo, &store, &target, "pull", ff_only)
+    }
+}
+
+fn missing_pull_tracking_info(current_branch_short: &str) -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: format!(
+            "There is no tracking information for the current branch.\n\
+Please specify which branch you want to rebase against.\n\
+See git-pull(1) for details.\n\n    git pull <remote> <branch>\n\n\
+If you wish to set tracking information for this branch you can do so with:\n\n    git branch --set-upstream-to=<remote>/<branch> {current_branch_short}\n"
+        ),
     }
 }
 
@@ -12175,6 +12243,7 @@ fn fetch_with_depth(
     write_fetch_head: bool,
     refmap: &[String],
     prefetch: bool,
+    porcelain: bool,
     recurse_submodules_mode: FetchRecurseSubmodulesMode,
     server_options: &[String],
     upload_pack_command: Option<&str>,
@@ -12415,6 +12484,7 @@ fn fetch_with_depth(
         write_fetch_head,
         dry_run,
         dry_run && fetch_should_recurse_submodules(recurse_submodules_mode),
+        porcelain,
         server_options,
         upload_pack_command,
     );
@@ -12453,6 +12523,7 @@ fn fetch_with_missing_ref_code(
         false,
         false,
         true,
+        false,
         false,
         false,
         &[],
@@ -12500,6 +12571,7 @@ pub(crate) fn fetch_with_repo_and_remote(
     write_fetch_head: bool,
     dry_run: bool,
     dry_run_recurse_submodules: bool,
+    porcelain: bool,
     server_options: &[String],
     upload_pack_command: Option<&str>,
 ) -> Result<()> {
@@ -12879,6 +12951,16 @@ pub(crate) fn fetch_with_repo_and_remote(
                 prune,
             )?
         };
+        let fetch_porcelain_rows = if quiet || !porcelain {
+            Vec::new()
+        } else {
+            let _trace = phase_trace("fetch.local.collect_porcelain_rows");
+            collect_configured_fetch_porcelain_rows(
+                &source_refs,
+                &destination_refs,
+                &fetch_refspecs,
+            )?
+        };
         if prune && !atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
         }
@@ -12919,7 +13001,11 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         {
             let _trace = phase_trace("fetch.local.render");
-            print_fetch_update_rows(&url, &fetch_update_rows);
+            if porcelain {
+                print_fetch_porcelain_rows(&fetch_porcelain_rows);
+            } else {
+                print_fetch_update_rows(&url, &fetch_update_rows);
+            }
         }
         {
             let _trace = phase_trace("fetch.local.copy_tags");
@@ -13024,6 +13110,16 @@ pub(crate) fn fetch_with_repo_and_remote(
                 prune,
             )?
         };
+        let fetch_porcelain_rows = if quiet || !porcelain {
+            Vec::new()
+        } else {
+            let _trace = phase_trace("fetch.local.collect_porcelain_rows");
+            collect_configured_fetch_porcelain_rows(
+                &source_refs,
+                &destination_refs,
+                &fetch_refspecs,
+            )?
+        };
         if prune && !atomic {
             prune_fetch_refspecs(&source_refs, &destination_refs, &fetch_refspecs)?;
         }
@@ -13058,7 +13154,9 @@ pub(crate) fn fetch_with_repo_and_remote(
         }
         {
             let _trace = phase_trace("fetch.local.render");
-            if prune && !quiet && fetch_update_rows.is_empty() {
+            if porcelain {
+                print_fetch_porcelain_rows(&fetch_porcelain_rows);
+            } else if prune && !quiet && fetch_update_rows.is_empty() {
                 eprintln!("From {}", fetch_head_url_display(&url));
             } else {
                 print_fetch_update_rows(&url, &fetch_update_rows);
@@ -15522,6 +15620,53 @@ fn collect_configured_fetch_update_rows(
     Ok(rows)
 }
 
+fn collect_configured_fetch_porcelain_rows(
+    source_refs: &RefStore,
+    destination_refs: &RefStore,
+    refspecs: &[String],
+) -> Result<Vec<String>> {
+    let mut rows = Vec::new();
+    for refspec in refspecs {
+        let refspec = refspec.trim_start_matches('+');
+        let Some((source, destination)) = refspec.split_once(':') else {
+            continue;
+        };
+        if let Some((source_prefix, source_suffix, destination_prefix, destination_suffix)) =
+            wildcard_fetch_parts(source, destination)
+        {
+            source_refs.for_each_resolved_ref(source_prefix, |source_ref, source_id| {
+                let Some(captured) = source_ref
+                    .strip_prefix(source_prefix)
+                    .and_then(|rest| rest.strip_suffix(source_suffix))
+                else {
+                    return Ok::<(), CliError>(());
+                };
+                let destination_ref = format!("{destination_prefix}{captured}{destination_suffix}");
+                let old_id = destination_refs.resolve(&destination_ref).ok();
+                if old_id.as_ref() == Some(source_id) {
+                    return Ok(());
+                }
+                rows.push(fetch_porcelain_row(old_id.as_ref(), source_id, &destination_ref));
+                Ok::<(), CliError>(())
+            })?;
+            continue;
+        }
+        if source.contains('*') || destination.contains('*') {
+            continue;
+        }
+        let destination_ref = destination_fetch_ref_name(destination)?;
+        let Ok(source_id) = resolve_fetch_refspec_source_id(source_refs, source) else {
+            continue;
+        };
+        let old_id = destination_refs.resolve(&destination_ref).ok();
+        if old_id.as_ref() == Some(&source_id) {
+            continue;
+        }
+        rows.push(fetch_porcelain_row(old_id.as_ref(), &source_id, &destination_ref));
+    }
+    Ok(rows)
+}
+
 fn destination_ref_missing(destination_refs: &RefStore, destination: &str) -> Result<bool> {
     if fetch_destination_has_ref_path_conflict(destination_refs, destination) {
         return Ok(true);
@@ -15550,15 +15695,23 @@ fn fetch_update_row(source: &str, destination: &str) -> String {
     } else {
         ("new ref", source.rsplit('/').next().unwrap_or(source))
     };
-    if kind == "new tag" {
-        return format!(
-            " * [{kind}]         {source_display:<11}-> {}",
-            fetch_update_destination_display(destination)
-        );
-    }
+    let spacing = match kind {
+        "new branch" => "      ",
+        "new tag" => "         ",
+        _ => "         ",
+    };
     format!(
-        " * [{kind}]         {source_display}        -> {}",
+        " * [{kind}]{spacing}{source_display:<10} -> {}",
         fetch_update_destination_display(destination)
+    )
+}
+
+fn fetch_porcelain_row(old_id: Option<&ObjectId>, new_id: &ObjectId, destination: &str) -> String {
+    format!(
+        "  {} {} {}",
+        old_id.map(ObjectId::to_hex).unwrap_or_else(zero_sha1_hex),
+        new_id.to_hex(),
+        destination
     )
 }
 
@@ -15647,6 +15800,12 @@ fn print_fetch_update_rows(url: &str, rows: &[String]) {
     eprintln!("From {}", fetch_head_url_display(url));
     for row in rows {
         eprintln!("{row}");
+    }
+}
+
+fn print_fetch_porcelain_rows(rows: &[String]) {
+    for row in rows {
+        println!("{row}");
     }
 }
 
@@ -20641,6 +20800,7 @@ fn fetch_with_repo_and_remote_deepen(
             write_fetch_head,
             false,
             false,
+            false,
             &[],
             None,
         );
@@ -20852,6 +21012,7 @@ fn fetch_with_repo_and_remote_unshallow(
         false,
         false,
         write_fetch_head,
+        false,
         false,
         false,
         &[],
