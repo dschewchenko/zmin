@@ -6,7 +6,8 @@ use std::process::{Command, Stdio};
 
 use common::{
     command_any_output as command_output, command_output_with_env, configure_identity, git,
-    git_init, git_with_env, run_zmin, run_zmin_with_env, zmin_bin,
+    git_init, git_with_env, git_with_stdin_args, run_zmin, run_zmin_with_env,
+    run_zmin_with_stdin_args, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -866,6 +867,85 @@ fn rev_parse_sq_quote_mode_matches_stock_git_outside_repo() {
     assert_eq!(
         command_output(zmin_bin(), dir.path(), &args, "zmin"),
         command_output("git", dir.path(), &args, "git")
+    );
+}
+
+#[test]
+fn rev_parse_parseopt_and_output_modes_match_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    configure_identity(&repo);
+    fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+    git(&repo, ["add", "-A"]);
+    git_with_env(&repo, ["commit", "-m", "base"]);
+
+    for args in [
+        ["rev-parse", "--output-object-format=storage", "HEAD"].as_slice(),
+        ["rev-parse", "--output-object-format=sha1", "HEAD"].as_slice(),
+        ["rev-parse", "--shared-index-path"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), &repo, args, "zmin"),
+            command_output("git", &repo, args, "git"),
+            "rev-parse output mode mismatch for {args:?}"
+        );
+    }
+
+    let head = git(&repo, ["rev-parse", "HEAD"]);
+    let disambiguate = format!("--disambiguate={}", &head[..7]);
+    let args = ["rev-parse", disambiguate.as_str()];
+    assert_eq!(
+        command_output(zmin_bin(), &repo, &args, "zmin"),
+        command_output("git", &repo, &args, "git")
+    );
+
+    let spec = "cmd\n--\na,alpha= arg help\nb,beta help\n\n";
+    let args = [
+        "rev-parse",
+        "--parseopt",
+        "--keep-dashdash",
+        "--stop-at-non-option",
+        "--stuck-long",
+        "--",
+        "--alpha=1",
+        "--",
+        "--beta",
+        "foo",
+        "bar",
+    ];
+    assert_eq!(
+        run_zmin_with_stdin_args(dir.path(), &args, spec),
+        git_with_stdin_args(dir.path(), &args, spec)
+    );
+
+    let args = ["rev-parse", "--parseopt", "--", "--alpha=1", "--beta", "foo"];
+    assert_eq!(
+        run_zmin_with_stdin_args(dir.path(), &args, spec),
+        git_with_stdin_args(dir.path(), &args, spec)
+    );
+}
+
+#[test]
+fn rev_parse_output_object_format_sha256_matches_stock_git_error() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    configure_identity(&repo);
+    fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+    git(&repo, ["add", "-A"]);
+    git_with_env(&repo, ["commit", "-m", "base"]);
+
+    let args = ["rev-parse", "--output-object-format=sha256", "HEAD"];
+    assert_eq!(
+        command_output(zmin_bin(), &repo, &args, "zmin"),
+        command_output("git", &repo, &args, "git")
     );
 }
 

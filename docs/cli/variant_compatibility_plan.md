@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`104/151 complete command matrices / 1503/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1523/3156 represented doc-option pairs / 5531 written rows / 4814/5531 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`105/151 complete command matrices / 1515/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1549/3156 represented doc-option pairs / 5567 written rows / 4847/5567 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,28 +300,28 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git rev-parse` parse/filter and
-quoting family expansion. Zmin now matches stock Git on helper-free local
-`rev-parse --flags`, `--no-flags`, `--revs-only`, `--no-revs`, `--default`,
-`--prefix <arg>`, `--not`, `--symbolic`, `--sq`, and outside-repository
-`--sq-quote`, while also fixing the old `--show-ref-format` invalid
-`extensions.refStorage` stderr shape so the focused `rev_parse_` oracle test
-target is now fully green.
+The latest completed slice is a helper-free `git rev-parse`
+parseopt/output/disambiguation expansion. Zmin now matches stock Git on the
+modeled helper-free local and outside-repository lanes for
+`rev-parse --output-object-format=storage HEAD`,
+`--output-object-format=sha1 HEAD`, the stock unsupported
+`--output-object-format=sha256 HEAD` rejection, `--disambiguate=<prefix>`,
+`--shared-index-path`, and `--parseopt` with the documented
+`--keep-dashdash`, `--stop-at-non-option`, and `--stuck-long` combinations,
+while keeping the full focused `rev_parse_` oracle target green.
 
 Current counts are `105/151` complete command matrices,
 `1515/3156` complete documented option pairs,
-`1542/3156` represented documented option pairs, `5558` written rows,
-`4839` verified rows, `12` open rows, and `704` invalid-input rows.
-`rev-parse` now sits at `43/51` represented documented option pairs with
-`102/102` classified rows, `94` stock-matching rows, `8` invalid-input rows,
+`1549/3156` represented documented option pairs, `5567` written rows,
+`4847` verified rows, `12` open rows, and `705` invalid-input rows.
+`rev-parse` now sits at `50/51` represented documented option pairs with
+`111/111` classified rows, `102` stock-matching rows, `9` invalid-input rows,
 and `0` exact-open written rows on the current modeled surface. This batch
 raised represented coverage and verified rows, but did not yet promote new
 reviewed-complete documented option pairs. The next bounded high-throughput
-follow-up can stay on the remaining helper-free `rev-parse` tail, which is
-now mostly parseopt/output/disambiguation expansion (`--parseopt`,
-`--keep-dashdash`, `--stop-at-non-option`, `--stuck-long`,
-`--output-object-format`, `--disambiguate`, `--exclude-hidden`,
-`--shared-index-path`), before moving to a new helper-free family.
+follow-up should move to a new dense helper-free family from the refreshed
+census queue unless the last config-driven `rev-parse --exclude-hidden`
+micro-tail is deliberately chosen first.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

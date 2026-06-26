@@ -1,4 +1,5 @@
 use super::*;
+use std::io::Read;
 use zmin_primitives::Error as PrimitiveError;
 use zmin_primitives::git_runtime::{GitObjectStore, GitPrimitiveRuntime, GitRefsStore};
 
@@ -7393,6 +7394,10 @@ struct RevParseOptions {
     sq_quote: bool,
     not: bool,
     symbolic: bool,
+    parseopt: bool,
+    keep_dashdash: bool,
+    stop_at_non_option: bool,
+    stuck_long: bool,
     short: Option<usize>,
     abbrev_ref: Option<String>,
     verify: bool,
@@ -7412,6 +7417,9 @@ struct RevParseOptions {
     absolute_git_dir: bool,
     git_common_dir: bool,
     resolve_git_dir: Vec<PathBuf>,
+    output_object_format: Vec<String>,
+    disambiguate: Vec<String>,
+    shared_index_path: bool,
     git_paths: Vec<PathBuf>,
     is_inside_git_dir: bool,
     is_inside_work_tree: bool,
@@ -7482,6 +7490,9 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
             return Ok(());
         }
     }
+    if options.parseopt {
+        return print_rev_parse_parseopt(&options, raw_args);
+    }
     let ordered_modes = [
         options.all,
         !options.branches.is_empty(),
@@ -7500,6 +7511,9 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
         options.sq_quote,
         options.not,
         options.symbolic,
+        !options.output_object_format.is_empty(),
+        !options.disambiguate.is_empty(),
+        options.shared_index_path,
         options.show_toplevel,
         options.show_prefix,
         options.show_cdup,
@@ -7747,6 +7761,10 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             "--no-revs" => {}
             "--sq" => {}
             "--sq-quote" => {}
+            "--parseopt" => {}
+            "--keep-dashdash" => {}
+            "--stop-at-non-option" => {}
+            "--stuck-long" => {}
             "--not" => {}
             "--symbolic" => {}
             "--default" => {
@@ -7779,6 +7797,12 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                     path_format,
                 )?);
                 index += 1;
+            }
+            "--shared-index-path" => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                if let Some(path) = rev_parse_shared_index_path(&ctx.repo)? {
+                    outputs.push(path);
+                }
             }
             "--git-dir" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
@@ -8008,6 +8032,23 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                     path_format,
                 )?);
             }
+            other if other.starts_with("--output-object-format=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                let mode = other.split_once('=').map(|(_, value)| value).unwrap_or_default();
+                let Some(rev) = raw_args.get(index + 1) else {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: "missing revision output".into(),
+                    });
+                };
+                outputs.push(rev_parse_output_object_format_value(&ctx.repo, mode, rev)?);
+                index += 1;
+            }
+            other if other.starts_with("--disambiguate=") => {
+                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
+                let prefix = other.split_once('=').map(|(_, value)| value).unwrap_or_default();
+                outputs.extend(rev_parse_disambiguate_values(&ctx.repo, prefix)?);
+            }
             other if other.starts_with("--short=") || other.starts_with("--abbrev-ref=") => {}
             other if other.starts_with('-') => {
                 if saw_end_of_options && output_options.include_other {
@@ -8191,6 +8232,133 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{escaped}'")
 }
 
+#[derive(Clone)]
+struct RevParseParseOptSpec {
+    short: Option<String>,
+    long: Option<String>,
+    takes_value: bool,
+}
+
+fn print_rev_parse_parseopt(options: &RevParseOptions, raw_args: &[String]) -> Result<()> {
+    let index = usize::from(raw_args.first().is_some_and(|arg| arg == "rev-parse"));
+    let Some(double_dash) = raw_args[index..].iter().position(|arg| arg == "--") else {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "parseopt requires `--` separator".into(),
+        });
+    };
+    let args = &raw_args[index + double_dash + 1..];
+    let mut spec_text = String::new();
+    std::io::stdin()
+        .read_to_string(&mut spec_text)
+        .map_err(CliError::Io)?;
+    let specs = parse_rev_parse_parseopt_specs(&spec_text);
+    println!(
+        "{}",
+        rev_parse_parseopt_render(
+            &specs,
+            args,
+            options.keep_dashdash,
+            options.stop_at_non_option,
+            options.stuck_long,
+        )?
+    );
+    Ok(())
+}
+
+fn parse_rev_parse_parseopt_specs(spec_text: &str) -> Vec<RevParseParseOptSpec> {
+    spec_text
+        .lines()
+        .skip_while(|line| line.trim() != "--")
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let token = line.split_whitespace().next()?;
+            let takes_value = token.contains('=');
+            let token = token.trim_end_matches('=');
+            let mut parts = token.split(',');
+            Some(RevParseParseOptSpec {
+                short: parts.next().filter(|value| !value.is_empty()).map(str::to_owned),
+                long: parts.next().filter(|value| !value.is_empty()).map(str::to_owned),
+                takes_value,
+            })
+        })
+        .collect()
+}
+
+fn rev_parse_parseopt_render(
+    specs: &[RevParseParseOptSpec],
+    args: &[String],
+    keep_dashdash: bool,
+    _stop_at_non_option: bool,
+    stuck_long: bool,
+) -> Result<String> {
+    let mut out = vec!["set".to_owned(), "--".to_owned()];
+    let mut index = 0usize;
+    let mut end_of_options = false;
+    while index < args.len() {
+        let arg = &args[index];
+        if end_of_options {
+            out.push(shell_single_quote(arg));
+            index += 1;
+            continue;
+        }
+        if arg == "--" {
+            out.push("--".to_owned());
+            if keep_dashdash {
+                out.push(shell_single_quote(arg));
+            }
+            end_of_options = true;
+            index += 1;
+            continue;
+        }
+        if !arg.starts_with('-') {
+            out.push("--".to_owned());
+            end_of_options = true;
+            continue;
+        }
+        if let Some(name) = arg.strip_prefix("--") {
+            let (opt_name, inline_value) = name
+                .split_once('=')
+                .map(|(left, right)| (left, Some(right)))
+                .unwrap_or((name, None));
+            if let Some(spec) = specs.iter().find(|spec| spec.long.as_deref() == Some(opt_name)) {
+                if spec.takes_value {
+                    let value = if let Some(value) = inline_value {
+                        value.to_owned()
+                    } else {
+                        index += 1;
+                        args.get(index).cloned().ok_or_else(|| CliError::Fatal {
+                            code: 129,
+                            message: format!("option `--{opt_name}` requires a value"),
+                        })?
+                    };
+                    if stuck_long {
+                        out.push(format!("--{opt_name}={}", shell_single_quote(&value)));
+                    } else if let Some(short) = spec.short.as_deref() {
+                        out.push(format!("-{short}"));
+                        out.push(shell_single_quote(&value));
+                    } else {
+                        out.push(format!("--{opt_name}"));
+                        out.push(shell_single_quote(&value));
+                    }
+                } else if stuck_long {
+                    out.push(format!("--{opt_name}"));
+                } else if let Some(short) = spec.short.as_deref() {
+                    out.push(format!("-{short}"));
+                } else {
+                    out.push(format!("--{opt_name}"));
+                }
+                index += 1;
+                continue;
+            }
+        }
+        out.push(shell_single_quote(arg));
+        index += 1;
+    }
+    Ok(out.join(" "))
+}
+
 fn rev_parse_has_glob_magic(value: &str) -> bool {
     value.contains('*') || value.contains('?') || value.contains('[')
 }
@@ -8367,6 +8535,77 @@ fn rev_parse_ref_format_value(repo: Option<&GitRepo>) -> Result<String> {
         .map(repo_ref_format)
         .transpose()?
         .unwrap_or("files".to_owned()))
+}
+
+fn rev_parse_output_object_format_value(repo: &GitRepo, mode: &str, rev: &str) -> Result<String> {
+    match mode {
+        "storage" | "sha1" => rev_parse_object_value(repo, rev, None, false, false, false)?
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "missing revision output".into(),
+            }),
+        "sha256" => Err(CliError::Fatal {
+            code: 128,
+            message: "unsupported object format: sha256".into(),
+        }),
+        other => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported object format: {other}"),
+        }),
+    }
+}
+
+fn rev_parse_disambiguate_values(repo: &GitRepo, prefix: &str) -> Result<Vec<String>> {
+    let prefix = prefix.to_ascii_lowercase();
+    if prefix.len() < 4 || !prefix.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Ok(vec![]);
+    }
+    let mut matches = BTreeSet::new();
+    let objects_root = &repo.objects_dir;
+    if objects_root.is_dir() {
+        for dir_entry in fs::read_dir(objects_root).map_err(CliError::Io)? {
+            let dir_entry = dir_entry.map_err(CliError::Io)?;
+            let name = dir_entry.file_name().to_string_lossy().to_string();
+            if name.len() != 2 || !name.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                continue;
+            }
+            if !prefix.starts_with(&name) && !name.starts_with(&prefix) {
+                continue;
+            }
+            if !dir_entry.path().is_dir() {
+                continue;
+            }
+            for object_entry in fs::read_dir(dir_entry.path()).map_err(CliError::Io)? {
+                let object_entry = object_entry.map_err(CliError::Io)?;
+                let tail = object_entry.file_name().to_string_lossy().to_string();
+                if !tail.chars().all(|ch| ch.is_ascii_hexdigit()) {
+                    continue;
+                }
+                let oid = format!("{name}{tail}");
+                if oid.starts_with(&prefix) {
+                    matches.insert(oid);
+                }
+            }
+        }
+    }
+    Ok(matches.into_iter().collect())
+}
+
+fn rev_parse_shared_index_path(repo: &GitRepo) -> Result<Option<String>> {
+    let index = fs::read(&repo.index_path).map_err(CliError::Io)?;
+    let marker = b"link\0";
+    let Some(position) = index.windows(marker.len()).position(|window| window == marker) else {
+        return Ok(None);
+    };
+    let start = position + marker.len();
+    if index.len() < start + 20 {
+        return Ok(None);
+    }
+    let hash = index[start..start + 20]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(Some(git_path_output(&repo.git_dir.join(format!("sharedindex.{hash}")))))
 }
 
 fn rev_parse_object_value(
@@ -8753,6 +8992,10 @@ pub(crate) fn rev_parse_command(
     sq_quote: bool,
     not: bool,
     symbolic: bool,
+    parseopt: bool,
+    keep_dashdash: bool,
+    stop_at_non_option: bool,
+    stuck_long: bool,
     short: Option<usize>,
     abbrev_ref: Option<String>,
     verify: bool,
@@ -8772,6 +9015,9 @@ pub(crate) fn rev_parse_command(
     absolute_git_dir: bool,
     git_common_dir: bool,
     resolve_git_dir: Vec<PathBuf>,
+    output_object_format: Vec<String>,
+    disambiguate: Vec<String>,
+    shared_index_path: bool,
     git_paths: Vec<PathBuf>,
     is_inside_git_dir: bool,
     is_inside_work_tree: bool,
@@ -8799,6 +9045,10 @@ pub(crate) fn rev_parse_command(
             sq_quote,
             not,
             symbolic,
+            parseopt,
+            keep_dashdash,
+            stop_at_non_option,
+            stuck_long,
             short,
             abbrev_ref,
             verify,
@@ -8818,6 +9068,9 @@ pub(crate) fn rev_parse_command(
             absolute_git_dir,
             git_common_dir,
             resolve_git_dir,
+            output_object_format,
+            disambiguate,
+            shared_index_path,
             git_paths,
             is_inside_git_dir,
             is_inside_work_tree,

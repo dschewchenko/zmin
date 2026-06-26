@@ -11,6 +11,23 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git rev-parse`
+parseopt/output/disambiguation expansion. The selected change adds nine exact
+stock-Git rows for `--output-object-format=storage`, `--output-object-format=sha1`,
+the stock unsupported `--output-object-format=sha256` rejection,
+`--disambiguate=<prefix>`, `--shared-index-path`, and the documented
+`--parseopt` / `--keep-dashdash` / `--stop-at-non-option` / `--stuck-long`
+combined mode on the current helper-free lane. Expected delta was `+9` matrix
+rows, `+7` represented documented option pairs, `+8` verified rows, `+1`
+invalid-input row, `+0` complete documented option pairs, and `+0` complete
+command matrices. Actual delta matched. `rev-parse` now sits at `25/51`
+reviewed-complete documented option pairs, `50/51` represented documented
+option pairs, `111/111` classified rows, `102` stock-matching rows, `9`
+invalid-input rows, and `0` exact-open rows. The next best default follow-up
+should move to a new dense helper-free family from the refreshed census queue
+unless the last config-driven `rev-parse --exclude-hidden` micro-tail is
+explicitly chosen first.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git config`
 `--url` urlmatch closure plus reviewed-complete promotion. The selected change
 adds five exact stock-Git rows for `config get --url=...` best-match lookup,

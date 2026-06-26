@@ -2,13 +2,13 @@ metric	count	total	note
 complete_command_matrices	105	151	only commands whose full behavior matrix is finished
 complete_doc_option_pairs	1515	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1542	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5558	5558	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4839	5558	closed written rows only
-behavior_rows_classified	5543	5558	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5558	written rows with incomplete parity
-behavior_rows_open	12	5558	written rows not implemented or not matching yet
-invalid_input_rows	704	5558	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1549	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5567	5567	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4847	5567	closed written rows only
+behavior_rows_classified	5552	5567	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5567	written rows with incomplete parity
+behavior_rows_open	12	5567	written rows not implemented or not matching yet
+invalid_input_rows	705	5567	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -124,7 +124,7 @@ rerere	0	0	0	0.0	8	8	100.0	7	87.5	0	0	1	yes
 reset	6	0	0	0.0	11	11	100.0	6	54.5	0	0	5	no
 restore	25	7	7	28.0	81	81	100.0	61	75.3	0	0	20	no
 rev-list	117	12	12	10.3	31	31	100.0	31	100.0	0	0	0	no
-rev-parse	51	25	43	84.3	102	102	100.0	94	92.2	0	0	8	no
+rev-parse	51	25	50	98.0	111	111	100.0	102	91.9	0	0	9	no
 revert	19	4	4	21.1	7	7	100.0	5	71.4	0	0	2	no
 rm	12	12	12	100.0	50	50	100.0	41	82.0	0	0	9	yes
 send-email	64	2	2	3.1	18	18	100.0	17	94.4	0	0	1	no

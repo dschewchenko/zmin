@@ -3577,6 +3577,14 @@ pub enum Command {
         not: bool,
         #[arg(long = "symbolic", action = ArgAction::SetTrue)]
         symbolic: bool,
+        #[arg(long = "parseopt", action = ArgAction::SetTrue)]
+        parseopt: bool,
+        #[arg(long = "keep-dashdash", action = ArgAction::SetTrue)]
+        keep_dashdash: bool,
+        #[arg(long = "stop-at-non-option", action = ArgAction::SetTrue)]
+        stop_at_non_option: bool,
+        #[arg(long = "stuck-long", action = ArgAction::SetTrue)]
+        stuck_long: bool,
         #[arg(
             long = "short",
             num_args = 0..=1,
@@ -3630,6 +3638,16 @@ pub enum Command {
         git_common_dir: bool,
         #[arg(long = "resolve-git-dir")]
         resolve_git_dir: Vec<PathBuf>,
+        #[arg(
+            long = "output-object-format",
+            num_args = 1,
+            require_equals = true
+        )]
+        output_object_format: Vec<String>,
+        #[arg(long = "disambiguate", require_equals = true)]
+        disambiguate: Vec<String>,
+        #[arg(long = "shared-index-path", action = ArgAction::SetTrue)]
+        shared_index_path: bool,
         #[arg(long = "git-path")]
         git_paths: Vec<PathBuf>,
         #[arg(long = "is-inside-git-dir", action = ArgAction::SetTrue)]
