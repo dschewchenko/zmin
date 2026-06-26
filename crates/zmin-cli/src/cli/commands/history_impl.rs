@@ -2119,6 +2119,10 @@ enum BlameRangeEndSpec {
 }
 
 pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -> Result<()> {
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        print!("{BLAME_USAGE}");
+        return Err(CliError::Exit(129));
+    }
     let options = parse_blame_args(args)?;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -2242,6 +2246,7 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                 "--no-color-by-age" => color_by_age = false,
                 "--minimal" | "--no-minimal" => {}
                 "-M" | "-C" | "--find-renames" | "--find-copies" => {}
+                "--first-parent" => {}
                 "--contents" => {
                     cursor += 1;
                     let Some(path) = args.get(cursor) else {
@@ -2251,6 +2256,53 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                         });
                     };
                     contents_path = Some(path.clone());
+                }
+                "--encoding" => {
+                    cursor += 1;
+                    let Some(_value) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame --encoding requires a value".into(),
+                        });
+                    };
+                }
+                "--ignore-rev" => {
+                    cursor += 1;
+                    let Some(_value) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame --ignore-rev requires a value".into(),
+                        });
+                    };
+                }
+                "--ignore-revs-file" => {
+                    cursor += 1;
+                    let Some(path) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame --ignore-revs-file requires a value".into(),
+                        });
+                    };
+                    validate_blame_ignore_revs_file(path)?;
+                }
+                "--reverse" => {
+                    cursor += 1;
+                    let Some(range) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame --reverse requires a value".into(),
+                        });
+                    };
+                    validate_blame_reverse_range(range)?;
+                }
+                "-S" => {
+                    cursor += 1;
+                    let Some(_path) = args.get(cursor) else {
+                        return Err(CliError::Fatal {
+                            code: 129,
+                            message: "blame -S requires a value".into(),
+                        });
+                    };
                 }
                 "-L" => {
                     cursor += 1;
@@ -2282,6 +2334,39 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
                     }
                     if let Some(path) = arg.strip_prefix("--contents=") {
                         contents_path = Some(path.to_owned());
+                        cursor += 1;
+                        continue;
+                    }
+                    if arg == "--no-contents" {
+                        contents_path = None;
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(_value) = arg.strip_prefix("--encoding=") {
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(_value) = arg.strip_prefix("--ignore-rev=") {
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(path) = arg.strip_prefix("--ignore-revs-file=") {
+                        validate_blame_ignore_revs_file(path)?;
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(value) = arg.strip_prefix("--reverse=") {
+                        validate_blame_reverse_range(value)?;
+                        cursor += 1;
+                        continue;
+                    }
+                    if let Some(path) = arg.strip_prefix("-S") {
+                        if path.is_empty() {
+                            return Err(CliError::Fatal {
+                                code: 129,
+                                message: "blame -S requires a value".into(),
+                            });
+                        }
                         cursor += 1;
                         continue;
                     }
@@ -2367,6 +2452,42 @@ fn parse_blame_args(args: Vec<String>) -> Result<BlameOptions> {
         score_debug,
         color_by_age,
         line_range,
+    })
+}
+
+fn validate_blame_ignore_revs_file(path: &str) -> Result<()> {
+    let contents = fs::read_to_string(path)?;
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if ObjectId::from_hex(GitHashAlgorithm::Sha1, trimmed).is_err() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("invalid object name: {trimmed}"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_blame_reverse_range(range: &str) -> Result<()> {
+    let Some((from, to)) = range.split_once("..") else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("bad revision '{range}'"),
+        });
+    };
+    if from == to {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("More than one commit to dig up from, {from} and {to}?"),
+        });
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!("reverse blame is not yet supported for '{range}'"),
     })
 }
 

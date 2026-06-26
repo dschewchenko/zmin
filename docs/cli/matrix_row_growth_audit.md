@@ -11,6 +11,23 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git blame`
+documented explicit-schema family expansion. The selected change adds the
+remaining documented `blame` schema surface for `--contents`, `--encoding`,
+`--first-parent`, `--ignore-rev`, `--ignore-revs-file`, `--reverse`, `-S`,
+and `-h`, reuses the existing durable helper-free `--contents` oracle lane,
+adds exact stock-Git evidence for the represented simple local
+`--encoding` / `--first-parent` / `--ignore-rev` / `--ignore-revs-file` /
+`-S` lanes, and closes `--reverse` plus short-help with exact stock-shaped
+invalid-input rows. Expected delta was `+8` matrix rows, `+8` represented
+documented option pairs, `+6` verified rows, `+2` invalid-input rows, `+0`
+complete documented option pairs, and `+0` complete command matrices. Actual
+delta matched. `blame` now sits at `36/36` represented documented option
+pairs, `28/36` reviewed-complete documented option pairs, `180/180`
+classified rows, `98` stock-matching rows, `82` invalid-input rows, and `0`
+exact-open rows. The next best helper-free batch should move to another large
+schema-gap family such as `shortlog`.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git index-pack`
 documented-option family review closure. The selected change extends the
 previous schema/runtime expansion to cover repeated `--threads` and

@@ -300,32 +300,26 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git index-pack`
-documented-option family review closure. Zmin now carries durable stock-Git
-evidence for `--threads`, `--check-self-contained-and-connected`,
-`--max-input-size`, `--object-format`, and `--promisor` across the modeled
-helper-free lanes, including repeated thread-count last-one-wins parsing,
-standalone connectivity-check composition with `--strict` and
-`--fsck-objects`, zero and malformed unlimited parsing plus repeated
-last-one-wins size limits, repeated sha1 and unknown object-format handling,
-and both empty and message `.promisor` sidecar creation plus pack-name
-rejection. Those five documented option pairs are now promoted into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+The latest completed slice is a helper-free `git blame`
+documented explicit-schema family expansion. Zmin now exposes the remaining
+documented `blame` surface for `--contents`, `--encoding`, `--first-parent`,
+`--ignore-rev`, `--ignore-revs-file`, `--reverse`, `-S`, and `-h`, keeps the
+existing helper-free local `--contents` row durable through the prior exact
+oracle, accepts the safe schema-only local no-op lanes for the represented
+`--encoding`, `--first-parent`, `--ignore-rev`, `--ignore-revs-file`, and
+`-S` families, and matches stock Git for the modeled `--reverse HEAD..HEAD`
+failure plus `blame -h` usage-output lane.
 
 Current counts are `101/151` complete command matrices,
 `1472/3156` complete documented option pairs,
-`1480/3156` represented documented option pairs, `5453` written rows,
-`4744` verified rows, `12` open rows, and `694` invalid-input rows.
-`index-pack` now sits at `15/16` reviewed-complete documented option pairs,
-`15/16` represented documented option pairs, `33/33` classified rows, `23`
-stock-matching rows, and `10` invalid-input rows. `--progress-title` remains
-the only documented `index-pack` option still absent from schema, and both
-local stock Git baselines available on this machine (`/usr/bin/git 2.50.1`
-and `/usr/local/bin/git 2.53.0`) currently reject it with the generic
-index-pack usage output despite the Git 2.47.1 docs listing it. The next
-bounded high-throughput follow-up should therefore either obtain a stronger
-Git 2.47.x oracle for `--progress-title` or record an explicit defer decision
-before leaving `index-pack`.
+`1488/3156` represented documented option pairs, `5461` written rows,
+`4750` verified rows, `12` open rows, and `696` invalid-input rows.
+`blame` now sits at `28/36` reviewed-complete documented option pairs,
+`36/36` represented documented option pairs, `180/180` classified rows, `98`
+stock-matching rows, and `82` invalid-input rows. The next bounded
+high-throughput follow-up should move to another dense helper-free schema-gap
+family from the census, starting with `shortlog` before reopening the
+`index-pack --progress-title` oracle tail.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
@@ -1621,33 +1615,40 @@ Latest in-progress family follow-up:
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
 
-Current durable census after the zero-code reviewed-complete `blame`
-documented-option promotion cluster:
+Current durable census after the helper-free `blame` documented
+explicit-schema family expansion:
 
-- complete command matrices: `82 / 151`
-- complete documented command-option pairs: `1040 / 3175`
-- matrix rows: `5332`
-- verified rows: `4624`
-- invalid-input rows: `679`
-- open or partial exact rows: `26`
+- complete command matrices: `101 / 151`
+- complete documented command-option pairs: `1472 / 3156`
+- represented documented command-option pairs: `1488 / 3156`
+- matrix rows: `5461`
+- verified rows: `4750`
+- invalid-input rows: `696`
+- open or partial exact rows: `12`
 
 Latest completed batch:
 
-- `blame` now has twenty-eight represented helper-free local documented option
-  families promoted into the reviewed-complete doc-option census list,
-  bringing the command to `28/36` reviewed-complete documented option pairs.
-- The slice adds no new behavior rows; it only makes already closed exact
-  stock-Git local annotation, date-mode, line-range, regex-range, progress,
-  and invalid-input evidence durable in the reviewed doc-option source list.
+- `blame` now has all thirty-six documented option pairs represented in schema
+  and matrix rows, with the remaining eight documented options closed through a
+  compact helper-free batch covering `--contents`, `--encoding`,
+  `--first-parent`, `--ignore-rev`, `--ignore-revs-file`, `--reverse`, `-S`,
+  and `-h`.
+- The slice adds eight new exact rows and promotes the represented `blame`
+  surface to `36/36`, while leaving reviewed-complete status at `28/36`
+  because only the previously durable helper-free families are marked review
+  complete today.
 - Focused verification was
-  `python3 tools/git-compat-census.py --root .`,
+  `cargo test -p zmin-cli --test git_history_query_compat blame_ -- --nocapture`,
+  `cargo check -p zmin-cli --bin zmin --profile compat`,
+  `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+  `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
   `tools/git-cli-readiness-status.sh`,
   and `tools/git-compat-command-summary.sh --tsv | rg '^(blame|summary)\t'`.
 
 Latest in-progress family follow-up:
 
 - `blame` now has `28/36` documented option pairs reviewed complete with
-  `28/36` represented documented option pairs, `172/172` classified rows, and
+  `36/36` represented documented option pairs, `180/180` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.

@@ -359,6 +359,41 @@ fn blame_and_annotate_match_stock_git_for_simple_linear_history() {
 }
 
 #[test]
+fn blame_documented_option_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\ntwo\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "init"]);
+
+    write_file(repo.path(), "contents.txt", "uno\ndos\n");
+    let head = command_output("git", repo.path(), &["rev-parse", "HEAD"], "git").1;
+    write_file(repo.path(), "ignore-revs.txt", &format!("{head}\n"));
+    write_file(repo.path(), "revs.txt", &format!("{head}\n"));
+
+    for args in [
+        ["blame", "--encoding=none", "a.txt"].as_slice(),
+        ["blame", "--first-parent", "a.txt"].as_slice(),
+        ["blame", "--ignore-rev", &head, "a.txt"].as_slice(),
+        ["blame", "--ignore-revs-file", "ignore-revs.txt", "a.txt"].as_slice(),
+        ["blame", "-S", "revs.txt", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(run_zmin_args(repo.path(), args), git_args(repo.path(), args), "args: {args:?}");
+    }
+
+    for args in [
+        ["blame", "--reverse", "HEAD..HEAD", "a.txt"].as_slice(),
+        ["blame", "-h"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_invalid_date_format_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

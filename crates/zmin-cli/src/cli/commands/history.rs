@@ -57,9 +57,34 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => {
             super::history_commands::shortlog(committer, numbered, summary, email, no_merges, revs)
         }
-        runtime::Command::Blame { long, root, args } => {
-            super::history_commands::blame(long, root, false, args)
-        }
+        runtime::Command::Blame {
+            help,
+            long,
+            root,
+            contents,
+            encoding,
+            first_parent,
+            ignore_rev,
+            ignore_revs_file,
+            reverse,
+            revs_file,
+            args,
+        } => super::history_commands::blame(
+            long,
+            root,
+            false,
+            serialize_blame_args(
+                help,
+                contents,
+                encoding,
+                first_parent,
+                ignore_rev,
+                ignore_revs_file,
+                reverse,
+                revs_file,
+                args,
+            ),
+        ),
         runtime::Command::Annotate { args } => {
             super::history_commands::blame(false, true, true, args)
         }
@@ -491,6 +516,51 @@ fn serialize_reflog_args(command: Option<runtime::ReflogCommand>, mut args: Vec<
             }
             out.extend(drop.refs);
         }
+    }
+    out.append(&mut args);
+    out
+}
+
+fn serialize_blame_args(
+    help: bool,
+    contents: Option<std::path::PathBuf>,
+    encoding: Option<String>,
+    first_parent: bool,
+    ignore_rev: Vec<String>,
+    ignore_revs_file: Vec<std::path::PathBuf>,
+    reverse: Option<String>,
+    revs_file: Option<std::path::PathBuf>,
+    mut args: Vec<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if help {
+        out.push("--help".to_owned());
+    }
+    if let Some(path) = contents {
+        out.push("--contents".to_owned());
+        out.push(path.to_string_lossy().into_owned());
+    }
+    if let Some(value) = encoding {
+        out.push(format!("--encoding={value}"));
+    }
+    if first_parent {
+        out.push("--first-parent".to_owned());
+    }
+    for value in ignore_rev {
+        out.push("--ignore-rev".to_owned());
+        out.push(value);
+    }
+    for path in ignore_revs_file {
+        out.push("--ignore-revs-file".to_owned());
+        out.push(path.to_string_lossy().into_owned());
+    }
+    if let Some(value) = reverse {
+        out.push("--reverse".to_owned());
+        out.push(value);
+    }
+    if let Some(path) = revs_file {
+        out.push("-S".to_owned());
+        out.push(path.to_string_lossy().into_owned());
     }
     out.append(&mut args);
     out

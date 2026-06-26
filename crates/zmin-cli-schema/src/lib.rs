@@ -604,11 +604,28 @@ pub enum Command {
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },
+    #[command(disable_help_flag = true)]
     Blame {
+        #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+        help: bool,
         #[arg(short = 'l', action = ArgAction::SetTrue)]
         long: bool,
         #[arg(long = "root", action = ArgAction::SetTrue)]
         root: bool,
+        #[arg(long = "contents", value_hint = ValueHint::FilePath)]
+        contents: Option<PathBuf>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+        first_parent: bool,
+        #[arg(long = "ignore-rev")]
+        ignore_rev: Vec<String>,
+        #[arg(long = "ignore-revs-file", value_hint = ValueHint::FilePath)]
+        ignore_revs_file: Vec<PathBuf>,
+        #[arg(long = "reverse")]
+        reverse: Option<String>,
+        #[arg(short = 'S', value_hint = ValueHint::FilePath)]
+        revs_file: Option<PathBuf>,
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
