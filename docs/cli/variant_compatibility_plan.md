@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4921/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`107/151 complete command matrices / 1558/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4921/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,24 +300,29 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git restore` documented-option
-family closure batch. Zmin now exposes and matches stock Git on the current
-modeled helper-free local `restore` lanes for progress/quiet toggles, merge
-and conflict spellings, ours/theirs selection, overlay, recurse-submodules
-toggles, ignore-unmerged, ignore-skip-worktree-bits, pathspec-from-file
-inputs, and the `--patch` / `-p` quit lanes.
+The latest completed slice is a zero-code reviewed-complete `git restore`
+promotion cluster. Zmin now promotes the remaining represented `restore`
+documented options `--conflict`, `--ignore-skip-worktree-bits`,
+`--ignore-unmerged`, `--merge`, `--no-progress`,
+`--no-recurse-submodules`, `--ours`, `--overlay`, `--patch`,
+`--pathspec-file-nul`, `--pathspec-from-file`, `--progress`, `--quiet`,
+`--recurse-submodules`, `--theirs`, `-m`, `-p`, and `-q` into the
+reviewed-complete census list and promotes `restore` itself into the
+reviewed-complete command set because the current modeled helper-free
+surface is fully represented with `0` exact-open rows.
 
-Current counts are `106/151` complete command matrices,
-`1540/3156` complete documented option pairs,
+Current counts are `107/151` complete command matrices,
+`1558/3156` complete documented option pairs,
 `1614/3156` represented documented option pairs, `5654` written rows,
 `4921` verified rows, `12` open rows, and `718` invalid-input rows.
-`restore` now sits at `25/25` represented documented option pairs with
-`100/100` written rows, `100/100` classified rows, `80` stock-matching rows,
-`20` invalid-input rows, and `0` exact-open written rows on the current
-modeled helper-free local surface. The next bounded high-throughput follow-up
-should either deepen the still-incomplete `restore` and `checkout` documented
-option expansions now that both helper-free schema tails are closed, or move
-to the next dense represented family from the refreshed census queue.
+`restore` now sits at `25/25` reviewed-complete documented option pairs with
+`25/25` represented documented option pairs, `100/100` written rows,
+`100/100` classified rows, `80` stock-matching rows, `20` invalid-input
+rows, and `0` exact-open written rows on the current modeled helper-free
+local surface. The next bounded high-throughput follow-up should either
+deepen the still-incomplete `checkout` documented option expansions now that
+`restore` is reviewed complete, or move to the next dense represented family
+from the refreshed census queue.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

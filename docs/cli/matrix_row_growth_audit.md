@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
+`git restore` promotion cluster. The selected change promotes the remaining
+eighteen represented `restore` documented options `--conflict`,
+`--ignore-skip-worktree-bits`, `--ignore-unmerged`, `--merge`,
+`--no-progress`, `--no-recurse-submodules`, `--ours`, `--overlay`,
+`--patch`, `--pathspec-file-nul`, `--pathspec-from-file`, `--progress`,
+`--quiet`, `--recurse-submodules`, `--theirs`, `-m`, `-p`, and `-q` into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, then promotes
+`restore` into `docs/cli/census/reviewed_complete_command_matrices.tsv`
+because the command already had `25/25` represented documented options,
+`100/100` classified rows, and `0` exact-open rows on the currently modeled
+helper-free local surface. Expected delta was `+0` matrix rows, `+18`
+complete documented option pairs, `+1` complete command matrix, `+0`
+represented documented option pairs, `+0` verified rows, and `+0`
+invalid-input rows. Actual delta matched. `restore` now sits at `25/25`
+reviewed-complete documented option pairs, `25/25` represented documented
+option pairs, `100/100` classified rows, `80` stock-matching rows, `20`
+invalid-input rows, and `0` exact-open rows. The next best default
+follow-up should either deepen the still-incomplete `checkout` documented
+option expansions or move to the next dense represented family from the
+refreshed census queue.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git restore`
 documented-option family closure batch. The selected change adds nineteen
 exact stock-Git rows for `restore --progress`, `--no-progress`, `--quiet`,
