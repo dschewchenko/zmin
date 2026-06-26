@@ -613,10 +613,39 @@ pub enum Command {
         remotes: bool,
         #[arg(long = "current", action = ArgAction::SetTrue)]
         current: bool,
+        #[arg(long = "topo-order", action = ArgAction::SetTrue)]
+        topo_order: bool,
+        #[arg(long = "date-order", action = ArgAction::SetTrue)]
+        date_order: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
+        color: Option<String>,
+        #[arg(long = "no-color", action = ArgAction::SetTrue)]
+        no_color: bool,
+        #[arg(long = "more", require_equals = true)]
+        more: Option<isize>,
+        #[arg(long = "list", action = ArgAction::SetTrue)]
+        list: bool,
+        #[arg(long = "independent", action = ArgAction::SetTrue)]
+        independent: bool,
+        #[arg(long = "merge-base", action = ArgAction::SetTrue)]
+        merge_base: bool,
         #[arg(long = "sha1-name", action = ArgAction::SetTrue)]
         sha1_name: bool,
         #[arg(long = "no-name", action = ArgAction::SetTrue)]
         no_name: bool,
+        #[arg(long = "topics", action = ArgAction::SetTrue)]
+        topics: bool,
+        #[arg(
+            short = 'g',
+            long = "reflog",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            allow_hyphen_values = true
+        )]
+        reflog: Option<String>,
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },

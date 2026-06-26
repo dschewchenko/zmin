@@ -3,6 +3,7 @@ use super::patch_commands::{
 };
 use super::sequencer_commands::apply_tree_delta;
 use super::*;
+use crate::runtime::{DiffColorMode, parse_diff_color_option};
 use chrono::Datelike;
 use std::io::{Read, Seek};
 
@@ -3892,57 +3893,111 @@ fn blame_display_id(
 struct ShowBranchHead {
     id: ObjectId,
     display: String,
+    header_subject: Option<String>,
     current: bool,
     remote: bool,
 }
 
-pub(crate) fn show_branch(
-    all: bool,
-    remotes: bool,
-    current: bool,
-    sha1_name: bool,
-    no_name: bool,
-    revs: Vec<String>,
-) -> Result<()> {
+pub(crate) struct ShowBranchOptions {
+    pub(crate) all: bool,
+    pub(crate) remotes: bool,
+    pub(crate) current: bool,
+    pub(crate) topo_order: bool,
+    pub(crate) date_order: bool,
+    pub(crate) sparse: bool,
+    pub(crate) color: Option<String>,
+    pub(crate) no_color: bool,
+    pub(crate) more: Option<isize>,
+    pub(crate) list: bool,
+    pub(crate) independent: bool,
+    pub(crate) merge_base: bool,
+    pub(crate) sha1_name: bool,
+    pub(crate) no_name: bool,
+    pub(crate) topics: bool,
+    pub(crate) reflog: Option<String>,
+    pub(crate) revs: Vec<String>,
+}
+
+pub(crate) fn show_branch(options: ShowBranchOptions) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let heads = show_branch_heads(&repo, &store, &refs, all, remotes, current, revs)?;
+    let _accepted_sparse = options.sparse;
+    let color_mode = parse_diff_color_option(options.color.as_deref(), options.no_color)?;
+    if options.independent {
+        return show_branch_independent(&repo, &store, &commit_cache, options.revs);
+    }
+    if options.merge_base {
+        return show_branch_merge_base(&repo, &store, &commit_cache, options.revs);
+    }
+    let reflog_mode = options.reflog.is_some();
+    let heads = if reflog_mode {
+        show_branch_reflog_heads(&repo, &refs, options.reflog.as_deref(), &options.revs)?
+    } else {
+        show_branch_heads(
+            &repo,
+            &store,
+            &refs,
+            options.all,
+            options.remotes,
+            options.current,
+            options.revs,
+        )?
+    };
     if heads.is_empty() {
         return Ok(());
+    }
+    let more = if options.list { Some(-1) } else { options.more };
+    if more.is_some_and(|value| value < 0) {
+        return show_branch_list(&commit_cache, &heads);
     }
     if heads.len() == 1 {
         println!(
             "[{}] {}",
             heads[0].display,
-            commit_subject(&commit_cache.read_commit(&heads[0].id)?.message)
+            show_branch_header_subject(&commit_cache, &heads[0])?
         );
         return Ok(());
     }
     for (idx, head) in heads.iter().enumerate() {
         println!(
             "{} [{}] {}",
-            show_branch_header_prefix(&heads, idx),
+            show_branch_header_prefix(&heads, idx, color_mode),
             head.display,
-            commit_subject(&commit_cache.read_commit(&head.id)?.message)
+            show_branch_header_subject(&commit_cache, head)?
         );
     }
     println!("{}", "-".repeat(heads.len()));
-    let commits = show_branch_commits(&commit_cache, &heads)?;
+    let commits = show_branch_commits(
+        &commit_cache,
+        &heads,
+        options.topo_order,
+        options.date_order,
+        !reflog_mode,
+    )?;
     for id in commits {
+        if options.topics
+            && show_branch_commit_is_first_branch_only(&commit_cache, &heads, &id)?
+        {
+            continue;
+        }
         let mut prefix = String::new();
-        for head in &heads {
+        for (idx, head) in heads.iter().enumerate() {
             if show_branch_reaches(&commit_cache, &head.id, &id)? {
-                prefix.push(if head.current { '*' } else { '+' });
+                prefix.push_str(&show_branch_prefix_marker(
+                    idx,
+                    if head.current { '*' } else { '+' },
+                    color_mode,
+                ));
             } else {
                 prefix.push(' ');
             }
         }
         let commit = commit_cache.read_commit(&id)?;
-        let name = if no_name {
+        let name = if options.no_name {
             String::new()
-        } else if sha1_name {
+        } else if options.sha1_name {
             short_object_id(&id)
         } else {
             show_branch_name_for_commit(&commit_cache, &heads, &id)?
@@ -3952,6 +4007,21 @@ pub(crate) fn show_branch(
         } else {
             println!("{prefix} [{name}] {}", commit_subject(&commit.message));
         }
+    }
+    Ok(())
+}
+
+fn show_branch_list(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    heads: &[ShowBranchHead],
+) -> Result<()> {
+    for head in heads {
+        let prefix = if head.current { "* " } else { "  " };
+        println!(
+            "{prefix}[{}] {}",
+            head.display,
+            show_branch_header_subject(commit_cache, head)?
+        );
     }
     Ok(())
 }
@@ -3992,6 +4062,7 @@ fn show_branch_heads(
         heads.push(ShowBranchHead {
             current: current.as_deref() == Some(ref_name.as_str()),
             display: abbrev_ref_name(repo, &rev)?,
+            header_subject: None,
             remote: ref_name.starts_with("refs/remotes/"),
             id,
         });
@@ -4019,6 +4090,7 @@ fn show_branch_push_ref_head_id(
         heads.push(ShowBranchHead {
             current: current == Some(ref_name),
             display: show_branch_ref_display(ref_name),
+            header_subject: None,
             remote: ref_name.starts_with("refs/remotes/"),
             id: id.clone(),
         });
@@ -4034,24 +4106,35 @@ fn show_branch_ref_display(ref_name: &str) -> String {
         .to_owned()
 }
 
-fn show_branch_header_prefix(heads: &[ShowBranchHead], idx: usize) -> String {
+fn show_branch_header_prefix(
+    heads: &[ShowBranchHead],
+    idx: usize,
+    color_mode: DiffColorMode,
+) -> String {
     let mut prefix = String::new();
     for _ in 0..idx {
         prefix.push(' ');
     }
-    prefix.push(if heads[idx].current { '*' } else { '!' });
+    prefix.push_str(&show_branch_prefix_marker(
+        idx,
+        if heads[idx].current { '*' } else { '!' },
+        color_mode,
+    ));
     prefix
 }
 
 fn show_branch_commits(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     heads: &[ShowBranchHead],
+    _topo_order: bool,
+    _date_order: bool,
+    reverse_heads: bool,
 ) -> Result<Vec<ObjectId>> {
-    let mut pending = heads
-        .iter()
-        .rev()
-        .map(|head| head.id.clone())
-        .collect::<Vec<_>>();
+    let mut pending = if reverse_heads {
+        heads.iter().rev().map(|head| head.id.clone()).collect::<Vec<_>>()
+    } else {
+        heads.iter().map(|head| head.id.clone()).collect::<Vec<_>>()
+    };
     let mut seen = HashSet::new();
     let mut commits = Vec::new();
     while !pending.is_empty() {
@@ -4070,6 +4153,193 @@ fn show_branch_commits(
         commits.push(id);
     }
     Ok(commits)
+}
+
+fn show_branch_header_subject(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    head: &ShowBranchHead,
+) -> Result<String> {
+    match &head.header_subject {
+        Some(subject) => Ok(subject.clone()),
+        None => Ok(commit_subject(&commit_cache.read_commit(&head.id)?.message)),
+    }
+}
+
+fn show_branch_prefix_marker(idx: usize, marker: char, color_mode: DiffColorMode) -> String {
+    if marker == ' ' || !show_branch_color_enabled(color_mode) {
+        return marker.to_string();
+    }
+    let color = match idx % 6 {
+        0 => 31,
+        1 => 32,
+        2 => 33,
+        3 => 34,
+        4 => 35,
+        _ => 36,
+    };
+    format!("\u{1b}[{color}m{marker}\u{1b}[m")
+}
+
+fn show_branch_color_enabled(color_mode: DiffColorMode) -> bool {
+    match color_mode {
+        DiffColorMode::Never => false,
+        DiffColorMode::Always => true,
+        DiffColorMode::Auto => io::stdout().is_terminal(),
+    }
+}
+
+fn show_branch_commit_is_first_branch_only(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    heads: &[ShowBranchHead],
+    id: &ObjectId,
+) -> Result<bool> {
+    let Some((first, rest)) = heads.split_first() else {
+        return Ok(false);
+    };
+    if !show_branch_reaches(commit_cache, &first.id, id)? {
+        return Ok(false);
+    }
+    for head in rest {
+        if show_branch_reaches(commit_cache, &head.id, id)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn show_branch_independent(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    revs: Vec<String>,
+) -> Result<()> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let heads = show_branch_heads(repo, store, &refs, false, false, false, revs)?;
+    for (idx, head) in heads.iter().enumerate() {
+        let mut reachable = false;
+        for (other_idx, other) in heads.iter().enumerate() {
+            if idx == other_idx {
+                continue;
+            }
+            if show_branch_reaches(commit_cache, &other.id, &head.id)? {
+                reachable = true;
+                break;
+            }
+        }
+        if !reachable {
+            println!("{}", head.id.to_hex());
+        }
+    }
+    Ok(())
+}
+
+fn show_branch_merge_base(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    revs: Vec<String>,
+) -> Result<()> {
+    if revs.len() < 2 {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "`show-branch --merge-base` requires at least two revs".into(),
+        });
+    }
+    let resolved = revs
+        .iter()
+        .map(|rev| resolve_commitish(repo, store, rev))
+        .collect::<Result<Vec<_>>>()?;
+    for base in merge_bases_all_cached(commit_cache, &resolved[0], &resolved[1])? {
+        println!("{}", base.to_hex());
+    }
+    Ok(())
+}
+
+fn show_branch_reflog_heads(
+    repo: &GitRepo,
+    refs: &RefStore,
+    raw: Option<&str>,
+    revs: &[String],
+) -> Result<Vec<ShowBranchHead>> {
+    let selector = parse_show_branch_reflog_selector(raw)?;
+    let ref_name = if let Some(value) = revs.first() {
+        if value == "HEAD" {
+            "HEAD".to_owned()
+        } else {
+            branch_ref_name(value).unwrap_or_else(|_| value.clone())
+        }
+    } else if let Some(current) = current_branch_ref(refs)? {
+        current
+    } else {
+        "HEAD".to_owned()
+    };
+    let path = reflog_path(repo, &ref_name)?;
+    let file = fs::File::open(&path).map_err(CliError::Io)?;
+    let mut entries = Vec::new();
+    let mut index = 0usize;
+    let now = git_test_date_now().unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+            .unwrap_or(0)
+    });
+    for_each_reflog_line_rev(file, |line| {
+        let Some(entry) = parse_reflog_entry(line) else {
+            return Ok(());
+        };
+        if index >= selector.base && entries.len() < selector.limit {
+            let date = relative_date_from_timestamps(entry.timestamp, now);
+            entries.push(ShowBranchHead {
+                id: entry.new_id.clone(),
+                display: format!("{ref_name}@{{{index}}}"),
+                header_subject: Some(format!("({date}) {}", entry.message)),
+                current: false,
+                remote: false,
+            });
+        }
+        index += 1;
+        Ok(())
+    })?;
+    if entries.is_empty() {
+        println!("No revs to be shown.");
+    }
+    Ok(entries)
+}
+
+struct ShowBranchReflogSelector {
+    limit: usize,
+    base: usize,
+}
+
+fn parse_show_branch_reflog_selector(raw: Option<&str>) -> Result<ShowBranchReflogSelector> {
+    let Some(raw) = raw else {
+        return Ok(ShowBranchReflogSelector { limit: 10, base: 0 });
+    };
+    if raw.is_empty() {
+        return Ok(ShowBranchReflogSelector { limit: 10, base: 0 });
+    }
+    if raw.starts_with('=') {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: format!("error: unrecognized reflog param '{raw}'\n"),
+        });
+    }
+    let (limit, base) = match raw.split_once(',') {
+        Some((limit, base)) => (limit, Some(base)),
+        None => (raw, None),
+    };
+    let limit = limit.parse::<usize>().map_err(|_| CliError::Stderr {
+        code: 129,
+        text: format!("error: unrecognized reflog param '{raw}'\n"),
+    })?;
+    let base = match base {
+        Some(base) => base.parse::<usize>().map_err(|_| CliError::Stderr {
+            code: 129,
+            text: format!("error: unrecognized reflog param '{raw}'\n"),
+        })?,
+        None => 0,
+    };
+    Ok(ShowBranchReflogSelector { limit, base })
 }
 
 fn show_branch_reaches(

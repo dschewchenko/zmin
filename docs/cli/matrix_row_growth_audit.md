@@ -11,6 +11,20 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git show-branch`
+documented explicit-schema closure plus command promotion. The selected change
+extends the schema and runtime to cover `--list`, `--more`, `--independent`,
+`--merge-base`, `--topics`, `--topo-order`, `--date-order`, `--sparse`,
+`--color`, `--no-color`, `--reflog`, and the documented `-g` short alias,
+then promotes those twelve documented option pairs plus `show-branch` itself
+into the reviewed-complete census lists. Expected delta was `+13` matrix rows,
+`+12` complete documented option pairs, `+12` represented documented option
+pairs, `+1` complete command matrix, `+13` verified rows, and `+0`
+invalid-input rows. Actual delta matched, and `show-branch` is now
+command-complete at `19/19` reviewed-complete documented option pairs with
+`19/19` represented documented option pairs, `23` written rows, `23`
+verified rows, `0` invalid-input rows, and `0` exact-open written rows.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git difftool`
 documented explicit-schema closure plus command promotion. The selected change
 extends the schema and runtime to cover `--tool-help`, gui and no-gui

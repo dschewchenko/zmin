@@ -61,6 +61,56 @@ fn show_branch_matches_stock_git_for_local_branch_graphs() {
 }
 
 #[test]
+fn show_branch_additional_documented_options_match_stock_git() {
+    let repo = show_branch_fixture_repo();
+    git(
+        repo.path(),
+        ["update-ref", "refs/remotes/origin/main", "refs/heads/main"],
+    );
+    git(
+        repo.path(),
+        [
+            "update-ref",
+            "refs/remotes/origin/feature",
+            "refs/heads/feature",
+        ],
+    );
+
+    for args in [
+        ["show-branch", "--list"].as_slice(),
+        ["show-branch", "--more=1"].as_slice(),
+        ["show-branch", "--more=-1"].as_slice(),
+        ["show-branch", "--independent", "main", "feature"].as_slice(),
+        ["show-branch", "--merge-base", "main", "feature"].as_slice(),
+        ["show-branch", "--topics", "main", "feature"].as_slice(),
+        ["show-branch", "--topo-order"].as_slice(),
+        ["show-branch", "--date-order"].as_slice(),
+        ["show-branch", "--sparse"].as_slice(),
+        ["show-branch", "--color"].as_slice(),
+        ["show-branch", "--no-color"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output_with_env("git", repo.path(), args, &[], "git"),
+            command_output_with_env(zmin_bin(), repo.path(), args, &[], "zmin"),
+            "args: {args:?}"
+        );
+    }
+
+    let env = [("GIT_TEST_DATE_NOW", "1782432000")];
+    for args in [
+        ["show-branch", "--reflog"].as_slice(),
+        ["show-branch", "--reflog=2"].as_slice(),
+        ["show-branch", "-g"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output_with_env("git", repo.path(), args, &env, "git"),
+            command_output_with_env(zmin_bin(), repo.path(), args, &env, "zmin"),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn name_rev_matches_stock_git_for_refs_tags_and_stdin_annotation() {
     let repo = git_init();
     configure_identity(repo.path());

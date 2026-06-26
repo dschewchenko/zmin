@@ -167,22 +167,22 @@ Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete command matrices | `100/151` | commands whose current documented and discovered behavior matrix is fully closed |
-| Fully complete documented option matrices | `1455/3156` | documented command-option pairs whose current behavior matrix is fully closed |
+| Fully complete command matrices | `101/151` | commands whose current documented and discovered behavior matrix is fully closed |
+| Fully complete documented option matrices | `1467/3156` | documented command-option pairs whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `1463/3156` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `5424` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `4719/5424` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/5424` | written rows with incomplete parity |
-| Open written rows | `12/5424` | written rows that still do not match stock Git |
-| Invalid input rows | `690/5424` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `1475/3156` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `5437` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `4732/5437` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/5437` | written rows with incomplete parity |
+| Open written rows | `12/5437` | written rows that still do not match stock Git |
+| Invalid input rows | `690/5437` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `4719/5424` as Git compatibility. It only means `4719` of the `5424`
+Do not read `4732/5437` as Git compatibility. It only means `4732` of the `5437`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/5424` rows are partially matching,
-`12/5424` rows are known open mismatches, and `690/5424` additional rows are
-stock-compatible invalid inputs. Do not read `1463/3156` as option support
+unexpanded surface is not counted yet, `0/5437` rows are partially matching,
+`12/5437` rows are known open mismatches, and `690/5437` additional rows are
+stock-compatible invalid inputs. Do not read `1475/3156` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -352,7 +352,7 @@ a complete matrix built from Git docs, upstream Git tests and real tool traces.
 - Basic Snapshotting: `add`, `status`, `diff`, `commit`, `notes`, `restore`, `reset`, `rm`, `mv`
 - Branching and Merging: `branch`, `checkout`, `switch`, `merge`, `mergetool`, `log`, `stash`, `tag`, `worktree`
 - Sharing and Updating Projects: `fetch`, `pull`, `push`, `remote`, `submodule`
-- Inspection and Comparison: `show`, `log`, `diff`, `difftool`, `range-diff`, `shortlog`, `describe`
+- Inspection and Comparison: `show`, `show-branch`, `log`, `diff`, `difftool`, `range-diff`, `shortlog`, `describe`
 - Patching: `apply`, `cherry-pick`, `diff`, `rebase`, `revert`
 - Debugging: `bisect`, `blame`, `grep`
 - Email: `am`, `apply`, `imap-send`, `format-patch`, `send-email`, `request-pull`
@@ -360,7 +360,7 @@ a complete matrix built from Git docs, upstream Git tests and real tool traces.
 - Administration: `clean`, `gc`, `fsck`, `reflog`, `filter-branch`, `instaweb`, `archive`, `bundle`
 - Server Admin: `daemon`, `update-server-info`
 - Plumbing Commands: `cat-file`, `check-ignore`, `checkout-index`, `commit-tree`, `count-objects`, `diff-index`, `for-each-ref`, `hash-object`, `ls-files`, `ls-tree`, `merge-base`, `read-tree`, `rev-list`, `rev-parse`, `show-ref`, `symbolic-ref`, `update-index`, `update-ref`, `verify-pack`, `write-tree`
-- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `sh-i18n`, `sh-setup`, `shell`, `show-branch`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
+- Other Git `2.47` commands: `annotate`, `archimport`, `check-attr`, `check-mailmap`, `check-ref-format`, `cherry`, `citool`, `column`, `commit-graph`, `cvsexportcommit`, `cvsimport`, `cvsserver`, `diagnose`, `diff-files`, `diff-tree`, `fast-export`, `fmt-merge-msg`, `for-each-repo`, `get-tar-commit-id`, `gui`, `hook`, `http-fetch`, `http-push`, `index-pack`, `interpret-trailers`, `ls-remote`, `mailinfo`, `mailsplit`, `maintenance`, `merge-file`, `merge-index`, `merge-one-file`, `merge-tree`, `mktag`, `mktree`, `multi-pack-index`, `name-rev`, `p4`, `pack-objects`, `pack-redundant`, `pack-refs`, `patch-id`, `prune`, `prune-packed`, `quiltimport`, `receive-pack`, `refs`, `repack`, `replace`, `replay`, `rerere`, `sh-i18n`, `sh-setup`, `shell`, `show-index`, `sparse-checkout`, `stage`, `stripspace`, `unpack-file`, `unpack-objects`, `upload-archive`, `upload-pack`, `var`, `verify-commit`, `verify-tag`, `version`, `whatchanged`
 
 </details>
 

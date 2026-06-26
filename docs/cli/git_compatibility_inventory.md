@@ -339,15 +339,15 @@ Do not collapse these layers into one percentage.
 
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
-| Fully complete command matrices | `100/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
-| Fully complete command-option matrices | `1455/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
+| Fully complete command matrices | `101/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
+| Fully complete command-option matrices | `1467/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | no | audit rows now span the Git baseline plus nested command families represented in focused matrices |
-| Git doc option pairs represented by rows | `1463/3156` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `5424` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `4719/5424` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/5424` | no | written rows with incomplete parity |
-| Open written rows | `12/5424` | no | written rows that still do not match stock Git |
-| Invalid input rows | `690/5424` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Git doc option pairs represented by rows | `1475/3156` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `5437` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `4732/5437` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/5437` | no | written rows with incomplete parity |
+| Open written rows | `12/5437` | no | written rows that still do not match stock Git |
+| Invalid input rows | `690/5437` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full

@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`100/151 complete command matrices / 1455/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1463/3156 represented doc-option pairs / 5424 written rows / 4719/5424 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`101/151 complete command matrices / 1467/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1475/3156 represented doc-option pairs / 5437 written rows / 4732/5437 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,24 +300,25 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git difftool` documented
+The latest completed slice is a helper-free `git show-branch` documented
 explicit-schema closure plus command promotion. Zmin now covers stock Git
-2.47.1 `difftool` for `--tool-help`, gui and no-gui selection, rotate and
-skip ordering, trust-exit-code toggles, dir-diff materialization, symlink and
-copy dir-diff modes, and the documented `-d` and `-g` short aliases, while
-preserving stock helper-failure behavior and trailing-slash LOCAL/REMOTE
-directory path shape on Unix. With those rows closed, `difftool` now sits at
-`19/19` reviewed-complete documented option pairs, `19/19` represented
-documented option pairs, `21` written rows, `21` verified rows, `0`
-invalid-input rows, and is promoted into
+2.47.1 `show-branch` for `--list`, `--more`, `--independent`,
+`--merge-base`, `--topics`, `--topo-order`, `--date-order`, `--sparse`,
+`--color`, `--no-color`, `--reflog`, and the documented `-g` short alias,
+including current-branch reflog header rendering with relative dates under
+fixed `GIT_TEST_DATE_NOW`, while preserving the current helper-free local
+branch-graph output for the previously modeled option families. With those
+rows closed, `show-branch` now sits at `19/19` reviewed-complete documented
+option pairs, `19/19` represented documented option pairs, `23` written rows,
+`23` verified rows, `0` invalid-input rows, and is promoted into
 `docs/cli/census/reviewed_complete_command_matrices.tsv`.
 
-Current counts are `100/151` complete command matrices,
-`1455/3156` complete documented option pairs,
-`1463/3156` represented documented option pairs, `5424` written rows,
-`4719` verified rows, `12` open rows, and `690` invalid-input rows. The next
-bounded high-throughput follow-up should return to the compact
-`show-branch` explicit-schema tail before revisiting heavier commands with
+Current counts are `101/151` complete command matrices,
+`1467/3156` complete documented option pairs,
+`1475/3156` represented documented option pairs, `5437` written rows,
+`4732` verified rows, `12` open rows, and `690` invalid-input rows. The next
+bounded high-throughput follow-up should return to the compact `index-pack`
+invalid-input verification tail before revisiting heavier commands with
 broader documented-option gaps.
 
 The focused `git_object_plumbing_compat.rs`,
@@ -993,7 +994,7 @@ until a full matrix is expanded and verified.
 | `diff --check` and no-index edge rows | `3` | `1` | clean pathspec `--check`, dirty whitespace diagnostics, missing no-index path rejection and no-index `/dev/null` deletion comparison already covered by `git_diff_compat` |
 | `diff` whitespace-ignore rows | `10` | `0` | cached patch/stat/numstat/shortstat forms for `--ignore-space-at-eol`, `--ignore-cr-at-eol`, `--ignore-space-change`, `-b`, `--ignore-all-space` and `-w` already covered by `git_diff_compat` |
 | `diff --no-index` directory rows | `25` | `0` | default, reversed, stat, numstat, shortstat, name-only, name-status, raw, summary, patch-with-stat, patch-with-raw, full raw, file-directory and binary forms for no-index paths already covered by `git_diff_compat` |
-| `show-branch` explicit-schema tail | `10` | `0` | default, positional, sha1-name, all/remotes/current and no-name rows are already covered; the remaining closure should target the documented list, merge-base, topics, topo-order, reflog, sparse, date-order, more, independent and short-alias families |
+| `index-pack --verify invalid file-format rows` | `4` | `0` | bad reverse-index signature, bad reverse-index version, unsupported pack version, and unsupported reverse-index version lanes are already scoped as compact exact invalid-input follow-ups |
 | `verify-pack` unsupported pack index version | `1` | `0` | `git verify-pack` rejects a checksum-valid `.idx` version `3` with stock unsupported-version diagnostics |
 | `index-pack --verify` bad reverse-index signature | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` with a bad signature using stock sha1 validation diagnostics |
 | `index-pack --verify` bad reverse-index version | `1` | `0` | `git index-pack --verify` rejects a checksum-valid `.rev` version `2` using stock sha1 validation diagnostics |
