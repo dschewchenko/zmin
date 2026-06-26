@@ -1,5 +1,5 @@
 metric	count	note
-complete_command_matrices	136	reviewed commands whose full behavior matrix is finished
+complete_command_matrices	140	reviewed commands whose full behavior matrix is finished
 complete_doc_option_pairs	1605	reviewed documented command-option pairs whose full behavior matrix is finished
 git_2_47_commands	151	upstream command-list seed
 git_doc_option_seed_rows	3156	documented option spelling seed, not final denominator

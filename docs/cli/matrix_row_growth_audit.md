@@ -16,16 +16,17 @@ command-surface promotion cluster. The selected change promotes
 `index-pack`, `daemon`, `show`, `switch`, `worktree`, `tag`,
 `update-index`, `commit`, `ls-remote`, `for-each-ref`, `fetch`, `log`,
 `pull`, `rev-list`, `format-patch`, `grep`, `pack-objects`, `merge`,
-`apply`, `revert`, `cherry-pick`, `rebase`, and `send-email` into
+`apply`, `revert`, `cherry-pick`, `rebase`, `send-email`, `replay`,
+`range-diff`, `fast-import`, and `p4` into
 `docs/cli/census/reviewed_complete_command_matrices.tsv` because each command
 already had all represented documented option pairs reviewed complete,
 `100%` classified written rows, and `0` exact-open rows on the currently
 modeled surface. Expected delta was `+0` matrix rows, `+0` complete
-documented option pairs, `+23` complete command matrices, `+0`
+documented option pairs, `+27` complete command matrices, `+0`
 represented documented option pairs, `+0` verified rows, and `+0`
 invalid-input rows. Actual delta matched. Current census counts are `5654`
 matrix rows, `4922` verified rows, `718` invalid-input rows, `12`
-exact-open rows, `136/151` complete command matrices, `1605/3156`
+exact-open rows, `140/151` complete command matrices, `1605/3156`
 complete documented option pairs, and `1614/3156` represented documented
 option pairs. The promoted cluster now sits at `index-pack 15/15`,
 `daemon 13/13`, `show 3/3`, `switch 7/7`, `worktree 8/8`, `tag 21/21`,
@@ -33,11 +34,13 @@ option pairs. The promoted cluster now sits at `index-pack 15/15`,
 `for-each-ref 2/2`, `fetch 40/40`, `log 18/18`, `pull 14/14`,
 `rev-list 12/12`, `format-patch 12/12`, `grep 7/7`,
 `pack-objects 10/10`, `merge 8/8`, `apply 5/5`, `revert 4/4`,
-`cherry-pick 4/4`, `rebase 3/3`, and `send-email 2/2`
+`cherry-pick 4/4`, `rebase 3/3`, `send-email 2/2`, `replay 2/2`,
+`range-diff 1/1`, `fast-import 1/1`, and `p4 1/1`
 reviewed-complete represented option pairs on their current modeled
-surfaces, with `0` exact-open rows across all twenty-three commands. The
-next best default follow-up should review the refreshed smaller zero-code
-promotion queue led by `replay`, `range-diff`, `fast-import`, and `p4`
+surfaces, with `0` exact-open rows across all twenty-seven commands. The
+next best default follow-up should move to a new represented-family
+expansion or make an explicit decision about zero-represented command
+promotions such as `am`, `cvsserver`, `fast-export`, `help`, or `reset`
 rather than spending the next slice on the lone `rev-parse
 --exclude-hidden` micro-tail.
 
