@@ -324,13 +324,17 @@ fn shortlog_grep_family_matches_stock_git() {
     for args in [
         ["shortlog", "--grep=banana", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "-i", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "--regexp-ignore-case", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "--invert-grep", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "--grep=carrot", "--all-match", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "--grep=carrot", "HEAD"].as_slice(),
         ["shortlog", "--grep=BA[N]ANA", "-E", "HEAD"].as_slice(),
+        ["shortlog", "--grep=BA[N]ANA", "--extended-regexp", "HEAD"].as_slice(),
         ["shortlog", "--grep=BA[N]ANA", "-i", "-E", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "-F", "HEAD"].as_slice(),
+        ["shortlog", "--grep=banana", "--fixed-strings", "HEAD"].as_slice(),
         ["shortlog", "--grep=ba.+na", "-P", "HEAD"].as_slice(),
+        ["shortlog", "--grep=ba.+na", "--perl-regexp", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),

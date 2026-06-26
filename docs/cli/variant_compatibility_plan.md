@@ -301,18 +301,18 @@ source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
 The latest completed slice is a helper-free `git shortlog`
-grep-family schema expansion. Zmin now exposes the shortlog grep surface for
-`--grep`, `--invert-grep`, `--all-match`, `-i`, `-E`, `-F`, and `-P`,
-matching stock Git on the modeled helper-free local grep, case-insensitive
-grep, invert-grep, all-match, extended-regexp, fixed-string, and
-perl-regexp lanes.
+long-form grep-alias evidence expansion. Zmin now keeps exact stock-Git rows
+for the already implemented long grep aliases `--regexp-ignore-case`,
+`--extended-regexp`, `--fixed-strings`, and `--perl-regexp`, matching stock
+Git on the modeled helper-free local case-insensitive, extended-regexp,
+fixed-string, and perl-regexp grep lanes.
 
 Current counts are `101/151` complete command matrices,
 `1472/3156` complete documented option pairs,
-`1500/3156` represented documented option pairs, `5479` written rows,
-`4764` verified rows, `12` open rows, and `700` invalid-input rows.
-`shortlog` now sits at `9/21` reviewed-complete documented option pairs,
-`21/125` represented documented option pairs, `29/29` classified rows, `25`
+`1504/3156` represented documented option pairs, `5483` written rows,
+`4768` verified rows, `12` open rows, and `700` invalid-input rows.
+`shortlog` now sits at `9/25` reviewed-complete documented option pairs,
+`25/125` represented documented option pairs, `33/33` classified rows, `29`
 stock-matching rows, and `4` invalid-input rows. The next bounded
 high-throughput follow-up should finish the remaining shortlog-specific tail
 around `-g` before deciding whether to widen the rev-list-backed denominator
@@ -1612,26 +1612,27 @@ Latest in-progress family follow-up:
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
 
-Current durable census after the helper-free `shortlog` grep-family schema
-expansion:
+Current durable census after the helper-free `shortlog` long-form grep-alias
+evidence expansion:
 
 - complete command matrices: `101 / 151`
 - complete documented command-option pairs: `1472 / 3156`
-- represented documented command-option pairs: `1500 / 3156`
-- matrix rows: `5479`
-- verified rows: `4764`
+- represented documented command-option pairs: `1504 / 3156`
+- matrix rows: `5483`
+- verified rows: `4768`
 - invalid-input rows: `700`
 - open or partial exact rows: `12`
 
 Latest completed batch:
 
-- `shortlog` now has an explicit grep-family schema surface for `--grep`,
-  `--invert-grep`, `--all-match`, `-i`, `-E`, `-F`, and `-P`, raising the
-  command to `21/125` represented documented option pairs without claiming
-  broader rev-list-backed review closure.
-- The slice adds seven exact rows and lifts `shortlog` from `14/125` to
-  `21/125` represented documented option coverage while moving the
-  represented/reviewed split from `9/14` to `9/21` on the durable local
+- `shortlog` now keeps exact stock-Git rows for the already implemented long
+  grep aliases `--regexp-ignore-case`, `--extended-regexp`,
+  `--fixed-strings`, and `--perl-regexp`, raising the command to `25/125`
+  represented documented option pairs without claiming broader rev-list-backed
+  review closure.
+- The slice adds four exact rows and lifts `shortlog` from `21/125` to
+  `25/125` represented documented option coverage while moving the
+  represented/reviewed split from `9/21` to `9/25` on the durable local
   helper-free lanes currently modeled.
 - Focused verification was
   `cargo test -p zmin-cli --test git_history_query_compat shortlog_ -- --nocapture`,
@@ -1643,8 +1644,8 @@ Latest completed batch:
 
 Latest in-progress family follow-up:
 
-- `shortlog` now has `9/21` documented option pairs reviewed complete with
-  `21/125` represented documented option pairs, `29/29` classified rows, and
+- `shortlog` now has `9/25` documented option pairs reviewed complete with
+  `25/125` represented documented option pairs, `33/33` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should finish the remaining shortlog
   specific tail around `-g` and only then decide whether to broaden the
