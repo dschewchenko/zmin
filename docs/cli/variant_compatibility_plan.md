@@ -300,24 +300,26 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git config` write/filter family
-expansion. Zmin now matches stock Git on the helper-free local lanes for
-modern `config set --all`, `config unset --all`, `config set --value=...`,
-modern and legacy `--fixed-value` filtering, legacy `--replace-all`,
-legacy `--comment`, and `--get-colorbool`, while preserving the previously
-landed modern read-family coverage for `--all`, `--regexp`, `--name-only`,
-`--no-includes`, `--no-type`, `--system`, and `--blob`.
+The latest completed slice is a helper-free `git config --url` urlmatch
+closure plus reviewed-complete command promotion. Zmin now matches stock Git
+on the helper-free local urlmatch get family for best-match lookup,
+section-wide listing, `--name-only`, `--show-origin`, no-match exit `1`, and
+the documented `--all` conflict under `--url`, which closes the last
+represented `config` documented option tail and promotes the full current
+helper-free `config` surface into reviewed-complete census status.
 
-Current counts are `104/151` complete command matrices,
-`1503/3156` complete documented option pairs,
-`1523/3156` represented documented option pairs, `5531` written rows,
-`4814` verified rows, `12` open rows, and `702` invalid-input rows.
-`config` now sits at `18/30` reviewed-complete documented option pairs,
-`29/30` represented documented option pairs, `155/155` classified rows, `141`
-stock-matching rows, and `14` invalid-input rows. The only remaining
-documented `config` schema tail is `--url`, so the next bounded
-high-throughput follow-up can either finish that last helper-free `config`
-lane or move to the next dense represented family from the refreshed census.
+Current counts are `105/151` complete command matrices,
+`1515/3156` complete documented option pairs,
+`1524/3156` represented documented option pairs, `5536` written rows,
+`4818` verified rows, `12` open rows, and `703` invalid-input rows.
+`config` now sits at `30/30` reviewed-complete documented option pairs,
+`30/30` represented documented option pairs, `160/160` classified rows, `145`
+stock-matching rows, and `15` invalid-input rows. No larger represented
+helper-free `config` tail remains. The next bounded high-throughput follow-up
+should return to `docs/cli/census/remaining_to_fix_or_verify.tsv` and choose a
+new dense helper-free schema family instead of taking a one-row micro-slice;
+the lone remaining represented-only gap is `shortlog --stdin`, which is too
+small to be the default next batch unless it unlocks a broader cluster.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

@@ -2399,6 +2399,82 @@ fn config_comment_and_get_colorbool_match_stock_git() {
 }
 
 #[test]
+fn config_urlmatch_get_family_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(
+            repo,
+            ["config", "--add", "url.https://example.com/.insteadOf", "ex:"],
+        );
+        git(
+            repo,
+            [
+                "config",
+                "--add",
+                "url.https://example.com/repo.git.insteadOf",
+                "exrepo:",
+            ],
+        );
+        git(
+            repo,
+            ["config", "--add", "url.https://example.com/.pushInsteadOf", "push:"],
+        );
+        git(
+            repo,
+            ["config", "--add", "http.https://example.com.sslVerify", "false"],
+        );
+        git(repo, ["config", "--add", "http.cookieFile", "/tmp/cookie.txt"]);
+    }
+
+    for args in [
+        &["config", "get", "--url=https://example.com/repo.git", "url.insteadOf"][..],
+        &["config", "get", "--url=https://example.com/repo.git", "url.pushInsteadOf"],
+        &["config", "get", "--url=https://example.com/repo.git", "url"],
+        &[
+            "config",
+            "get",
+            "--url=https://example.com/repo.git",
+            "--name-only",
+            "url",
+        ],
+        &[
+            "config",
+            "get",
+            "--url=https://example.com/repo.git",
+            "--show-origin",
+            "url.insteadOf",
+        ],
+        &["config", "get", "--url=https://example.com/repo", "http.sslverify"],
+        &["config", "get", "--url=https://example.com/repo", "http"],
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "config urlmatch mismatch for {args:?}"
+        );
+    }
+
+    for args in [
+        &["config", "get", "--url=https://unknown.test/repo.git", "url.insteadOf"][..],
+        &[
+            "config",
+            "get",
+            "--all",
+            "--url=https://example.com/repo.git",
+            "url.insteadOf",
+        ],
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_any_output("git", git_repo.path(), args, "git"),
+            "config urlmatch failure mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
 fn config_legacy_type_flags_match_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

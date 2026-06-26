@@ -12,6 +12,25 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git config`
+`--url` urlmatch closure plus reviewed-complete promotion. The selected change
+adds five exact stock-Git rows for `config get --url=...` best-match lookup,
+section listing, `--name-only`, `http` section matching, no-match exit `1`,
+and the stock `--all` conflict rejection, then promotes the remaining twelve
+represented `config` documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv` and promotes
+`config` into `docs/cli/census/reviewed_complete_command_matrices.tsv`
+because the current modeled helper-free `config` surface is now fully
+represented with `0` exact-open rows. Expected delta was `+5` matrix rows,
+`+12` complete documented option pairs, `+1` complete command matrix,
+`+1` represented documented option pair, `+4` verified rows, and `+1`
+invalid-input row. Actual delta matched. `config` now sits at `30/30`
+reviewed-complete documented option pairs, `30/30` represented documented
+option pairs, `160/160` classified rows, `145` stock-matching rows, `15`
+invalid-input rows, and `0` exact-open rows. The next best default follow-up
+should come from a new dense helper-free schema family in the refreshed
+census queue rather than the lone represented `shortlog --stdin` micro-slice.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git config`
 write/filter family expansion. The selected change adds ten exact stock-Git
 rows for modern `config set --all`, `config unset --all`, `config set --value`,
 modern and legacy `--fixed-value` filtering, legacy `--replace-all`,

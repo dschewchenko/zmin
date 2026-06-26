@@ -133,6 +133,9 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
     }
 
     if args.modern_get {
+        if let Some(url) = args.url.as_deref() {
+            return config_get_urlmatch(&args, scoped_file.as_ref(), &name, url);
+        }
         let mut entries = if args.regexp {
             matching_config_entries_regexp(&args, scoped_file.as_ref(), &name)?
         } else {
@@ -405,6 +408,102 @@ fn config_file_scope_path(args: &ConfigArgs) -> Result<Option<PathBuf>> {
         return Ok(Some(explicit_system_config_path()));
     }
     Ok(None)
+}
+
+fn config_get_urlmatch(
+    args: &ConfigArgs,
+    scoped_file: Option<&PathBuf>,
+    name: &str,
+    url: &str,
+) -> Result<()> {
+    if args.all || args.regexp || args.value_pattern.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--url= cannot be used with --all, --regexp or --value".into(),
+        });
+    }
+    let entries = scoped_config_entries(args, scoped_file)?;
+    let parts: Vec<&str> = name.split('.').collect();
+    if parts.is_empty() || parts.iter().any(|part| part.is_empty()) {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: format!("invalid config key: {name}"),
+        });
+    }
+
+    if parts.len() == 1 {
+        let section = parts[0].to_ascii_lowercase();
+        let mut emitted = false;
+        let mut keys = std::collections::BTreeSet::new();
+        for entry in &entries {
+            if entry.section == section {
+                keys.insert(entry.key.clone());
+            }
+        }
+        for key in keys {
+            if let Some(entry) = best_urlmatch_entry(&entries, &section, &key, url) {
+                let display_name = format!("{section}.{}", entry.key);
+                let value = if args.name_only {
+                    display_name
+                } else {
+                    format!("{display_name} {}", entry.value)
+                };
+                print_config_output_line(entry, &value, args.show_origin, args.show_scope, args.null)?;
+                emitted = true;
+            }
+        }
+        if emitted {
+            return Ok(());
+        }
+        return Err(CliError::Exit(1));
+    }
+
+    let section = parts[0].to_ascii_lowercase();
+    let key = parts[parts.len() - 1].to_ascii_lowercase();
+    let Some(entry) = best_urlmatch_entry(&entries, &section, &key, url) else {
+        return Err(CliError::Exit(1));
+    };
+    if args.name_only {
+        return Ok(());
+    }
+    print_config_output_line(entry, &entry.value, args.show_origin, args.show_scope, args.null)
+}
+
+fn best_urlmatch_entry<'a>(
+    entries: &'a [ConfigEntry],
+    section: &str,
+    key: &str,
+    url: &str,
+) -> Option<&'a ConfigEntry> {
+    let mut best: Option<&ConfigEntry> = None;
+    let mut best_len = 0usize;
+    for entry in entries {
+        if entry.section != section || entry.key != key {
+            continue;
+        }
+        if entry.subsection.is_empty() {
+            if best.is_none() {
+                best = Some(entry);
+            }
+            continue;
+        }
+        if url_matches_config_subsection(url, &entry.subsection) && entry.subsection.len() >= best_len {
+            best = Some(entry);
+            best_len = entry.subsection.len();
+        }
+    }
+    best
+}
+
+fn url_matches_config_subsection(url: &str, subsection: &str) -> bool {
+    url == subsection
+        || url
+            .strip_prefix(subsection)
+            .is_some_and(|tail| {
+                tail.is_empty()
+                    || subsection.ends_with('/')
+                    || matches!(tail.as_bytes()[0], b'/' | b'?' | b'#')
+            })
 }
 
 fn config_target_path_for_write(args: &ConfigArgs, scoped_file: Option<&PathBuf>) -> Result<PathBuf> {
