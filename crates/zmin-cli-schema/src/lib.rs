@@ -3129,6 +3129,10 @@ pub enum Command {
         name_only: bool,
         #[arg(long = "name-status", action = ArgAction::SetTrue)]
         name_status: bool,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
         #[arg(
             long = "decorate",
             num_args = 0..=1,
@@ -3138,6 +3142,10 @@ pub enum Command {
         decorate: Option<String>,
         #[arg(long = "clear-decorations", action = ArgAction::SetTrue)]
         clear_decorations: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(short = 'S')]
         pickaxe_string: Option<String>,
         #[arg(short = 'G')]

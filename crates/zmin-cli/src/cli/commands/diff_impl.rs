@@ -1918,6 +1918,7 @@ fn print_diff_tree_log_format(
         commit,
         false,
         default_abbrev_len(store)?,
+        false,
         &history_commands::LogDecorations::empty(),
         notes,
     )?;

@@ -5804,9 +5804,13 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) name_only: bool,
     pub(crate) name_status: bool,
+    pub(crate) notes: bool,
+    pub(crate) no_notes: bool,
     pub(crate) diff_required: bool,
     pub(crate) decorate: Option<&'a str>,
     pub(crate) clear_decorations: bool,
+    pub(crate) abbrev_commit: bool,
+    pub(crate) no_abbrev_commit: bool,
     pub(crate) pickaxe_string: Option<&'a str>,
     pub(crate) pickaxe_regex: Option<&'a str>,
     pub(crate) pickaxe_regex_mode: bool,
@@ -6043,7 +6047,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         decoration_mode,
         parsed_log_revs.clear_decorations,
     )?;
-    let notes = LogNotes::load(&repo, &store, matches!(format, LogFormat::Default))?;
+    let notes = LogNotes::load(
+        &repo,
+        &store,
+        log_notes_enabled(&format, options.notes, options.no_notes),
+    )?;
     let pickaxe_options = PickaxeOptions {
         string: parsed_log_revs.pickaxe_string.as_deref(),
         regex: parsed_log_revs.pickaxe_regex.as_deref(),
@@ -6158,7 +6166,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     if options.reverse {
         commits.reverse();
     }
-    let abbrev_len = 7;
+    let abbrev_len = if options.no_abbrev_commit {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else {
+        7
+    };
+    let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
     let terminates_lines = format.terminates_lines();
     let record_terminator = if zero {
         b"\0".as_slice()
@@ -6207,6 +6220,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     from_parent,
                     options.parents,
                     abbrev_len,
+                    default_commit_abbrev,
                     &decorations,
                     &notes,
                     date_mode,
@@ -6271,6 +6285,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             commit,
             options.parents,
             abbrev_len,
+            default_commit_abbrev,
             &decorations,
             &notes,
             date_mode,
@@ -7401,7 +7416,15 @@ impl<'a> LogFormat<'a> {
     ) -> Result<String> {
         let decorations = LogDecorations::empty();
         let notes = LogNotes::empty();
-        self.render_with_context_default_date(id, commit, parents, abbrev_len, &decorations, &notes)
+        self.render_with_context_default_date(
+            id,
+            commit,
+            parents,
+            abbrev_len,
+            false,
+            &decorations,
+            &notes,
+        )
     }
 
     pub(crate) fn render_with_context_default_date(
@@ -7410,6 +7433,7 @@ impl<'a> LogFormat<'a> {
         commit: &zmin_git_core::CommitObject,
         parents: bool,
         abbrev_len: usize,
+        default_commit_abbrev: bool,
         decorations: &LogDecorations,
         notes: &LogNotes,
     ) -> Result<String> {
@@ -7418,6 +7442,7 @@ impl<'a> LogFormat<'a> {
             commit,
             parents,
             abbrev_len,
+            default_commit_abbrev,
             decorations,
             notes,
             LogDateMode::Builtin(BlameDateMode::Default),
@@ -7430,6 +7455,7 @@ impl<'a> LogFormat<'a> {
         commit: &zmin_git_core::CommitObject,
         parents: bool,
         abbrev_len: usize,
+        default_commit_abbrev: bool,
         decorations: &LogDecorations,
         notes: &LogNotes,
         date_mode: LogDateMode<'_>,
@@ -7440,6 +7466,7 @@ impl<'a> LogFormat<'a> {
                 commit,
                 parents,
                 abbrev_len,
+                default_commit_abbrev,
                 decorations,
                 notes,
                 date_mode,
@@ -7477,19 +7504,27 @@ impl<'a> LogFormat<'a> {
         from_parent: Option<&ObjectId>,
         parents: bool,
         abbrev_len: usize,
+        default_commit_abbrev: bool,
         decorations: &LogDecorations,
         notes: &LogNotes,
         date_mode: LogDateMode<'_>,
     ) -> Result<String> {
         match (self, from_parent) {
-            (Self::Default, Some(parent)) => {
-                render_default_log_from_parent(id, commit, parent, parents, abbrev_len, date_mode)
-            }
+            (Self::Default, Some(parent)) => render_default_log_from_parent(
+                id,
+                commit,
+                parent,
+                parents,
+                abbrev_len,
+                default_commit_abbrev,
+                date_mode,
+            ),
             _ => self.render_with_context(
                 id,
                 commit,
                 parents,
                 abbrev_len,
+                default_commit_abbrev,
                 decorations,
                 notes,
                 date_mode,
@@ -7514,13 +7549,18 @@ fn render_default_log(
     commit: &zmin_git_core::CommitObject,
     parents: bool,
     abbrev_len: usize,
+    default_commit_abbrev: bool,
     decorations: &LogDecorations,
     notes: &LogNotes,
     date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
-    out.push_str(&id.to_hex());
+    if default_commit_abbrev {
+        out.push_str(&short_object_id_len(id, abbrev_len));
+    } else {
+        out.push_str(&id.to_hex());
+    }
     if let Some(items) = decorations.get(id)
         && !items.is_empty()
     {
@@ -7571,11 +7611,16 @@ fn render_default_log_from_parent(
     from_parent: &ObjectId,
     parents: bool,
     abbrev_len: usize,
+    default_commit_abbrev: bool,
     date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
-    out.push_str(&id.to_hex());
+    if default_commit_abbrev {
+        out.push_str(&short_object_id_len(id, abbrev_len));
+    } else {
+        out.push_str(&id.to_hex());
+    }
     out.push_str(" (from ");
     out.push_str(&from_parent.to_hex());
     out.push(')');
@@ -7773,6 +7818,13 @@ fn render_log_format(
         }
     }
     Ok(out)
+}
+
+fn log_notes_enabled(format: &LogFormat<'_>, notes: bool, no_notes: bool) -> bool {
+    if no_notes {
+        return false;
+    }
+    notes || matches!(format, LogFormat::Default)
 }
 
 #[derive(Debug, Clone)]
@@ -7983,9 +8035,13 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         summary: options.summary,
         name_only: options.name_only,
         name_status: options.name_status,
+        notes: false,
+        no_notes: false,
         diff_required: false,
         decorate: None,
         clear_decorations: false,
+        abbrev_commit: false,
+        no_abbrev_commit: false,
         pickaxe_string: None,
         pickaxe_regex: None,
         pickaxe_regex_mode: false,
@@ -8033,6 +8089,7 @@ fn show_name_only_multi(options: ShowOptions<'_>) -> Result<()> {
             &commit,
             false,
             default_abbrev_len(&store)?,
+            false,
             &LogDecorations::empty(),
             &LogNotes::empty(),
         )?;
@@ -8140,6 +8197,7 @@ fn show_object(
                         Some(parent),
                         false,
                         abbrev_len,
+                        false,
                         &decorations,
                         &notes,
                         LogDateMode::Builtin(BlameDateMode::Default),
