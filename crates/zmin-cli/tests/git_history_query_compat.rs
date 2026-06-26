@@ -557,6 +557,58 @@ fn shortlog_reflog_option_family_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_history_selector_and_filter_batch_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "one",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Bob",
+        "b@example.test",
+        "1700000600 +0000",
+        "two",
+    );
+    git(repo.path(), ["branch", "side", "HEAD~1"]);
+    git(repo.path(), ["tag", "v1", "HEAD~1"]);
+    write_file(repo.path(), "a.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700001200 +0000",
+        "three",
+    );
+
+    for args in [
+        ["shortlog", "--after=1700000300", "HEAD"].as_slice(),
+        ["shortlog", "--before=1700000900", "HEAD"].as_slice(),
+        ["shortlog", "--author=Alice", "HEAD"].as_slice(),
+        ["shortlog", "--all"].as_slice(),
+        ["shortlog", "--branches", "--summary"].as_slice(),
+        ["shortlog", "--tags", "--summary"].as_slice(),
+        ["shortlog", "--max-count=2", "HEAD"].as_slice(),
+        ["shortlog", "--grep=o.e", "--basic-regexp", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_family_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

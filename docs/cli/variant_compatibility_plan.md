@@ -21,6 +21,53 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free `shortlog`
+history-selector and filter schema closure. This batch added eight documented
+option closures by implementing and proving stock-Git parity for
+`shortlog --after`, `shortlog --before`, `shortlog --author`,
+`shortlog --all`, `shortlog --branches`, `shortlog --tags`,
+`shortlog --max-count`, and `shortlog --basic-regexp`.
+
+The batch fixed one cohesive parser/runtime gap on the `shortlog` path:
+
+- Zmin now accepts the represented shortlog history-selection aliases and
+  reuses the stock-like local history traversal/filter semantics already
+  modeled on the shared history surface, including all-ref selection,
+  branch/tag selectors, author filtering, basic-regexp grep mode, and
+  max-count traversal limiting
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_history_query_compat shortlog_history_selector_and_filter_batch_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(shortlog|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1947 / 3212`
+- represented documented command-option pairs: `1947 / 3212`
+- matrix rows: `6004`
+- verified rows: `5239`
+- invalid-input rows: `740`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `shortlog`: `37 / 125` reviewed-complete documented option pairs, `67`
+  written rows, `67` classified rows, `62` stock-matching rows, `5`
+  invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up should stay off the stateful `am`
+family unless a larger proof-only rejection batch emerges. The default next
+queue should be reselected from the refreshed `remaining_to_fix_or_verify.tsv`
+head, with likely candidates now shifting toward another represented
+history-adjacent schema family or a dense proof-only command cluster.
+
 As of 2026-06-27 the latest completed batch closes the final two shared
 `log` schema-tail doc-option seeds by proving stock-compatible rejection for
 `log --object-names` and `log --timestamp`. This was a narrow helper-free

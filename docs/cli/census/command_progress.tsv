@@ -1,14 +1,14 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1939	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1947	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1939	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	5996	5996	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	5231	5996	closed written rows only
-behavior_rows_classified	5971	5996	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5996	written rows with incomplete parity
-behavior_rows_open	0	5996	written rows not implemented or not matching yet
-invalid_input_rows	740	5996	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1947	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	6004	6004	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	5239	6004	closed written rows only
+behavior_rows_classified	5979	6004	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	6004	written rows with incomplete parity
+behavior_rows_open	0	6004	written rows not implemented or not matching yet
+invalid_input_rows	740	6004	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -132,7 +132,7 @@ send-pack	12	12	12	100.0	22	22	100.0	19	86.4	0	0	3	yes
 sh-i18n	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 sh-setup	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 shell	0	0	0	0.0	5	5	100.0	2	40.0	0	0	3	yes
-shortlog	125	29	29	23.2	59	59	100.0	54	91.5	0	0	5	yes
+shortlog	125	37	37	29.6	67	67	100.0	62	92.5	0	0	5	yes
 show	15	14	14	93.3	49	49	100.0	49	100.0	0	0	0	yes
 show-branch	19	19	19	100.0	23	23	100.0	23	100.0	0	0	0	yes
 show-index	1	1	1	100.0	46	46	100.0	42	91.3	0	0	4	yes

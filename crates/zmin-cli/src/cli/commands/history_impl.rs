@@ -1864,6 +1864,11 @@ fn reflog_display_name(ref_name: &str) -> String {
 const SHORTLOG_USAGE: &str = "usage: git shortlog [<options>] [<revision-range>] [[--] <path>...]\n   or: git log --pretty=short | git shortlog [<options>]\n\n    -c, --[no-]committer  group by committer rather than author\n    -n, --[no-]numbered   sort output according to the number of commits per author\n    -s, --[no-]summary    suppress commit descriptions, only provides commit count\n    -e, --[no-]email      show the email address of each author\n    -w[<w>[,<i1>[,<i2>]]] linewrap output\n    --[no-]group <field>  group by field\n";
 
 pub(crate) struct ShortlogOptions<'a> {
+    pub(crate) all: bool,
+    pub(crate) author: Option<&'a str>,
+    pub(crate) max_count: Option<&'a str>,
+    pub(crate) since: Option<&'a str>,
+    pub(crate) until: Option<&'a str>,
     pub(crate) committer: bool,
     pub(crate) numbered: bool,
     pub(crate) summary: bool,
@@ -1881,6 +1886,7 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) invert_grep: bool,
     pub(crate) all_match: bool,
     pub(crate) regexp_ignore_case: bool,
+    pub(crate) basic_regexp: bool,
     pub(crate) extended_regexp: bool,
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
@@ -1912,6 +1918,11 @@ enum ShortlogPatternMode {
 
 pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let ShortlogOptions {
+        all,
+        author,
+        max_count,
+        since,
+        until,
         committer,
         numbered,
         summary,
@@ -1929,6 +1940,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         invert_grep,
         all_match,
         regexp_ignore_case,
+        basic_regexp,
         extended_regexp,
         fixed_strings,
         perl_regexp,
@@ -1947,19 +1959,37 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         return Ok(());
     }
     let (wrap, revs) = normalize_shortlog_revs(wrap, revs);
-    if revs.is_empty() {
+    if revs.is_empty() && !all {
         return Ok(());
     }
+    let max_count = parse_log_max_count(max_count)?;
+    let Some(since) = parse_log_since(since) else {
+        return Ok(());
+    };
+    let Some(until) = parse_log_until(until) else {
+        return Ok(());
+    };
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let revs = collect_rev_list_revs(&repo, &store, false, revs)?;
+    let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
     let commit_cache = CommitObjectCache::new(&store);
     let commits =
-        collect_commit_objects_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
+        collect_commit_objects_with_exclusions_cached(
+            &repo,
+            &store,
+            &commit_cache,
+            &revs,
+            max_count,
+        )?;
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_mode = parse_log_date_mode(date)?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
-    let grep_mode = parse_shortlog_pattern_mode(false, extended_regexp, fixed_strings, perl_regexp);
+    let grep_mode = parse_shortlog_pattern_mode(
+        basic_regexp,
+        extended_regexp,
+        fixed_strings,
+        perl_regexp,
+    );
     let _ = reflog;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
@@ -1967,6 +1997,30 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     for entry in commits.iter().rev() {
         let commit = entry.commit.as_ref();
         if no_merges && commit.parents.len() > 1 {
+            continue;
+        }
+        if let Some(since) = since
+            && signature_timestamp_timezone(&commit.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_none_or(|timestamp| timestamp <= since)
+        {
+            continue;
+        }
+        if let Some(until) = until
+            && signature_timestamp_timezone(&commit.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_none_or(|timestamp| timestamp >= until)
+        {
+            continue;
+        }
+        if let Some(pattern) = author
+            && !log_signature_matches_pattern(
+                &commit.author,
+                pattern,
+                regexp_ignore_case,
+                grep_mode,
+            )
+        {
             continue;
         }
         if !shortlog_commit_matches_grep(

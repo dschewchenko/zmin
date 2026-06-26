@@ -591,6 +591,24 @@ pub enum Command {
         file: Option<PathBuf>,
     },
     Shortlog {
+        #[arg(long = "all", action = ArgAction::SetTrue)]
+        all: bool,
+        #[arg(
+            long = "branches",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        branches: Vec<String>,
+        #[arg(
+            long = "tags",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        tags: Vec<String>,
+        #[arg(long = "author")]
+        author: Option<String>,
         #[arg(short = 'c', long = "committer", action = ArgAction::SetTrue)]
         committer: bool,
         #[arg(short = 'n', long = "numbered", action = ArgAction::SetTrue)]
@@ -626,6 +644,12 @@ pub enum Command {
         #[arg(short = 'i', long = "regexp-ignore-case", action = ArgAction::SetTrue)]
         regexp_ignore_case: bool,
         #[arg(
+            long = "basic-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["extended_regexp", "fixed_strings", "perl_regexp"]
+        )]
+        basic_regexp: bool,
+        #[arg(
             short = 'E',
             long = "extended-regexp",
             action = ArgAction::SetTrue,
@@ -646,6 +670,12 @@ pub enum Command {
             overrides_with_all = ["extended_regexp", "fixed_strings"]
         )]
         perl_regexp: bool,
+        #[arg(long = "max-count")]
+        max_count: Option<String>,
+        #[arg(long = "since", alias = "after")]
+        since: Option<String>,
+        #[arg(long = "until", alias = "before")]
+        until: Option<String>,
         #[arg(allow_hyphen_values = true)]
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
