@@ -672,7 +672,8 @@ fn run_command_with_path_and_env(
     .expect("join PATH");
     let home = cwd.join("home");
     fs::create_dir_all(&home).expect("create command home");
-    let output = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .env("PATH", path)
         .env("HOME", &home)
@@ -680,9 +681,11 @@ fn run_command_with_path_and_env(
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")
         .current_dir(cwd)
-        .envs(envs.iter().copied())
-        .output()
-        .expect("run command");
+        .envs(envs.iter().copied());
+    if program == stock_git_bin().to_str().expect("stock git path") {
+        command.env("GIT_EXEC_PATH", git(stock_git_bin().parent().expect("stock git dir"), ["--exec-path"]));
+    }
+    let output = command.output().expect("run command");
     (
         output.status.code().expect("command exited by signal"),
         String::from_utf8(output.stdout)

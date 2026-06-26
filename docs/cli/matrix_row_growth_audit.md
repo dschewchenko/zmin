@@ -12,6 +12,26 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+foreign-SCM helper-oracle unlock closure for `git archimport`,
+`git cvsexportcommit`, and `git cvsimport` on the modeled fake-helper local
+lanes. The selected change added `+0` matrix rows and instead reclassified four
+existing exact rows from `open` to `closed`, then promoted eight already
+represented documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+0`
+matrix rows, `+8` complete documented option pairs, `+0` represented
+documented option pairs, `+4` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `5984` matrix rows,
+`5214` verified rows, `738` invalid-input rows, `8` exact-open rows,
+`146/151` complete command matrices, `1927/3212` complete documented option
+pairs, and `1927/3212` represented documented option pairs. `archimport` now
+sits at `1/8`, `cvsexportcommit` at `1/12`, and `cvsimport` at `6/20`
+reviewed-complete documented option pairs, with all currently represented
+foreign-SCM helper rows closed on the modeled fake-helper lanes. The next
+default follow-up should target the remaining oracle-availability blockers,
+starting with `git svn` helper discovery or oracle enablement before revisiting
+GUI-only `citool` and environment-specific `scalar`.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 `--split-index` documented-option tail closure on the modeled single-entry
 local lane. The selected change added one exact stock-Git row for
 `update-index --split-index`, then promoted that represented documented option
