@@ -877,6 +877,10 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         separate_merges: false,
         dd: false,
         reverse,
+        left_right: false,
+        cherry_pick: false,
+        cherry_mark: false,
+        boundary: false,
         root: false,
         patch: false,
         patch_with_stat: false,
@@ -1706,6 +1710,7 @@ pub(crate) fn rebase(
         include: vec![head.to_hex()],
         exclude: vec![upstream_id.to_hex()],
         extra_objects: Vec::new(),
+        symmetric_diff: None,
     };
     let mut commits =
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;

@@ -33,6 +33,14 @@ pub(crate) struct RevListRevs {
     pub(crate) include: Vec<String>,
     pub(crate) exclude: Vec<String>,
     pub(crate) extra_objects: Vec<(ObjectId, String)>,
+    pub(crate) symmetric_diff: Option<RevListSymmetricDiff>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RevListSymmetricDiff {
+    pub(crate) left: String,
+    pub(crate) right: String,
+    pub(crate) merge_bases: Vec<ObjectId>,
 }
 
 pub(crate) fn collect_rev_list_revs(
@@ -142,6 +150,13 @@ pub(crate) fn collect_rev_list_revs(
                     .include
                     .extend(bases.into_iter().map(|base| base.to_hex()));
             } else {
+                if parsed.symmetric_diff.is_none() {
+                    parsed.symmetric_diff = Some(RevListSymmetricDiff {
+                        left: left.to_owned(),
+                        right: right.to_owned(),
+                        merge_bases: bases.clone(),
+                    });
+                }
                 parsed.include.push(left.to_owned());
                 parsed.include.push(right.to_owned());
                 parsed
@@ -3347,6 +3362,7 @@ mod tests {
             include: vec![child.to_hex(), excluded_side.to_hex()],
             exclude: vec![excluded_side.to_hex()],
             extra_objects: Vec::new(),
+            symmetric_diff: None,
         };
         let repo = GitRepo {
             root: dir.path().to_path_buf(),
@@ -4053,6 +4069,7 @@ mod tests {
             include: Vec::new(),
             exclude: Vec::new(),
             extra_objects: Vec::new(),
+            symmetric_diff: None,
         };
         let commit_cache = CommitObjectCache::new(&store);
 

@@ -3105,6 +3105,14 @@ pub enum Command {
         dd: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "left-right", action = ArgAction::SetTrue)]
+        left_right: bool,
+        #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
+        cherry_pick: bool,
+        #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
+        cherry_mark: bool,
+        #[arg(long = "boundary", action = ArgAction::SetTrue)]
+        boundary: bool,
         #[arg(long = "root", action = ArgAction::SetTrue)]
         root: bool,
         #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
@@ -3654,6 +3662,14 @@ pub enum Command {
         children: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "left-right", action = ArgAction::SetTrue)]
+        left_right: bool,
+        #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
+        cherry_pick: bool,
+        #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
+        cherry_mark: bool,
+        #[arg(long = "boundary", action = ArgAction::SetTrue)]
+        boundary: bool,
         #[arg(long = "max-count", short = 'n')]
         max_count: Option<usize>,
         #[arg(allow_hyphen_values = true)]

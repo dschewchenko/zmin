@@ -2371,6 +2371,61 @@ fn rev_list_symmetric_difference_matches_stock_git() {
 }
 
 #[test]
+fn log_and_rev_list_left_right_cherry_boundary_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "left"]);
+    write_file(repo.path(), "same.txt", "same\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "leftsame"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "same.txt", "same\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "rightsame"]);
+    write_file(repo.path(), "right.txt", "right\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "rightonly"]);
+
+    for args in [
+        ["rev-list", "--left-right", "left...main"].as_slice(),
+        ["rev-list", "--left-right", "--cherry-pick", "left...main"].as_slice(),
+        ["rev-list", "--left-right", "--cherry-mark", "left...main"].as_slice(),
+        ["rev-list", "--left-right", "--boundary", "left...main"].as_slice(),
+        ["log", "--left-right", "--oneline", "left...main"].as_slice(),
+        [
+            "log",
+            "--left-right",
+            "--cherry-pick",
+            "--oneline",
+            "left...main",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--left-right",
+            "--cherry-mark",
+            "--oneline",
+            "left...main",
+        ]
+        .as_slice(),
+        ["log", "--left-right", "--boundary", "--oneline", "left...main"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_relative_since_matches_stock_git_for_recent_commits() {
     let git_repo = git_init();
     let zmin_repo = git_init();

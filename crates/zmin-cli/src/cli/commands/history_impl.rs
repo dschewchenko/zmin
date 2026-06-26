@@ -5,6 +5,7 @@ use super::sequencer_commands::apply_tree_delta;
 use super::*;
 use crate::runtime::{DiffColorMode, parse_diff_color_option};
 use chrono::Datelike;
+use std::collections::HashMap;
 use std::io::{Read, Seek};
 
 const REFLOG_REVERSE_READ_CHUNK_SIZE: usize = 16 * 1024;
@@ -4991,6 +4992,7 @@ pub(crate) fn cherry(
         include: vec![head.to_owned()],
         exclude,
         extra_objects: Vec::new(),
+        symmetric_diff: None,
     };
     let mut commits =
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
@@ -5792,6 +5794,10 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) separate_merges: bool,
     pub(crate) dd: bool,
     pub(crate) reverse: bool,
+    pub(crate) left_right: bool,
+    pub(crate) cherry_pick: bool,
+    pub(crate) cherry_mark: bool,
+    pub(crate) boundary: bool,
     pub(crate) root: bool,
     pub(crate) patch: bool,
     pub(crate) patch_with_stat: bool,
@@ -6164,6 +6170,33 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             options.first_parent,
         )?;
     }
+    let mut traversal_markers = HashMap::new();
+    if options.left_right || options.cherry_pick || options.cherry_mark || options.boundary {
+        let commit_ids = commits.iter().map(|entry| entry.id.clone()).collect::<Vec<_>>();
+        let traversal = collect_history_traversal_decoration(
+            &repo,
+            &store,
+            &commit_cache,
+            &revs,
+            &commit_ids,
+            options.left_right,
+            options.cherry_pick,
+            options.cherry_mark,
+            options.boundary,
+        )?;
+        if options.cherry_pick && !traversal.equivalent_ids.is_empty() {
+            commits.retain(|entry| !traversal.equivalent_ids.contains(&entry.id));
+        }
+        if options.boundary {
+            for id in &traversal.boundary_ids {
+                commits.push(CollectedCommit {
+                    id: id.clone(),
+                    commit: commit_cache.read_commit(id)?,
+                });
+            }
+        }
+        traversal_markers = traversal.markers;
+    }
     if let Some(max_count) = max_count {
         commits.truncate(max_count);
     }
@@ -6224,6 +6257,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     from_parent,
                     options.parents,
                     abbrev_len,
+                    traversal_markers.get(&entry.id).copied(),
                     default_commit_abbrev,
                     expand_tabs,
                     &decorations,
@@ -6290,6 +6324,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             commit,
             options.parents,
             abbrev_len,
+            traversal_markers.get(&entry.id).copied(),
             default_commit_abbrev,
             expand_tabs,
             &decorations,
@@ -7427,6 +7462,7 @@ impl<'a> LogFormat<'a> {
             commit,
             parents,
             abbrev_len,
+            None,
             false,
             true,
             &decorations,
@@ -7440,6 +7476,7 @@ impl<'a> LogFormat<'a> {
         commit: &zmin_git_core::CommitObject,
         parents: bool,
         abbrev_len: usize,
+        marker: Option<HistoryTraversalMarker>,
         default_commit_abbrev: bool,
         expand_tabs: bool,
         decorations: &LogDecorations,
@@ -7450,6 +7487,7 @@ impl<'a> LogFormat<'a> {
             commit,
             parents,
             abbrev_len,
+            marker,
             default_commit_abbrev,
             expand_tabs,
             decorations,
@@ -7464,6 +7502,7 @@ impl<'a> LogFormat<'a> {
         commit: &zmin_git_core::CommitObject,
         parents: bool,
         abbrev_len: usize,
+        marker: Option<HistoryTraversalMarker>,
         default_commit_abbrev: bool,
         expand_tabs: bool,
         decorations: &LogDecorations,
@@ -7476,6 +7515,7 @@ impl<'a> LogFormat<'a> {
                 commit,
                 parents,
                 abbrev_len,
+                marker,
                 default_commit_abbrev,
                 expand_tabs,
                 decorations,
@@ -7483,14 +7523,16 @@ impl<'a> LogFormat<'a> {
                 date_mode,
             ),
             Self::ShortOneline => Ok(format!(
-                "{}{}{} {}",
+                "{}{}{}{} {}",
+                marker.map(HistoryTraversalMarker::log_prefix).unwrap_or_default(),
                 short_object_id_len(id, abbrev_len),
                 short_parent_suffix(commit, parents, abbrev_len),
                 render_oneline_decorations(decorations, id),
                 commit_subject(&commit.message)
             )),
             Self::FullOneline => Ok(format!(
-                "{}{}{} {}",
+                "{}{}{}{} {}",
+                marker.map(HistoryTraversalMarker::log_prefix).unwrap_or_default(),
                 id.to_hex(),
                 parent_suffix(commit, parents),
                 render_oneline_decorations(decorations, id),
@@ -7515,6 +7557,7 @@ impl<'a> LogFormat<'a> {
         from_parent: Option<&ObjectId>,
         parents: bool,
         abbrev_len: usize,
+        marker: Option<HistoryTraversalMarker>,
         default_commit_abbrev: bool,
         expand_tabs: bool,
         decorations: &LogDecorations,
@@ -7528,6 +7571,7 @@ impl<'a> LogFormat<'a> {
                 parent,
                 parents,
                 abbrev_len,
+                marker,
                 default_commit_abbrev,
                 expand_tabs,
                 date_mode,
@@ -7537,6 +7581,7 @@ impl<'a> LogFormat<'a> {
                 commit,
                 parents,
                 abbrev_len,
+                marker,
                 default_commit_abbrev,
                 expand_tabs,
                 decorations,
@@ -7563,6 +7608,7 @@ fn render_default_log(
     commit: &zmin_git_core::CommitObject,
     parents: bool,
     abbrev_len: usize,
+    marker: Option<HistoryTraversalMarker>,
     default_commit_abbrev: bool,
     expand_tabs: bool,
     decorations: &LogDecorations,
@@ -7571,6 +7617,10 @@ fn render_default_log(
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
+    if let Some(marker) = marker {
+        out.push(marker.rev_list_prefix());
+        out.push(' ');
+    }
     if default_commit_abbrev {
         out.push_str(&short_object_id_len(id, abbrev_len));
     } else {
@@ -7626,12 +7676,17 @@ fn render_default_log_from_parent(
     from_parent: &ObjectId,
     parents: bool,
     abbrev_len: usize,
+    marker: Option<HistoryTraversalMarker>,
     default_commit_abbrev: bool,
     expand_tabs: bool,
     date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
     out.push_str("commit ");
+    if let Some(marker) = marker {
+        out.push(marker.rev_list_prefix());
+        out.push(' ');
+    }
     if default_commit_abbrev {
         out.push_str(&short_object_id_len(id, abbrev_len));
     } else {
@@ -7876,6 +7931,198 @@ fn log_expand_tabs_enabled(
     true
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HistoryTraversalMarker {
+    Boundary,
+    Equivalent,
+    Left,
+    Right,
+    PlainCherry,
+}
+
+impl HistoryTraversalMarker {
+    fn rev_list_prefix(self) -> char {
+        match self {
+            Self::Boundary => '-',
+            Self::Equivalent => '=',
+            Self::Left => '<',
+            Self::Right => '>',
+            Self::PlainCherry => '+',
+        }
+    }
+
+    fn log_prefix(self) -> String {
+        format!("{} ", self.rev_list_prefix())
+    }
+}
+
+#[derive(Debug, Default)]
+struct HistoryTraversalDecoration {
+    markers: HashMap<ObjectId, HistoryTraversalMarker>,
+    boundary_ids: Vec<ObjectId>,
+    equivalent_ids: HashSet<ObjectId>,
+}
+
+fn collect_history_traversal_decoration(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    revs: &RevListRevs,
+    commit_ids: &[ObjectId],
+    left_right: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    boundary: bool,
+) -> Result<HistoryTraversalDecoration> {
+    if !left_right && !cherry_pick && !cherry_mark && !boundary {
+        return Ok(HistoryTraversalDecoration::default());
+    }
+
+    let included_ids = commit_ids.iter().cloned().collect::<HashSet<_>>();
+    let (left_ids, right_ids) =
+        collect_history_traversal_side_sets(repo, store, commit_cache, revs, &included_ids)?;
+    let equivalent_ids = if cherry_pick || cherry_mark {
+        collect_history_patch_equivalent_ids(store, commit_cache, &left_ids, &right_ids)?
+    } else {
+        HashSet::new()
+    };
+    let boundary_ids = if boundary {
+        collect_history_boundary_ids(store, commit_ids, &included_ids)?
+    } else {
+        Vec::new()
+    };
+
+    let mut markers = HashMap::new();
+    for id in commit_ids {
+        let marker = if cherry_mark && equivalent_ids.contains(id) {
+            Some(HistoryTraversalMarker::Equivalent)
+        } else if left_right {
+            if left_ids.contains(id) {
+                Some(HistoryTraversalMarker::Left)
+            } else if right_ids.contains(id) {
+                Some(HistoryTraversalMarker::Right)
+            } else {
+                None
+            }
+        } else if cherry_mark {
+            Some(HistoryTraversalMarker::PlainCherry)
+        } else {
+            None
+        };
+        if let Some(marker) = marker {
+            markers.insert(id.clone(), marker);
+        }
+    }
+    for id in &boundary_ids {
+        markers.insert(id.clone(), HistoryTraversalMarker::Boundary);
+    }
+
+    Ok(HistoryTraversalDecoration {
+        markers,
+        boundary_ids,
+        equivalent_ids,
+    })
+}
+
+fn collect_history_traversal_side_sets(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    revs: &RevListRevs,
+    included_ids: &HashSet<ObjectId>,
+) -> Result<(HashSet<ObjectId>, HashSet<ObjectId>)> {
+    let Some(symmetric_diff) = revs.symmetric_diff.as_ref() else {
+        return Ok((HashSet::new(), included_ids.clone()));
+    };
+    let excluded_ids = symmetric_diff
+        .merge_bases
+        .iter()
+        .cloned()
+        .collect::<HashSet<_>>();
+    let left_root = resolve_commitish(repo, store, &symmetric_diff.left)?;
+    let right_root = resolve_commitish(repo, store, &symmetric_diff.right)?;
+    let left_ids = collect_commits_from_ids_cached_with_excluded(
+        repo,
+        commit_cache,
+        std::slice::from_ref(&left_root),
+        None,
+        &excluded_ids,
+    )?
+    .into_iter()
+    .filter(|id| included_ids.contains(id))
+    .collect::<HashSet<_>>();
+    let right_ids = collect_commits_from_ids_cached_with_excluded(
+        repo,
+        commit_cache,
+        std::slice::from_ref(&right_root),
+        None,
+        &excluded_ids,
+    )?
+    .into_iter()
+    .filter(|id| included_ids.contains(id))
+    .collect::<HashSet<_>>();
+    Ok((left_ids, right_ids))
+}
+
+fn collect_history_patch_equivalent_ids(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    left_ids: &HashSet<ObjectId>,
+    right_ids: &HashSet<ObjectId>,
+) -> Result<HashSet<ObjectId>> {
+    let tree_cache = TreeObjectCache::new(store);
+    let mut left_patch_ids = HashSet::new();
+    for id in left_ids {
+        if let Some(patch_id) =
+            reference_commands::commit_patch_id_for_cherry_cached(store, commit_cache, &tree_cache, id)?
+        {
+            left_patch_ids.insert(patch_id);
+        }
+    }
+    let mut right_patch_ids = HashSet::new();
+    for id in right_ids {
+        if let Some(patch_id) =
+            reference_commands::commit_patch_id_for_cherry_cached(store, commit_cache, &tree_cache, id)?
+        {
+            right_patch_ids.insert(patch_id);
+        }
+    }
+    let shared_patch_ids = left_patch_ids
+        .intersection(&right_patch_ids)
+        .cloned()
+        .collect::<HashSet<_>>();
+    if shared_patch_ids.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut equivalent_ids = HashSet::new();
+    for id in left_ids.iter().chain(right_ids.iter()) {
+        if reference_commands::commit_patch_id_for_cherry_cached(store, commit_cache, &tree_cache, id)?
+            .as_ref()
+            .is_some_and(|patch_id| shared_patch_ids.contains(patch_id))
+        {
+            equivalent_ids.insert(id.clone());
+        }
+    }
+    Ok(equivalent_ids)
+}
+
+fn collect_history_boundary_ids(
+    store: &LooseObjectStore,
+    commit_ids: &[ObjectId],
+    included_ids: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let mut boundary_ids = Vec::new();
+    let mut seen = HashSet::new();
+    for id in commit_ids {
+        for parent in read_commit_parents_uncached(store, id)? {
+            if !included_ids.contains(&parent) && seen.insert(parent.clone()) {
+                boundary_ids.push(parent);
+            }
+        }
+    }
+    Ok(boundary_ids)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ShowOptions<'a> {
     pub(crate) no_patch: bool,
@@ -8076,6 +8323,10 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         separate_merges: options.separate_merges,
         dd: false,
         reverse: false,
+        left_right: false,
+        cherry_pick: false,
+        cherry_mark: false,
+        boundary: false,
         root: options.root,
         patch: !(options.no_patch
             || options.stat
@@ -8152,6 +8403,7 @@ fn show_name_only_multi(options: ShowOptions<'_>) -> Result<()> {
             &commit,
             false,
             default_abbrev_len(&store)?,
+            None,
             false,
             true,
             &LogDecorations::empty(),
@@ -8241,6 +8493,7 @@ fn show_object(
                     &commit,
                     false,
                     abbrev_len,
+                    None,
                     default_commit_abbrev,
                     log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
                     &LogDecorations::empty(),
@@ -8284,6 +8537,7 @@ fn show_object(
                         Some(parent),
                         false,
                         abbrev_len,
+                        None,
                         default_commit_abbrev,
                         log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
                         &decorations,
@@ -8325,6 +8579,7 @@ fn show_object(
                 &commit,
                 false,
                 abbrev_len,
+                None,
                 default_commit_abbrev,
                 log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
                 &LogDecorations::empty(),
@@ -8892,6 +9147,10 @@ pub(crate) struct RevListOptions {
     pub(crate) parents: bool,
     pub(crate) children: bool,
     pub(crate) reverse: bool,
+    pub(crate) left_right: bool,
+    pub(crate) cherry_pick: bool,
+    pub(crate) cherry_mark: bool,
+    pub(crate) boundary: bool,
     pub(crate) max_count: Option<usize>,
     pub(crate) revs: Vec<String>,
 }
@@ -8914,6 +9173,10 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         parents,
         children,
         reverse,
+        left_right,
+        cherry_pick,
+        cherry_mark,
+        boundary,
         max_count,
         revs,
     } = options;
@@ -8928,6 +9191,7 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
     let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
     if objects && no_object_names && object_filter.is_some() {
         let filter = object_filter.expect("checked filter");
@@ -9049,6 +9313,23 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     }
 
     let mut commit_ids = collect_commits_with_exclusions(&repo, &store, &revs, max_count)?;
+    let traversal = collect_history_traversal_decoration(
+        &repo,
+        &store,
+        &commit_cache,
+        &revs,
+        &commit_ids,
+        left_right,
+        cherry_pick,
+        cherry_mark,
+        boundary,
+    )?;
+    if cherry_pick && !traversal.equivalent_ids.is_empty() {
+        commit_ids.retain(|id| !traversal.equivalent_ids.contains(id));
+    }
+    if boundary {
+        commit_ids.extend(traversal.boundary_ids.iter().cloned());
+    }
     if reverse {
         commit_ids.reverse();
     }
@@ -9070,6 +9351,9 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     };
     let mut out = io::stdout().lock();
     for id in &commit_ids {
+        if let Some(marker) = traversal.markers.get(id) {
+            write!(out, "{}", marker.rev_list_prefix())?;
+        }
         if parents {
             let parents = read_commit_parents_uncached(&store, &id)?;
             write!(out, "{id}")?;

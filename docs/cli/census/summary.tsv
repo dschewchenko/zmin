@@ -1,18 +1,18 @@
 metric	count	note
 complete_command_matrices	146	reviewed commands whose full behavior matrix is finished
-complete_doc_option_pairs	1784	reviewed documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	1792	reviewed documented command-option pairs whose full behavior matrix is finished
 git_2_47_commands	151	upstream command-list seed
 git_doc_option_seed_rows	3212	documented option spelling seed, not final denominator
 zmin_schema_commands	206	commands emitted by zmin compat schema
 zmin_schema_baseline_commands	151	baseline command names present in schema
 zmin_schema_additional_commands	55	schema commands outside Git 2.47.1 baseline
-matrix_rows	5791	existing behavior rows used as evidence layer
-verified_rows	5035	closed exact behavior rows
+matrix_rows	5799	existing behavior rows used as evidence layer
+verified_rows	5043	closed exact behavior rows
 invalid_input_rows	720	stock-compatible rejection rows
 open_or_partial_matrix_rows	12	exact rows still open or partial
 exact_open_local_oracle_unavailable_rows	12	exact open rows blocked by missing local stock Git oracle command/tool
 implemented_but_unverified_rows	2	schema args without exact matrix evidence
-remaining_to_fix_or_verify_rows	1440	doc-option expansion, exact opens and unclassified guards
+remaining_to_fix_or_verify_rows	1432	doc-option expansion, exact opens and unclassified guards
 extension_or_deferred_rows	69	Zmin-only or deferred/non-Git scope items
 oracle_evidence_layer_rows	969	existing oracle inventory rows, not primary backlog
 hard_fail_scan_rows	94	source guard hits
