@@ -652,6 +652,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             fixed_strings,
             perl_regexp,
             count,
+            branches,
+            tags,
+            remotes,
             max_parents,
             no_max_parents,
             merges,
@@ -746,7 +749,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             date: date.as_deref(),
             format: format.as_deref(),
             pretty: pretty.as_deref(),
-            revs,
+            revs: extend_rev_list_ref_selector_revs(revs, branches, tags, remotes),
         }),
         runtime::Command::MergeBase {
             all,
@@ -769,6 +772,36 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         ),
         _ => unreachable!("non-history command dispatched to history"),
     }
+}
+
+fn extend_rev_list_ref_selector_revs(
+    mut revs: Vec<String>,
+    branches: Vec<String>,
+    tags: Vec<String>,
+    remotes: Vec<String>,
+) -> Vec<String> {
+    for value in branches {
+        if value.is_empty() {
+            revs.push("--branches".to_owned());
+        } else {
+            revs.push(format!("--branches={value}"));
+        }
+    }
+    for value in tags {
+        if value.is_empty() {
+            revs.push("--tags".to_owned());
+        } else {
+            revs.push(format!("--tags={value}"));
+        }
+    }
+    for value in remotes {
+        if value.is_empty() {
+            revs.push("--remotes".to_owned());
+        } else {
+            revs.push(format!("--remotes={value}"));
+        }
+    }
+    revs
 }
 
 fn serialize_reflog_args(

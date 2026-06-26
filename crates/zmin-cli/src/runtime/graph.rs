@@ -227,7 +227,11 @@ fn rev_list_ref_selection_matches(ref_name: &str, pattern: Option<&str>) -> bool
     let Some(pattern) = pattern else {
         return true;
     };
-    wildcard_match(pattern, ref_name) || wildcard_match(pattern, &short_ref_name(ref_name))
+    wildcard_match(pattern, ref_name)
+        || wildcard_match(pattern, &short_ref_name(ref_name))
+        || ref_name
+            .strip_prefix("refs/remotes/")
+            .is_some_and(|short| wildcard_match(pattern, short))
 }
 
 pub(crate) fn collect_commits_cached<S>(

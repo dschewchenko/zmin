@@ -943,6 +943,45 @@ fn rev_list_reflog_and_first_parent_expansion_lanes_match_stock_git() {
 }
 
 #[test]
+fn rev_list_ref_selection_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    write_file(repo.path(), "b.txt", "new\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "feature"]);
+    git(repo.path(), ["checkout", "main"]);
+    git(
+        repo.path(),
+        ["remote", "add", "origin", "https://example.test/repo.git"],
+    );
+    git(
+        repo.path(),
+        ["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    git(repo.path(), ["tag", "v1", "HEAD"]);
+
+    for args in [
+        ["rev-list", "--branches", "--format=%H"].as_slice(),
+        ["rev-list", "--branches=fea*", "--format=%H"].as_slice(),
+        ["rev-list", "--remotes", "--format=%H"].as_slice(),
+        ["rev-list", "--remotes=origin/*", "--format=%H"].as_slice(),
+        ["rev-list", "--tags", "--format=%H"].as_slice(),
+        ["rev-list", "--tags=v*", "--format=%H"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_identity_time_and_parent_filters_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

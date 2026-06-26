@@ -12,27 +12,23 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git rev-list`
-reflog-walk plus first-parent documented-option family expansion on the
-current local lane. The selected change added six exact stock-Git rows for
-`rev-list --first-parent`, `--walk-reflogs`, `--grep-reflog`, and `-g`,
-covering first-parent range and explicit-negative-revision traversal,
-repeated reflog-grep any-match semantics, the stock
-`--reverse`/`--walk-reflogs` incompatibility fatal, the stock explicit
-negative-revision reflog-walk fatal, and the current stock empty `%g*`
-custom-format placeholder behavior on `rev-list --walk-reflogs`, then
-promoted four represented documented option pairs into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
-`+6` matrix rows, `+4` complete documented option pairs, `+0` represented
-documented option pairs, `+4` verified rows, `+2` invalid-input rows, and
-`+0` complete command matrices. Actual delta matched. Current census counts
-are `5881` matrix rows, `5118` verified rows, `726` invalid-input rows,
-`12` exact-open rows, `146/151` complete command matrices, `1857/3212`
-complete documented option pairs, and `1865/3212` represented documented
-option pairs. `rev-list` now sits at `65/117` reviewed-complete documented
-option pairs with `99/99` classified rows, `96` stock-matching rows, `3`
-invalid-input rows, and `0` exact-open rows on its current modeled surface.
-The next default follow-up should move to the next dense shared
-history-query family rather than reopening already-closed reflog lanes.
+ref-selection documented-option family expansion on the current local lane.
+The selected change added six exact stock-Git rows for `rev-list --branches`,
+`--remotes`, and `--tags`, covering both plain selector expansion and the
+wildcard-filtered `--branches=fea*`, `--remotes=origin/*`, and `--tags=v*`
+lanes, then promoted three represented documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is
+`+6` matrix rows, `+3` complete documented option pairs, `+3` represented
+documented option pairs, `+6` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `5887` matrix rows,
+`5124` verified rows, `726` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1860/3212` complete documented option
+pairs, and `1868/3212` represented documented option pairs. `rev-list` now
+sits at `68/117` reviewed-complete documented option pairs with `105/105`
+classified rows, `102` stock-matching rows, `3` invalid-input rows, and `0`
+exact-open rows on its current modeled surface. The next default follow-up
+should keep harvesting dense shared history-query ref-selection or
+selector-adjacent families rather than reopening already-closed reflog lanes.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
 `git rev-list` formatting/text documented-option family expansion on the

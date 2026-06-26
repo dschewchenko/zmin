@@ -3723,6 +3723,27 @@ pub enum Command {
         perl_regexp: bool,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(
+            long = "branches",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        branches: Vec<String>,
+        #[arg(
+            long = "tags",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        tags: Vec<String>,
+        #[arg(
+            long = "remotes",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        remotes: Vec<String>,
         #[arg(long = "max-parents")]
         max_parents: Option<String>,
         #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]

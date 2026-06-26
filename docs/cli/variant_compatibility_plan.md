@@ -300,34 +300,31 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git rev-list` reflog-walk plus
-first-parent documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `rev-list --first-parent`,
-`rev-list --walk-reflogs`, `rev-list -g`, and `rev-list --grep-reflog` on
-modeled local merge-graph and HEAD reflog lanes, including include-side
-first-parent range and explicit-negative-revision traversal, repeated
-`--grep-reflog` any-match semantics, the stock
-`--grep-reflog requires --walk-reflogs` fatal, the stock
-`--reverse`/`--walk-reflogs` incompatibility fatal, the stock explicit
-negative-revision reflog-walk fatal, and the current stock empty `%g*`
-custom-format placeholder behavior on `rev-list --walk-reflogs`.
+The latest completed slice is a helper-free `git rev-list` ref-selection
+documented-option family expansion on the current local lane. Zmin now
+accepts and matches stock Git for `rev-list --branches`, `--remotes`, and
+`--tags` on modeled local branch, remote-tracking, and tag ref lanes,
+including wildcard-filtered `--branches=fea*`, `--remotes=origin/*`, and
+`--tags=v*` selection.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_reflog_and_first_parent_family_matches_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_reflog_and_first_parent_expansion_lanes_match_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_history_query_compat reflog -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat rev_list_ref_selection_family_matches_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
 `git diff --check`.
-Current census counts are `5881` matrix rows, `5118` verified rows, `726`
-invalid-input rows, `12` exact-open rows, `146/151` complete command
-matrices, `1857/3212` complete documented option pairs, and
-`1865/3212` represented documented option pairs. `rev-list` now sits at
-`65/117` reviewed-complete documented option pairs with `99/99` classified
-rows, `96` stock-matching rows, `3` invalid-input rows, and `0`
-exact-open rows.
+Current census counts should be refreshed from the generated census artifacts
+after this slice lands. Actual delta from the prior reflog/first-parent
+closure is `+6` matrix rows, `+3` complete documented option pairs, `+3`
+represented documented option pairs, `+6` verified rows, `+0` invalid-input
+rows, and `+0` complete command matrices. Current census counts are `5887`
+matrix rows, `5124` verified rows, `726` invalid-input rows, `12` exact-open
+rows, `146/151` complete command matrices, `1860/3212` complete documented
+option pairs, and `1868/3212` represented documented option pairs. `rev-list`
+now sits at `68/117` reviewed-complete documented option pairs with
+`105/105` classified rows, `102` stock-matching rows, `3` invalid-input rows,
+and `0` exact-open rows.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family
