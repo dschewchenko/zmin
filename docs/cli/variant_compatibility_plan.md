@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`104/151 complete command matrices / 1503/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1519/3156 represented doc-option pairs / 5521 written rows / 4805/5521 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`104/151 complete command matrices / 1503/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1523/3156 represented doc-option pairs / 5531 written rows / 4814/5531 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,26 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git config` modern read-family
-schema/runtime expansion. Zmin now covers helper-free stock-Git lanes for
-modern `git config get --all`, `git config get --regexp`,
-`git config get --all --regexp`, `git config --name-only --list`,
-`git config --type=bool --no-type`, `git config --no-includes --get`,
-`git config --system`, and `git config --blob` on local config, explicit
-system-config and blob-backed read lanes without reopening the heavier write
-tails such as `--replace-all`, `--fixed-value`, `--comment`, `--url`, or
-`--get-colorbool`.
+The latest completed slice is a helper-free `git config` write/filter family
+expansion. Zmin now matches stock Git on the helper-free local lanes for
+modern `config set --all`, `config unset --all`, `config set --value=...`,
+modern and legacy `--fixed-value` filtering, legacy `--replace-all`,
+legacy `--comment`, and `--get-colorbool`, while preserving the previously
+landed modern read-family coverage for `--all`, `--regexp`, `--name-only`,
+`--no-includes`, `--no-type`, `--system`, and `--blob`.
 
 Current counts are `104/151` complete command matrices,
 `1503/3156` complete documented option pairs,
-`1519/3156` represented documented option pairs, `5521` written rows,
-`4805` verified rows, `12` open rows, and `701` invalid-input rows.
+`1523/3156` represented documented option pairs, `5531` written rows,
+`4814` verified rows, `12` open rows, and `702` invalid-input rows.
 `config` now sits at `18/30` reviewed-complete documented option pairs,
-`25/30` represented documented option pairs, `145/145` classified rows, `132`
-stock-matching rows, and `13` invalid-input rows. The next bounded
-high-throughput follow-up should stay on the remaining helper-free `config`
-documented tails if another compact read/write family emerges; otherwise move
-to the next dense represented family from the refreshed census queue.
+`29/30` represented documented option pairs, `155/155` classified rows, `141`
+stock-matching rows, and `14` invalid-input rows. The only remaining
+documented `config` schema tail is `--url`, so the next bounded
+high-throughput follow-up can either finish that last helper-free `config`
+lane or move to the next dense represented family from the refreshed census.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

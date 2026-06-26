@@ -3287,6 +3287,7 @@ fn gitmodules_blob_entries(content: &[u8]) -> Option<Vec<ConfigEntry>> {
             subsection: subsection.clone(),
             key: key.to_ascii_lowercase(),
             value: decode_config_value(value),
+            comment: None,
             implicit_bool,
             scope: ConfigScope::Local,
             origin: String::new(),

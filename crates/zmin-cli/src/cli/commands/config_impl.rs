@@ -5,10 +5,11 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         args.unset = true;
         args.name = args.value.take();
     }
-    if args.all && !args.modern_get {
+    if args.all && !(args.modern_get || args.value.is_some() || args.unset || args.unset_all) {
         return Err(CliError::Fatal {
             code: 129,
-            message: "--all requires `git config get`".into(),
+            message: "--all requires `git config get`, `git config set` or `git config unset`"
+                .into(),
         });
     }
     if args.regexp && !args.modern_get {
@@ -25,6 +26,9 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
     }
     let value_type = config_value_type(&args)?;
     let scoped_file = config_file_scope_path(&args)?;
+    if args.get_colorbool {
+        return config_get_colorbool(&args, scoped_file.as_ref());
+    }
     if args.list {
         if args.get
             || args.get_all
@@ -74,15 +78,14 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
                 message: "--unset cannot be combined with config get/set modifiers".into(),
             });
         }
-        if let Some(path) = scoped_file.as_ref() {
-            return unset_config_value_in_file(path, &name);
-        }
-        let repo = find_repo_or_bare()?;
-        if args.worktree {
-            ensure_worktree_config_scope(&repo)?;
-            return unset_worktree_config_value(&repo, &name);
-        }
-        return unset_config_value(&repo, &name);
+        let path = config_target_path_for_write(&args, scoped_file.as_ref())?;
+        return config_unset_value_in_file(
+            &path,
+            &name,
+            args.all,
+            args.value_pattern.as_deref(),
+            args.fixed_value,
+        );
     }
 
     if args.get_regexp {
@@ -130,11 +133,12 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
     }
 
     if args.modern_get {
-        let entries = if args.regexp {
+        let mut entries = if args.regexp {
             matching_config_entries_regexp(&args, scoped_file.as_ref(), &name)?
         } else {
             matching_config_entries(&args, scoped_file.as_ref(), &name)?
         };
+        entries = filter_entries_by_value_pattern(entries, args.value_pattern.as_deref(), args.fixed_value)?;
         if entries.is_empty() {
             let Some(default) = args.default.as_deref() else {
                 return Err(CliError::Exit(1));
@@ -168,7 +172,7 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         return Ok(());
     }
 
-    if let Some(value) = args.value {
+    if let Some(value) = args.value.clone() {
         if args.get || args.get_all {
             return Err(CliError::Fatal {
                 code: 129,
@@ -176,30 +180,29 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
             });
         }
         let stored_value = normalize_config_value(&name, &value, value_type)?;
-        if let Some(path) = scoped_file.as_ref() {
-            if args.append {
-                return append_config_value_in_file(path, &name, &stored_value);
-            }
-            return set_config_value_in_file(path, &name, &stored_value);
-        }
-        let repo = find_repo_or_bare()?;
-        if args.worktree {
-            ensure_worktree_config_scope(&repo)?;
-            if args.append {
-                append_worktree_config_value(&repo, &name, &stored_value)?;
-            } else {
-                set_worktree_config_value(&repo, &name, &stored_value)?;
-            }
-        } else if args.append {
-            append_config_value(&repo, &name, &stored_value)?;
+        let path = config_target_path_for_write(&args, scoped_file.as_ref())?;
+        if args.append {
+            append_config_value_in_file(&path, &name, &stored_value)?;
         } else {
-            set_config_value(&repo, &name, &stored_value)?;
+            config_set_value_in_file(
+                &path,
+                &name,
+                &stored_value,
+                args.all || args.replace_all,
+                args.value_pattern.as_deref(),
+                args.fixed_value,
+                args.comment.as_deref(),
+            )?;
         }
         return Ok(());
     }
 
     if args.get_all {
-        let entries = matching_config_entries(&args, scoped_file.as_ref(), &name)?;
+        let entries = filter_entries_by_value_pattern(
+            matching_config_entries(&args, scoped_file.as_ref(), &name)?,
+            args.value_pattern.as_deref(),
+            args.fixed_value,
+        )?;
         if entries.is_empty() {
             let Some(default) = args.default.as_deref() else {
                 return Err(CliError::Exit(1));
@@ -223,7 +226,11 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         return Ok(());
     }
 
-    let entry = matching_config_entries(&args, scoped_file.as_ref(), &name)?
+    let entry = filter_entries_by_value_pattern(
+        matching_config_entries(&args, scoped_file.as_ref(), &name)?,
+        args.value_pattern.as_deref(),
+        args.fixed_value,
+    )?
         .into_iter()
         .last();
     match entry {
@@ -398,6 +405,249 @@ fn config_file_scope_path(args: &ConfigArgs) -> Result<Option<PathBuf>> {
         return Ok(Some(explicit_system_config_path()));
     }
     Ok(None)
+}
+
+fn config_target_path_for_write(args: &ConfigArgs, scoped_file: Option<&PathBuf>) -> Result<PathBuf> {
+    if let Some(path) = scoped_file {
+        return Ok(path.clone());
+    }
+    let repo = find_repo_or_bare()?;
+    if args.worktree {
+        ensure_worktree_config_scope(&repo)?;
+        return Ok(worktree_config_path_for_scope(&repo)?);
+    }
+    Ok(local_config_path(&repo)?)
+}
+
+fn config_get_colorbool(args: &ConfigArgs, scoped_file: Option<&PathBuf>) -> Result<()> {
+    let Some(name) = args.name.as_deref() else {
+        return Err(CliError::Exit(1));
+    };
+    let tty = args
+        .value
+        .as_deref()
+        .and_then(parse_git_bool)
+        .unwrap_or(false);
+    let entry = matching_config_entries(args, scoped_file, name)?.into_iter().last();
+    let Some(entry) = entry else {
+        if tty {
+            println!("false");
+            return Ok(());
+        }
+        return Err(CliError::Exit(1));
+    };
+    let mode = entry.value.to_ascii_lowercase();
+    let enabled = match mode.as_str() {
+        "always" => true,
+        "never" => false,
+        "auto" => tty,
+        _ => entry.bool_value().unwrap_or(false) && tty,
+    };
+    if tty {
+        println!("{}", if enabled { "true" } else { "false" });
+        return Ok(());
+    }
+    if enabled {
+        Ok(())
+    } else {
+        Err(CliError::Exit(1))
+    }
+}
+
+fn filter_entries_by_value_pattern(
+    entries: Vec<ConfigEntry>,
+    value_pattern: Option<&str>,
+    fixed_value: bool,
+) -> Result<Vec<ConfigEntry>> {
+    let Some(pattern) = value_pattern else {
+        return Ok(entries);
+    };
+    if fixed_value {
+        return Ok(entries
+            .into_iter()
+            .filter(|entry| entry.value == pattern)
+            .collect());
+    }
+    let regex = Regex::new(pattern).map_err(|err| CliError::Fatal {
+        code: 6,
+        message: err.to_string(),
+    })?;
+    Ok(entries
+        .into_iter()
+        .filter(|entry| regex.is_match(entry.value.as_bytes()))
+        .collect())
+}
+
+fn config_set_value_in_file(
+    path: &Path,
+    name: &str,
+    value: &str,
+    replace_all: bool,
+    value_pattern: Option<&str>,
+    fixed_value: bool,
+    comment: Option<&str>,
+) -> Result<()> {
+    let mut new_entry = parse_config_entry(name, value)?;
+    new_entry.comment = comment.map(format_config_comment).transpose()?;
+    let mut entries = read_config_file(path)?;
+    let key_indices = matching_key_indices(&entries, &new_entry);
+    let matched_indices = matching_value_indices(&entries, &key_indices, value_pattern, fixed_value)?;
+
+    if replace_all {
+        if let Some((&first, rest)) = matched_indices.split_first() {
+            entries[first].value = new_entry.value;
+            entries[first].comment = new_entry.comment;
+            for index in rest.iter().rev() {
+                entries.remove(*index);
+            }
+        } else {
+            let insert_at = config_insert_index(&entries, &new_entry);
+            entries.insert(insert_at, new_entry);
+        }
+        write_config_entries(path, &entries)?;
+        return Ok(());
+    }
+
+    if value_pattern.is_none() && key_indices.len() > 1 {
+        return Err(config_set_multiple_values_error(name));
+    }
+
+    match matched_indices.as_slice() {
+        [] => {
+            if value_pattern.is_some() {
+                let insert_at = config_insert_index(&entries, &new_entry);
+                entries.insert(insert_at, new_entry);
+            } else if let [index] = key_indices.as_slice() {
+                entries[*index].value = new_entry.value;
+                entries[*index].comment = new_entry.comment;
+            } else {
+                let insert_at = config_insert_index(&entries, &new_entry);
+                entries.insert(insert_at, new_entry);
+            }
+        }
+        [index] => {
+            entries[*index].value = new_entry.value;
+            entries[*index].comment = new_entry.comment;
+        }
+        _ => return Err(config_multi_value_warning(name)),
+    }
+    write_config_entries(path, &entries)?;
+    Ok(())
+}
+
+fn config_unset_value_in_file(
+    path: &Path,
+    name: &str,
+    remove_all: bool,
+    value_pattern: Option<&str>,
+    fixed_value: bool,
+) -> Result<()> {
+    let target = parse_config_entry(name, "")?;
+    let mut entries = read_config_file(path)?;
+    let key_indices = matching_key_indices(&entries, &target);
+    let matched_indices = matching_value_indices(&entries, &key_indices, value_pattern, fixed_value)?;
+
+    if remove_all {
+        if matched_indices.is_empty() {
+            return Err(CliError::Exit(5));
+        }
+        for index in matched_indices.into_iter().rev() {
+            entries.remove(index);
+        }
+        write_config_entries(path, &entries)?;
+        return Ok(());
+    }
+
+    if key_indices.len() > 1 {
+        return Err(config_multi_value_warning(name));
+    }
+    if matched_indices.is_empty() {
+        return Err(CliError::Exit(5));
+    }
+    entries.remove(matched_indices[0]);
+    write_config_entries(path, &entries)?;
+    Ok(())
+}
+
+fn matching_key_indices(entries: &[ConfigEntry], target: &ConfigEntry) -> Vec<usize> {
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| config_entry_key_matches(entry, target).then_some(index))
+        .collect()
+}
+
+fn matching_value_indices(
+    entries: &[ConfigEntry],
+    indices: &[usize],
+    value_pattern: Option<&str>,
+    fixed_value: bool,
+) -> Result<Vec<usize>> {
+    let Some(pattern) = value_pattern else {
+        return Ok(indices.to_vec());
+    };
+    if fixed_value {
+        return Ok(indices
+            .iter()
+            .copied()
+            .filter(|index| entries[*index].value == pattern)
+            .collect());
+    }
+    let regex = Regex::new(pattern).map_err(|err| CliError::Fatal {
+        code: 6,
+        message: err.to_string(),
+    })?;
+    Ok(indices
+        .iter()
+        .copied()
+        .filter(|index| regex.is_match(entries[*index].value.as_bytes()))
+        .collect())
+}
+
+fn config_insert_index(entries: &[ConfigEntry], new_entry: &ConfigEntry) -> usize {
+    entries
+        .iter()
+        .rposition(|entry| {
+            entry.section == new_entry.section && entry.subsection == new_entry.subsection
+        })
+        .map(|idx| idx + 1)
+        .unwrap_or(entries.len())
+}
+
+fn format_config_comment(message: &str) -> Result<String> {
+    if message.contains(['\n', '\r']) {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "comment must not contain linefeeds".into(),
+        });
+    }
+    if message.is_empty() {
+        return Ok(" # ".to_owned());
+    }
+    if message.starts_with('#') {
+        return Ok(format!(" {message}"));
+    }
+    let trimmed = message.trim_start_matches([' ', '\t']);
+    if trimmed.starts_with('#') {
+        return Ok(message.to_owned());
+    }
+    Ok(format!(" # {message}"))
+}
+
+fn config_multi_value_warning(name: &str) -> CliError {
+    CliError::Stderr {
+        code: 5,
+        text: format!("warning: {name} has multiple values\n"),
+    }
+}
+
+fn config_set_multiple_values_error(name: &str) -> CliError {
+    CliError::Stderr {
+        code: 5,
+        text: format!(
+            "warning: {name} has multiple values\nerror: cannot overwrite multiple values with a single value\n       Use a regexp, --add or --replace-all to change {name}.\n"
+        ),
+    }
 }
 
 fn format_config_output_line(

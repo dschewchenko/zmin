@@ -2186,6 +2186,219 @@ fn config_modern_get_read_options_match_stock_git() {
 }
 
 #[test]
+fn config_write_value_pattern_and_replace_all_match_stock_git() {
+    fn seed_multi(repo: &Path, values: &[&str]) {
+        for value in values {
+            git(repo, ["config", "--add", "demo.multi", value]);
+        }
+    }
+
+    fn assert_local_config_matches(git_repo: &Path, zmin_repo: &Path) {
+        assert_eq!(
+            fs::read_to_string(git_repo.join(".git/config")).expect("read stock config"),
+            fs::read_to_string(zmin_repo.join(".git/config")).expect("read zmin config")
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["one", "two", "three"]);
+        seed_multi(zmin_repo.path(), &["one", "two", "three"]);
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), &["config", "set", "demo.multi", "keep"]),
+            git_failure_output(git_repo.path(), &["config", "set", "demo.multi", "keep"])
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["one", "two", "three"]);
+        seed_multi(zmin_repo.path(), &["one", "two", "three"]);
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["config", "set", "--all", "demo.multi", "keepall"]),
+            git(git_repo.path(), ["config", "set", "--all", "demo.multi", "keepall"])
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["one", "two", "three"]);
+        seed_multi(zmin_repo.path(), &["one", "two", "three"]);
+        assert_eq!(
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "set", "--value=two", "demo.multi", "keep-two"]
+            ),
+            git(
+                git_repo.path(),
+                ["config", "set", "--value=two", "demo.multi", "keep-two"]
+            )
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["two", "three", "ten", "two"]);
+        seed_multi(zmin_repo.path(), &["two", "three", "ten", "two"]);
+        assert_eq!(
+            run_zmin_failure_output(
+                zmin_repo.path(),
+                &["config", "set", "--value=t.*", "demo.multi", "hit"],
+            ),
+            git_failure_output(
+                git_repo.path(),
+                &["config", "set", "--value=t.*", "demo.multi", "hit"],
+            )
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["two", "three", "ten", "two"]);
+        seed_multi(zmin_repo.path(), &["two", "three", "ten", "two"]);
+        assert_eq!(
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "set", "--all", "--value=t.*", "demo.multi", "hit"],
+            ),
+            git(
+                git_repo.path(),
+                ["config", "set", "--all", "--value=t.*", "demo.multi", "hit"],
+            )
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["a.c", "abc", "a-c"]);
+        seed_multi(zmin_repo.path(), &["a.c", "abc", "a-c"]);
+        assert_eq!(
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "get", "--value=a.c", "demo.multi"]
+            ),
+            git(git_repo.path(), ["config", "get", "--value=a.c", "demo.multi"])
+        );
+        assert_eq!(
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "get", "--value=a.c", "--fixed-value", "demo.multi"]
+            ),
+            git(
+                git_repo.path(),
+                ["config", "get", "--value=a.c", "--fixed-value", "demo.multi"]
+            )
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["one", "two", "three"]);
+        seed_multi(zmin_repo.path(), &["one", "two", "three"]);
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), &["config", "unset", "demo.multi"]),
+            git_failure_output(git_repo.path(), &["config", "unset", "demo.multi"])
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["one", "two", "three", "two"]);
+        seed_multi(zmin_repo.path(), &["one", "two", "three", "two"]);
+        assert_eq!(
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "unset", "--all", "--value=two", "--fixed-value", "demo.multi"],
+            ),
+            git(
+                git_repo.path(),
+                ["config", "unset", "--all", "--value=two", "--fixed-value", "demo.multi"],
+            )
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        seed_multi(git_repo.path(), &["one", "two", "three"]);
+        seed_multi(zmin_repo.path(), &["one", "two", "three"]);
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["config", "--replace-all", "demo.multi", "keep"]),
+            git(git_repo.path(), ["config", "--replace-all", "demo.multi", "keep"])
+        );
+        assert_local_config_matches(git_repo.path(), zmin_repo.path());
+    }
+}
+
+#[test]
+fn config_comment_and_get_colorbool_match_stock_git() {
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        assert_eq!(
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "--comment=note", "demo.single", "val"]
+            ),
+            git(git_repo.path(), ["config", "--comment=note", "demo.single", "val"])
+        );
+        assert_eq!(
+            fs::read_to_string(git_repo.path().join(".git/config")).expect("read stock config"),
+            fs::read_to_string(zmin_repo.path().join(".git/config")).expect("read zmin config")
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        git(git_repo.path(), ["config", "color.ui", "always"]);
+        run_zmin(zmin_repo.path(), ["config", "color.ui", "always"]);
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "zmin"),
+            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "git")
+        );
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui"], "zmin"),
+            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui"], "git")
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        git(git_repo.path(), ["config", "color.ui", "never"]);
+        run_zmin(zmin_repo.path(), ["config", "color.ui", "never"]);
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "zmin"),
+            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "git")
+        );
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui"], "zmin"),
+            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui"], "git")
+        );
+        assert_eq!(
+            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "missing.key", "true"], "zmin"),
+            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "missing.key", "true"], "git")
+        );
+    }
+}
+
+#[test]
 fn config_legacy_type_flags_match_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

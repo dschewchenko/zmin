@@ -12,6 +12,24 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git config`
+write/filter family expansion. The selected change adds ten exact stock-Git
+rows for modern `config set --all`, `config unset --all`, `config set --value`,
+modern and legacy `--fixed-value` filtering, legacy `--replace-all`,
+legacy `--comment`, and `--get-colorbool`, while also correcting the shared
+legacy/modern multi-value set behavior so plain `config key value` and
+`config set key value` now keep stock multi-value rejection semantics unless
+an explicit replacement mode is used. Expected delta was `+10` matrix rows,
+`+4` represented documented option pairs, `+9` verified rows, `+1`
+invalid-input row, `+0` complete documented option pairs, and `+0`
+complete command matrices. Actual delta matched. `config` now sits at
+`18/30` reviewed-complete documented option pairs, `29/30` represented
+documented option pairs, `155/155` classified rows, `141` stock-matching
+rows, `14` invalid-input rows, and only the documented `--url` helper-free
+tail remains unrepresented. The next best helper-free follow-up can finish
+that last `config` lane or move to the next dense represented family from the
+refreshed census queue.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git config`
 modern read-family schema/runtime expansion. The selected change adds eight
 exact stock-Git rows for `config get --all`, `config get --regexp`,
 `config get --all --regexp`, `config --name-only --list`,

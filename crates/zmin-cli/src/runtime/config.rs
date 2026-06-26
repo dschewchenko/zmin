@@ -37,6 +37,7 @@ pub(crate) struct ConfigEntry {
     pub(crate) subsection: String,
     pub(crate) key: String,
     pub(crate) value: String,
+    pub(crate) comment: Option<String>,
     pub(crate) implicit_bool: bool,
     pub(crate) scope: ConfigScope,
     pub(crate) origin: String,
@@ -118,6 +119,7 @@ pub(crate) fn parse_global_config_entry(raw: &str) -> Result<ConfigEntry> {
         subsection,
         key,
         value: value.to_owned(),
+        comment: None,
         implicit_bool,
         scope: ConfigScope::Command,
         origin: "command line:".to_owned(),
@@ -741,6 +743,7 @@ fn parse_config_text(
             subsection: subsection.clone(),
             key: key.to_ascii_lowercase(),
             value: decode_config_value(value),
+            comment: None,
             implicit_bool,
             scope,
             origin: origin.clone(),
@@ -1285,6 +1288,7 @@ pub(crate) fn parse_config_entry(name: &str, value: &str) -> Result<ConfigEntry>
         subsection,
         key,
         value: value.to_owned(),
+        comment: None,
         implicit_bool: false,
         scope: ConfigScope::Local,
         origin: String::new(),
@@ -1324,13 +1328,10 @@ pub(crate) fn write_config_entries(
 ) -> io::Result<()> {
     reject_locked_config(path)?;
     let mut out = String::new();
-    let mut current = None::<(&str, &str)>;
+    let mut current = None::<(String, String)>;
     for entry in entries {
-        let section = (entry.section.as_str(), entry.subsection.as_str());
-        if current != Some(section) {
-            if !out.is_empty() {
-                out.push('\n');
-            }
+        let section = (entry.section.clone(), entry.subsection.clone());
+        if current != Some(section.clone()) {
             if entry.subsection.is_empty() {
                 out.push_str(&format!("[{}]\n", entry.section));
             } else {
@@ -1339,14 +1340,14 @@ pub(crate) fn write_config_entries(
             current = Some(section);
         }
         if entry.implicit_bool {
-            out.push_str(&format!("\t{}\n", entry.key));
+            out.push_str(&format!("\t{}", entry.key));
         } else {
-            out.push_str(&format!(
-                "\t{} = {}\n",
-                entry.key,
-                encode_config_value(&entry.value)
-            ));
+            out.push_str(&format!("\t{} = {}", entry.key, encode_config_value(&entry.value)));
         }
+        if let Some(comment) = entry.comment.as_deref() {
+            out.push_str(comment);
+        }
+        out.push('\n');
     }
     fs::write(path, out)
 }

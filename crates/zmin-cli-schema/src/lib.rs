@@ -1136,10 +1136,16 @@ pub enum Command {
         all: bool,
         #[arg(long = "blob")]
         blob: Option<String>,
+        #[arg(long = "comment")]
+        comment: Option<String>,
+        #[arg(long = "fixed-value", action = ArgAction::SetTrue)]
+        fixed_value: bool,
         #[arg(long = "get", action = ArgAction::SetTrue)]
         get: bool,
         #[arg(long = "get-all", action = ArgAction::SetTrue)]
         get_all: bool,
+        #[arg(long = "get-colorbool", action = ArgAction::SetTrue)]
+        get_colorbool: bool,
         #[arg(long = "get-regexp", action = ArgAction::SetTrue)]
         get_regexp: bool,
         #[arg(long = "list", short = 'l', action = ArgAction::SetTrue)]
@@ -1152,6 +1158,8 @@ pub enum Command {
         no_type: bool,
         #[arg(long = "regexp", action = ArgAction::SetTrue)]
         regexp: bool,
+        #[arg(long = "replace-all", action = ArgAction::SetTrue)]
+        replace_all: bool,
         #[arg(long = "system", action = ArgAction::SetTrue)]
         system: bool,
         #[arg(long = "unset", action = ArgAction::SetTrue)]
@@ -1192,6 +1200,10 @@ pub enum Command {
         show_origin: bool,
         #[arg(long = "show-scope", action = ArgAction::SetTrue)]
         show_scope: bool,
+        #[arg(long = "url")]
+        url: Option<String>,
+        #[arg(long = "value")]
+        value_pattern: Option<String>,
         arg0: Option<String>,
         #[arg(allow_hyphen_values = true)]
         arg1: Option<String>,
@@ -4229,14 +4241,18 @@ pub struct ConfigArgs {
     pub null: bool,
     pub all: bool,
     pub blob: Option<String>,
+    pub comment: Option<String>,
+    pub fixed_value: bool,
     pub get: bool,
     pub get_all: bool,
+    pub get_colorbool: bool,
     pub get_regexp: bool,
     pub list: bool,
     pub name_only: bool,
     pub no_includes: bool,
     pub no_type: bool,
     pub regexp: bool,
+    pub replace_all: bool,
     pub system: bool,
     pub unset: bool,
     pub unset_all: bool,
@@ -4257,6 +4273,8 @@ pub struct ConfigArgs {
     pub modern_get: bool,
     pub show_origin: bool,
     pub show_scope: bool,
+    pub url: Option<String>,
+    pub value_pattern: Option<String>,
     pub name: Option<String>,
     pub value: Option<String>,
 }

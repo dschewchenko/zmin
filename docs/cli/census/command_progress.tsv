@@ -2,13 +2,13 @@ metric	count	total	note
 complete_command_matrices	104	151	only commands whose full behavior matrix is finished
 complete_doc_option_pairs	1503	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1519	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5521	5521	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4805	5521	closed written rows only
-behavior_rows_classified	5506	5521	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5521	written rows with incomplete parity
-behavior_rows_open	12	5521	written rows not implemented or not matching yet
-invalid_input_rows	701	5521	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1523	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5531	5531	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4814	5531	closed written rows only
+behavior_rows_classified	5516	5531	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5531	written rows with incomplete parity
+behavior_rows_open	12	5531	written rows not implemented or not matching yet
+invalid_input_rows	702	5531	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -38,7 +38,7 @@ column	7	7	7	100.0	54	54	100.0	46	85.2	0	0	8	yes
 commit	58	37	37	63.8	80	80	100.0	75	93.8	0	0	5	no
 commit-graph	3	3	3	100.0	14	14	100.0	11	78.6	0	0	3	yes
 commit-tree	6	6	6	100.0	62	62	100.0	42	67.7	0	0	20	yes
-config	30	18	25	83.3	145	145	100.0	132	91.0	0	0	13	no
+config	30	18	29	96.7	155	155	100.0	141	91.0	0	0	14	no
 count-objects	4	4	4	100.0	53	53	100.0	45	84.9	0	0	8	yes
 credential	0	0	0	0.0	5	5	100.0	4	80.0	0	0	1	yes
 credential-cache	2	2	2	100.0	6	6	100.0	6	100.0	0	0	0	yes
