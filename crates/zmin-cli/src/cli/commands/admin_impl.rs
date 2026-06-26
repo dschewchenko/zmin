@@ -49,8 +49,12 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) refresh: bool,
     pub(crate) ignore_missing: bool,
     pub(crate) unmerged: bool,
+    pub(crate) info_only: bool,
     pub(crate) cacheinfo: Vec<String>,
     pub(crate) index_info: bool,
+    pub(crate) index_version: Option<String>,
+    pub(crate) show_index_version: bool,
+    pub(crate) verbose: bool,
     pub(crate) chmod: Option<String>,
     pub(crate) assume_unchanged: bool,
     pub(crate) no_assume_unchanged: bool,
@@ -529,7 +533,9 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut index = read_repo_index(&repo)?;
+    let initial_index_version = update_index_disk_version(&repo)?;
     normalize_update_index_cacheinfo_args(&mut options)?;
+    let requested_index_version = parse_update_index_version(options.index_version.as_deref())?;
     if options.index_info {
         update_index_index_info(&store, &mut index)?;
     }
@@ -541,6 +547,9 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         update_index_paths(&options, &repo)?
     };
     let _ = (options.quiet, options.ignore_missing, options.unmerged);
+    if options.show_index_version {
+        println!("{initial_index_version}");
+    }
 
     for cacheinfo in &options.cacheinfo {
         update_index_cacheinfo(
@@ -556,6 +565,9 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         for path in &paths {
             let relative = path_arg_to_repo_relative(&repo, path)?;
             index.remove_path(&relative)?;
+            if options.verbose {
+                println!("remove '{}'", String::from_utf8_lossy(&relative));
+            }
         }
     } else if options.refresh {
         update_index_refresh_tracked(&repo, &index, &paths)?;
@@ -568,8 +580,50 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         update_index_chmod(&repo, &mut index, &paths, chmod)?;
     }
     update_index_entry_flags(&repo, &mut index, &paths, &options)?;
-    index.write_to_path(&repo.index_path)?;
+    if let Some(version) = requested_index_version {
+        if options.verbose {
+            println!(
+                "index-version: was {initial_index_version}, set to {}",
+                version.as_u32()
+            );
+        }
+        index.write_to_path_with_version(&repo.index_path, version)?;
+    } else {
+        index.write_to_path(&repo.index_path)?;
+    }
     Ok(())
+}
+
+fn update_index_disk_version(repo: &GitRepo) -> Result<u32> {
+    if !repo.index_path.exists() {
+        return Ok(0);
+    }
+    let bytes = fs::read(&repo.index_path)?;
+    if bytes.len() < 8 || &bytes[..4] != b"DIRC" {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "invalid index header".into(),
+        });
+    }
+    Ok(u32::from_be_bytes(bytes[4..8].try_into().expect("slice length checked")))
+}
+
+fn parse_update_index_version(value: Option<&str>) -> Result<Option<zmin_git_core::GitIndexVersion>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let version = match value {
+        "2" => zmin_git_core::GitIndexVersion::V2,
+        "3" => zmin_git_core::GitIndexVersion::V3,
+        "4" => zmin_git_core::GitIndexVersion::V4,
+        _ => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("index-version {value} not in range: 2..4"),
+            });
+        }
+    };
+    Ok(Some(version))
 }
 
 fn normalize_update_index_cacheinfo_args(options: &mut UpdateIndexCommandOptions) -> Result<()> {
@@ -683,7 +737,14 @@ fn update_index_path(
                 update_index_remove_parent_file_entries(index, &relative)?;
                 index.remove_dir(&relative)?;
             }
-            stage_file(repo, store, index, &absolute)?;
+            if options.info_only {
+                update_index_stage_info_only(repo, index, &absolute)?;
+            } else {
+                stage_file(repo, store, index, &absolute)?;
+            }
+            if options.verbose {
+                println!("add '{}'", String::from_utf8_lossy(&relative));
+            }
             return Ok(());
         }
         return Err(CliError::Fatal {
@@ -705,6 +766,64 @@ fn update_index_path(
             String::from_utf8_lossy(&relative)
         ),
     })
+}
+
+fn update_index_stage_info_only(
+    repo: &GitRepo,
+    index: &mut GitIndex,
+    path: &Path,
+) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    let relative = repo_relative_path(&repo.root, path)?;
+    let stage_options = WorktreeStageOptions::load(repo)?;
+    let file_type = metadata.file_type();
+    let mut mode = if file_type.is_symlink() {
+        IndexMode::Symlink
+    } else if metadata.is_file() {
+        stage_options.index_mode_for_metadata(&metadata)
+    } else {
+        return Err(CliError::Message(format!("{} is not a file", path.display())));
+    };
+    let unmerged_mode = index
+        .entry(&relative, 2)
+        .or_else(|| index.entry(&relative, 1))
+        .or_else(|| index.entry(&relative, 3))
+        .map(|entry| entry.mode);
+    if let Some(existing_mode) = unmerged_mode {
+        if existing_mode == IndexMode::Executable && !stage_options.filemode_enabled() {
+            mode = IndexMode::Executable;
+        } else if existing_mode == IndexMode::Symlink && !stage_options.symlinks_enabled() {
+            mode = IndexMode::Symlink;
+        }
+        index.remove_path(&relative)?;
+    }
+    if let Some(existing_mode) = find_index_entry(index, &relative).map(|entry| entry.mode) {
+        if existing_mode == IndexMode::Executable && !stage_options.filemode_enabled() {
+            mode = IndexMode::Executable;
+        } else if existing_mode == IndexMode::Symlink && !stage_options.symlinks_enabled() {
+            mode = IndexMode::Symlink;
+        }
+    }
+
+    let content = if file_type.is_symlink() {
+        read_symlink_content(path)?
+    } else if stage_options.needs_content_conversion(&relative) {
+        let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+        stage_options.clean_staged_worktree_content(repo, &store, index, &relative, fs::read(path)?)?
+    } else {
+        fs::read(path)?
+    };
+    let id = hash_object(GitHashAlgorithm::Sha1, GitObjectKind::Blob, &content);
+    remove_index_parent_file_entries(index, &relative)?;
+    let mut entry = IndexEntry::new(
+        relative,
+        id,
+        mode,
+        content.len().min(u32::MAX as usize) as u32,
+    )?;
+    apply_index_entry_metadata(&mut entry, &metadata);
+    index.upsert(entry)?;
+    Ok(())
 }
 
 fn update_index_cacheinfo(

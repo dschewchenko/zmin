@@ -22,6 +22,50 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
+reporting plus index-format documented-option expansion on the current local
+lane. The selected change added seven exact stock-Git rows for
+`update-index --verbose a.txt`,
+`update-index --info-only --verbose a.txt`,
+`update-index --show-index-version` before an index exists,
+`update-index --index-version 4`,
+`update-index --verbose --index-version 4`,
+`update-index --show-index-version` after forcing version 4, and stock
+invalid-input rejection for `update-index --index-version 5`, then promoted
+four newly represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+
+The batch fixed two concrete runtime gaps on the update-index path:
+
+- `update-index --info-only` now hashes worktree content into the index
+  without writing the blob object to the object database, matching stock Git
+  on the modeled tracked-file lane
+- `update-index --show-index-version`, `--index-version`, and
+  `--verbose --index-version` now report and rewrite on-disk index versions
+  like stock Git, including version `4` output and out-of-range rejection for
+  `5`
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1905 / 3212`
+- represented documented command-option pairs: `1913 / 3212`
+- matrix rows: `5970`
+- verified rows: `5196`
+- invalid-input rows: `738`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `update-index`: `24 / 38` reviewed-complete documented option pairs, `55`
+  written rows, `55` classified rows, `47` stock-matching rows, `8`
+  invalid-input rows, `0` exact-open rows
+
+The next best helper-free follow-up should stay on `update-index` and close the
+remaining local tail, with `--unresolve` now the next densest behaviorful slice
+before revisiting `ignore-submodules`, `ignore-skip-worktree-entries`, and the
+more helper-like `fsmonitor` / `split-index` / `untracked-cache` families.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 refresh-family documented-option expansion on the current local lane. The
 selected change added five exact stock-Git rows for dirty tracked
 `update-index --refresh`, `update-index --refresh -q`,

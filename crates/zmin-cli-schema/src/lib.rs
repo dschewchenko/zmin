@@ -996,10 +996,18 @@ pub enum Command {
         ignore_missing: u8,
         #[arg(long = "unmerged", action = ArgAction::Count)]
         unmerged: u8,
+        #[arg(long = "info-only", action = ArgAction::Count)]
+        info_only: u8,
         #[arg(long = "cacheinfo")]
         cacheinfo: Vec<String>,
         #[arg(long = "index-info", action = ArgAction::Count)]
         index_info_mode: u8,
+        #[arg(long = "index-version")]
+        index_version: Option<String>,
+        #[arg(long = "show-index-version", action = ArgAction::Count)]
+        show_index_version: u8,
+        #[arg(long = "verbose", action = ArgAction::Count)]
+        verbose: u8,
         #[arg(long = "chmod")]
         chmod: Option<String>,
         #[arg(long = "assume-unchanged", action = ArgAction::Count)]

@@ -40,7 +40,8 @@ pub use diff::{
 };
 pub use ignore::GitIgnore;
 pub use index::{
-    GitIndex, IndexEntry, IndexMode, ResolveUndoEntry, ResolveUndoStage, read_index, write_index,
+    GitIndex, GitIndexVersion, IndexEntry, IndexMode, ResolveUndoEntry, ResolveUndoStage,
+    read_index, write_index, write_index_with_version,
 };
 pub use init::{InitRepositoryOptions, InitRepositoryResult, init_repository};
 pub use loose::{LooseObject, LooseObjectStore, encode_loose_object};

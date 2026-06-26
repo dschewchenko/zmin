@@ -1521,6 +1521,123 @@ fn update_index_refresh_family_matches_stock_git() {
 }
 
 #[test]
+fn update_index_reporting_and_info_only_match_stock_git() {
+    let (git_repo, zmin_repo) = dirty_tracked_file_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--verbose", "a.txt"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--verbose", "a.txt"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+    );
+
+    let (git_repo, zmin_repo) = dirty_tracked_file_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--info-only", "--verbose", "a.txt"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--info-only", "--verbose", "a.txt"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git_status(zmin_repo.path(), ["diff", "--cached", "--", "a.txt"]),
+        git_status(git_repo.path(), ["diff", "--cached", "--", "a.txt"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--show-index-version"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--show-index-version"],
+            "git",
+        )
+    );
+
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--index-version", "4"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--index-version", "4"],
+            "git",
+        )
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--verbose", "--index-version", "4"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--verbose", "--index-version", "4"],
+            "git",
+        )
+    );
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--show-index-version"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--show-index-version"],
+            "git",
+        )
+    );
+
+    assert_eq!(
+        run_zmin_failure_output(
+            zmin_repo.path(),
+            &["update-index", "--index-version", "5"],
+        ),
+        git_failure_output(git_repo.path(), &["update-index", "--index-version", "5"])
+    );
+}
+
+#[test]
 fn rm_file_dir_and_cached_match_stock_git_state() {
     let git_repo = rm_fixture_repo();
     let zmin_repo = rm_fixture_repo();

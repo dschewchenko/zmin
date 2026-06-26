@@ -1103,7 +1103,7 @@ fn stage_file_with_mode_and_index_mtime_options_and_trace(
     Ok(())
 }
 
-fn remove_index_parent_file_entries(index: &mut GitIndex, path: &[u8]) -> Result<()> {
+pub(crate) fn remove_index_parent_file_entries(index: &mut GitIndex, path: &[u8]) -> Result<()> {
     for (idx, byte) in path.iter().enumerate() {
         if *byte == b'/' {
             index.remove_path(&path[..idx])?;
@@ -1568,7 +1568,7 @@ impl WorktreeStageOptions {
         })
     }
 
-    fn index_mode_for_metadata(&self, metadata: &fs::Metadata) -> IndexMode {
+    pub(crate) fn index_mode_for_metadata(&self, metadata: &fs::Metadata) -> IndexMode {
         if self.filemode_enabled {
             index_mode_for_metadata(metadata)
         } else {
@@ -1576,19 +1576,19 @@ impl WorktreeStageOptions {
         }
     }
 
-    fn filemode_enabled(&self) -> bool {
+    pub(crate) fn filemode_enabled(&self) -> bool {
         self.filemode_enabled
     }
 
-    fn symlinks_enabled(&self) -> bool {
+    pub(crate) fn symlinks_enabled(&self) -> bool {
         self.symlinks_enabled
     }
 
-    fn needs_content_conversion(&self, relative: &[u8]) -> bool {
+    pub(crate) fn needs_content_conversion(&self, relative: &[u8]) -> bool {
         self.content_rules.needs_content_conversion(relative)
     }
 
-    fn clean_staged_worktree_content(
+    pub(crate) fn clean_staged_worktree_content(
         &self,
         repo: &GitRepo,
         store: &LooseObjectStore,

@@ -26,6 +26,23 @@ const RESOLVE_UNDO_EXTENSION: &[u8; 4] = b"REUC";
 const SPARSE_DIRECTORY_EXTENSION: &[u8; 4] = b"sdir";
 const INDEX_ENTRY_INITIAL_CAPACITY_LIMIT: usize = 8192;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitIndexVersion {
+    V2,
+    V3,
+    V4,
+}
+
+impl GitIndexVersion {
+    pub const fn as_u32(self) -> u32 {
+        match self {
+            Self::V2 => INDEX_VERSION_V2,
+            Self::V3 => INDEX_VERSION_V3,
+            Self::V4 => INDEX_VERSION_V4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IndexMode {
     File,
@@ -343,10 +360,26 @@ impl GitIndex {
     pub fn write_to_path(&self, path: impl AsRef<Path>) -> io::Result<()> {
         write_index(path, self)
     }
+
+    pub fn write_to_path_with_version(
+        &self,
+        path: impl AsRef<Path>,
+        version: GitIndexVersion,
+    ) -> io::Result<()> {
+        write_index_with_version(path, self, version)
+    }
 }
 
 pub fn write_index(path: impl AsRef<Path>, index: &GitIndex) -> io::Result<()> {
-    write_index_to_path(path.as_ref(), index)
+    write_index_to_path(path.as_ref(), index, None)
+}
+
+pub fn write_index_with_version(
+    path: impl AsRef<Path>,
+    index: &GitIndex,
+    version: GitIndexVersion,
+) -> io::Result<()> {
+    write_index_to_path(path.as_ref(), index, Some(version))
 }
 
 #[cfg(test)]
@@ -468,12 +501,16 @@ fn write_octal_u32(out: &mut Vec<u8>, mut value: u32) {
     out.extend_from_slice(&buf[cursor..]);
 }
 
-fn write_index_to_path(path: &Path, index: &GitIndex) -> io::Result<()> {
+fn write_index_to_path(
+    path: &Path,
+    index: &GitIndex,
+    version: Option<GitIndexVersion>,
+) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let lock_path = index_lock_path(path);
-    let write_result = write_index_lock(&lock_path, index);
+    let write_result = write_index_lock(&lock_path, index, version);
     if let Err(error) = write_result {
         let _ = fs::remove_file(&lock_path);
         return Err(error);
@@ -485,13 +522,17 @@ fn write_index_to_path(path: &Path, index: &GitIndex) -> io::Result<()> {
     Ok(())
 }
 
-fn write_index_lock(lock_path: &Path, index: &GitIndex) -> io::Result<()> {
+fn write_index_lock(
+    lock_path: &Path,
+    index: &GitIndex,
+    version: Option<GitIndexVersion>,
+) -> io::Result<()> {
     let lock = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(lock_path)?;
     let mut writer = IndexStreamingWriter::new(BufWriter::new(lock));
-    write_index_stream(&mut writer, index)?;
+    write_index_stream(&mut writer, index, version)?;
     writer.finish()
 }
 
@@ -537,13 +578,19 @@ impl<W: Write> IndexStreamingWriter<W> {
 fn write_index_stream<W: Write>(
     out: &mut IndexStreamingWriter<W>,
     index: &GitIndex,
+    forced_version: Option<GitIndexVersion>,
 ) -> io::Result<()> {
+    let version = forced_version
+        .map(GitIndexVersion::as_u32)
+        .unwrap_or_else(|| index_version_for_index(index));
     out.write_all(INDEX_SIGNATURE)?;
-    write_u32_stream(out, index_version_for_index(index))?;
+    write_u32_stream(out, version)?;
     write_u32_stream(out, checked_entry_count(index.entries.len())?)?;
 
+    let mut previous_path = Vec::new();
     for entry in &index.entries {
-        encode_entry_stream(out, entry)?;
+        encode_entry_stream(out, entry, version, &previous_path)?;
+        previous_path.clone_from(&entry.path);
     }
     if !index.resolve_undo.is_empty() {
         encode_resolve_undo_extension_stream(out, &index.resolve_undo)?;
@@ -608,6 +655,8 @@ fn resolve_undo_extension_too_large() -> io::Error {
 fn encode_entry_stream<W: Write>(
     out: &mut IndexStreamingWriter<W>,
     entry: &IndexEntry,
+    version: u32,
+    previous_path: &[u8],
 ) -> io::Result<()> {
     validate_index_path(&entry.path)?;
     if entry.stage > 3 {
@@ -633,12 +682,51 @@ fn encode_entry_stream<W: Write>(
     if entry.skip_worktree() || entry.intent_to_add() {
         write_u16_stream(out, extended_flags_for_entry(entry))?;
     }
-    out.write_all(&entry.path)?;
+    if version == INDEX_VERSION_V4 {
+        encode_v4_entry_path_stream(out, &entry.path, previous_path)?;
+    } else {
+        out.write_all(&entry.path)?;
+    }
     out.write_all(&[0])?;
-    while !out.entry_len().is_multiple_of(8) {
+    while version != INDEX_VERSION_V4 && !out.entry_len().is_multiple_of(8) {
         out.write_all(&[0])?;
     }
     Ok(())
+}
+
+fn encode_v4_entry_path_stream<W: Write>(
+    out: &mut IndexStreamingWriter<W>,
+    path: &[u8],
+    previous_path: &[u8],
+) -> io::Result<()> {
+    let prefix_len = common_prefix_len(path, previous_path);
+    let remove_len = previous_path.len() - prefix_len;
+    write_index_v4_path_remove_len_stream(out, remove_len)?;
+    out.write_all(&path[prefix_len..])
+}
+
+fn write_index_v4_path_remove_len_stream<W: Write>(
+    out: &mut IndexStreamingWriter<W>,
+    value: usize,
+) -> io::Result<()> {
+    let mut parts = vec![(value & 0x7f) as u8];
+    let mut value = value >> 7;
+    while value != 0 {
+        value -= 1;
+        parts.push(((value & 0x7f) as u8) | 0x80);
+        value >>= 7;
+    }
+    for byte in parts.into_iter().rev() {
+        out.write_all(&[byte])?;
+    }
+    Ok(())
+}
+
+fn common_prefix_len(left: &[u8], right: &[u8]) -> usize {
+    left.iter()
+        .zip(right)
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 fn write_octal_u32_stream<W: Write>(
