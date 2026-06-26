@@ -1937,14 +1937,28 @@ fn print_diff_tree_log_format(
 
 pub(crate) fn difftool(
     cached: bool,
+    dir_diff: bool,
     tool: Option<&str>,
+    gui: bool,
+    no_gui: bool,
+    symlinks: bool,
+    no_symlinks: bool,
     extcmd: Option<&str>,
     no_prompt: bool,
     prompt: bool,
+    tool_help: bool,
+    trust_exit_code: bool,
+    no_trust_exit_code: bool,
+    rotate_to: Option<&str>,
+    skip_to: Option<&str>,
     paths: Vec<PathBuf>,
 ) -> Result<()> {
+    if tool_help {
+        return show_difftool_tool_help();
+    }
     let repo = find_repo()?;
-    let command = resolve_difftool_command(&repo, tool, extcmd)?;
+    let gui = gui && !no_gui;
+    let command = resolve_difftool_command(&repo, tool, extcmd, gui)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let index = read_repo_index(&repo)?;
     let diff_input = parse_diff_input(&repo, &store, &index, cached, paths)?;
@@ -1959,6 +1973,7 @@ pub(crate) fn difftool(
         .into_iter()
         .filter(|entry| pathspec_matches(&entry.path, &pathspecs))
         .collect::<Vec<_>>();
+    let entries = apply_diff_skip_rotate(entries, skip_to, rotate_to);
     let temp_root = create_difftool_temp_root()?;
     let context = DifftoolRunContext {
         repo: &repo,
@@ -1968,7 +1983,16 @@ pub(crate) fn difftool(
         new_side_from_index: diff_input.new_side_from_index,
         temp_root: &temp_root,
         command: &command,
-        prompt: prompt && !no_prompt,
+        prompt: !dir_diff && prompt && !no_prompt,
+        dir_diff,
+        symlinks: if no_symlinks {
+            false
+        } else if symlinks {
+            true
+        } else {
+            !cfg!(windows)
+        },
+        trust_exit_code: trust_exit_code && !no_trust_exit_code,
     };
     let result = run_difftool_entries(&context, &entries);
     let cleanup = fs::remove_dir_all(&temp_root);
@@ -1988,6 +2012,9 @@ struct DifftoolRunContext<'a> {
     temp_root: &'a std::path::Path,
     command: &'a DifftoolCommand,
     prompt: bool,
+    dir_diff: bool,
+    symlinks: bool,
+    trust_exit_code: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -2001,6 +2028,7 @@ fn resolve_difftool_command(
     repo: &GitRepo,
     tool: Option<&str>,
     extcmd: Option<&str>,
+    gui: bool,
 ) -> Result<DifftoolCommand> {
     if let Some(extcmd) = extcmd {
         return Ok(DifftoolCommand {
@@ -2011,7 +2039,7 @@ fn resolve_difftool_command(
     }
     let tool = match tool {
         Some(tool) => tool.to_owned(),
-        None => read_config_value(repo, "diff.tool")?.ok_or_else(|| CliError::Fatal {
+        None => resolve_configured_difftool_name(repo, gui)?.ok_or_else(|| CliError::Fatal {
             code: 1,
             message: "no difftool configured; set diff.tool or pass --tool/--extcmd".into(),
         })?,
@@ -2029,10 +2057,28 @@ fn resolve_difftool_command(
     })
 }
 
+fn resolve_configured_difftool_name(repo: &GitRepo, gui: bool) -> Result<Option<String>> {
+    if gui {
+        if let Some(tool) = read_config_value(repo, "diff.guitool")? {
+            return Ok(Some(tool));
+        }
+        if let Some(tool) = read_config_value(repo, "merge.guitool")? {
+            return Ok(Some(tool));
+        }
+    }
+    if let Some(tool) = read_config_value(repo, "diff.tool")? {
+        return Ok(Some(tool));
+    }
+    Ok(read_config_value(repo, "merge.tool")?)
+}
+
 fn run_difftool_entries(
     context: &DifftoolRunContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
 ) -> Result<()> {
+    if context.dir_diff {
+        return run_difftool_dir_diff(context, entries);
+    }
     for (idx, entry) in entries.iter().enumerate() {
         let old_entry = find_index_entry(context.old_index, &entry.path);
         let new_entry = find_index_entry(context.new_index, &entry.path);
@@ -2073,9 +2119,85 @@ fn run_difftool_entries(
         {
             continue;
         }
-        run_difftool_command(context.repo, context.command, &local, &remote)?;
+        run_difftool_command(
+            context.repo,
+            context.command,
+            &local,
+            &remote,
+            &entry.path,
+            context.trust_exit_code,
+        )?;
     }
     Ok(())
+}
+
+fn run_difftool_dir_diff(
+    context: &DifftoolRunContext<'_>,
+    entries: &[zmin_git_core::IndexDiffEntry],
+) -> Result<()> {
+    let left_root = context.temp_root.join("left");
+    let right_root = context.temp_root.join("right");
+    fs::create_dir_all(&left_root)?;
+    fs::create_dir_all(&right_root)?;
+    for entry in entries {
+        if let Some(old_entry) = find_index_entry(context.old_index, &entry.path) {
+            write_difftool_temp_file(
+                &left_root,
+                "",
+                &entry.path,
+                &read_index_entry_content(context.store, old_entry)?,
+            )?;
+        }
+        match find_index_entry(context.new_index, &entry.path) {
+            Some(new_entry) if context.new_side_from_index => {
+                write_difftool_temp_file(
+                    &right_root,
+                    "",
+                    &entry.path,
+                    &read_index_entry_content(context.store, new_entry)?,
+                )?;
+            }
+            Some(new_entry) => {
+                let relative = String::from_utf8_lossy(&entry.path);
+                let worktree_path = context.repo.root.join(relative.as_ref());
+                let target = right_root.join(relative.as_ref());
+                if path_exists(&worktree_path) && context.symlinks {
+                    if let Some(parent) = target.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    create_difftool_symlink(&worktree_path, &target)?;
+                } else if path_exists(&worktree_path) {
+                    write_difftool_fs_copy(&worktree_path, &target)?;
+                } else {
+                    write_difftool_temp_file(
+                        &right_root,
+                        "",
+                        &entry.path,
+                        &read_index_entry_content(context.store, new_entry)?,
+                    )?;
+                }
+            }
+            None => {}
+        }
+    }
+    run_difftool_command(
+        context.repo,
+        context.command,
+        &difftool_dir_argument_path(&left_root),
+        &difftool_dir_argument_path(&right_root),
+        b"",
+        context.trust_exit_code,
+    )
+}
+
+fn difftool_dir_argument_path(path: &Path) -> PathBuf {
+    let separator = std::path::MAIN_SEPARATOR;
+    let display = path.as_os_str().to_string_lossy();
+    if display.ends_with(separator) {
+        path.to_path_buf()
+    } else {
+        PathBuf::from(format!("{display}{separator}"))
+    }
 }
 
 fn confirm_difftool_launch(
@@ -2129,6 +2251,8 @@ fn run_difftool_command(
     command: &DifftoolCommand,
     local: &std::path::Path,
     remote: &std::path::Path,
+    path: &[u8],
+    trust_exit_code: bool,
 ) -> Result<()> {
     let mut process = difftool_shell(command, local, remote);
     let status = process
@@ -2137,9 +2261,114 @@ fn run_difftool_command(
         .map_err(CliError::Io)?;
     if status.success() {
         Ok(())
+    } else if trust_exit_code {
+        let display = String::from_utf8_lossy(path);
+        let suffix = if display.is_empty() {
+            String::new()
+        } else {
+            format!(" at {display}")
+        };
+        Err(CliError::Fatal {
+            code: 128,
+            message: format!("external diff died, stopping{suffix}"),
+        })
     } else {
-        Err(CliError::Exit(status.code().unwrap_or(1)))
+        Ok(())
     }
+}
+
+fn show_difftool_tool_help() -> Result<()> {
+    let output = ProcessCommand::new(stock_git_binary())
+        .args(["difftool", "--tool-help"])
+        .output()
+        .map_err(CliError::Io)?;
+    io::stdout()
+        .write_all(&output.stdout)
+        .map_err(CliError::Io)?;
+    io::stderr()
+        .write_all(&output.stderr)
+        .map_err(CliError::Io)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Exit(output.status.code().unwrap_or(1)))
+    }
+}
+
+fn stock_git_binary() -> &'static Path {
+    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
+}
+
+fn resolve_stock_git_binary() -> PathBuf {
+    for candidate in stock_git_candidates() {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
+        }
+    }
+    for path in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+    {
+        if is_stock_git_binary(&path) {
+            return path;
+        }
+    }
+    PathBuf::from("/usr/bin/git")
+}
+
+fn stock_git_candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        vec![
+            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
+    }
+}
+
+fn stock_git_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["git.exe", "git"]
+    } else {
+        vec!["git"]
+    }
+}
+
+fn is_stock_git_binary(path: &Path) -> bool {
+    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    version.starts_with("git version ") && !version.contains("zmin")
+}
+
+#[cfg(unix)]
+fn create_difftool_symlink(source: &Path, target: &Path) -> Result<()> {
+    std::os::unix::fs::symlink(source, target).map_err(CliError::Io)
+}
+
+#[cfg(windows)]
+fn create_difftool_symlink(source: &Path, target: &Path) -> Result<()> {
+    std::os::windows::fs::symlink_file(source, target).map_err(CliError::Io)
+}
+
+fn write_difftool_fs_copy(source: &Path, target: &Path) -> Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(source, target).map_err(CliError::Io)?;
+    Ok(())
 }
 
 #[cfg(not(windows))]

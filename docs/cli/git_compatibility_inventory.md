@@ -217,7 +217,8 @@ focused parity evidence checks the same surface.
   patch, reverse, pickaxe, ordering, path, exit-code, word-diff, algorithm,
   binary-text, irreversible-delete, submodule and no-index variants.
 - `docs/cli/matrices/difftool_v2_47.tsv` tracks the first `difftool`
-  extcmd and configured tool command variants on Unix.
+  extcmd, configured tool, gui, dir-diff, symlink, ordering and helper-exit
+  variants on Unix.
 - `docs/cli/matrices/diff_files_v2_47.tsv` tracks the first `diff-files`
   word-diff, algorithm and irreversible-delete variants.
 - `docs/cli/matrices/diff_index_v2_47.tsv` tracks the first `diff-index`
@@ -338,15 +339,15 @@ Do not collapse these layers into one percentage.
 
 | Layer | Count | Counts as support | Meaning |
 | --- | ---: | --- | --- |
-| Fully complete command matrices | `99/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
-| Fully complete command-option matrices | `1443/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
+| Fully complete command matrices | `100/151` | yes, when complete | command matrices whose current documented and discovered behavior rows are fully closed |
+| Fully complete command-option matrices | `1455/3156` | yes, when complete | documented option spellings whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | no | audit rows now span the Git baseline plus nested command families represented in focused matrices |
-| Git doc option pairs represented by rows | `1451/3156` | no | documented command-option pairs with at least one behavior row |
-| Written behavior rows | `5412` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
-| Written rows matching stock Git | `4707/5412` | yes, row by row | supported-behavior rows with parity evidence |
-| Partial written rows | `0/5412` | no | written rows with incomplete parity |
-| Open written rows | `12/5412` | no | written rows that still do not match stock Git |
-| Invalid input rows | `690/5412` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
+| Git doc option pairs represented by rows | `1463/3156` | no | documented command-option pairs with at least one behavior row |
+| Written behavior rows | `5424` | no by itself | explicit command/option/value/combination/state/transport/platform rows currently written |
+| Written rows matching stock Git | `4719/5424` | yes, row by row | supported-behavior rows with parity evidence |
+| Partial written rows | `0/5424` | no | written rows with incomplete parity |
+| Open written rows | `12/5424` | no | written rows that still do not match stock Git |
+| Invalid input rows | `690/5424` | yes, as invalid-input compatibility | rows where stock Git rejects the input and Zmin matches that rejection |
 | Full Git behavior denominator | not known yet | not yet | still being expanded |
 
 The `4632` option count is only the documented Git 2.47 seed. The full
@@ -451,7 +452,7 @@ variants.
 | `diff-files` | `130` | `0` | `10` | `docs/cli/matrices/diff_files_v2_47.tsv` | `20` | `20` | `0` | `0` | `0` | no |
 | `diff-index` | `124` | `0` | `9` | `docs/cli/matrices/diff_index_v2_47.tsv` | `14` | `14` | `0` | `0` | `0` | no |
 | `diff-tree` | `151` | `0` | `47` | `docs/cli/matrices/diff_tree_v2_47.tsv` | `74` | `74` | `0` | `0` | `0` | no |
-| `difftool` | `19` | `0` | `3` | `docs/cli/matrices/difftool_v2_47.tsv` | `4` | `4` | `0` | `0` | `0` | no |
+| `difftool` | `19` | `19` | `19` | `docs/cli/matrices/difftool_v2_47.tsv` | `21` | `21` | `0` | `0` | `0` | yes |
 | `fast-import` | `25` | `0` | `1` | `docs/cli/matrices/fast_import_v2_47.tsv` | `7` | `4` | `0` | `0` | `3` | no |
 | `fetch` | `73` | `0` | `30` | `docs/cli/matrices/fetch_v2_47.tsv` | `326` | `316` | `0` | `0` | `10` | no |
 | `fetch-pack` | `19` | `0` | `3` | `docs/cli/matrices/fetch_pack_v2_47.tsv` | `6` | `6` | `0` | `0` | `0` | no |

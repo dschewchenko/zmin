@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	99	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	1443	3156	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	100	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	1455	3156	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	1451	3156	documented command-option pairs with at least one behavior row
-behavior_rows_written	5412	5412	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	4707	5412	closed written rows only
-behavior_rows_classified	5397	5412	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	5412	written rows with incomplete parity
-behavior_rows_open	12	5412	written rows not implemented or not matching yet
-invalid_input_rows	690	5412	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	1463	3156	documented command-option pairs with at least one behavior row
+behavior_rows_written	5424	5424	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	4719	5424	closed written rows only
+behavior_rows_classified	5409	5424	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	5424	written rows with incomplete parity
+behavior_rows_open	12	5424	written rows not implemented or not matching yet
+invalid_input_rows	690	5424	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	26	26	86.7	126	126	100.0	110	87.3	0	0	16	no
@@ -53,7 +53,7 @@ diff	117	83	83	70.9	250	250	100.0	246	98.4	0	0	4	no
 diff-files	118	79	79	66.9	98	98	100.0	98	100.0	0	0	0	no
 diff-index	112	78	78	69.6	105	105	100.0	105	100.0	0	0	0	no
 diff-tree	132	85	85	64.4	117	117	100.0	117	100.0	0	0	0	no
-difftool	19	7	7	36.8	9	9	100.0	9	100.0	0	0	0	no
+difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
 fast-export	18	0	0	0.0	7	7	100.0	4	57.1	0	0	3	no
 fast-import	19	1	1	5.3	11	11	100.0	8	72.7	0	0	3	no
 fetch	63	40	40	63.5	356	356	100.0	341	95.8	0	0	15	no

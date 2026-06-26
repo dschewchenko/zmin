@@ -2119,14 +2119,34 @@ pub enum Command {
     Difftool {
         #[arg(long = "cached", alias = "staged", action = ArgAction::SetTrue)]
         cached: bool,
+        #[arg(short = 'd', long = "dir-diff", action = ArgAction::SetTrue)]
+        dir_diff: bool,
         #[arg(short = 't', long = "tool")]
         tool: Option<String>,
+        #[arg(short = 'g', long = "gui", action = ArgAction::SetTrue)]
+        gui: bool,
+        #[arg(long = "no-gui", action = ArgAction::SetTrue)]
+        no_gui: bool,
+        #[arg(long = "symlinks", action = ArgAction::SetTrue)]
+        symlinks: bool,
+        #[arg(long = "no-symlinks", action = ArgAction::SetTrue)]
+        no_symlinks: bool,
         #[arg(short = 'x', long = "extcmd")]
         extcmd: Option<String>,
         #[arg(short = 'y', long = "no-prompt", action = ArgAction::SetTrue)]
         no_prompt: bool,
         #[arg(long = "prompt", action = ArgAction::SetTrue)]
         prompt: bool,
+        #[arg(long = "tool-help", action = ArgAction::SetTrue)]
+        tool_help: bool,
+        #[arg(long = "trust-exit-code", action = ArgAction::SetTrue)]
+        trust_exit_code: bool,
+        #[arg(long = "no-trust-exit-code", action = ArgAction::SetTrue)]
+        no_trust_exit_code: bool,
+        #[arg(long = "rotate-to")]
+        rotate_to: Option<String>,
+        #[arg(long = "skip-to")]
+        skip_to: Option<String>,
         #[arg(value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
     },

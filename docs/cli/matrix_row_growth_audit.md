@@ -11,6 +11,21 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git difftool`
+documented explicit-schema closure plus command promotion. The selected change
+extends the schema and runtime to cover `--tool-help`, gui and no-gui
+selection, rotate and skip ordering, trust-exit-code toggles, dir-diff
+materialization, symlink and copy dir-diff modes, and the documented `-d` and
+`-g` short aliases, then promotes those twelve documented option pairs plus
+`difftool` itself into the reviewed-complete census lists. Expected delta was
+`+12` matrix rows, `+12` complete documented option pairs, `+12`
+represented documented option pairs, `+1` complete command matrix, `+12`
+verified rows, and `+0` invalid-input rows. Actual delta matched, and
+`difftool` is now command-complete at `19/19` reviewed-complete documented
+option pairs with `19/19` represented documented option pairs, `21` written
+rows, `21` verified rows, `0` invalid-input rows, and `0` exact-open written
+rows.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git reflog`
 expire-family closure plus command promotion. The selected change exposes the
 documented expire-family options in the schema for census accounting, adds
@@ -1597,7 +1612,7 @@ This table compares actual behavior rows per command at `9275ac4d` and at
 | `commit-tree` | `0` | `5` | `+5` |
 | `credential` | `0` | `5` | `+5` |
 | `credential-cache` | `0` | `6` | `+6` |
-| `difftool` | `0` | `4` | `+4` |
+| `difftool` | `0` | `21` | `+21` |
 | `fmt-merge-msg` | `0` | `4` | `+4` |
 | `for-each-repo` | `0` | `4` | `+4` |
 | `init` | `0` | `4` | `+4` |

@@ -30,6 +30,30 @@ fn command_output(command: &str, cwd: &Path, args: &[&str]) -> (i32, String, Str
     )
 }
 
+fn normalize_difftool_dir_output(output: (i32, String, String)) -> (i32, String, String) {
+    let stdout = output
+        .1
+        .lines()
+        .map(|line| normalize_difftool_dir_line(line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    (output.0, stdout, output.2)
+}
+
+fn normalize_difftool_dir_line(line: &str) -> String {
+    if let Some(rest) = line.strip_prefix("L:")
+        && let Some(suffix) = rest.rsplit_once("/left/").map(|(_, tail)| tail)
+    {
+        return format!("L:<TEMP>/left/{suffix}");
+    }
+    if let Some(rest) = line.strip_prefix("R:")
+        && let Some(suffix) = rest.rsplit_once("/right/").map(|(_, tail)| tail)
+    {
+        return format!("R:<TEMP>/right/{suffix}");
+    }
+    line.to_owned()
+}
+
 fn two_commit_repo() -> TempDir {
     let repo = git_init();
     configure_identity(repo.path());
@@ -2161,6 +2185,84 @@ fn difftool_uses_configured_default_tool_like_stock_git() {
             ["difftool", "--no-prompt", "--tool=zmintest", "a.txt"]
         )
     );
+}
+
+#[test]
+#[cfg(not(windows))]
+fn difftool_additional_documented_options_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "old\n");
+    write_file(repo.path(), "b.txt", "oldb\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    write_file(repo.path(), "a.txt", "new\n");
+    write_file(repo.path(), "b.txt", "newb\n");
+
+    let command = "printf 'L:'; cat \"$LOCAL\"; printf 'R:'; cat \"$REMOTE\"";
+    git(repo.path(), ["config", "diff.tool", "zmintest"]);
+    git(repo.path(), ["config", "diff.guitool", "zmintest"]);
+    git(repo.path(), ["config", "difftool.zmintest.cmd", command]);
+    git(repo.path(), ["config", "difftool.prompt", "false"]);
+
+    for args in [
+        ["difftool", "--tool-help"].as_slice(),
+        ["difftool", "--gui", "-y", "a.txt"].as_slice(),
+        ["difftool", "--no-gui", "-y", "a.txt"].as_slice(),
+        ["difftool", "-g", "-y", "a.txt"].as_slice(),
+        ["difftool", "--rotate-to=b.txt", "-y", "-t", "zmintest"].as_slice(),
+        ["difftool", "--skip-to=b.txt", "-y", "-t", "zmintest"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    git(repo.path(), ["config", "difftool.fail.cmd", "printf fail; exit 7"]);
+    for args in [
+        ["difftool", "-y", "-t", "fail", "a.txt"].as_slice(),
+        ["difftool", "-y", "-t", "fail", "--trust-exit-code", "a.txt"].as_slice(),
+        ["difftool", "-y", "-t", "fail", "--no-trust-exit-code", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(not(windows))]
+fn difftool_dir_diff_and_symlink_modes_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        configure_identity(repo);
+        write_file(repo, "a.txt", "old\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "initial"]);
+        write_file(repo, "a.txt", "new\n");
+        let command = "printf 'L:%s\\nR:%s\\n' \"$LOCAL\" \"$REMOTE\"; test -L \"$REMOTE/a.txt\" && echo SYMLINK || echo COPY; cat \"$REMOTE/a.txt\"";
+        git(repo, ["config", "diff.tool", "zmintest"]);
+        git(repo, ["config", "difftool.zmintest.cmd", command]);
+        git(repo, ["config", "difftool.prompt", "false"]);
+    }
+
+    for args in [
+        ["difftool", "--dir-diff", "-y", "-t", "zmintest"].as_slice(),
+        ["difftool", "-d", "-y", "-t", "zmintest"].as_slice(),
+        ["difftool", "--symlinks", "--dir-diff", "-y", "-t", "zmintest"].as_slice(),
+        ["difftool", "--no-symlinks", "--dir-diff", "-y", "-t", "zmintest"].as_slice(),
+    ] {
+        assert_eq!(
+            normalize_difftool_dir_output(command_output(zmin_bin(), zmin_repo.path(), args)),
+            normalize_difftool_dir_output(command_output("git", git_repo.path(), args)),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]

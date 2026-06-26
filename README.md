@@ -167,22 +167,22 @@ Current state:
 
 | Layer | Count | Meaning |
 | --- | ---: | --- |
-| Fully complete command matrices | `99/151` | commands whose current documented and discovered behavior matrix is fully closed |
-| Fully complete documented option matrices | `1443/3156` | documented command-option pairs whose current behavior matrix is fully closed |
+| Fully complete command matrices | `100/151` | commands whose current documented and discovered behavior matrix is fully closed |
+| Fully complete documented option matrices | `1455/3156` | documented command-option pairs whose current behavior matrix is fully closed |
 | Commands with any matrix rows | `155/151` | commands that have started behavior matrices; this is not support |
-| Documented option spellings represented by rows | `1451/3156` | option spellings that have at least one behavior row; this is not support |
-| Written behavior rows | `5412` | explicit rows currently written in command matrices |
-| Written rows matching stock Git | `4707/5412` | supported-behavior rows with focused parity evidence |
-| Partial written rows | `0/5412` | written rows with incomplete parity |
-| Open written rows | `12/5412` | written rows that still do not match stock Git |
-| Invalid input rows | `690/5412` | rows where stock Git rejects the input |
+| Documented option spellings represented by rows | `1463/3156` | option spellings that have at least one behavior row; this is not support |
+| Written behavior rows | `5424` | explicit rows currently written in command matrices |
+| Written rows matching stock Git | `4719/5424` | supported-behavior rows with focused parity evidence |
+| Partial written rows | `0/5424` | written rows with incomplete parity |
+| Open written rows | `12/5424` | written rows that still do not match stock Git |
+| Invalid input rows | `690/5424` | rows where stock Git rejects the input |
 | Full Git behavior denominator | not known yet | still being expanded from docs, upstream tests, IDE traces and platform checks |
 
-Do not read `4707/5412` as Git compatibility. It only means `4707` of the `5412`
+Do not read `4719/5424` as Git compatibility. It only means `4719` of the `5424`
 rows already written down are closed supported-behavior rows. The larger
-unexpanded surface is not counted yet, `0/5412` rows are partially matching,
-`12/5412` rows are known open mismatches, and `690/5412` additional rows are
-stock-compatible invalid inputs. Do not read `1451/3156` as option support
+unexpanded surface is not counted yet, `0/5424` rows are partially matching,
+`12/5424` rows are known open mismatches, and `690/5424` additional rows are
+stock-compatible invalid inputs. Do not read `1463/3156` as option support
 either; it only means those option spellings have at least one row in the audit.
 
 Option spellings are only seed data. Each spelling still has to be expanded into
@@ -266,7 +266,7 @@ Current command-level matrices:
 | `diff-files` | `130` | `0` | `10` | `20` | `20` | `0` | `0` | `0` | no |
 | `diff-index` | `124` | `0` | `9` | `14` | `14` | `0` | `0` | `0` | no |
 | `diff-tree` | `151` | `0` | `47` | `74` | `74` | `0` | `0` | `0` | no |
-| `difftool` | `19` | `0` | `3` | `4` | `4` | `0` | `0` | `0` | no |
+| `difftool` | `19` | `19` | `19` | `21` | `21` | `0` | `0` | `0` | yes |
 | `fast-import` | `25` | `0` | `1` | `7` | `4` | `0` | `0` | `3` | no |
 | `fetch` | `73` | `0` | `30` | `326` | `316` | `0` | `0` | `10` | no |
 | `fetch-pack` | `19` | `0` | `3` | `6` | `6` | `0` | `0` | `0` | no |
