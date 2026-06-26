@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`113/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`123/151 complete command matrices / 1605/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1614/3156 represented doc-option pairs / 5654 written rows / 4922/5654 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,26 +300,30 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a zero-code reviewed-complete diff-family
-promotion cluster. Zmin now promotes `diff`, `diff-files`, `diff-index`, and
-`diff-tree` into the reviewed-complete command set because each command
+The latest completed slice is a zero-code reviewed-complete command-surface
+promotion cluster. Zmin now promotes `index-pack`, `daemon`, `show`,
+`switch`, `worktree`, `tag`, `update-index`, `commit`, `ls-remote`, and
+`for-each-ref` into the reviewed-complete command set because each command
 already had all represented documented option pairs reviewed complete,
 `100%` classified written rows, and `0` exact-open rows on the current
-modeled helper-free local surface. The remaining unrepresented documented
-tails for each diff-family command stay explicitly outside these modeled
-reviewed-complete surfaces.
+modeled surface. The remaining unrepresented documented tails for each
+promoted command stay explicitly outside these modeled reviewed-complete
+surfaces, including the documented-but-locally-unmodeled `index-pack
+--progress-title` tail.
 
-Current counts are `113/151` complete command matrices,
+Current counts are `123/151` complete command matrices,
 `1605/3156` complete documented option pairs,
 `1614/3156` represented documented option pairs, `5654` written rows,
 `4922` verified rows, `12` open rows, and `718` invalid-input rows.
-The diff family now sits at:
-`diff 83/83`, `diff-files 79/79`, `diff-index 78/78`, and `diff-tree 85/85`
-reviewed-complete represented option pairs on their current modeled surfaces,
-with `0` exact-open rows across all four commands. The next bounded
-high-throughput follow-up should either close the lone `rev-parse
---exclude-hidden` tail if a clean helper-free lane can be proven, or move to
-the next dense represented family from the refreshed census queue.
+The promoted cluster now sits at:
+`index-pack 15/15`, `daemon 13/13`, `show 3/3`, `switch 7/7`,
+`worktree 8/8`, `tag 21/21`, `update-index 16/16`, `commit 37/37`,
+`ls-remote 3/3`, and `for-each-ref 2/2` reviewed-complete represented
+option pairs on their current modeled surfaces, all with `0` exact-open
+rows. The next bounded high-throughput follow-up should review the refreshed
+zero-code promotion queue led by `fetch`, `log`, `pull`, and `rev-list`,
+rather than spending the next slice on the lone `rev-parse --exclude-hidden`
+micro-tail.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
