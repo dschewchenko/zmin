@@ -909,6 +909,9 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         no_expand_tabs: false,
         notes: false,
         no_notes: false,
+        show_notes: false,
+        show_notes_by_default: false,
+        no_standard_notes: false,
         diff_required: false,
         pickaxe_string: None,
         pickaxe_regex: None,
@@ -924,6 +927,7 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         no_abbrev_commit: false,
         ignore_matching_lines: Vec::new(),
         walk_reflogs: false,
+        reflog: false,
         no_walk: false,
         grep_reflog: Vec::new(),
         grep: Vec::new(),
@@ -939,7 +943,9 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         since,
         until: None,
         date: None,
+        relative_date: false,
         pretty,
+        quiet: false,
         revs,
     })
 }

@@ -5823,6 +5823,9 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) no_expand_tabs: bool,
     pub(crate) notes: bool,
     pub(crate) no_notes: bool,
+    pub(crate) show_notes: bool,
+    pub(crate) show_notes_by_default: bool,
+    pub(crate) no_standard_notes: bool,
     pub(crate) diff_required: bool,
     pub(crate) decorate: Option<&'a str>,
     pub(crate) clear_decorations: bool,
@@ -5838,6 +5841,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) pickaxe_all: bool,
     pub(crate) ignore_matching_lines: Vec<String>,
     pub(crate) walk_reflogs: bool,
+    pub(crate) reflog: bool,
     pub(crate) no_walk: bool,
     pub(crate) grep_reflog: Vec<String>,
     pub(crate) grep: Vec<String>,
@@ -5853,7 +5857,9 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) since: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
     pub(crate) date: Option<&'a str>,
+    pub(crate) relative_date: bool,
     pub(crate) pretty: Option<&'a str>,
+    pub(crate) quiet: bool,
     pub(crate) revs: Vec<String>,
 }
 
@@ -6247,6 +6253,7 @@ pub(crate) fn log(options: LogOptions<'_>) -> Result<()> {
 fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _trace = phase_trace("log.total");
     let _ = options.count;
+    let _ = options.quiet;
     let (revs, max_count, parsed_zero) =
         split_log_revs_and_count(options.revs.clone(), options.max_count)?;
     let zero = options.zero || parsed_zero;
@@ -6283,7 +6290,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     .into(),
         });
     }
-    if !options.grep_reflog.is_empty() && !options.walk_reflogs {
+    let walk_reflogs = options.walk_reflogs || options.reflog;
+    if !options.grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
             code: 128,
             message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
@@ -6307,8 +6315,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             message: "unrecognized argument: --no-object-names".into(),
         });
     }
-    if options.walk_reflogs {
-        return log_reflog(&options, parsed_log_revs.revs, max_count);
+    if walk_reflogs {
+        return log_reflog(
+            &options,
+            parsed_log_revs.revs,
+            max_count,
+            parsed_log_revs.format.as_deref(),
+            parsed_log_revs.pretty.as_deref(),
+        );
     }
     let format = LogFormat::parse(
         options.oneline,
@@ -6339,7 +6353,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.no_max_parents,
         options.merges,
     )?;
-    let date_mode = parse_log_date_mode(options.date)?;
+    let date_arg = if options.relative_date && options.date.is_none() {
+        Some("relative")
+    } else {
+        options.date
+    };
+    let date_mode = parse_log_date_mode(date_arg)?;
     let expand_tabs = log_expand_tabs_enabled(
         options.encoding,
         options.expand_tabs,
@@ -6383,7 +6402,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let notes = LogNotes::load(
         &repo,
         &store,
-        log_notes_enabled(&format, options.notes, options.no_notes),
+        log_notes_enabled(
+            &format,
+            options.notes || options.show_notes || options.show_notes_by_default,
+            options.no_notes || options.no_standard_notes,
+        ),
     )?;
     let pickaxe_options = PickaxeOptions {
         string: parsed_log_revs.pickaxe_string.as_deref(),
@@ -7202,10 +7225,17 @@ where
     Ok(commits)
 }
 
-fn log_reflog(options: &LogOptions<'_>, revs: Vec<String>, max_count: Option<usize>) -> Result<()> {
+fn log_reflog(
+    options: &LogOptions<'_>,
+    revs: Vec<String>,
+    max_count: Option<usize>,
+    parsed_format: Option<&str>,
+    parsed_pretty: Option<&str>,
+) -> Result<()> {
     let repo = find_repo()?;
-    let format = options
-        .format
+    let format = parsed_format
+        .or(options.format)
+        .or(parsed_pretty)
         .or(options.pretty)
         .or_else(|| log_reflog_embedded_format(&revs))
         .unwrap_or("%gd %H %gs");
@@ -8745,6 +8775,9 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         no_expand_tabs: options.no_expand_tabs,
         notes: options.notes || options.show_notes || options.show_notes_by_default,
         no_notes: options.no_notes || options.standard_notes || options.no_standard_notes,
+        show_notes: false,
+        show_notes_by_default: false,
+        no_standard_notes: false,
         diff_required: false,
         decorate: None,
         clear_decorations: false,
@@ -8760,6 +8793,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         pickaxe_all: false,
         ignore_matching_lines: Vec::new(),
         walk_reflogs: false,
+        reflog: false,
         no_walk: true,
         grep_reflog: Vec::new(),
         grep: Vec::new(),
@@ -8775,7 +8809,9 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         since: None,
         until: None,
         date: None,
+        relative_date: false,
         pretty: options.pretty,
+        quiet: false,
         revs: options.args,
     })
 }

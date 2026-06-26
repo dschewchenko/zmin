@@ -3176,6 +3176,12 @@ pub enum Command {
         notes: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]
         no_notes: bool,
+        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+        show_notes: bool,
+        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+        show_notes_by_default: bool,
+        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+        no_standard_notes: bool,
         #[arg(
             long = "decorate",
             num_args = 0..=1,
@@ -3209,6 +3215,8 @@ pub enum Command {
         ignore_matching_lines: Vec<String>,
         #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
         walk_reflogs: bool,
+        #[arg(long = "reflog", action = ArgAction::SetTrue)]
+        reflog: bool,
         #[arg(long = "no-walk", action = ArgAction::SetTrue)]
         no_walk: bool,
         #[arg(long = "grep-reflog")]
@@ -3258,8 +3266,12 @@ pub enum Command {
         until: Option<String>,
         #[arg(long = "date")]
         date: Option<String>,
+        #[arg(long = "relative-date", action = ArgAction::SetTrue)]
+        relative_date: bool,
         #[arg(long = "pretty")]
         pretty: Option<String>,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },

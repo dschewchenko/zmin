@@ -1239,6 +1239,49 @@ fn log_notes_and_abbrev_commit_family_matches_stock_git() {
 }
 
 #[test]
+fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "1700000000 +0000",
+        "feat: base",
+    );
+
+    for args in [
+        ["log", "--quiet", "-1"].as_slice(),
+        ["log", "--relative-date", "-1", "--format=%ad|%cd"].as_slice(),
+        ["log", "--reflog", "HEAD", "--format=%H"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    git(repo.path(), ["notes", "add", "-m", "note body"]);
+
+    for args in [
+        ["log", "--show-notes", "-1", "--format=%N"].as_slice(),
+        ["log", "--show-notes-by-default", "-1", "--format=%N"].as_slice(),
+        ["log", "--no-standard-notes", "-1", "--format=%N"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn show_notes_aliases_and_abbrev_commit_family_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

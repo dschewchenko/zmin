@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1857/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1865/3212 represented doc-option pairs / 5881 written rows / 5118/5881 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1867/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1881/3212 represented doc-option pairs / 5903 written rows / 5136/5903 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,35 +300,37 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git log` object-selector plus
-tag-selection documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `log --tags`, `--not`,
-`--children`, `--objects`, and `--filter` on modeled local tagged and
-two-commit history lanes, and matches the current stock invalid-input
-behavior for `log --filter-provided-objects` and `--no-object-names`,
-including wildcard-filtered `--tags=v*`, explicit negative revision ordering,
-the current stock no-op `--children` / `--objects` lanes on formatted/default
-log output, the stock `object filtering requires --objects` fatal, and the
-stock `unrecognized argument` fatals for unsupported object-adjacent forms.
+The latest completed slice is a helper-free `git log` reflog/date/notes
+schema-tail parser-plus-evidence expansion on the current local lane. Zmin now
+accepts and matches stock Git for `log --quiet`, `--relative-date`,
+`--show-notes`, `--show-notes-by-default`, `--no-standard-notes`, and
+`--reflog` on modeled single-commit local history and HEAD reflog lanes,
+including the current stock no-op `--quiet` surface, the `--date=relative`
+aliasing behavior for `%ad` and `%cd`, notes-enabled and notes-suppressed
+custom-format lanes, and the explicit `--format=%H` reflog-walk output surface
+behind the long `--reflog` spelling.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat log_object_and_selector_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_reflog_relative_date_and_notes_aliases_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
 `git diff --check`.
-Current census counts should be refreshed from the generated census artifacts
-after this slice lands. Actual delta from the prior `rev-list` ref-selection
-closure is `+10` matrix rows, `+7` complete documented option pairs, `+7`
-represented documented option pairs, `+6` verified rows, `+4` invalid-input
-rows, and `+0` complete command matrices. Current census counts are `5897`
-matrix rows, `5130` verified rows, `730` invalid-input rows, `12` exact-open
-rows, `146/151` complete command matrices, `1867/3212` complete documented
-option pairs, and `1875/3212` represented documented option pairs. `log` now
-sits at `71/131` reviewed-complete documented option pairs with `170/170`
-classified rows, `159` stock-matching rows, `11` invalid-input rows, and `0`
-exact-open rows.
+Actual delta from the prior `log` object-selector closure is `+6` matrix rows,
+`+0` complete documented option pairs, `+6` represented documented option
+pairs, `+6` verified rows, `+0` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `5903` matrix rows, `5136` verified rows,
+`730` invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1867/3212` complete documented option pairs, and
+`1881/3212` represented documented option pairs. `log` now sits at
+`71/131` reviewed-complete documented option pairs with `176` written rows,
+`175` classified rows, `165` stock-matching rows, `10` invalid-input rows,
+and `0` exact-open rows. The next default follow-up should keep expanding
+these newly represented history-query tails with additional value and
+combination lanes, especially `log --show-notes`, `--reflog`,
+`--relative-date`, and the overlapping `rev-list` surfaces, instead of
+switching back to isolated one-row tails.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family

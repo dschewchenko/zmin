@@ -12,27 +12,25 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git log`
-object-selector plus tag-selection documented-option family expansion on the
-current local lane. The selected change added ten exact stock-Git rows for
-`log --tags`, `--not`, `--children`, `--objects`, `--filter`,
-`--filter-provided-objects`, and `--no-object-names`, covering wildcard tag
-selection, explicit negative revision ordering, the current stock no-op
-children/object lanes, the stock missing-objects fatal for filter without
-objects, and the stock unrecognized-argument fatals for unsupported
-object-adjacent forms, then promoted seven represented documented option
-pairs into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual
-delta is `+10` matrix rows, `+7` complete documented option pairs, `+7`
-represented documented option pairs, `+6` verified rows, `+4` invalid-input
-rows, and `+0` complete command matrices. Current census counts are `5897`
-matrix rows, `5130` verified rows, `730` invalid-input rows, `12`
+reflog/date/notes schema-tail parser-plus-evidence expansion on the current
+local lane. The selected change added six exact stock-Git rows for
+`log --quiet`, `--relative-date`, `--show-notes`,
+`--show-notes-by-default`, `--no-standard-notes`, and `--reflog`, covering
+the current stock no-op `--quiet` lane, the long-form relative-date alias,
+notes-enabled and notes-suppressed custom-format `%N` lanes, and the
+explicit `--format=%H` reflog-walk surface behind the long `--reflog`
+spelling. Actual delta is `+6` matrix rows, `+0` complete documented option
+pairs, `+6` represented documented option pairs, `+6` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `5903` matrix rows, `5136` verified rows, `730` invalid-input rows, `12`
 exact-open rows, `146/151` complete command matrices, `1867/3212` complete
-documented option pairs, and `1875/3212` represented documented option
+documented option pairs, and `1881/3212` represented documented option
 pairs. `log` now sits at `71/131` reviewed-complete documented option pairs
-with `170/170` classified rows, `159` stock-matching rows, `11`
-invalid-input rows, and `0` exact-open rows on its current modeled surface.
-The next default follow-up should keep harvesting dense shared history-query
-schema tails where existing revision-collector behavior already exists rather
-than switching to isolated one-row tails.
+with `176` written rows, `175` classified rows, `165` stock-matching rows,
+`10` invalid-input rows, and `0` exact-open rows on its current modeled
+surface. The next default follow-up should keep expanding the newly
+represented history-query tails rather than switching back to isolated
+one-row tails.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
 `git rev-list` formatting/text documented-option family expansion on the
