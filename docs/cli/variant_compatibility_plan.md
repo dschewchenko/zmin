@@ -300,22 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git shortlog`
-reflog-family schema/runtime expansion. Zmin now matches stock Git on the
-modeled local shortlog reflog lanes for `--reflog`, `--walk-reflogs`, `-g`,
-and `--grep-reflog`, including the current empty-output walk-reflogs shape
-and the stock `--grep-reflog requires --walk-reflogs` fatal guard.
+The latest completed slice is a zero-code reviewed-complete `git blame`
+promotion cluster. Zmin now promotes the remaining documented blame options
+from the explicit-schema family into the reviewed-complete census list and
+promotes `blame` itself into the reviewed-complete command set because all
+`36/36` documented options are represented, all `180/180` rows are
+classified, and there are no exact-open rows left on the currently modeled
+helper-free local blame surface.
 
-Current counts are `101/151` complete command matrices,
-`1472/3156` complete documented option pairs,
+Current counts are `102/151` complete command matrices,
+`1480/3156` complete documented option pairs,
 `1508/3156` represented documented option pairs, `5488` written rows,
 `4772` verified rows, `12` open rows, and `701` invalid-input rows.
-`shortlog` now sits at `9/29` reviewed-complete documented option pairs,
-`29/125` represented documented option pairs, `38/38` classified rows, `33`
-stock-matching rows, and `5` invalid-input rows. The next bounded
-high-throughput follow-up should either continue the remaining shortlog
-expansion tail from the census or switch to the next denser helper-free
-represented family after re-checking the updated queue.
+`blame` now sits at `36/36` reviewed-complete documented option pairs,
+`36/36` represented documented option pairs, `180/180` classified rows, `98`
+stock-matching rows, and `82` invalid-input rows. The next bounded
+high-throughput follow-up should return to the next densest helper-free
+represented family such as the remaining `shortlog` expansion tail, using the
+refreshed census queue instead of raw chat memory.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
@@ -1611,11 +1613,11 @@ Latest in-progress family follow-up:
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
 
-Current durable census after the helper-free `shortlog` reflog-family
-schema/runtime expansion:
+Current durable census after the zero-code reviewed-complete `blame`
+promotion cluster:
 
-- complete command matrices: `101 / 151`
-- complete documented command-option pairs: `1472 / 3156`
+- complete command matrices: `102 / 151`
+- complete documented command-option pairs: `1480 / 3156`
 - represented documented command-option pairs: `1508 / 3156`
 - matrix rows: `5488`
 - verified rows: `4772`
@@ -1624,31 +1626,27 @@ schema/runtime expansion:
 
 Latest completed batch:
 
-- `shortlog` now covers the reflog-family surface for `--reflog`,
-  `--walk-reflogs`, `-g`, and `--grep-reflog`, raising the command to
-  `29/125` represented documented option pairs without claiming broader
-  rev-list-backed review closure.
-- The slice adds five exact rows and lifts `shortlog` from `25/125` to
-  `29/125` represented documented option coverage while moving the
-  represented/reviewed split from `9/25` to `9/29` on the durable local
-  helper-free lanes currently modeled.
+- `blame` now has the remaining explicit-schema documented options
+  `--contents`, `--encoding`, `--first-parent`, `--ignore-rev`,
+  `--ignore-revs-file`, `--reverse`, `-S`, and `-h` promoted into the
+  reviewed-complete doc-option census list.
+- The slice adds no new matrix rows; it lifts `blame` from `28/36` to
+  `36/36` reviewed-complete documented option coverage and promotes the full
+  `blame` command matrix into the reviewed-complete command census list.
 - Focused verification was
-  `cargo test -p zmin-cli --test git_history_query_compat shortlog_ -- --nocapture`,
-  `cargo check -p zmin-cli --bin zmin --profile compat`,
-  `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
   `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
   `tools/git-cli-readiness-status.sh`,
-  and `tools/git-compat-command-summary.sh --tsv | rg '^(shortlog|summary)\t'`.
+  `tools/git-compat-command-summary.sh --tsv | rg '^(blame|summary)\t'`,
+  and `git diff --check`.
 
 Latest in-progress family follow-up:
 
-- `shortlog` now has `9/29` documented option pairs reviewed complete with
-  `29/125` represented documented option pairs, `38/38` classified rows, and
-  `0` exact-open written rows.
-- The next best helper-free follow-up should finish the remaining shortlog
-  expansion tail and only then decide whether to broaden the rev-list-backed
-  denominator or move to another dense census-backed represented family or
-  zero-code command-promotion cluster.
+- `blame` is now command-complete at `36/36` documented option pairs
+  reviewed complete with `36/36` represented documented option pairs,
+  `180/180` classified rows, and `0` exact-open written rows.
+- The next best helper-free follow-up should move to the next dense
+  census-backed represented family or review-promotion cluster, with
+  `shortlog` still the leading local expansion candidate.
 
 Current durable census after the zero-code reviewed-complete `rev-parse`
 documented-option promotion cluster:

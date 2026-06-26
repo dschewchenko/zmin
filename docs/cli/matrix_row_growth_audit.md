@@ -11,6 +11,23 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a zero-code reviewed-complete
+`git blame` promotion cluster. The selected change promotes the remaining
+represented documented options `--contents`, `--encoding`, `--first-parent`,
+`--ignore-rev`, `--ignore-revs-file`, `--reverse`, `-S`, and `-h` into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, then promotes
+`blame` into `docs/cli/census/reviewed_complete_command_matrices.tsv`
+because the command already had `36/36` represented documented options,
+`180/180` classified rows, and `0` exact-open rows. Expected delta was `+0`
+matrix rows, `+8` complete documented option pairs, `+0` represented
+documented option pairs, `+1` complete command matrix, `+0` verified rows,
+and `+0` invalid-input rows. Actual delta matched. `blame` is now
+command-complete at `36/36` reviewed-complete documented option pairs with
+`36/36` represented documented option pairs, `180/180` classified rows, `98`
+stock-matching rows, `82` invalid-input rows, and `0` exact-open rows. The
+next best helper-free follow-up should return to the next dense represented
+family such as the remaining `shortlog` expansion tail.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
 reflog-family schema/runtime expansion. The selected change adds the
 shortlog-local parser/runtime surface for `--reflog`, `--walk-reflogs`,
