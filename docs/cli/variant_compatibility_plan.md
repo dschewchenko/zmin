@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`105/151 complete command matrices / 1515/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1549/3156 represented doc-option pairs / 5567 written rows / 4847/5567 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`106/151 complete command matrices / 1540/3156 complete doc-option matrices / 155/151 commands with matrix rows / 1574/3156 represented doc-option pairs / 5592 written rows / 4870/5592 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,28 +300,25 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git rev-parse`
-parseopt/output/disambiguation expansion. Zmin now matches stock Git on the
-modeled helper-free local and outside-repository lanes for
-`rev-parse --output-object-format=storage HEAD`,
-`--output-object-format=sha1 HEAD`, the stock unsupported
-`--output-object-format=sha256 HEAD` rejection, `--disambiguate=<prefix>`,
-`--shared-index-path`, and `--parseopt` with the documented
-`--keep-dashdash`, `--stop-at-non-option`, and `--stuck-long` combinations,
-while keeping the full focused `rev_parse_` oracle target green.
+The latest completed slice is a helper-free `git annotate` documented-option
+family closure plus reviewed-complete promotion. Zmin now exposes and matches
+stock Git on the current modeled helper-free local lanes for all documented
+`annotate` option spellings, including porcelain and incremental modes,
+alternate contents, progress and color toggles, date and raw-timestamp
+rendering, line-range and ancestry-file selection, first-parent and
+ignore-revision acceptance lanes, and the current short-help and reverse
+invalid-input shapes.
 
-Current counts are `105/151` complete command matrices,
-`1515/3156` complete documented option pairs,
-`1549/3156` represented documented option pairs, `5567` written rows,
-`4847` verified rows, `12` open rows, and `705` invalid-input rows.
-`rev-parse` now sits at `50/51` represented documented option pairs with
-`111/111` classified rows, `102` stock-matching rows, `9` invalid-input rows,
-and `0` exact-open written rows on the current modeled surface. This batch
-raised represented coverage and verified rows, but did not yet promote new
-reviewed-complete documented option pairs. The next bounded high-throughput
-follow-up should move to a new dense helper-free family from the refreshed
-census queue unless the last config-driven `rev-parse --exclude-hidden`
-micro-tail is deliberately chosen first.
+Current counts are `106/151` complete command matrices,
+`1540/3156` complete documented option pairs,
+`1574/3156` represented documented option pairs, `5592` written rows,
+`4870` verified rows, `12` open rows, and `707` invalid-input rows.
+`annotate` now sits at `25/25` reviewed-complete documented option pairs with
+`26/26` classified rows, `24` stock-matching rows, `2` invalid-input rows,
+and `0` exact-open written rows on the current modeled surface. The next
+bounded high-throughput follow-up should return to another dense helper-free
+family from the refreshed census queue rather than spending a full iteration
+on the lone config-driven `rev-parse --exclude-hidden` micro-tail.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

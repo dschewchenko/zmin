@@ -11,6 +11,29 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git annotate`
+documented-option family closure plus reviewed-complete promotion. The
+selected change adds twenty-five exact stock-Git rows for the full documented
+annotate surface: `--color-by-age`, `--color-lines`, `--contents`, `--date`,
+`--encoding`, `--first-parent`, `--ignore-rev`, `--ignore-revs-file`,
+`--incremental`, `--line-porcelain`, `--no-progress`, `--porcelain`,
+`--progress`, `--reverse`, `--root`, `--show-stats`, `-C`, `-L`, `-M`, `-S`,
+`-b`, `-h`, `-l`, `-p`, and `-t`, then promotes those twenty-five documented
+option pairs into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`
+and promotes `annotate` into
+`docs/cli/census/reviewed_complete_command_matrices.tsv` because the current
+modeled helper-free annotate surface is now fully represented with `0`
+exact-open rows. Expected delta was `+25` matrix rows, `+25` complete
+documented option pairs, `+1` complete command matrix, `+25` represented
+documented option pairs, `+23` verified rows, and `+2` invalid-input rows.
+Actual delta matched. `annotate` now sits at `25/25`
+reviewed-complete documented option pairs, `25/25` represented documented
+option pairs, `26/26` classified rows, `24` stock-matching rows, `2`
+invalid-input rows, and `0` exact-open rows. The next best default follow-up
+should move to another dense helper-free family from the refreshed census
+queue rather than the lone config-driven `rev-parse --exclude-hidden`
+micro-tail.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git rev-parse`
 parseopt/output/disambiguation expansion. The selected change adds nine exact
 stock-Git rows for `--output-object-format=storage`, `--output-object-format=sha1`,

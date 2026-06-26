@@ -649,6 +649,107 @@ fn blame_documented_option_family_matches_stock_git() {
 }
 
 #[test]
+fn annotate_documented_option_family_matches_stock_git() {
+    let git_repo = blame_fixture_repo();
+    let zmin_repo = clone_repo_fixture(git_repo.path());
+    let head = command_output("git", git_repo.path(), &["rev-parse", "HEAD"], "git").1;
+
+    write_file(git_repo.path(), "ignore-revs.txt", &format!("{head}\n"));
+    write_file(zmin_repo.path(), "ignore-revs.txt", &format!("{head}\n"));
+    write_file(git_repo.path(), "revs.txt", &format!("{head}\n"));
+    write_file(zmin_repo.path(), "revs.txt", &format!("{head}\n"));
+
+    for args in [
+        ["annotate", "-l", "a.txt"].as_slice(),
+        ["annotate", "-p", "a.txt"].as_slice(),
+        ["annotate", "--porcelain", "a.txt"].as_slice(),
+        ["annotate", "--incremental", "a.txt"].as_slice(),
+        ["annotate", "--line-porcelain", "a.txt"].as_slice(),
+        ["annotate", "--date=short", "a.txt"].as_slice(),
+        ["annotate", "--encoding=none", "a.txt"].as_slice(),
+        ["annotate", "--no-progress", "a.txt"].as_slice(),
+        ["annotate", "--root", "a.txt"].as_slice(),
+        ["annotate", "--show-stats", "a.txt"].as_slice(),
+        ["annotate", "-C", "a.txt"].as_slice(),
+        ["annotate", "-L", "1,1", "a.txt"].as_slice(),
+        ["annotate", "-M", "a.txt"].as_slice(),
+        ["annotate", "-b", "a.txt"].as_slice(),
+        ["annotate", "-t", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["annotate", "--progress", "a.txt"].as_slice(),
+        ["annotate", "--color-lines", "a.txt"].as_slice(),
+        ["annotate", "--color-by-age", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
+            command_output("git", git_repo.path(), args, "git"),
+            "args: {args:?}"
+        );
+    }
+
+    write_file(git_repo.path(), "contents.txt", "one\nTWO\n");
+    write_file(zmin_repo.path(), "contents.txt", "one\nTWO\n");
+    let git_contents = git_repo.path().join("contents.txt");
+    let zmin_contents = zmin_repo.path().join("contents.txt");
+    let git_contents = git_contents.to_string_lossy().into_owned();
+    let zmin_contents = zmin_contents.to_string_lossy().into_owned();
+    assert_eq!(
+        run_zmin_args(
+            zmin_repo.path(),
+            &["annotate", "--contents", &zmin_contents, "HEAD", "--", "a.txt"],
+        ),
+        git_args(
+            git_repo.path(),
+            &["annotate", "--contents", &git_contents, "HEAD", "--", "a.txt"],
+        )
+    );
+
+    let opt_git_repo = git_init();
+    configure_identity(opt_git_repo.path());
+    write_file(opt_git_repo.path(), "a.txt", "one\ntwo\n");
+    git(opt_git_repo.path(), ["add", "-A"]);
+    git_with_env(opt_git_repo.path(), ["commit", "-m", "init"]);
+    let opt_zmin_repo = clone_repo_fixture(opt_git_repo.path());
+    let opt_head = command_output("git", opt_git_repo.path(), &["rev-parse", "HEAD"], "git").1;
+    write_file(opt_git_repo.path(), "ignore-revs.txt", &format!("{opt_head}\n"));
+    write_file(opt_zmin_repo.path(), "ignore-revs.txt", &format!("{opt_head}\n"));
+    write_file(opt_git_repo.path(), "revs.txt", &format!("{opt_head}\n"));
+    write_file(opt_zmin_repo.path(), "revs.txt", &format!("{opt_head}\n"));
+
+    for args in [
+        ["annotate", "--first-parent", "a.txt"].as_slice(),
+        ["annotate", "--ignore-rev", &opt_head, "a.txt"].as_slice(),
+        ["annotate", "--ignore-revs-file", "ignore-revs.txt", "a.txt"].as_slice(),
+        ["annotate", "-S", "revs.txt", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(opt_zmin_repo.path(), args),
+            git_args(opt_git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["annotate", "--reverse", "HEAD..HEAD", "a.txt"].as_slice(),
+        ["annotate", "-h"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(zmin_repo.path(), args),
+            git_failure_output(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_invalid_date_format_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

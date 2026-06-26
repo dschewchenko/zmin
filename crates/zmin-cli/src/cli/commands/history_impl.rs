@@ -2507,7 +2507,11 @@ enum BlameRangeEndSpec {
 
 pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -> Result<()> {
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
-        print!("{BLAME_USAGE}");
+        if annotate {
+            print!("{}", BLAME_USAGE.replacen("git blame", "git annotate", 1));
+        } else {
+            print!("{BLAME_USAGE}");
+        }
         return Err(CliError::Exit(129));
     }
     let options = parse_blame_args(args)?;
@@ -2534,7 +2538,12 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
         let (start, end) = resolve_blame_line_range(&lines, range)?;
         lines.retain(|line| (start..=end).contains(&line.line_no));
     }
-    let effective_root = root || options.root;
+    let annotate_structured = annotate && (options.incremental || options.porcelain || options.line_porcelain);
+    let effective_root = if annotate_structured {
+        options.root
+    } else {
+        root || options.root
+    };
     if options.incremental {
         print_incremental_blame_lines(&commit_cache, &lines, &path_bytes, effective_root)
     } else if options.porcelain || options.line_porcelain {
@@ -2546,7 +2555,12 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
             options.line_porcelain,
         )
     } else if annotate || options.annotate_output {
-        print_annotate_lines(&commit_cache, &lines)
+        let annotate_root = !options.blank_boundary;
+        print_annotate_lines(&commit_cache, &lines, long, annotate_root, &options)?;
+        if options.show_stats {
+            print_blame_stats(&lines);
+        }
+        Ok(())
     } else {
         print_blame_lines(
             &commit_cache,
@@ -4231,14 +4245,28 @@ fn signature_strict_blame_date(signature: &[u8]) -> Result<String> {
 fn print_annotate_lines(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     lines: &[BlameLine],
+    long: bool,
+    root: bool,
+    options: &BlameOptions,
 ) -> Result<()> {
     for line in lines {
         let commit = commit_cache.read_commit(&line.commit)?;
         let author = signature_name(&commit.author);
-        let date = signature_blame_date(&commit.author)?;
+        let date = if matches!(options.date_mode, BlameDateMode::Raw) {
+            format_blame_date(&commit.author, options.date_mode)?
+        } else {
+            signature_blame_date(&commit.author)?
+        };
+        let display_id = blame_display_id(
+            &line.commit,
+            line.boundary && (!root || options.blank_boundary),
+            long,
+            options.abbrev_width,
+            options.blank_boundary,
+        );
         print!(
             "{}\t({author:>10}\t{date}\t{})",
-            short_object_id_len(&line.commit, 8),
+            display_id,
             line.line_no
         );
         io::stdout().write_all(&line.content)?;

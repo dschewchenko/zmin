@@ -675,7 +675,56 @@ pub enum Command {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    #[command(disable_help_flag = true)]
     Annotate {
+        #[arg(short = 'h', long = "help", action = ArgAction::SetTrue)]
+        help: bool,
+        #[arg(short = 'l', action = ArgAction::SetTrue)]
+        long: bool,
+        #[arg(short = 'p', long = "porcelain", action = ArgAction::SetTrue)]
+        porcelain: bool,
+        #[arg(long = "incremental", action = ArgAction::SetTrue)]
+        incremental: bool,
+        #[arg(long = "line-porcelain", action = ArgAction::SetTrue)]
+        line_porcelain: bool,
+        #[arg(long = "contents", value_hint = ValueHint::FilePath)]
+        contents: Option<PathBuf>,
+        #[arg(long = "date")]
+        date: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+        first_parent: bool,
+        #[arg(long = "ignore-rev")]
+        ignore_rev: Vec<String>,
+        #[arg(long = "ignore-revs-file", value_hint = ValueHint::FilePath)]
+        ignore_revs_file: Vec<PathBuf>,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-progress", action = ArgAction::SetTrue)]
+        no_progress: bool,
+        #[arg(long = "color-lines", action = ArgAction::SetTrue)]
+        color_lines: bool,
+        #[arg(long = "color-by-age", action = ArgAction::SetTrue)]
+        color_by_age: bool,
+        #[arg(long = "reverse")]
+        reverse: Option<String>,
+        #[arg(long = "root", action = ArgAction::SetTrue)]
+        root: bool,
+        #[arg(long = "show-stats", action = ArgAction::SetTrue)]
+        show_stats: bool,
+        #[arg(short = 'C', action = ArgAction::Count)]
+        copies: u8,
+        #[arg(short = 'L')]
+        line_ranges: Vec<String>,
+        #[arg(short = 'M', action = ArgAction::Count)]
+        moves: u8,
+        #[arg(short = 'S', value_hint = ValueHint::FilePath)]
+        revs_file: Option<PathBuf>,
+        #[arg(short = 'b', action = ArgAction::SetTrue)]
+        blank_boundary: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        raw_timestamp: bool,
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },

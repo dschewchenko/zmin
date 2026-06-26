@@ -120,9 +120,63 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 args,
             ),
         ),
-        runtime::Command::Annotate { args } => {
-            super::history_commands::blame(false, true, true, args)
-        }
+        runtime::Command::Annotate {
+            help,
+            long,
+            porcelain,
+            incremental,
+            line_porcelain,
+            contents,
+            date,
+            encoding,
+            first_parent,
+            ignore_rev,
+            ignore_revs_file,
+            progress,
+            no_progress,
+            color_lines,
+            color_by_age,
+            reverse,
+            root,
+            show_stats,
+            copies,
+            line_ranges,
+            moves,
+            revs_file,
+            blank_boundary,
+            raw_timestamp,
+            args,
+        } => super::history_commands::blame(
+            long,
+            true,
+            true,
+            serialize_annotate_args(
+                help,
+                porcelain,
+                incremental,
+                line_porcelain,
+                contents,
+                date,
+                encoding,
+                first_parent,
+                ignore_rev,
+                ignore_revs_file,
+                progress,
+                no_progress,
+                color_lines,
+                color_by_age,
+                reverse,
+                root,
+                show_stats,
+                copies,
+                line_ranges,
+                moves,
+                revs_file,
+                blank_boundary,
+                raw_timestamp,
+                args,
+            ),
+        ),
         runtime::Command::ShowBranch {
             all,
             remotes,
@@ -597,6 +651,98 @@ fn serialize_blame_args(
         out.push("-S".to_owned());
         out.push(path.to_string_lossy().into_owned());
     }
+    out.append(&mut args);
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn serialize_annotate_args(
+    help: bool,
+    porcelain: bool,
+    incremental: bool,
+    line_porcelain: bool,
+    contents: Option<std::path::PathBuf>,
+    date: Option<String>,
+    encoding: Option<String>,
+    first_parent: bool,
+    ignore_rev: Vec<String>,
+    ignore_revs_file: Vec<std::path::PathBuf>,
+    progress: bool,
+    no_progress: bool,
+    color_lines: bool,
+    color_by_age: bool,
+    reverse: Option<String>,
+    root: bool,
+    show_stats: bool,
+    copies: u8,
+    line_ranges: Vec<String>,
+    moves: u8,
+    revs_file: Option<std::path::PathBuf>,
+    blank_boundary: bool,
+    raw_timestamp: bool,
+    mut args: Vec<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if help {
+        out.push("-h".to_owned());
+    }
+    if porcelain {
+        out.push("--porcelain".to_owned());
+    }
+    if incremental {
+        out.push("--incremental".to_owned());
+    }
+    if line_porcelain {
+        out.push("--line-porcelain".to_owned());
+    }
+    if let Some(value) = date {
+        out.push(format!("--date={value}"));
+    }
+    if progress {
+        out.push("--progress".to_owned());
+    }
+    if no_progress {
+        out.push("--no-progress".to_owned());
+    }
+    if color_lines {
+        out.push("--color-lines".to_owned());
+    }
+    if color_by_age {
+        out.push("--color-by-age".to_owned());
+    }
+    if root {
+        out.push("--root".to_owned());
+    }
+    if show_stats {
+        out.push("--show-stats".to_owned());
+    }
+    for _ in 0..copies {
+        out.push("-C".to_owned());
+    }
+    for value in line_ranges {
+        out.push("-L".to_owned());
+        out.push(value);
+    }
+    for _ in 0..moves {
+        out.push("-M".to_owned());
+    }
+    if blank_boundary {
+        out.push("-b".to_owned());
+    }
+    if raw_timestamp {
+        out.push("-t".to_owned());
+    }
+    out.extend(serialize_blame_args(
+        false,
+        contents,
+        encoding,
+        first_parent,
+        ignore_rev,
+        ignore_revs_file,
+        reverse,
+        revs_file,
+        Vec::new(),
+    ));
     out.append(&mut args);
     out
 }
