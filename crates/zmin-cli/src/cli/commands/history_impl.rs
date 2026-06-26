@@ -5778,10 +5778,13 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) author: Option<&'a str>,
     pub(crate) committer: Option<&'a str>,
     pub(crate) count: bool,
+    pub(crate) skip: Option<usize>,
     pub(crate) max_parents: Option<&'a str>,
     pub(crate) no_max_parents: bool,
     pub(crate) merges: bool,
+    pub(crate) max_age: Option<&'a str>,
     pub(crate) min_parents: Option<&'a str>,
+    pub(crate) min_age: Option<&'a str>,
     pub(crate) no_min_parents: bool,
     pub(crate) no_merges: bool,
     pub(crate) parents: bool,
@@ -5843,6 +5846,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) ignore_matching_lines: Vec<String>,
     pub(crate) walk_reflogs: bool,
     pub(crate) reflog: bool,
+    pub(crate) do_walk: bool,
     pub(crate) no_walk: bool,
     pub(crate) grep_reflog: Vec<String>,
     pub(crate) grep: Vec<String>,
@@ -6293,6 +6297,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         });
     }
     let walk_reflogs = options.walk_reflogs || options.reflog;
+    let no_walk = resolve_history_walk_mode(options.raw_args, options.no_walk, options.do_walk);
     if !options.grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
             code: 128,
@@ -6339,12 +6344,20 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.fixed_strings,
         options.perl_regexp,
     );
-    let Some(since) = parse_log_since(options.since) else {
+    let (since, until) = resolve_history_age_bounds(
+        options.raw_args,
+        options.since,
+        options.max_age,
+        options.until,
+        options.min_age,
+    );
+    let Some(since) = parse_log_since(since) else {
         return Ok(());
     };
-    let Some(until) = parse_log_until(options.until) else {
+    let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
+    let skip = resolve_history_skip(options.raw_args, options.skip)?;
     let author_pattern = options.author;
     let committer_pattern = options.committer;
     let (min_parents, max_parents) = parse_log_parent_bounds(
@@ -6440,11 +6453,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
     } else {
-        max_count
+        expand_history_max_count(max_count, skip)
     };
     let mut commits = {
         let _trace = phase_trace("log.collect_commits");
-        if options.no_walk && !options.all {
+        if no_walk && !options.all {
             collect_no_walk_commit_objects(
                 &repo,
                 &store,
@@ -6573,6 +6586,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
     {
         commits = reorder_collected_commits(commits, order)?;
+    }
+    if let Some(skip) = skip {
+        commits = commits.into_iter().skip(skip).collect();
     }
     if let Some(max_count) = max_count {
         commits.truncate(max_count);
@@ -7526,6 +7542,100 @@ fn parse_log_max_count(value: Option<&str>) -> Result<Option<usize>> {
         message: format!("'{value}': not an integer"),
     })?;
     Ok(Some(parsed))
+}
+
+fn raw_arg_last_value<'a>(raw_args: &'a [String], names: &[&str]) -> Option<&'a str> {
+    let mut last = None;
+    let mut idx = 0usize;
+    while idx < raw_args.len() {
+        let arg = raw_args[idx].as_str();
+        for name in names {
+            if arg == *name {
+                if let Some(value) = raw_args.get(idx + 1) {
+                    last = Some(value.as_str());
+                }
+                idx += 1;
+                break;
+            }
+            if let Some(value) = arg.strip_prefix(name)
+                && let Some(value) = value.strip_prefix('=')
+            {
+                last = Some(value);
+                break;
+            }
+        }
+        idx += 1;
+    }
+    last
+}
+
+fn raw_arg_last_toggle(raw_args: &[String], enabled_name: &str, disabled_name: &str) -> Option<bool> {
+    let mut last = None;
+    for arg in raw_args {
+        match arg.as_str() {
+            value if value == enabled_name => last = Some(true),
+            value if value == disabled_name => last = Some(false),
+            _ => {}
+        }
+    }
+    last
+}
+
+fn resolve_history_walk_mode(raw_args: &[String], no_walk: bool, do_walk: bool) -> bool {
+    raw_arg_last_toggle(raw_args, "--no-walk", "--do-walk").unwrap_or(no_walk && !do_walk)
+}
+
+fn resolve_history_age_bounds<'a>(
+    raw_args: &'a [String],
+    since: Option<&'a str>,
+    max_age: Option<&'a str>,
+    until: Option<&'a str>,
+    min_age: Option<&'a str>,
+) -> (Option<&'a str>, Option<&'a str>) {
+    let resolved_since = raw_arg_last_value(raw_args, &["--since", "--max-age"])
+        .or(max_age)
+        .or(since);
+    let resolved_until = raw_arg_last_value(raw_args, &["--until", "--min-age"])
+        .or(min_age)
+        .or(until);
+    (resolved_since, resolved_until)
+}
+
+fn parse_history_skip_value(value: &str) -> Result<usize> {
+    value.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("'{value}': not an integer"),
+    })
+}
+
+fn resolve_history_skip(raw_args: &[String], skip: Option<usize>) -> Result<Option<usize>> {
+    let mut last = None;
+    let mut idx = 0usize;
+    while idx < raw_args.len() {
+        let arg = raw_args[idx].as_str();
+        if arg == "--skip" {
+            let Some(value) = raw_args.get(idx + 1) else {
+                return Err(CliError::Fatal {
+                    code: 129,
+                    message: "option '--skip' requires a value".into(),
+                });
+            };
+            last = Some(parse_history_skip_value(value)?);
+            idx += 1;
+        } else if let Some(value) = arg.strip_prefix("--skip=") {
+            last = Some(parse_history_skip_value(value)?);
+        }
+        idx += 1;
+    }
+    Ok(last.or(skip))
+}
+
+fn expand_history_max_count(max_count: Option<usize>, skip: Option<usize>) -> Option<usize> {
+    match (max_count, skip) {
+        (Some(max_count), Some(skip)) => Some(max_count.saturating_add(skip)),
+        (Some(max_count), None) => Some(max_count),
+        (None, _) => None,
+    }
 }
 
 fn parse_log_since(value: Option<&str>) -> Option<Option<i64>> {
@@ -8852,10 +8962,13 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         author: None,
         committer: None,
         count: false,
+        skip: None,
         max_parents: None,
         no_max_parents: false,
         merges: false,
+        max_age: None,
         min_parents: None,
+        min_age: None,
         no_min_parents: false,
         no_merges: false,
         parents: false,
@@ -8924,6 +9037,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         ignore_matching_lines: Vec::new(),
         walk_reflogs: false,
         reflog: false,
+        do_walk: false,
         no_walk: true,
         grep_reflog: Vec::new(),
         grep: Vec::new(),
@@ -9739,13 +9853,17 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
     pub(crate) count: bool,
+    pub(crate) skip: Option<usize>,
     pub(crate) max_parents: Option<&'a str>,
+    pub(crate) max_age: Option<&'a str>,
     pub(crate) no_max_parents: bool,
     pub(crate) merges: bool,
     pub(crate) min_parents: Option<&'a str>,
+    pub(crate) min_age: Option<&'a str>,
     pub(crate) no_min_parents: bool,
     pub(crate) no_merges: bool,
     pub(crate) objects: bool,
+    pub(crate) object_names: bool,
     pub(crate) no_object_names: bool,
     pub(crate) filter: Option<String>,
     pub(crate) filter_provided_objects: bool,
@@ -9754,6 +9872,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) children: bool,
     pub(crate) walk_reflogs: bool,
     pub(crate) reflog: bool,
+    pub(crate) do_walk: bool,
     pub(crate) grep_reflog: Vec<String>,
     pub(crate) reverse: bool,
     pub(crate) full_history: bool,
@@ -9774,6 +9893,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) since: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
     pub(crate) relative_date: bool,
+    pub(crate) timestamp: bool,
     pub(crate) date: Option<&'a str>,
     pub(crate) quiet: bool,
     pub(crate) format: Option<&'a str>,
@@ -9975,13 +10095,17 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         fixed_strings,
         perl_regexp,
         count,
+        skip,
         max_parents,
+        max_age,
         no_max_parents,
         merges,
         min_parents,
+        min_age,
         no_min_parents,
         no_merges,
         objects,
+        object_names,
         no_object_names,
         filter,
         filter_provided_objects,
@@ -9990,6 +10114,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         children,
         walk_reflogs,
         reflog,
+        do_walk,
         grep_reflog,
         reverse,
         full_history,
@@ -10010,6 +10135,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         since,
         until,
         relative_date,
+        timestamp,
         date,
         quiet,
         format,
@@ -10025,6 +10151,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let _accepted_no_notes = no_notes;
     let _accepted_standard_notes = standard_notes;
     let _accepted_no_standard_notes = no_standard_notes;
+    let _accepted_object_names = object_names;
+    let _accepted_do_walk = do_walk;
     let walk_reflogs = walk_reflogs || reflog;
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
@@ -10039,12 +10167,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         });
     }
     let simplify_history_topo = simplify_merges || simplify_by_decoration;
+    let (since, until) = resolve_history_age_bounds(raw_args, since, max_age, until, min_age);
     let Some(since) = parse_log_since(since) else {
         return Ok(());
     };
     let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
+    let skip = resolve_history_skip(raw_args, skip)?;
     if rev_list_supports_notes_display(
         notes,
         show_notes,
@@ -10174,7 +10304,15 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         let filter = object_filter.expect("checked filter");
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
         let mut commit_trees =
-            collect_commit_trees_with_exclusions_uncached(&repo, &store, &revs, max_count)?;
+            collect_commit_trees_with_exclusions_uncached(
+                &repo,
+                &store,
+                &revs,
+                expand_history_max_count(max_count, skip),
+            )?;
+        if let Some(skip) = skip {
+            commit_trees = commit_trees.into_iter().skip(skip).collect();
+        }
         if reverse {
             commit_trees.reverse();
         }
@@ -10216,7 +10354,15 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     if objects && (no_object_names || count) {
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
         let mut commit_trees =
-            collect_commit_trees_with_exclusions_uncached(&repo, &store, &revs, max_count)?;
+            collect_commit_trees_with_exclusions_uncached(
+                &repo,
+                &store,
+                &revs,
+                expand_history_max_count(max_count, skip),
+            )?;
+        if let Some(skip) = skip {
+            commit_trees = commit_trees.into_iter().skip(skip).collect();
+        }
         if reverse {
             commit_trees.reverse();
         }
@@ -10249,17 +10395,24 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         return Ok(());
     }
     if count && !objects && !post_collection_filters {
-        println!(
-            "{}",
-            count_commits_with_exclusions(&repo, &store, &revs, max_count)?
-        );
+        let count_value =
+            count_commits_with_exclusions(&repo, &store, &revs, expand_history_max_count(max_count, skip))?;
+        println!("{}", count_value.saturating_sub(skip.unwrap_or(0)));
         return Ok(());
     }
 
     if objects && !parents && !children {
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
         let mut commit_trees =
-            collect_commit_trees_with_exclusions_uncached(&repo, &store, &revs, max_count)?;
+            collect_commit_trees_with_exclusions_uncached(
+                &repo,
+                &store,
+                &revs,
+                expand_history_max_count(max_count, skip),
+            )?;
+        if let Some(skip) = skip {
+            commit_trees = commit_trees.into_iter().skip(skip).collect();
+        }
         if reverse {
             commit_trees.reverse();
         }
@@ -10289,9 +10442,19 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         return Ok(());
     }
 
+    let collect_max_count = if count || objects {
+        expand_history_max_count(max_count, skip)
+    } else {
+        max_count
+    };
+    let collect_max_count = if post_collection_filters && (count || objects) {
+        None
+    } else {
+        collect_max_count
+    };
+
     let mut commit_ids = if post_collection_filters {
         let commit_cache = CommitObjectCache::new(&store);
-        let collect_max_count = if count || objects { None } else { max_count };
         let mut commits = if first_parent && !all {
             collect_first_parent_commit_objects_with_exclusions(
                 &repo,
@@ -10373,13 +10536,13 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 &store,
                 &commit_cache,
                 &revs,
-                max_count,
+                collect_max_count,
             )?
             .into_iter()
             .map(|entry| entry.id)
             .collect()
         } else {
-            collect_commits_with_exclusions(&repo, &store, &revs, max_count)?
+            collect_commits_with_exclusions(&repo, &store, &revs, collect_max_count)?
         }
     };
     if ancestry_path {
@@ -10411,6 +10574,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
     {
         commit_ids = reorder_commit_ids(&commit_cache, commit_ids, order)?;
+    }
+    if let Some(skip) = skip {
+        commit_ids = commit_ids.into_iter().skip(skip).collect();
     }
     if reverse {
         commit_ids.reverse();
@@ -10459,7 +10625,20 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 out.write_all(b"\n")?;
             }
         } else if parents {
-            let parents = read_commit_parents_uncached(&store, &id)?;
+            if timestamp {
+                let commit = commit_cache.read_commit(id)?;
+                let timestamp = signature_timestamp_timezone(&commit.committer)
+                    .map(|(timestamp, _)| timestamp)
+                    .unwrap_or_default();
+                write!(out, "{timestamp} ")?;
+                write!(out, "{id}")?;
+                for parent in &commit.parents {
+                    write!(out, " {parent}")?;
+                }
+                writeln!(out)?;
+                continue;
+            }
+            let parents = read_commit_parents_uncached(&store, id)?;
             write!(out, "{id}")?;
             for parent in parents {
                 write!(out, " {parent}")?;
@@ -10474,6 +10653,13 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             }
             writeln!(out)?;
         } else {
+            if timestamp {
+                let commit = commit_cache.read_commit(id)?;
+                let timestamp = signature_timestamp_timezone(&commit.committer)
+                    .map(|(timestamp, _)| timestamp)
+                    .unwrap_or_default();
+                write!(out, "{timestamp} ")?;
+            }
             if let Some(marker) = marker {
                 write!(out, "{}", marker.rev_list_prefix())?;
             }

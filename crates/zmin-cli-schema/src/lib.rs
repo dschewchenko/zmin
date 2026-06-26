@@ -3128,14 +3128,20 @@ pub enum Command {
         committer: Option<String>,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(long = "skip")]
+        skip: Option<usize>,
         #[arg(long = "max-parents")]
         max_parents: Option<String>,
         #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
         no_max_parents: bool,
         #[arg(long = "merges", action = ArgAction::SetTrue)]
         merges: bool,
+        #[arg(long = "max-age")]
+        max_age: Option<String>,
         #[arg(long = "min-parents")]
         min_parents: Option<String>,
+        #[arg(long = "min-age")]
+        min_age: Option<String>,
         #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
         no_min_parents: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
@@ -3261,6 +3267,8 @@ pub enum Command {
         walk_reflogs: bool,
         #[arg(long = "reflog", action = ArgAction::SetTrue)]
         reflog: bool,
+        #[arg(long = "do-walk", action = ArgAction::SetTrue)]
+        do_walk: bool,
         #[arg(long = "no-walk", action = ArgAction::SetTrue)]
         no_walk: bool,
         #[arg(long = "grep-reflog")]
@@ -3804,6 +3812,8 @@ pub enum Command {
         perl_regexp: bool,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(long = "skip")]
+        skip: Option<usize>,
         #[arg(
             long = "branches",
             num_args = 0..=1,
@@ -3827,18 +3837,24 @@ pub enum Command {
         remotes: Vec<String>,
         #[arg(long = "max-parents")]
         max_parents: Option<String>,
+        #[arg(long = "max-age")]
+        max_age: Option<String>,
         #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
         no_max_parents: bool,
         #[arg(long = "merges", action = ArgAction::SetTrue)]
         merges: bool,
         #[arg(long = "min-parents")]
         min_parents: Option<String>,
+        #[arg(long = "min-age")]
+        min_age: Option<String>,
         #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
         no_min_parents: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
         no_merges: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
         objects: bool,
+        #[arg(long = "object-names", action = ArgAction::SetTrue)]
+        object_names: bool,
         #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
         no_object_names: bool,
         #[arg(long = "filter")]
@@ -3855,6 +3871,8 @@ pub enum Command {
         walk_reflogs: bool,
         #[arg(long = "reflog", action = ArgAction::SetTrue)]
         reflog: bool,
+        #[arg(long = "do-walk", action = ArgAction::SetTrue)]
+        do_walk: bool,
         #[arg(long = "grep-reflog")]
         grep_reflog: Vec<String>,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
@@ -3895,6 +3913,8 @@ pub enum Command {
         until: Option<String>,
         #[arg(long = "relative-date", action = ArgAction::SetTrue)]
         relative_date: bool,
+        #[arg(long = "timestamp", action = ArgAction::SetTrue)]
+        timestamp: bool,
         #[arg(long = "date")]
         date: Option<String>,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]

@@ -21,6 +21,58 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch closes a shared helper-free
+history schema/runtime family across `log` and `rev-list`. This batch added
+ten documented-option closures by implementing and proving stock-Git parity
+for `log --do-walk`, `log --max-age`, `log --min-age`, `log --skip`,
+`rev-list --do-walk`, `rev-list --max-age`, `rev-list --min-age`,
+`rev-list --skip`, `rev-list --timestamp`, and
+`rev-list --object-names`.
+
+The batch fixed one cohesive parser/runtime gap on the shared history-query
+surface:
+
+- Zmin now accepts the represented `--do-walk`, `--max-age`, `--min-age`, and
+  `--skip` spellings on the shared `log` / `rev-list` path with stock-like
+  alias precedence and skip ordering; `rev-list` also now matches stock Git
+  for explicit `--object-names` on the objects lane and for `--timestamp`
+  output on the default commit-id lane
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_shared_history_schema_batch_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1937 / 3212`
+- represented documented command-option pairs: `1937 / 3212`
+- matrix rows: `5994`
+- verified rows: `5231`
+- invalid-input rows: `738`
+- open or partial exact rows: `0`
+
+Per-command position on the touched shared surface:
+
+- `log`: `82 / 197` reviewed-complete documented option pairs, `131` written
+  rows, `82` classified rows on the reviewed-complete surface, `187`
+  stock-matching rows overall, `10` invalid-input rows, `0` exact-open rows
+- `rev-list`: `81 / 133` reviewed-complete documented option pairs, `117`
+  written rows, `81` classified rows on the reviewed-complete surface, `123`
+  stock-matching rows overall, `10` invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up remains on the shared history schema
+tail, but it is now sharply narrowed. The default next queue should decide the
+fate of the last two `log` documented options still absent from Zmin schema in
+the current census, `--object-names` and `--timestamp`, since the rest of this
+helper-free batch is now fully represented and reviewed-complete.
+
 As of 2026-06-27 the latest completed batch is a history-compat stabilization
 pass on the shared `log` / `rev-list` / `whatchanged` surface. This batch did
 not add new matrix rows or documented-option coverage; instead it restored the

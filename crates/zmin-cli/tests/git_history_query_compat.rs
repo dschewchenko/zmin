@@ -119,6 +119,18 @@ fn git_commit_with_split_dates(
     );
 }
 
+fn write_commit_with_date(
+    cwd: &std::path::Path,
+    path: &str,
+    content: &str,
+    date: &str,
+    message: &str,
+) {
+    write_file(cwd, path, content);
+    git(cwd, ["add", "-A"]);
+    git_commit_with_author(cwd, "A", "a@example.test", date, message);
+}
+
 fn write_loose_blob(cwd: &std::path::Path, content: &str) {
     let mut child = Command::new(stock_git_bin())
         .args(["hash-object", "-w", "--stdin"])
@@ -3537,6 +3549,40 @@ fn log_no_walk_author_date_matches_stock_git() {
             &["log", "--no-walk", "--format=%ad", "HEAD"]
         )
     );
+}
+
+#[test]
+fn log_and_rev_list_shared_history_schema_batch_matches_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        write_commit_with_date(repo, "a.txt", "one\n", "1700000000 +0000", "one");
+        write_commit_with_date(repo, "a.txt", "two\n", "1700001000 +0000", "two");
+        write_commit_with_date(repo, "a.txt", "three\n", "1700002000 +0000", "three");
+    }
+
+    for args in [
+        ["log", "--do-walk", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--max-age=1700000500", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--min-age=1700001500", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--skip=1", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--do-walk", "--skip=1", "--format=%s", "HEAD"].as_slice(),
+        ["rev-list", "--do-walk", "HEAD"].as_slice(),
+        ["rev-list", "--max-age=1700000500", "HEAD"].as_slice(),
+        ["rev-list", "--min-age=1700001500", "HEAD"].as_slice(),
+        ["rev-list", "--skip=1", "HEAD"].as_slice(),
+        ["rev-list", "--timestamp", "HEAD"].as_slice(),
+        ["rev-list", "--object-names", "--objects", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]
