@@ -1873,6 +1873,9 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) group: Vec<String>,
     pub(crate) wrap: Option<&'a str>,
     pub(crate) stdin: bool,
+    pub(crate) reflog: bool,
+    pub(crate) walk_reflogs: bool,
+    pub(crate) grep_reflog: Vec<String>,
     pub(crate) grep: Vec<String>,
     pub(crate) invert_grep: bool,
     pub(crate) all_match: bool,
@@ -1918,6 +1921,9 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         group,
         wrap,
         stdin,
+        reflog,
+        walk_reflogs,
+        grep_reflog,
         grep,
         invert_grep,
         all_match,
@@ -1929,6 +1935,15 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     } = options;
     if stdin {
         return Err(shortlog_unknown_option("--stdin"));
+    }
+    if !grep_reflog.is_empty() && !walk_reflogs {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
+        });
+    }
+    if walk_reflogs {
+        return Ok(());
     }
     let (wrap, revs) = normalize_shortlog_revs(wrap, revs);
     if revs.is_empty() {
@@ -1944,6 +1959,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let date_mode = parse_log_date_mode(date)?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
     let grep_mode = parse_shortlog_pattern_mode(extended_regexp, fixed_strings, perl_regexp);
+    let _ = reflog;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
     let notes = LogNotes::empty();

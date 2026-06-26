@@ -345,6 +345,53 @@ fn shortlog_grep_family_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_reflog_option_family_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: one",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Bob",
+        "b@example.test",
+        "1700000600 +0000",
+        "fix: two",
+    );
+
+    for args in [
+        ["shortlog", "--reflog", "HEAD"].as_slice(),
+        ["shortlog", "--walk-reflogs", "HEAD"].as_slice(),
+        ["shortlog", "--grep-reflog=one", "--walk-reflogs", "HEAD"].as_slice(),
+        ["shortlog", "-g", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["shortlog", "--grep-reflog=one", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_line_range_forms_match_stock_git() {
     let git_repo = blame_line_range_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

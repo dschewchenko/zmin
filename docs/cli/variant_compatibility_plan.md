@@ -301,22 +301,21 @@ source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
 The latest completed slice is a helper-free `git shortlog`
-long-form grep-alias evidence expansion. Zmin now keeps exact stock-Git rows
-for the already implemented long grep aliases `--regexp-ignore-case`,
-`--extended-regexp`, `--fixed-strings`, and `--perl-regexp`, matching stock
-Git on the modeled helper-free local case-insensitive, extended-regexp,
-fixed-string, and perl-regexp grep lanes.
+reflog-family schema/runtime expansion. Zmin now matches stock Git on the
+modeled local shortlog reflog lanes for `--reflog`, `--walk-reflogs`, `-g`,
+and `--grep-reflog`, including the current empty-output walk-reflogs shape
+and the stock `--grep-reflog requires --walk-reflogs` fatal guard.
 
 Current counts are `101/151` complete command matrices,
 `1472/3156` complete documented option pairs,
-`1504/3156` represented documented option pairs, `5483` written rows,
-`4768` verified rows, `12` open rows, and `700` invalid-input rows.
-`shortlog` now sits at `9/25` reviewed-complete documented option pairs,
-`25/125` represented documented option pairs, `33/33` classified rows, `29`
-stock-matching rows, and `4` invalid-input rows. The next bounded
-high-throughput follow-up should finish the remaining shortlog-specific tail
-around `-g` before deciding whether to widen the rev-list-backed denominator
-or switch commands.
+`1508/3156` represented documented option pairs, `5488` written rows,
+`4772` verified rows, `12` open rows, and `701` invalid-input rows.
+`shortlog` now sits at `9/29` reviewed-complete documented option pairs,
+`29/125` represented documented option pairs, `38/38` classified rows, `33`
+stock-matching rows, and `5` invalid-input rows. The next bounded
+high-throughput follow-up should either continue the remaining shortlog
+expansion tail from the census or switch to the next denser helper-free
+represented family after re-checking the updated queue.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
@@ -1612,27 +1611,26 @@ Latest in-progress family follow-up:
 - The next best helper-free follow-up should move to another dense
   census-backed represented family or zero-code command-promotion cluster.
 
-Current durable census after the helper-free `shortlog` long-form grep-alias
-evidence expansion:
+Current durable census after the helper-free `shortlog` reflog-family
+schema/runtime expansion:
 
 - complete command matrices: `101 / 151`
 - complete documented command-option pairs: `1472 / 3156`
-- represented documented command-option pairs: `1504 / 3156`
-- matrix rows: `5483`
-- verified rows: `4768`
-- invalid-input rows: `700`
+- represented documented command-option pairs: `1508 / 3156`
+- matrix rows: `5488`
+- verified rows: `4772`
+- invalid-input rows: `701`
 - open or partial exact rows: `12`
 
 Latest completed batch:
 
-- `shortlog` now keeps exact stock-Git rows for the already implemented long
-  grep aliases `--regexp-ignore-case`, `--extended-regexp`,
-  `--fixed-strings`, and `--perl-regexp`, raising the command to `25/125`
-  represented documented option pairs without claiming broader rev-list-backed
-  review closure.
-- The slice adds four exact rows and lifts `shortlog` from `21/125` to
-  `25/125` represented documented option coverage while moving the
-  represented/reviewed split from `9/21` to `9/25` on the durable local
+- `shortlog` now covers the reflog-family surface for `--reflog`,
+  `--walk-reflogs`, `-g`, and `--grep-reflog`, raising the command to
+  `29/125` represented documented option pairs without claiming broader
+  rev-list-backed review closure.
+- The slice adds five exact rows and lifts `shortlog` from `25/125` to
+  `29/125` represented documented option coverage while moving the
+  represented/reviewed split from `9/25` to `9/29` on the durable local
   helper-free lanes currently modeled.
 - Focused verification was
   `cargo test -p zmin-cli --test git_history_query_compat shortlog_ -- --nocapture`,
@@ -1644,13 +1642,13 @@ Latest completed batch:
 
 Latest in-progress family follow-up:
 
-- `shortlog` now has `9/25` documented option pairs reviewed complete with
-  `25/125` represented documented option pairs, `33/33` classified rows, and
+- `shortlog` now has `9/29` documented option pairs reviewed complete with
+  `29/125` represented documented option pairs, `38/38` classified rows, and
   `0` exact-open written rows.
 - The next best helper-free follow-up should finish the remaining shortlog
-  specific tail around `-g` and only then decide whether to broaden the
-  rev-list-backed denominator or move to another dense census-backed
-  represented family or zero-code command-promotion cluster.
+  expansion tail and only then decide whether to broaden the rev-list-backed
+  denominator or move to another dense census-backed represented family or
+  zero-code command-promotion cluster.
 
 Current durable census after the zero-code reviewed-complete `rev-parse`
 documented-option promotion cluster:

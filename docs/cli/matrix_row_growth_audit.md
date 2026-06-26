@@ -12,6 +12,22 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
+reflog-family schema/runtime expansion. The selected change adds the
+shortlog-local parser/runtime surface for `--reflog`, `--walk-reflogs`,
+`-g`, and `--grep-reflog`, reuses the existing shortlog summarization lane
+for `--reflog`, matches the current stock empty-output lane for
+`--walk-reflogs` and `-g`, and closes the stock `--grep-reflog` guard both
+with and without walk-reflogs on the modeled helper-free local history lane.
+Expected delta was `+5` matrix rows, `+4` represented documented option
+pairs, `+4` verified rows, `+1` invalid-input row, `+0` complete documented
+option pairs, and `+0` complete command matrices. Actual delta matched.
+`shortlog` now sits at `29/125` represented documented option pairs,
+`9/29` reviewed-complete documented option pairs, `38/38` classified rows,
+`33` stock-matching rows, `5` invalid-input rows, and `0` exact-open rows.
+The next best helper-free follow-up should continue the remaining shortlog
+expansion tail before deciding on a broader rev-list-backed schema sweep.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
 long-form grep-alias evidence expansion. The selected change reuses the
 already implemented grep-family runtime and adds exact stock-Git evidence for
 `--regexp-ignore-case`, `--extended-regexp`, `--fixed-strings`, and

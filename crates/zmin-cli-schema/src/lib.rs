@@ -611,6 +611,12 @@ pub enum Command {
         wrap: Option<String>,
         #[arg(long = "stdin", hide = true, action = ArgAction::SetTrue)]
         stdin: bool,
+        #[arg(long = "reflog", action = ArgAction::SetTrue)]
+        reflog: bool,
+        #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
+        walk_reflogs: bool,
+        #[arg(long = "grep-reflog")]
+        grep_reflog: Vec<String>,
         #[arg(long = "grep")]
         grep: Vec<String>,
         #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
