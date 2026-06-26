@@ -256,6 +256,23 @@ fn scalar_root_help_flags_and_version_match_stock_exit_shape() {
 }
 
 #[test]
+fn scalar_no_subcommand_matches_stock_shape() {
+    let zmin_home = TempDir::new().expect("zmin home");
+    let stock_home = TempDir::new().expect("stock home");
+    let cwd = TempDir::new().expect("cwd");
+
+    let Some(stock) = run_stock_scalar(&stock_home, cwd.path(), &[]) else {
+        eprintln!("skipping scalar stock-oracle test because stock scalar is unavailable");
+        return;
+    };
+    let zmin = run_scalar(&zmin_home, cwd.path(), &["scalar"]);
+    assert_eq!(
+        normalize_scalar_platform_stderr(zmin),
+        normalize_scalar_platform_stderr(stock)
+    );
+}
+
+#[test]
 fn scalar_version_options_match_stock_exit_shape() {
     let home = TempDir::new().expect("home");
     let cwd = TempDir::new().expect("cwd");

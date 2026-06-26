@@ -21,25 +21,23 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-26 the latest completed batch is a foreign-SCM helper-oracle
-unlock closure for `git archimport`, `git cvsexportcommit`, and `git cvsimport`
-on the modeled fake-helper local lanes. The selected change did not add new
-matrix rows; instead it converted four existing exact rows from `open` to
-`closed` by routing stock-Git helper oracle runs through the bundled
-`GIT_EXEC_PATH` helper location, then promoted the represented documented
-options `archimport -v`, `cvsexportcommit -w`, and
-`cvsimport -C/-P/-R/-a/-d/-z` into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+As of 2026-06-26 the latest completed batch closes the final exact-open
+helper/oracle tail: the top-level `scalar` no-subcommand row plus the two
+modeled `git svn` rows (`clone`, `dcommit`). The selected change did not add
+new matrix rows; instead it corrected the stale top-level `scalar` probe to use
+the standalone stock `scalar` binary rather than `git scalar`, added a focused
+stock-oracle test for `zmin scalar`, and reclassified the two `svn` rows as
+closed after verifying them against a real stock `git-svn` oracle through a
+local `ZMIN_STOCK_GIT` x86 wrapper for the Homebrew helper build.
 
-The batch fixed one concrete evidence/infrastructure gap on the foreign-SCM
-oracle path:
+The batch fixed two evidence/oracle gaps rather than changing modeled Zmin
+runtime behavior:
 
-- stock Git helper parity for the modeled fake-tla, fake-CVS, and fake-cvsps
-  lanes now runs through the bundled helper exec-path when the foreign-SCM
-  compat tests launch the stock Git binary, so the existing Zmin-vs-stock
-  oracle tests for `archimport`, `cvsexportcommit`, and both `cvsimport`
-  flows now close the previously oracle-blocked rows instead of relying on
-  helper-unavailable local assumptions
+- the stale `scalar` root probe now measures standalone stock `scalar`
+  no-subcommand behavior, which matches `zmin scalar` exactly on this host
+- the existing fake-SVN oracle tests now close the represented `git svn clone`
+  and `git svn dcommit` rows when run against a real stock `git-svn` helper
+  through the local x86 wrapper
 
 Actual durable census after this batch:
 
@@ -47,27 +45,24 @@ Actual durable census after this batch:
 - complete documented command-option pairs: `1927 / 3212`
 - represented documented command-option pairs: `1927 / 3212`
 - matrix rows: `5984`
-- verified rows: `5214`
+- verified rows: `5221`
 - invalid-input rows: `738`
-- open or partial exact rows: `8`
+- open or partial exact rows: `0`
 
 Per-command position on the active shared surface:
 
-- `archimport`: `1 / 8` reviewed-complete documented option pairs, `1`
-  written row, `1` classified row, `1` stock-matching row, `0`
-  invalid-input rows, `0` exact-open rows
-- `cvsexportcommit`: `1 / 12` reviewed-complete documented option pairs, `2`
-  written rows, `2` classified rows, `2` stock-matching rows, `0`
-  invalid-input rows, `0` exact-open rows
-- `cvsimport`: `6 / 20` reviewed-complete documented option pairs, `3`
-  written rows, `3` classified rows, `3` stock-matching rows, `0`
-  invalid-input rows, `0` exact-open rows
+- `scalar`: `19 / 19` written rows, `19` classified rows, `19`
+  stock-matching rows, `0` invalid-input rows, `0` exact-open rows
+- `svn`: `3 / 3` written rows, `3` classified rows, `3`
+  stock-matching rows, `0` invalid-input rows, `0` exact-open rows
 
-The next best high-throughput follow-up should focus on the last oracle
-availability blockers rather than more represented-row harvesting, because the
-represented documented-option backlog is now fully closed. The default next
-queue should start with `git svn` helper-oracle availability, then finish the
-remaining top-level `scalar` local-oracle gap.
+The next best high-throughput follow-up should move off oracle unblock work and
+back to the largest safe documented-option/schema backlog, because the exact
+open-row tail is now gone and represented documented-option coverage is fully
+closed at `1927/1927`. The default next queue should start with the largest
+helper-free schema family in `remaining_to_fix_or_verify.tsv`, currently
+`git am`, unless a denser reviewed-complete family emerges from the next census
+pass.
 
 As of 2026-06-26 the latest completed batch is the final helper-like
 `git update-index --split-index` documented-option tail on the modeled
@@ -844,17 +839,14 @@ stock-vs-Zmin oracle. The remaining exact-open tail in this environment is the
 local-helper-unavailable batch tracked in
 `docs/cli/census/exact_open_oracle_gaps.tsv`.
 
-After the latest `citool` closure, the exact-open queue in this environment is
-down to only three helper-oracle-unavailable rows: `svn` (`2`) and `scalar`
-(`1`). `citool` is now fully represented and fully classified at `5/5` written
-rows with `5/5` stock-matching rows after switching the GUI surface to launch
-the stock `git citool` helper path instead of performing an internal commit.
-The next bounded follow-up should therefore stay on oracle enablement rather
-than represented-row harvesting: either a usable `git svn` helper oracle or a
-real top-level stock `scalar` oracle. The primary
-`remaining_to_fix_or_verify.tsv` backlog still has no real
-implemented-but-unverified family beyond the lone schema-only
-`archive <positional:args>` parser surface.
+After the latest `scalar + svn` closure, the exact-open queue in this
+environment is empty. `citool`, `scalar`, and `svn` are all fully classified on
+their currently modeled surfaces, and `docs/cli/census/exact_open_oracle_gaps.tsv`
+is now empty. The next bounded follow-up should therefore return to the
+documented-option/schema backlog rather than oracle unblock work. The primary
+`remaining_to_fix_or_verify.tsv` backlog is now led by `doc_option_not_in_zmin_schema`
+rows for `git am`, while the only remaining implemented-but-unverified family
+is still the lone schema-only `archive <positional:args>` parser surface.
 
 ### Latest Completed Slice
 

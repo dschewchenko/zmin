@@ -11,22 +11,22 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-26 the latest completed batch is a helper-oracle unlock closure
-for the five modeled `git citool` GUI rows. The selected change added `+1`
-focused stock-oracle test file, `+0` matrix rows, and reclassified the five
-existing `citool --amend/--file/-F/--nocommit/-m` rows from `open` to
-`closed`; no documented-option counts changed because those rows were already
-represented. Actual delta is `+0` matrix rows, `+0` complete documented option
-pairs, `+0` represented documented option pairs, `+5` verified rows, `+0`
-invalid-input rows, and `+0` complete command matrices. Current census counts
-are `5984` matrix rows, `5219` verified rows, `738` invalid-input rows,
-`3` exact-open rows, `146/151` complete command matrices,
+As of 2026-06-26 the latest completed batch closes the final exact-open tail:
+top-level `scalar` no-subcommand plus the modeled `git svn clone` and
+`git svn dcommit` rows. The selected change added `+1` focused scalar
+stock-oracle test, corrected the stale scalar probe to use standalone stock
+`scalar`, added `+0` matrix rows, and reclassified the three remaining exact
+rows from `open` to `closed`. Actual delta is `+0` matrix rows, `+0` complete
+documented option pairs, `+0` represented documented option pairs, `+2`
+verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
+Current census counts are `5984` matrix rows, `5221` verified rows, `738`
+invalid-input rows, `0` exact-open rows, `146/151` complete command matrices,
 `1927/3212` complete documented option pairs, and `1927/3212` represented
-documented option pairs. `citool` now sits at `5/5` classified rows with
-`5/5` stock-matching rows, while the only remaining exact-open backlog is
-`svn` (`2`) plus top-level `scalar` (`1`). The next default follow-up should
-stay on oracle availability, starting with a usable `git svn` helper oracle
-before the final top-level `scalar` gap.
+documented option pairs. `scalar` now sits at `19/19` stock-matching written
+rows and `svn` at `3/3` stock-matching written rows on their modeled
+surfaces. The next default follow-up should move off oracle unblock work and
+return to the largest helper-free documented-option/schema family, with `git am`
+currently at the head of `remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 `--split-index` documented-option tail closure on the modeled single-entry
