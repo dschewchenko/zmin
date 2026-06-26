@@ -22,6 +22,45 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
+`git log`/`git rev-list` date-order plus notes-precedence expansion on the
+current local lane. The selected change added seventeen exact stock-Git rows
+for order-sensitive `--date=iso` plus `--relative-date` lanes, `--quiet`
+plus relative-date formatting, `--reflog` plus `--relative-date` pretty lanes,
+and additional `show-notes` / `show-notes-by-default` / `standard-notes` /
+`no-standard-notes` custom-format precedence combinations across `log` and
+`rev-list`.
+
+The batch also fixed two shared runtime gaps:
+
+- raw CLI ordering for `--date` versus `--relative-date` now survives through
+  the history command path, so last-one-wins matches stock Git
+- `rev-list --reflog ... --relative-date` no longer treats `--relative-date`
+  as a reflog target during target extraction
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1867 / 3212`
+- represented documented command-option pairs: `1889 / 3212`
+- matrix rows: `5942`
+- verified rows: `5167`
+- invalid-input rows: `737`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `log`: `71 / 131` reviewed-complete documented option pairs, `193` written
+  rows, `191` classified rows, `181` stock-matching rows, `10` invalid-input
+  rows, `0` exact-open rows
+- `rev-list`: `68 / 117` reviewed-complete documented option pairs, `127`
+  written rows, `127` classified rows, `117` stock-matching rows, `10`
+  invalid-input rows, `0` exact-open rows
+
+The next best helper-free follow-up still stays on the shared history-query
+surface: keep closing the remaining represented `log` / `rev-list` doc-option
+tails before switching back to unrelated command families.
+
+As of 2026-06-26 the latest completed batch is a helper-free shared
 `git log`/`git rev-list` reflog-plus-notes precedence expansion on the current
 local lane. The selected change added eight exact stock-Git rows for
 `log --show-notes-by-default --no-standard-notes`,

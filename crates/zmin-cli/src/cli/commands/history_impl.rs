@@ -169,7 +169,7 @@ fn replay_commit_chain(
     Ok(parent)
 }
 
-pub(crate) fn run_history(command: HistoryCommand) -> Result<()> {
+pub(crate) fn run_history(command: HistoryCommand, _raw_args: &[String]) -> Result<()> {
     match command {
         HistoryCommand::Reword {
             commit,
@@ -5861,6 +5861,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) relative_date: bool,
     pub(crate) pretty: Option<&'a str>,
     pub(crate) quiet: bool,
+    pub(crate) raw_args: &'a [String],
     pub(crate) revs: Vec<String>,
 }
 
@@ -6354,12 +6355,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.no_max_parents,
         options.merges,
     )?;
-    let date_arg = if options.relative_date && options.date.is_none() {
-        Some("relative")
-    } else {
-        options.date
-    };
-    let date_mode = parse_log_date_mode(date_arg)?;
+    let date_arg = history_raw_date_arg(options.raw_args, options.date, options.relative_date);
+    let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let expand_tabs = log_expand_tabs_enabled(
         options.encoding,
         options.expand_tabs,
@@ -6644,7 +6641,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     &decorations,
                     &notes,
                     date_mode,
-                    options.standard_notes && !options.show_notes && !options.show_notes_by_default,
+                    options.standard_notes && !options.show_notes,
                 )?;
                 out.write_all(rendered.as_bytes())?;
                 if let Some(diff_format) = diff_format {
@@ -6714,7 +6711,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             &decorations,
             &notes,
             date_mode,
-            options.standard_notes && !options.show_notes && !options.show_notes_by_default,
+            options.standard_notes && !options.show_notes,
         )?;
         out.write_all(rendered.as_bytes())?;
         let root_patch_separator =
@@ -7252,13 +7249,9 @@ fn log_reflog(
         .or(embedded_format)
         .unwrap_or("%gd %H %gs");
     let format = format.strip_prefix("format:").unwrap_or(format);
-    let date_arg = if options.relative_date && options.date.is_none() {
-        Some("relative")
-    } else {
-        options.date
-    }
-    .or_else(|| log_reflog_embedded_date(&revs));
-    let date_mode = parse_log_date_mode(date_arg)?;
+    let date_arg = history_raw_date_arg(options.raw_args, options.date, options.relative_date)
+        .or_else(|| log_reflog_embedded_date(&revs).map(str::to_owned));
+    let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let custom_format = explicit_format
         .or(embedded_format)
         .map(|value| value.strip_prefix("format:").unwrap_or(value));
@@ -8375,22 +8368,77 @@ fn log_notes_enabled(
     if no_notes {
         return false;
     }
-    if show_notes_by_default && no_standard_notes {
-        return true;
-    }
-    if show_notes && no_standard_notes {
+    if standard_notes {
+        if show_notes {
+            return !no_standard_notes;
+        }
         return false;
     }
-    if standard_notes && show_notes {
-        return true;
-    }
-    if standard_notes || no_standard_notes {
+    if no_standard_notes {
+        if show_notes_by_default {
+            return true;
+        }
         return false;
     }
     if show_notes || show_notes_by_default {
         return true;
     }
     notes || matches!(format, LogFormat::Default)
+}
+
+fn history_raw_date_arg(
+    raw_args: &[String],
+    default_date: Option<&str>,
+    relative_date: bool,
+) -> Option<String> {
+    let fallback = if relative_date && default_date.is_none() {
+        Some("relative".to_owned())
+    } else {
+        default_date.map(str::to_owned)
+    };
+    if raw_args.is_empty() {
+        return fallback;
+    }
+    let args = raw_args
+        .first()
+        .filter(|arg| !arg.starts_with('-'))
+        .map(|_| &raw_args[1..])
+        .unwrap_or(raw_args);
+    let mut selected = None::<String>;
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--relative-date" {
+            selected = Some("relative".to_owned());
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--date=") {
+            selected = Some(value.to_owned());
+            continue;
+        }
+        if arg == "--date"
+            && let Some(value) = iter.peek()
+        {
+            selected = Some((**value).clone());
+            iter.next();
+        }
+    }
+    selected.or(fallback)
+}
+
+fn rev_list_supports_notes_display(
+    notes: bool,
+    show_notes: bool,
+    show_notes_by_default: bool,
+    standard_notes: bool,
+    _no_standard_notes: bool,
+) -> bool {
+    if notes || show_notes {
+        return true;
+    }
+    show_notes_by_default && !standard_notes
 }
 
 fn log_expand_tabs_enabled(
@@ -8885,6 +8933,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         relative_date: false,
         pretty: options.pretty,
         quiet: false,
+        raw_args: &[],
         revs: options.args,
     })
 }
@@ -9720,6 +9769,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) quiet: bool,
     pub(crate) format: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
+    pub(crate) raw_args: &'a [String],
     pub(crate) revs: Vec<String>,
 }
 
@@ -9776,6 +9826,7 @@ fn rev_list_reflog_targets(revs: &[String]) -> Vec<String> {
                 && !rev.starts_with("--format=")
                 && !rev.starts_with("--pretty=")
                 && !rev.starts_with("--date=")
+                && rev.as_str() != "--relative-date"
         })
         .cloned()
         .collect()
@@ -9954,6 +10005,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         quiet,
         format,
         pretty,
+        raw_args,
         revs,
     } = options;
     let _accepted_full_history = full_history;
@@ -9984,7 +10036,13 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
-    if notes || show_notes || show_notes_by_default {
+    if rev_list_supports_notes_display(
+        notes,
+        show_notes,
+        show_notes_by_default,
+        standard_notes,
+        no_standard_notes,
+    ) {
         return Err(CliError::Fatal {
             code: 128,
             message: "rev-list does not support display of notes".into(),
@@ -9992,11 +10050,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     let grep_mode =
         parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
-    let date = if relative_date && date.is_none() {
-        Some("relative")
-    } else {
-        date
-    };
+    let date = history_raw_date_arg(raw_args, date, relative_date);
     let embedded_date = if walk_reflogs {
         rev_list_reflog_embedded_date(&revs).map(str::to_owned)
     } else {
@@ -10007,10 +10061,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     } else {
         None
     };
-    let date = date
-        .map(str::to_owned)
-        .or(embedded_date)
-        .unwrap_or_default();
+    let date = date.or(embedded_date).unwrap_or_default();
     let date = (!date.is_empty()).then_some(date);
     let format = format
         .map(str::to_owned)

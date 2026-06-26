@@ -947,6 +947,7 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         relative_date: false,
         pretty,
         quiet: false,
+        raw_args: &[],
         revs,
     })
 }

@@ -1,6 +1,9 @@
 use crate::runtime;
 
-pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
+pub(crate) fn dispatch(
+    command: runtime::Command,
+    raw_args: &[String],
+) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::Replay {
             contained,
@@ -8,7 +11,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             onto,
             revision_ranges,
         } => run_replay(contained, advance, onto, revision_ranges),
-        runtime::Command::History { command } => run_history(command),
+        runtime::Command::History { command } => run_history(command, raw_args),
         runtime::Command::RangeDiff {
             no_dual_color,
             no_no_dual_color,
@@ -473,6 +476,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_object_names,
             filter,
             filter_provided_objects,
+            raw_args,
             revs: extend_history_ref_selector_revs(revs, Vec::new(), tags, Vec::new()),
         }),
         runtime::Command::Whatchanged {
@@ -603,6 +607,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             abbrev_commit: false,
             no_abbrev_commit: false,
             quiet: false,
+            raw_args,
             revs,
         }),
         runtime::Command::Show {
@@ -800,6 +805,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             quiet,
             format: format.as_deref(),
             pretty: pretty.as_deref(),
+            raw_args,
             revs: extend_history_ref_selector_revs(revs, branches, tags, remotes),
         }),
         runtime::Command::MergeBase {
@@ -1077,8 +1083,9 @@ pub(crate) fn run_replay(
 
 pub(crate) fn run_history(
     command: runtime::HistoryCommand,
+    raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
-    super::history_commands::run_history(command)
+    super::history_commands::run_history(command, raw_args)
 }
 
 pub(crate) fn run_range_diff(
