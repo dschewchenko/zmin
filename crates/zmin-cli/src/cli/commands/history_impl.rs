@@ -6405,8 +6405,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         &store,
         log_notes_enabled(
             &format,
-            options.notes || options.show_notes || options.show_notes_by_default,
-            options.no_notes || options.standard_notes || options.no_standard_notes,
+            options.notes,
+            options.no_notes,
+            options.show_notes,
+            options.show_notes_by_default,
+            options.standard_notes,
+            options.no_standard_notes,
         ),
     )?;
     let pickaxe_options = PickaxeOptions {
@@ -6640,7 +6644,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     &decorations,
                     &notes,
                     date_mode,
-                    options.standard_notes,
+                    options.standard_notes && !options.show_notes && !options.show_notes_by_default,
                 )?;
                 out.write_all(rendered.as_bytes())?;
                 if let Some(diff_format) = diff_format {
@@ -6710,7 +6714,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             &decorations,
             &notes,
             date_mode,
-            options.standard_notes,
+            options.standard_notes && !options.show_notes && !options.show_notes_by_default,
         )?;
         out.write_all(rendered.as_bytes())?;
         let root_patch_separator =
@@ -7239,17 +7243,31 @@ fn log_reflog(
     parsed_pretty: Option<&str>,
 ) -> Result<()> {
     let repo = find_repo()?;
-    let format = parsed_format
+    let explicit_format = parsed_format
         .or(options.format)
         .or(parsed_pretty)
-        .or(options.pretty)
-        .or_else(|| log_reflog_embedded_format(&revs))
+        .or(options.pretty);
+    let embedded_format = log_reflog_embedded_format(&revs);
+    let format = explicit_format
+        .or(embedded_format)
         .unwrap_or("%gd %H %gs");
     let format = format.strip_prefix("format:").unwrap_or(format);
+    let date_arg = if options.relative_date && options.date.is_none() {
+        Some("relative")
+    } else {
+        options.date
+    }
+    .or_else(|| log_reflog_embedded_date(&revs));
+    let date_mode = parse_log_date_mode(date_arg)?;
+    let custom_format = explicit_format
+        .or(embedded_format)
+        .map(|value| value.strip_prefix("format:").unwrap_or(value));
     if let Some(patterns) = log_reflog_branch_patterns(&revs) {
         return log_reflog_branches(
             &repo,
             format,
+            custom_format,
+            date_mode,
             &patterns,
             max_count,
             &options.grep_reflog,
@@ -7260,6 +7278,8 @@ fn log_reflog(
     log_reflog_target(
         &repo,
         format,
+        custom_format,
+        date_mode,
         target,
         max_count,
         false,
@@ -7272,12 +7292,16 @@ fn log_reflog(
 fn log_reflog_target(
     repo: &GitRepo,
     format: &str,
+    custom_format: Option<&str>,
+    date_mode: LogDateMode<'_>,
     target: &str,
     max_count: Option<usize>,
     allow_missing: bool,
     grep_reflog: &[String],
     regexp_ignore_case: bool,
 ) -> Result<usize> {
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
     let path = reflog_path(&repo, target)?;
     let file = match fs::File::open(&path) {
         Ok(file) => file,
@@ -7317,10 +7341,21 @@ fn log_reflog_target(
         {
             return Ok(());
         }
-        println!(
-            "{}",
+        let rendered = if let Some(pattern) = custom_format {
+            let commit = commit_cache.read_commit(&entry.new_id)?;
+            render_log_format(
+                pattern,
+                &entry.new_id,
+                &commit,
+                7,
+                &LogDecorations::empty(),
+                &LogNotes::empty(),
+                date_mode,
+            )?
+        } else {
             render_reflog_log_format(format, target, entry_index, &entry)?
-        );
+        };
+        println!("{rendered}");
         emitted += 1;
         Ok(())
     })?;
@@ -7349,9 +7384,15 @@ fn log_reflog_embedded_format(revs: &[String]) -> Option<&str> {
     })
 }
 
+fn log_reflog_embedded_date(revs: &[String]) -> Option<&str> {
+    revs.iter().find_map(|rev| rev.strip_prefix("--date="))
+}
+
 fn log_reflog_branches(
     repo: &GitRepo,
     format: &str,
+    custom_format: Option<&str>,
+    date_mode: LogDateMode<'_>,
     patterns: &[String],
     max_count: Option<usize>,
     grep_reflog: &[String],
@@ -7382,6 +7423,8 @@ fn log_reflog_branches(
         emitted += log_reflog_target(
             repo,
             format,
+            custom_format,
+            date_mode,
             &branch,
             Some(limit - emitted),
             true,
@@ -8320,9 +8363,32 @@ fn render_log_format(
     Ok(out)
 }
 
-fn log_notes_enabled(format: &LogFormat<'_>, notes: bool, no_notes: bool) -> bool {
+fn log_notes_enabled(
+    format: &LogFormat<'_>,
+    notes: bool,
+    no_notes: bool,
+    show_notes: bool,
+    show_notes_by_default: bool,
+    standard_notes: bool,
+    no_standard_notes: bool,
+) -> bool {
     if no_notes {
         return false;
+    }
+    if show_notes_by_default && no_standard_notes {
+        return true;
+    }
+    if show_notes && no_standard_notes {
+        return false;
+    }
+    if standard_notes && show_notes {
+        return true;
+    }
+    if standard_notes || no_standard_notes {
+        return false;
+    }
+    if show_notes || show_notes_by_default {
+        return true;
     }
     notes || matches!(format, LogFormat::Default)
 }
@@ -10003,6 +10069,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     if walk_reflogs {
+        if quiet {
+            return Ok(());
+        }
         let reflog_revs = rev_list_reflog_targets(&revs);
         if let Some(target) = rev_list_walk_reflogs_exclusion_target(&reflog_revs) {
             return Err(CliError::Fatal {

@@ -12,6 +12,31 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
+`git log`/`git rev-list` reflog-plus-notes precedence expansion on the current
+local lane. The selected change added eight exact stock-Git rows for
+`log --show-notes-by-default --no-standard-notes`,
+`log --standard-notes --show-notes`, `log --quiet --reflog`,
+`log --reflog --date=relative --pretty=format:%gd|%ad|%cd`,
+`rev-list --quiet --reflog`,
+`rev-list --reflog --date=relative --pretty=format:%gd|%ad|%cd`,
+`rev-list --standard-notes --show-notes`, and
+`rev-list --show-notes-by-default --no-standard-notes`. Actual delta is `+8`
+matrix rows, `+0` complete documented option pairs, `+0` represented
+documented option pairs, `+6` verified rows, `+2` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `5925` matrix rows,
+`5153` verified rows, `735` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1867/3212` complete documented option
+pairs, and `1889/3212` represented documented option pairs. `log` now sits at
+`71/131` reviewed-complete documented option pairs with `184` written rows,
+`183` classified rows, `173` stock-matching rows, `10` invalid-input rows,
+and `0` exact-open rows, while `rev-list` now sits at `68/117`
+reviewed-complete documented option pairs with `119` written rows, `119`
+classified rows, `111` stock-matching rows, `8` invalid-input rows, and `0`
+exact-open rows on their current modeled surfaces. The next default follow-up
+should keep harvesting shared history-query represented tails instead of
+falling back to one-row isolated closures.
+
+As of 2026-06-26 the latest completed batch is a helper-free shared
 `git log`/`git rev-list` notes-plus-quiet precedence expansion on the current
 local lane. The selected change added seven exact stock-Git rows for
 `log --standard-notes`, `log --standard-notes --no-standard-notes`,

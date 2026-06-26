@@ -1228,6 +1228,22 @@ fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
         ["rev-list", "--quiet", "--format=%H", "-1", "HEAD"].as_slice(),
         ["rev-list", "--relative-date", "--format=%ad|%cd", "-1", "HEAD"].as_slice(),
         ["rev-list", "--reflog", "HEAD", "--format=%H"].as_slice(),
+        [
+            "rev-list",
+            "--quiet",
+            "--reflog",
+            "HEAD",
+            "--format=%H",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--reflog",
+            "HEAD",
+            "--date=relative",
+            "--pretty=format:%gd|%ad|%cd",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1263,6 +1279,24 @@ fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
         [
             "rev-list",
             "--show-notes-by-default",
+            "--pretty=format:%N",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--standard-notes",
+            "--show-notes",
+            "--pretty=format:%N",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--show-notes-by-default",
+            "--no-standard-notes",
             "--pretty=format:%N",
             "-1",
             "HEAD",
@@ -1338,6 +1372,22 @@ fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
         ["log", "--quiet", "-1", "--format=%H"].as_slice(),
         ["log", "--relative-date", "-1", "--format=%ad|%cd"].as_slice(),
         ["log", "--reflog", "HEAD", "--format=%H"].as_slice(),
+        [
+            "log",
+            "--quiet",
+            "--reflog",
+            "HEAD",
+            "--format=%H",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--reflog",
+            "HEAD",
+            "--date=relative",
+            "--pretty=format:%gd|%ad|%cd",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1355,6 +1405,15 @@ fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
         ["log", "--standard-notes", "-1", "--format=%N"].as_slice(),
         ["log", "--standard-notes", "--no-standard-notes", "-1", "--format=%N"].as_slice(),
         ["log", "--show-notes", "--no-standard-notes", "-1", "--format=%N"].as_slice(),
+        [
+            "log",
+            "--show-notes-by-default",
+            "--no-standard-notes",
+            "-1",
+            "--format=%N",
+        ]
+        .as_slice(),
+        ["log", "--standard-notes", "--show-notes", "-1", "--format=%N"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),

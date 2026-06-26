@@ -19,6 +19,42 @@ Start each resume from `docs/cli/git_compatibility_execution_plan.md`. This
 file remains the detailed live handoff for counting rules, slice queues, guard
 mappings and latest completed slices.
 
+## Current Slice Pointer
+
+As of 2026-06-26 the latest completed batch is a helper-free shared
+`git log`/`git rev-list` reflog-plus-notes precedence expansion on the current
+local lane. The selected change added eight exact stock-Git rows for
+`log --show-notes-by-default --no-standard-notes`,
+`log --standard-notes --show-notes`, `log --quiet --reflog`,
+`log --reflog --date=relative --pretty=format:%gd|%ad|%cd`,
+`rev-list --quiet --reflog`,
+`rev-list --reflog --date=relative --pretty=format:%gd|%ad|%cd`,
+`rev-list --standard-notes --show-notes`, and
+`rev-list --show-notes-by-default --no-standard-notes`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1867 / 3212`
+- represented documented command-option pairs: `1889 / 3212`
+- matrix rows: `5925`
+- verified rows: `5153`
+- invalid-input rows: `735`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `log`: `71 / 131` reviewed-complete documented option pairs, `184` written
+  rows, `183` classified rows, `173` stock-matching rows, `10` invalid-input
+  rows, `0` exact-open rows
+- `rev-list`: `68 / 117` reviewed-complete documented option pairs, `119`
+  written rows, `119` classified rows, `111` stock-matching rows, `8`
+  invalid-input rows, `0` exact-open rows
+
+The next best helper-free follow-up stays on the shared history-query family:
+harvest the densest remaining represented `log`/`rev-list` tails before
+switching back to isolated command families.
+
 ## Counting Rules
 
 - Count only stock-Git-supported behavior unless there is an explicit Zmin-only
