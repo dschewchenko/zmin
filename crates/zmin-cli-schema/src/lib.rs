@@ -3670,6 +3670,41 @@ pub enum Command {
         author: Option<String>,
         #[arg(long = "committer")]
         committer: Option<String>,
+        #[arg(long = "grep")]
+        grep: Vec<String>,
+        #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
+        invert_grep: bool,
+        #[arg(long = "all-match", action = ArgAction::SetTrue)]
+        all_match: bool,
+        #[arg(short = 'i', long = "regexp-ignore-case", action = ArgAction::SetTrue)]
+        regexp_ignore_case: bool,
+        #[arg(
+            long = "basic-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["extended_regexp", "fixed_strings", "perl_regexp"]
+        )]
+        basic_regexp: bool,
+        #[arg(
+            short = 'E',
+            long = "extended-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["basic_regexp", "fixed_strings", "perl_regexp"]
+        )]
+        extended_regexp: bool,
+        #[arg(
+            short = 'F',
+            long = "fixed-strings",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["basic_regexp", "extended_regexp", "perl_regexp"]
+        )]
+        fixed_strings: bool,
+        #[arg(
+            short = 'P',
+            long = "perl-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
+        )]
+        perl_regexp: bool,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
         #[arg(long = "max-parents")]

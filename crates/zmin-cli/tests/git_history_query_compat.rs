@@ -695,6 +695,102 @@ fn log_grep_family_matches_stock_git() {
 }
 
 #[test]
+fn rev_list_grep_family_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000000 +0000",
+        "feat: Alpha\n\nbody apple banana",
+    );
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700000600 +0000",
+        "fix: beta\n\nbody BANANA carrot",
+    );
+    write_file(repo.path(), "a.txt", "three\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "a@example.test",
+        "1700001200 +0000",
+        "chore: gamma\n\nbody carrot delta",
+    );
+
+    for args in [
+        ["rev-list", "--grep=banana", "HEAD"].as_slice(),
+        ["rev-list", "--grep=banana", "-i", "HEAD"].as_slice(),
+        ["rev-list", "--grep=banana", "--regexp-ignore-case", "HEAD"].as_slice(),
+        ["rev-list", "--grep=banana", "--invert-grep", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--grep=banana",
+            "--grep=carrot",
+            "--all-match",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["rev-list", "--grep=banana", "--grep=carrot", "HEAD"].as_slice(),
+        ["rev-list", "--grep=BA[N]ANA", "-E", "HEAD"].as_slice(),
+        ["rev-list", "--grep=BA[N]ANA", "--extended-regexp", "HEAD"].as_slice(),
+        ["rev-list", "--grep=BA[N]ANA", "--basic-regexp", "HEAD"].as_slice(),
+        ["rev-list", "--grep=banana", "-F", "HEAD"].as_slice(),
+        ["rev-list", "--grep=banana", "--fixed-strings", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--grep=BA[N]ANA",
+            "--extended-regexp",
+            "--fixed-strings",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--grep=BA[N]ANA",
+            "--fixed-strings",
+            "--extended-regexp",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["rev-list", "--grep=ba.+na", "-P", "HEAD"].as_slice(),
+        ["rev-list", "--grep=ba.+na", "--perl-regexp", "HEAD"].as_slice(),
+        ["rev-list", "--grep=ba.+na", "-P", "-F", "HEAD"].as_slice(),
+        ["rev-list", "--grep=ba.+na", "-F", "-P", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--grep=ba.+na",
+            "--perl-regexp",
+            "--fixed-strings",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--grep=ba.+na",
+            "--fixed-strings",
+            "--perl-regexp",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_reflog_requires_walk_reflogs_and_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

@@ -9504,6 +9504,14 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) all: bool,
     pub(crate) author: Option<&'a str>,
     pub(crate) committer: Option<&'a str>,
+    pub(crate) grep: Vec<String>,
+    pub(crate) invert_grep: bool,
+    pub(crate) all_match: bool,
+    pub(crate) regexp_ignore_case: bool,
+    pub(crate) basic_regexp: bool,
+    pub(crate) extended_regexp: bool,
+    pub(crate) fixed_strings: bool,
+    pub(crate) perl_regexp: bool,
     pub(crate) count: bool,
     pub(crate) max_parents: Option<&'a str>,
     pub(crate) no_max_parents: bool,
@@ -9563,6 +9571,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         all,
         author,
         committer,
+        grep,
+        invert_grep,
+        all_match,
+        regexp_ignore_case,
+        basic_regexp,
+        extended_regexp,
+        fixed_strings,
+        perl_regexp,
         count,
         max_parents,
         no_max_parents,
@@ -9608,6 +9624,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
+    let grep_mode =
+        parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
     let (min_parents, max_parents) = parse_log_parent_bounds(
         min_parents,
         no_min_parents,
@@ -9624,6 +9642,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         || until.is_some()
         || author.is_some()
         || committer.is_some()
+        || !grep.is_empty()
         || min_parents.is_some()
         || max_parents.is_some()
         || ancestry_path
@@ -9787,8 +9806,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 log_signature_matches_pattern(
                     &entry.commit.author,
                     pattern,
-                    false,
-                    ShortlogPatternMode::Basic,
+                    regexp_ignore_case,
+                    grep_mode,
                 )
             });
         }
@@ -9797,9 +9816,22 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 log_signature_matches_pattern(
                     &entry.commit.committer,
                     pattern,
-                    false,
-                    ShortlogPatternMode::Basic,
+                    regexp_ignore_case,
+                    grep_mode,
                 )
+            });
+        }
+        if !grep.is_empty() {
+            commits.retain(|entry| {
+                shortlog_commit_matches_grep(
+                    &entry.commit.message,
+                    &grep,
+                    all_match,
+                    invert_grep,
+                    regexp_ignore_case,
+                    grep_mode,
+                )
+                .unwrap_or(false)
             });
         }
         if min_parents.is_some() || max_parents.is_some() {
