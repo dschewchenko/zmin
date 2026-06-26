@@ -7383,6 +7383,16 @@ struct RevParseOptions {
     glob: Vec<String>,
     exclude: Vec<String>,
     local_env_vars: bool,
+    flags: bool,
+    no_flags: bool,
+    revs_only: bool,
+    no_revs: bool,
+    default: Option<String>,
+    prefix: Option<String>,
+    sq: bool,
+    sq_quote: bool,
+    not: bool,
+    symbolic: bool,
     short: Option<usize>,
     abbrev_ref: Option<String>,
     verify: bool,
@@ -7433,6 +7443,23 @@ enum RevParseRefSelectionKind {
     Glob,
 }
 
+#[derive(Clone, Copy)]
+enum RevParseArgKind {
+    RevListFlag,
+    Revision,
+    Other,
+}
+
+struct RevParseOutputOptions<'a> {
+    default_arg: Option<&'a str>,
+    prefix: Option<&'a str>,
+    not: bool,
+    symbolic: bool,
+    include_revlist_flags: bool,
+    include_revisions: bool,
+    include_other: bool,
+}
+
 impl RevParsePathFormat {
     fn parse(value: &str) -> Result<Self> {
         match value {
@@ -7448,6 +7475,13 @@ impl RevParsePathFormat {
 
 fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
     let _quiet = options.quiet;
+    if options.sq_quote {
+        let index = usize::from(raw_args.first().is_some_and(|arg| arg == "rev-parse"));
+        if raw_args.get(index).is_some_and(|arg| arg == "--sq-quote") {
+            print_rev_parse_sq_quote(&raw_args[index + 1..]);
+            return Ok(());
+        }
+    }
     let ordered_modes = [
         options.all,
         !options.branches.is_empty(),
@@ -7456,6 +7490,16 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
         !options.glob.is_empty(),
         !options.exclude.is_empty(),
         options.local_env_vars,
+        options.flags,
+        options.no_flags,
+        options.revs_only,
+        options.no_revs,
+        options.default.is_some(),
+        options.prefix.is_some(),
+        options.sq,
+        options.sq_quote,
+        options.not,
+        options.symbolic,
         options.show_toplevel,
         options.show_prefix,
         options.show_cdup,
@@ -7577,6 +7621,23 @@ fn validate_rev_parse_repository_extensions(repo: &GitRepo) -> Result<()> {
     Ok(())
 }
 
+fn read_repo_local_config_value(
+    repo: &GitRepo,
+    section: &str,
+    subsection: &str,
+    key: &str,
+) -> Result<Option<String>> {
+    let path = local_config_path(repo).map_err(CliError::Io)?;
+    let entries = read_config_file(&path).map_err(CliError::Io)?;
+    Ok(entries
+        .into_iter()
+        .rev()
+        .find(|entry| {
+            entry.section == section && entry.subsection == subsection && entry.key == key
+        })
+        .map(|entry| entry.value))
+}
+
 fn rev_parse_repo_is_bare(repo: &GitRepo) -> Result<bool> {
     match read_config_value(repo, "core.bare")?.as_deref() {
         Some("true") => Ok(true),
@@ -7595,6 +7656,20 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
         .unwrap_or(RevParsePathFormat::Default);
     let mut repo_context = None;
     let mut pending_excludes = Vec::new();
+    let mut outputs = Vec::new();
+    let mut saw_end_of_options = false;
+    let include_revlist_flags = !options.no_flags && !options.no_revs;
+    let include_revisions = !options.no_revs;
+    let include_other = !options.revs_only && !options.flags;
+    let output_options = RevParseOutputOptions {
+        default_arg: options.default.as_deref(),
+        prefix: options.prefix.as_deref(),
+        not: options.not,
+        symbolic: options.symbolic,
+        include_revlist_flags,
+        include_revisions,
+        include_other,
+    };
     while index < raw_args.len() {
         let arg = &raw_args[index];
         match arg.as_str() {
@@ -7666,6 +7741,32 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 index += 1;
             }
             "--local-env-vars" => print_rev_parse_local_env_vars(),
+            "--flags" => {}
+            "--no-flags" => {}
+            "--revs-only" => {}
+            "--no-revs" => {}
+            "--sq" => {}
+            "--sq-quote" => {}
+            "--not" => {}
+            "--symbolic" => {}
+            "--default" => {
+                if raw_args.get(index + 1).is_none() {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `default' requires a value".into(),
+                    });
+                }
+                index += 1;
+            }
+            "--prefix" => {
+                if raw_args.get(index + 1).is_none() {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `prefix' requires a value".into(),
+                    });
+                }
+                index += 1;
+            }
             "--resolve-git-dir" => {
                 let Some(path) = raw_args.get(index + 1) else {
                     return Err(CliError::Fatal {
@@ -7673,28 +7774,25 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                         message: "option `resolve-git-dir' requires a value".into(),
                     });
                 };
-                println!(
-                    "{}",
-                    rev_parse_resolve_git_dir_display(Path::new(path), path_format)?
-                );
+                outputs.push(rev_parse_resolve_git_dir_display(
+                    Path::new(path),
+                    path_format,
+                )?);
                 index += 1;
             }
             "--git-dir" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!("{}", git_dir_display(&ctx.repo, path_format)?);
+                outputs.push(git_dir_display(&ctx.repo, path_format)?);
             }
-            "--absolute-git-dir" => println!(
-                "{}",
-                git_path_output(&canonical_or_absolute(
+            "--absolute-git-dir" => outputs.push(git_path_output(&canonical_or_absolute(
                     cached_rev_parse_repo_context(&mut repo_context)?
                         .repo
                         .git_dir
                         .clone()
-                ))
-            ),
+                ))),
             "--git-common-dir" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!("{}", git_common_dir_display(&ctx.repo, path_format)?);
+                outputs.push(git_common_dir_display(&ctx.repo, path_format)?);
             }
             "--git-path" => {
                 let Some(path) = raw_args.get(index + 1) else {
@@ -7704,33 +7802,34 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                     });
                 };
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!(
-                    "{}",
-                    git_path_display(&ctx.repo, std::path::Path::new(path), path_format)?
-                );
+                outputs.push(git_path_display(
+                    &ctx.repo,
+                    std::path::Path::new(path),
+                    path_format,
+                )?);
                 index += 1;
             }
             "--is-inside-git-dir" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!("{}", if ctx.inside_git_dir { "true" } else { "false" });
+                outputs.push(if ctx.inside_git_dir { "true" } else { "false" }.to_owned());
             }
             "--is-inside-work-tree" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!("{}", if ctx.inside_work_tree { "true" } else { "false" });
+                outputs.push(if ctx.inside_work_tree { "true" } else { "false" }.to_owned());
             }
             "--is-bare-repository" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!("{}", if ctx.bare { "true" } else { "false" });
+                outputs.push(if ctx.bare { "true" } else { "false" }.to_owned());
             }
             "--is-shallow-repository" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                println!(
-                    "{}",
+                outputs.push(
                     if ctx.repo.git_dir.join("shallow").is_file() {
                         "true"
                     } else {
                         "false"
                     }
+                    .to_owned(),
                 );
             }
             "--show-toplevel" => {
@@ -7741,40 +7840,37 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                         message: "this operation must be run in a work tree".into(),
                     });
                 }
-                println!(
-                    "{}",
-                    rev_parse_path_output(&ctx.repo.root, path_format, true)?
-                );
+                outputs.push(rev_parse_path_output(&ctx.repo.root, path_format, true)?);
             }
             "--show-prefix" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 if ctx.bare || ctx.inside_git_dir {
-                    println!();
+                    outputs.push(String::new());
                 } else {
-                    println!("{}", repo_relative_prefix(&ctx.repo)?);
+                    outputs.push(repo_relative_prefix(&ctx.repo)?);
                 }
             }
             "--show-cdup" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 if ctx.bare || ctx.inside_git_dir {
-                    println!();
+                    outputs.push(String::new());
                 } else {
-                    println!("{}", repo_relative_cdup(&ctx.repo)?);
+                    outputs.push(repo_relative_cdup(&ctx.repo)?);
                 }
             }
             "--show-superproject-working-tree" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 if let Some(path) = superproject_working_tree(&ctx.repo)? {
-                    println!("{}", git_path_output(&path));
+                    outputs.push(git_path_output(&path));
                 }
             }
             "--show-object-format" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                print_rev_parse_object_format(Some(&ctx.repo), "storage")?;
+                outputs.push(rev_parse_object_format_value(Some(&ctx.repo), "storage")?);
             }
             "--show-ref-format" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                print_rev_parse_ref_format(Some(&ctx.repo))?;
+                outputs.push(rev_parse_ref_format_value(Some(&ctx.repo))?);
             }
             "--verify" => {}
             "--symbolic-full-name" => {}
@@ -7811,6 +7907,12 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             "--short" => {}
             "--abbrev-ref" => {}
+            "--" => {
+                saw_end_of_options = true;
+                if output_options.include_other {
+                    outputs.push("--".to_owned());
+                }
+            }
             other if other.starts_with("--path-format=") => {
                 path_format = RevParsePathFormat::parse(
                     other
@@ -7835,13 +7937,13 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             other if other.starts_with("--show-object-format=") => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                print_rev_parse_object_format(
+                outputs.push(rev_parse_object_format_value(
                     Some(&ctx.repo),
                     other
                         .split_once('=')
                         .map(|(_, mode)| mode)
                         .unwrap_or("storage"),
-                )?;
+                )?);
             }
             other if other.starts_with("--branches=") => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
@@ -7901,37 +8003,192 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                     .split_once('=')
                     .map(|(_, value)| value)
                     .unwrap_or_default();
-                println!(
-                    "{}",
-                    rev_parse_resolve_git_dir_display(Path::new(path), path_format)?
-                );
+                outputs.push(rev_parse_resolve_git_dir_display(
+                    Path::new(path),
+                    path_format,
+                )?);
             }
             other if other.starts_with("--short=") || other.starts_with("--abbrev-ref=") => {}
-            other if other.starts_with('-') => {}
+            other if other.starts_with('-') => {
+                if saw_end_of_options && output_options.include_other {
+                    outputs.push(rev_parse_prefix_arg(output_options.prefix, other));
+                }
+            }
             rev => {
-                let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                if let Some(mode) = options.abbrev_ref.as_deref() {
-                    if mode != "loose" && mode != "strict" {
-                        return Err(CliError::Fatal {
-                            code: 128,
-                            message: format!("unknown mode for --abbrev-ref: {mode}"),
-                        });
+                if saw_end_of_options {
+                    if output_options.include_other {
+                        outputs.push(rev_parse_prefix_arg(output_options.prefix, rev));
                     }
-                    println!("{}", abbrev_ref_name(&ctx.repo, rev)?);
                 } else {
-                    print_rev_parse_object(
-                        &ctx.repo,
+                    let arg_kind =
+                        rev_parse_classify_arg(&mut repo_context, rev, options.verify, options)?;
+                    rev_parse_emit_arg(
+                        &mut repo_context,
+                        &mut outputs,
                         rev,
-                        options.short,
-                        options.verify,
-                        options.quiet,
+                        arg_kind,
+                        options,
+                        &output_options,
                     )?;
                 }
             }
         }
         index += 1;
     }
+    if outputs.is_empty() && let Some(default_arg) = output_options.default_arg {
+        let arg_kind = rev_parse_classify_arg(
+            &mut repo_context,
+            default_arg,
+            options.verify,
+            options,
+        )?;
+        rev_parse_emit_arg(
+            &mut repo_context,
+            &mut outputs,
+            default_arg,
+            arg_kind,
+            options,
+            &output_options,
+        )?;
+    }
+    print_rev_parse_outputs(&outputs, options.sq);
     Ok(())
+}
+
+fn rev_parse_classify_arg(
+    repo_context: &mut Option<RevParseRepoContext>,
+    arg: &str,
+    verify: bool,
+    options: &RevParseOptions,
+) -> Result<RevParseArgKind> {
+    if arg.starts_with('-') {
+        return Ok(RevParseArgKind::RevListFlag);
+    }
+    let objectish = if options.not {
+        arg.strip_prefix('^').unwrap_or(arg)
+    } else {
+        arg
+    };
+    let ctx = cached_rev_parse_repo_context(repo_context)?;
+    if options.symbolic_full_name && symbolic_full_ref_name(&ctx.repo, objectish)?.is_some() {
+        return Ok(RevParseArgKind::Revision);
+    }
+    if options.abbrev_ref.is_some() {
+        abbrev_ref_name(&ctx.repo, objectish)?;
+        return Ok(RevParseArgKind::Revision);
+    }
+    match resolve_objectish(&ctx.repo, objectish) {
+        Ok(_) => Ok(RevParseArgKind::Revision),
+        Err(error) => {
+            if verify {
+                Err(CliError::Io(error))
+            } else {
+                Ok(RevParseArgKind::Other)
+            }
+        }
+    }
+}
+
+fn rev_parse_emit_arg(
+    repo_context: &mut Option<RevParseRepoContext>,
+    outputs: &mut Vec<String>,
+    arg: &str,
+    arg_kind: RevParseArgKind,
+    options: &RevParseOptions,
+    output_options: &RevParseOutputOptions<'_>,
+) -> Result<()> {
+    match arg_kind {
+        RevParseArgKind::RevListFlag => {
+            if output_options.include_revlist_flags {
+                outputs.push(arg.to_owned());
+            }
+        }
+        RevParseArgKind::Other => {
+            if output_options.include_other {
+                outputs.push(rev_parse_prefix_arg(output_options.prefix, arg));
+            }
+        }
+        RevParseArgKind::Revision => {
+            if !output_options.include_revisions {
+                return Ok(());
+            }
+            let ctx = cached_rev_parse_repo_context(repo_context)?;
+            if let Some(mode) = options.abbrev_ref.as_deref() {
+                if mode != "loose" && mode != "strict" {
+                    return Err(CliError::Fatal {
+                        code: 128,
+                        message: format!("unknown mode for --abbrev-ref: {mode}"),
+                    });
+                }
+                outputs.push(abbrev_ref_name(&ctx.repo, arg)?);
+            } else if options.symbolic_full_name {
+                if let Some(ref_name) = symbolic_full_ref_name(&ctx.repo, arg)? {
+                    outputs.push(ref_name);
+                }
+            } else if output_options.symbolic {
+                outputs.push(arg.to_owned());
+            } else {
+                let value = rev_parse_object_value(
+                    &ctx.repo,
+                    arg,
+                    options.short,
+                    options.verify,
+                    options.quiet,
+                    output_options.not,
+                )?;
+                if let Some(value) = value {
+                    outputs.push(value);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn rev_parse_prefix_arg(prefix: Option<&str>, arg: &str) -> String {
+    let Some(prefix) = prefix else {
+        return arg.to_owned();
+    };
+    if arg == "--" || Path::new(arg).is_absolute() {
+        return arg.to_owned();
+    }
+    format!("{prefix}{arg}")
+}
+
+fn print_rev_parse_outputs(outputs: &[String], sq: bool) {
+    if sq {
+        print!("{}", shell_quote_join(outputs, false, true));
+    } else {
+        for output in outputs {
+            println!("{output}");
+        }
+    }
+}
+
+fn print_rev_parse_sq_quote(args: &[String]) {
+    print!("{}", shell_quote_join(args, true, false));
+    println!();
+}
+
+fn shell_quote_join(values: &[impl AsRef<str>], leading_space: bool, trailing_space: bool) -> String {
+    let mut rendered = String::new();
+    let mut first = true;
+    for value in values {
+        if !first || leading_space {
+            rendered.push(' ');
+        }
+        first = false;
+        rendered.push_str(&shell_single_quote(value.as_ref()));
+    }
+    if trailing_space && !values.is_empty() {
+        rendered.push(' ');
+    }
+    rendered
+}
+
+fn shell_single_quote(value: &str) -> String {
+    let escaped = value.replace('\'', "'\\''");
+    format!("'{escaped}'")
 }
 
 fn rev_parse_has_glob_magic(value: &str) -> bool {
@@ -8083,16 +8340,16 @@ fn print_rev_parse_ref_selection(
 }
 
 fn print_rev_parse_object_format(repo: Option<&GitRepo>, mode: &str) -> Result<()> {
+    println!("{}", rev_parse_object_format_value(repo, mode)?);
+    Ok(())
+}
+
+fn rev_parse_object_format_value(repo: Option<&GitRepo>, mode: &str) -> Result<String> {
     match mode {
-        "storage" | "input" | "output" => {
-            println!(
-                "{}",
-                repo.map(repo_object_format)
-                    .transpose()?
-                    .unwrap_or("sha1".to_owned())
-            );
-            Ok(())
-        }
+        "storage" | "input" | "output" => Ok(repo
+            .map(repo_object_format)
+            .transpose()?
+            .unwrap_or("sha1".to_owned())),
         _ => Err(CliError::Fatal {
             code: 128,
             message: format!("unknown mode for --show-object-format: {mode}"),
@@ -8101,13 +8358,48 @@ fn print_rev_parse_object_format(repo: Option<&GitRepo>, mode: &str) -> Result<(
 }
 
 fn print_rev_parse_ref_format(repo: Option<&GitRepo>) -> Result<()> {
-    println!(
-        "{}",
-        repo.map(repo_ref_format)
-            .transpose()?
-            .unwrap_or("files".to_owned())
-    );
+    println!("{}", rev_parse_ref_format_value(repo)?);
     Ok(())
+}
+
+fn rev_parse_ref_format_value(repo: Option<&GitRepo>) -> Result<String> {
+    Ok(repo
+        .map(repo_ref_format)
+        .transpose()?
+        .unwrap_or("files".to_owned()))
+}
+
+fn rev_parse_object_value(
+    repo: &GitRepo,
+    rev: &str,
+    short: Option<usize>,
+    verify: bool,
+    quiet: bool,
+    invert_not: bool,
+) -> Result<Option<String>> {
+    let objectish = if invert_not {
+        rev.strip_prefix('^').unwrap_or(rev)
+    } else {
+        rev
+    };
+    let resolved = resolve_objectish(repo, objectish).map_err(CliError::Io)?;
+    let mut output = if let Some(length) = short {
+        short_object_id_len(&resolved, length.max(1))
+    } else {
+        resolved.to_hex()
+    };
+    if invert_not {
+        if rev.starts_with('^') {
+            output = output.strip_prefix('^').unwrap_or(&output).to_owned();
+        } else {
+            output = format!("^{output}");
+        }
+    }
+    if verify || !quiet {
+        Ok(Some(output))
+    } else {
+        Ok(None)
+    }
 }
 
 fn parse_rev_parse_date(value: &str) -> Result<i64> {
@@ -8214,9 +8506,9 @@ fn print_rev_parse_bisect_refs(repo: &GitRepo) -> Result<()> {
 }
 
 fn repo_object_format(repo: &GitRepo) -> Result<String> {
-    let version =
-        read_config_value(repo, "core.repositoryformatversion")?.unwrap_or_else(|| "0".to_owned());
-    let format = read_config_value(repo, "extensions.objectFormat")?;
+    let version = read_repo_local_config_value(repo, "core", "", "repositoryformatversion")?
+        .unwrap_or_else(|| "0".to_owned());
+    let format = read_repo_local_config_value(repo, "extensions", "", "objectformat")?;
     if version == "0" && format.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -8227,9 +8519,9 @@ fn repo_object_format(repo: &GitRepo) -> Result<String> {
 }
 
 fn repo_ref_format(repo: &GitRepo) -> Result<String> {
-    let version =
-        read_config_value(repo, "core.repositoryformatversion")?.unwrap_or_else(|| "0".to_owned());
-    let format = read_config_value(repo, "extensions.refStorage")?;
+    let version = read_repo_local_config_value(repo, "core", "", "repositoryformatversion")?
+        .unwrap_or_else(|| "0".to_owned());
+    let format = read_repo_local_config_value(repo, "extensions", "", "refstorage")?;
     if let Some(value) = format.as_deref()
         && !matches!(value, "files" | "reftable")
     {
@@ -8451,6 +8743,16 @@ pub(crate) fn rev_parse_command(
     glob: Vec<String>,
     exclude: Vec<String>,
     local_env_vars: bool,
+    flags: bool,
+    no_flags: bool,
+    revs_only: bool,
+    no_revs: bool,
+    default: Option<String>,
+    prefix: Option<String>,
+    sq: bool,
+    sq_quote: bool,
+    not: bool,
+    symbolic: bool,
     short: Option<usize>,
     abbrev_ref: Option<String>,
     verify: bool,
@@ -8487,6 +8789,16 @@ pub(crate) fn rev_parse_command(
             glob,
             exclude,
             local_env_vars,
+            flags,
+            no_flags,
+            revs_only,
+            no_revs,
+            default,
+            prefix,
+            sq,
+            sq_quote,
+            not,
+            symbolic,
             short,
             abbrev_ref,
             verify,

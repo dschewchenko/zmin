@@ -817,6 +817,59 @@ fn rev_parse_local_env_vars_and_resolve_git_dir_outside_repo_match_stock_git() {
 }
 
 #[test]
+fn rev_parse_filter_prefix_and_symbolic_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let repo = dir.path().join("repo");
+    git(
+        dir.path(),
+        ["init", "-b", "main", repo.to_str().expect("repo path")],
+    );
+    configure_identity(&repo);
+    fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+    git(&repo, ["add", "-A"]);
+    git_with_env(&repo, ["commit", "-m", "base"]);
+    fs::create_dir_all(repo.join("sub")).expect("create subdir");
+
+    for args in [
+        ["rev-parse", "--flags", "HEAD", "--", "x", "-n"].as_slice(),
+        ["rev-parse", "--no-flags", "HEAD", "--", "x", "-n"].as_slice(),
+        ["rev-parse", "--revs-only", "HEAD", "--", "x", "-n"].as_slice(),
+        ["rev-parse", "--no-revs", "HEAD", "--", "x", "-n"].as_slice(),
+        ["rev-parse", "--default", "HEAD"].as_slice(),
+        ["rev-parse", "--default", "HEAD", "--verify"].as_slice(),
+        ["rev-parse", "--not", "HEAD", "^HEAD", "refs/heads/main"].as_slice(),
+        ["rev-parse", "--symbolic", "HEAD", "refs/heads/main", "main"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), &repo, args, "zmin"),
+            command_output("git", &repo, args, "git"),
+            "rev-parse filter/symbolic mismatch for {args:?}"
+        );
+    }
+
+    for args in [
+        ["rev-parse", "--prefix", "sub/", "--", "a.txt", "../b.txt"].as_slice(),
+        ["rev-parse", "--sq", "--prefix", "sub/", "--", "a.txt", "../b.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), &repo.join("sub"), args, "zmin"),
+            command_output("git", &repo.join("sub"), args, "git"),
+            "rev-parse prefix/sq mismatch for {args:?}"
+        );
+    }
+}
+
+#[test]
+fn rev_parse_sq_quote_mode_matches_stock_git_outside_repo() {
+    let dir = TempDir::new().expect("temp dir");
+    let args = ["rev-parse", "--sq-quote", "a b", "c'd"];
+    assert_eq!(
+        command_output(zmin_bin(), dir.path(), &args, "zmin"),
+        command_output("git", dir.path(), &args, "git")
+    );
+}
+
+#[test]
 fn global_config_option_overrides_runtime_config_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let zmin_repo = dir.path().join("zmin-repo");

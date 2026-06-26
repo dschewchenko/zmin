@@ -647,6 +647,7 @@ pub enum Command {
         )]
         perl_regexp: bool,
         #[arg(allow_hyphen_values = true)]
+        #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },
     #[command(disable_help_flag = true)]
@@ -3556,6 +3557,26 @@ pub enum Command {
         exclude: Vec<String>,
         #[arg(long = "local-env-vars", action = ArgAction::SetTrue)]
         local_env_vars: bool,
+        #[arg(long = "flags", action = ArgAction::SetTrue)]
+        flags: bool,
+        #[arg(long = "no-flags", action = ArgAction::SetTrue)]
+        no_flags: bool,
+        #[arg(long = "revs-only", action = ArgAction::SetTrue)]
+        revs_only: bool,
+        #[arg(long = "no-revs", action = ArgAction::SetTrue)]
+        no_revs: bool,
+        #[arg(long = "default")]
+        default: Option<String>,
+        #[arg(long = "prefix")]
+        prefix: Option<String>,
+        #[arg(long = "sq", action = ArgAction::SetTrue)]
+        sq: bool,
+        #[arg(long = "sq-quote", action = ArgAction::SetTrue)]
+        sq_quote: bool,
+        #[arg(long = "not", action = ArgAction::SetTrue)]
+        not: bool,
+        #[arg(long = "symbolic", action = ArgAction::SetTrue)]
+        symbolic: bool,
         #[arg(
             long = "short",
             num_args = 0..=1,

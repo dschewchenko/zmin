@@ -300,26 +300,28 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git rev-parse` ref-selection and
-discovery family expansion. Zmin now matches stock Git on helper-free local
-`rev-parse --all`, `--branches[=<pattern>]`, `--tags[=<pattern>]`,
-`--remotes[=<pattern>]`, `--glob=<pattern>`, next-selector `--exclude`,
-`--local-env-vars`, and `--resolve-git-dir <path>` lanes, including outside
-repository behavior for `--local-env-vars` and invalid `--resolve-git-dir .`.
+The latest completed slice is a helper-free `git rev-parse` parse/filter and
+quoting family expansion. Zmin now matches stock Git on helper-free local
+`rev-parse --flags`, `--no-flags`, `--revs-only`, `--no-revs`, `--default`,
+`--prefix <arg>`, `--not`, `--symbolic`, `--sq`, and outside-repository
+`--sq-quote`, while also fixing the old `--show-ref-format` invalid
+`extensions.refStorage` stderr shape so the focused `rev_parse_` oracle test
+target is now fully green.
 
 Current counts are `105/151` complete command matrices,
 `1515/3156` complete documented option pairs,
-`1532/3156` represented documented option pairs, `5547` written rows,
-`4828` verified rows, `12` open rows, and `704` invalid-input rows.
-`rev-parse` now sits at `33/51` represented documented option pairs with
-`91/91` classified rows, `83` stock-matching rows, `8` invalid-input rows,
+`1542/3156` represented documented option pairs, `5558` written rows,
+`4839` verified rows, `12` open rows, and `704` invalid-input rows.
+`rev-parse` now sits at `43/51` represented documented option pairs with
+`102/102` classified rows, `94` stock-matching rows, `8` invalid-input rows,
 and `0` exact-open written rows on the current modeled surface. This batch
 raised represented coverage and verified rows, but did not yet promote new
 reviewed-complete documented option pairs. The next bounded high-throughput
-follow-up should either continue the remaining helper-free `rev-parse`
-parse/quoting tail if it still clusters densely, or return to
-`docs/cli/census/remaining_to_fix_or_verify.tsv` for the next larger safe
-helper-free family instead of taking a one-row micro-slice.
+follow-up can stay on the remaining helper-free `rev-parse` tail, which is
+now mostly parseopt/output/disambiguation expansion (`--parseopt`,
+`--keep-dashdash`, `--stop-at-non-option`, `--stuck-long`,
+`--output-object-format`, `--disambiguate`, `--exclude-hidden`,
+`--shared-index-path`), before moving to a new helper-free family.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

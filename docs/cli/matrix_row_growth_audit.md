@@ -1149,6 +1149,20 @@ represented documented option pairs. Rust behavior changes are expected in
 `rev-parse` raw-argument ordered handling and lazy repository loading.
 Actual delta matched.
 
+As of 2026-06-26 the next batch is a helper-free `rev-parse` parse/filter and
+quoting family expansion. The selected rows add exact stock-Git local
+evidence for `--flags`, `--no-flags`, `--revs-only`, `--no-revs`,
+`--default`, `--prefix <arg>`, `--not`, `--symbolic`, `--sq`, and
+outside-repository `--sq-quote`, while also correcting the old
+`--show-ref-format` invalid `extensions.refStorage` stderr shape so the
+focused `rev_parse_` test target becomes fully green again. Expected delta is
+`+11` matrix rows, `+0` complete documented option pairs, `+0` complete
+command matrices, `+11` verified rows, `+0` invalid-input rows, and `+10`
+represented documented option pairs. Rust behavior changes are expected in
+`rev-parse` raw-argument classification, shell quoting, default/prefix
+handling, and direct local config reads for ref/object format reporting.
+Actual delta matched.
+
 As of 2026-06-25 the next batch is a zero-code reviewed-complete documented
 option promotion cluster for the represented helper-free `diff-files`
 surface. The selected rows do not add new behavior evidence; they promote
