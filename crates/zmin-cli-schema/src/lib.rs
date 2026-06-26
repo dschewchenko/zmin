@@ -1014,6 +1014,8 @@ pub enum Command {
         index_version: Option<String>,
         #[arg(long = "show-index-version", action = ArgAction::Count)]
         show_index_version: u8,
+        #[arg(long = "split-index", action = ArgAction::Count)]
+        split_index: u8,
         #[arg(long = "no-split-index", action = ArgAction::Count)]
         no_split_index: u8,
         #[arg(long = "untracked-cache", action = ArgAction::Count)]

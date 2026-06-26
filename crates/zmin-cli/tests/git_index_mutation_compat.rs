@@ -249,6 +249,8 @@ fn normalized_index_extensions(repo: &std::path::Path) -> Vec<(String, Vec<u8>)>
         let mut normalized = body.to_vec();
         if signature == b"FSMN" && normalized.len() >= 23 {
             normalized[4..23].fill(b'0');
+        } else if signature == b"link" {
+            normalized.clear();
         } else if signature == b"UNTR" {
             normalized[0] = 0;
             if let Some(prefix_end) = normalized.windows(9).position(|window| window == b"Location ") {
@@ -282,6 +284,19 @@ fn normalized_index_extensions(repo: &std::path::Path) -> Vec<(String, Vec<u8>)>
         cursor += 8 + len;
     }
     extensions
+}
+
+fn sharedindex_file_count(repo: &std::path::Path) -> usize {
+    fs::read_dir(repo.join(".git"))
+        .expect("read git dir")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with("sharedindex."))
+        })
+        .count()
 }
 
 #[cfg(unix)]
@@ -2061,6 +2076,40 @@ fn update_index_helper_extensions_match_stock_git_on_extensionless_index() {
             git(git_repo.path(), ["status", "--porcelain=v1"])
         );
     }
+}
+
+#[test]
+fn update_index_split_index_matches_stock_git_on_extensionless_index() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--split-index"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--split-index"],
+            "git",
+        )
+    );
+    assert_eq!(
+        normalized_index_extensions(zmin_repo.path()),
+        normalized_index_extensions(git_repo.path())
+    );
+    assert_eq!(sharedindex_file_count(zmin_repo.path()), 1);
+    assert_eq!(sharedindex_file_count(git_repo.path()), 1);
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
 }
 
 #[test]

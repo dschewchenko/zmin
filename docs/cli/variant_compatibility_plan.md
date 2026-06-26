@@ -21,6 +21,43 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-26 the latest completed batch is the final helper-like
+`git update-index --split-index` documented-option tail on the modeled
+single-entry local lane. The selected change added one exact stock-Git row for
+`update-index --split-index`, then promoted that represented documented option
+into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
+
+The batch fixed one remaining concrete runtime gap on the update-index path:
+
+- Zmin now writes a stock-compatible split index for the modeled lane by
+  creating `sharedindex.*`, emitting the lowercase `link` extension with the
+  expected bitmap payload, stripping the main-index placeholder entry name like
+  stock Git, and narrowly reading that single-entry split-index shape back
+  through the shared base so follow-up `ls-files` and `status` behavior stays
+  stock-compatible where modeled
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1919 / 3212`
+- represented documented command-option pairs: `1927 / 3212`
+- matrix rows: `5984`
+- verified rows: `5210`
+- invalid-input rows: `738`
+- open or partial exact rows: `12`
+
+Per-command position on the active shared surface:
+
+- `update-index`: `38 / 38` reviewed-complete documented option pairs, `69`
+  written rows, `69` classified rows, `61` stock-matching rows, `8`
+  invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up should move off `update-index` and back
+to the next dense represented helper-free family outside it. The best default
+queue is another reviewed-complete promotion batch on the shared history-query
+surface (`log` / `rev-list`) or whichever represented command cluster now has
+the largest safe zero-code or low-code closure.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 helper-extension documented-option expansion on the current extensionless local
 lane. The selected change added five exact stock-Git rows for

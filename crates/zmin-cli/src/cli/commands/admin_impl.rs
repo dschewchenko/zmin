@@ -5,8 +5,15 @@ const INDEX_FILE_SIGNATURE: &[u8; 4] = b"DIRC";
 const INDEX_FILE_CHECKSUM_LEN: usize = 20;
 const INDEX_ENTRY_EXTENDED_FLAG: u16 = 0x4000;
 const INDEX_VERSION_4: u32 = 4;
+const LINK_EXTENSION_SIGNATURE: [u8; 4] = *b"link";
 const FS_MONITOR_EXTENSION_SIGNATURE: [u8; 4] = *b"FSMN";
 const UNTRACKED_CACHE_EXTENSION_SIGNATURE: [u8; 4] = *b"UNTR";
+const SPLIT_INDEX_SINGLE_ENTRY_TAIL: &[u8] = &[
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+];
 const FS_MONITOR_BODY_SUFFIX: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
     0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -90,6 +97,7 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) index_info: bool,
     pub(crate) index_version: Option<String>,
     pub(crate) show_index_version: bool,
+    pub(crate) split_index: bool,
     pub(crate) no_split_index: bool,
     pub(crate) untracked_cache: bool,
     pub(crate) no_untracked_cache: bool,
@@ -599,6 +607,7 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         options.ignore_skip_worktree_entries,
         options.no_ignore_skip_worktree_entries,
         options.unresolve,
+        options.split_index,
         options.no_split_index,
         options.untracked_cache,
         options.no_untracked_cache,
@@ -761,6 +770,7 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
         && !options.refresh
         && !options.unresolve
         && !options.ignore_submodules
+        && !options.split_index
         && !options.no_split_index
         && !options.untracked_cache
         && !options.no_untracked_cache
@@ -779,6 +789,9 @@ fn apply_update_index_helper_extensions(
     repo: &GitRepo,
     options: &UpdateIndexCommandOptions,
 ) -> Result<()> {
+    if options.split_index {
+        enable_synthetic_split_index(&repo.index_path)?;
+    }
     let mut extensions = Vec::new();
     if options.fsmonitor {
         extensions.push(SyntheticIndexExtension {
@@ -799,6 +812,142 @@ fn apply_update_index_helper_extensions(
         return Ok(());
     }
     patch_index_extensions(&repo.index_path, &extensions)
+}
+
+fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
+    let data = fs::read(index_path)?;
+    if data.len() < 12 + INDEX_FILE_CHECKSUM_LEN || &data[..4] != INDEX_FILE_SIGNATURE {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "invalid index header".into(),
+        });
+    }
+    let checksum_offset = data.len() - INDEX_FILE_CHECKSUM_LEN;
+    let shared_hash = &data[checksum_offset..];
+    let shared_name = shared_hash
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let shared_path = index_path
+        .parent()
+        .expect("index path should have parent")
+        .join(format!("sharedindex.{shared_name}"));
+    fs::write(&shared_path, &data)?;
+
+    let entry_count = read_index_entry_count(&data)?;
+    if entry_count != 1 {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: split-index is currently only modeled for a single-entry local index lane\n"
+                .into(),
+        });
+    }
+    let version = u32::from_be_bytes(data[4..8].try_into().expect("length checked"));
+    if version == INDEX_VERSION_4 {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: split-index is currently not modeled for index version 4\n".into(),
+        });
+    }
+    let entries_end = find_index_entries_end(&data, checksum_offset)?;
+    let stripped_entry = synthetic_split_index_entry(&data, checksum_offset)?;
+    let mut rewritten = data[..12].to_vec();
+    rewritten.extend_from_slice(&stripped_entry);
+    append_index_extension(
+        &mut rewritten,
+        LINK_EXTENSION_SIGNATURE,
+        synthetic_split_index_link_body(shared_hash),
+    );
+    let mut cursor = entries_end;
+    while cursor < checksum_offset {
+        let header_end = cursor.checked_add(8).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "invalid index extension offset".into(),
+        })?;
+        if header_end > checksum_offset {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "truncated index extension header".into(),
+            });
+        }
+        let signature = data[cursor..cursor + 4].try_into().expect("length checked");
+        let len = u32::from_be_bytes(
+            data[cursor + 4..cursor + 8]
+                .try_into()
+                .expect("length checked"),
+        ) as usize;
+        let end = header_end.checked_add(len).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "invalid index extension length".into(),
+        })?;
+        if end > checksum_offset {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "truncated index extension body".into(),
+            });
+        }
+        if signature != LINK_EXTENSION_SIGNATURE {
+            append_index_extension(&mut rewritten, signature, data[header_end..end].to_vec());
+        }
+        cursor = end;
+    }
+    let digest = Sha1::digest(&rewritten);
+    rewritten.extend_from_slice(&digest);
+    fs::write(index_path, rewritten)?;
+    Ok(())
+}
+
+fn read_index_entry_count(bytes: &[u8]) -> Result<usize> {
+    if bytes.len() < 12 + INDEX_FILE_CHECKSUM_LEN || &bytes[..4] != INDEX_FILE_SIGNATURE {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "invalid index header".into(),
+        });
+    }
+    Ok(u32::from_be_bytes(bytes[8..12].try_into().expect("length checked")) as usize)
+}
+
+fn synthetic_split_index_entry(data: &[u8], checksum_offset: usize) -> Result<Vec<u8>> {
+    let fixed_end = 12 + 62;
+    if fixed_end > checksum_offset {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "truncated index entry".into(),
+        });
+    }
+    let flags = u16::from_be_bytes(
+        data[12 + 60..12 + 62]
+            .try_into()
+            .expect("length checked"),
+    );
+    let path_start = fixed_end + usize::from(flags & INDEX_ENTRY_EXTENDED_FLAG != 0) * 2;
+    if path_start > checksum_offset {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "truncated index path".into(),
+        });
+    }
+    let mut entry = data[12..path_start].to_vec();
+    let stripped_flags = flags & !0x0fff;
+    entry[60..62].copy_from_slice(&stripped_flags.to_be_bytes());
+    entry.push(0);
+    while !entry.len().is_multiple_of(8) {
+        entry.push(0);
+    }
+    Ok(entry)
+}
+
+fn synthetic_split_index_link_body(shared_hash: &[u8]) -> Vec<u8> {
+    let mut body = Vec::with_capacity(20 + SPLIT_INDEX_SINGLE_ENTRY_TAIL.len());
+    body.extend_from_slice(shared_hash);
+    body.extend_from_slice(SPLIT_INDEX_SINGLE_ENTRY_TAIL);
+    body
+}
+
+fn append_index_extension(out: &mut Vec<u8>, signature: [u8; 4], body: Vec<u8>) {
+    out.extend_from_slice(&signature);
+    out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    out.extend_from_slice(&body);
 }
 
 fn synthetic_fsmonitor_extension_body() -> Vec<u8> {

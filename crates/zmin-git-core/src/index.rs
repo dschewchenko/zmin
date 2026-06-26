@@ -24,6 +24,13 @@ const INDEX_ENTRY_SKIP_WORKTREE: u8 = 0b010;
 const INDEX_ENTRY_INTENT_TO_ADD: u8 = 0b100;
 const RESOLVE_UNDO_EXTENSION: &[u8; 4] = b"REUC";
 const SPARSE_DIRECTORY_EXTENSION: &[u8; 4] = b"sdir";
+const SPLIT_INDEX_LINK_EXTENSION: &[u8; 4] = b"link";
+const SPLIT_INDEX_SINGLE_ENTRY_TAIL: &[u8] = &[
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+];
 const INDEX_ENTRY_INITIAL_CAPACITY_LIMIT: usize = 8192;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -830,6 +837,7 @@ fn replace_with_lock(lock_path: &Path, path: &Path) -> io::Result<()> {
 }
 
 pub fn read_index(path: impl AsRef<Path>) -> io::Result<GitIndex> {
+    let path = path.as_ref();
     let file = fs::File::open(path)?;
     if file.metadata()?.len() == 0 {
         return decode_index(&[]);
@@ -838,7 +846,110 @@ pub fn read_index(path: impl AsRef<Path>) -> io::Result<GitIndex> {
     // updates replace the file through index.lock, so readers see one immutable
     // snapshot for the lifetime of this parse.
     let bytes = unsafe { Mmap::map(&file)? };
+    if let Some(shared_path) = supported_single_entry_split_index_shared_path(path, &bytes)? {
+        return read_index(shared_path);
+    }
     decode_index(&bytes)
+}
+
+fn supported_single_entry_split_index_shared_path(
+    index_path: &Path,
+    bytes: &[u8],
+) -> io::Result<Option<PathBuf>> {
+    let (version, count, checksum_offset) = decode_index_header(bytes)?;
+    if !matches!(version, INDEX_VERSION_V2 | INDEX_VERSION_V3) || count != 1 {
+        return Ok(None);
+    }
+    let entry_start = 12usize;
+    let fixed_end = entry_start + ENTRY_FIXED_LEN;
+    if fixed_end > checksum_offset {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index entry is truncated",
+        ));
+    }
+    let flags = read_u16(bytes, entry_start + 60)?;
+    let path_start = fixed_end + usize::from(flags & ENTRY_FLAG_EXTENDED != 0) * 2;
+    if path_start >= checksum_offset {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index path is truncated",
+        ));
+    }
+    if bytes[path_start] != 0 || flags & 0x0fff != 0 {
+        return Ok(None);
+    }
+    let next = aligned_entry_end(path_start + 1, entry_start);
+    if next > checksum_offset {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "git index entry padding is truncated",
+        ));
+    }
+    let mut cursor = next;
+    let mut shared_hash = None;
+    while cursor < checksum_offset {
+        let header_end = cursor.checked_add(8).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "git index extension offset overflow",
+            )
+        })?;
+        if header_end > checksum_offset {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "git index extension header is truncated",
+            ));
+        }
+        let signature = &bytes[cursor..cursor + 4];
+        let len = read_u32(bytes, cursor + 4)? as usize;
+        let end = header_end.checked_add(len).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "git index extension length overflow",
+            )
+        })?;
+        if end > checksum_offset {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "git index extension body is truncated",
+            ));
+        }
+        if signature == SPLIT_INDEX_LINK_EXTENSION {
+            let body = &bytes[header_end..end];
+            if body.len() != CHECKSUM_LEN + SPLIT_INDEX_SINGLE_ENTRY_TAIL.len()
+                || &body[CHECKSUM_LEN..] != SPLIT_INDEX_SINGLE_ENTRY_TAIL
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "index uses unsupported split-index shape",
+                ));
+            }
+            shared_hash = Some(body[..CHECKSUM_LEN].to_vec());
+        }
+        cursor = end;
+    }
+    let Some(shared_hash) = shared_hash else {
+        return Ok(None);
+    };
+    let shared_name = shared_hash
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(Some(
+        index_path
+            .parent()
+            .expect("index path should have parent")
+            .join(format!("sharedindex.{shared_name}")),
+    ))
+}
+
+fn aligned_entry_end(next: usize, start: usize) -> usize {
+    let mut aligned = next;
+    while !(aligned - start).is_multiple_of(8) {
+        aligned += 1;
+    }
+    aligned
 }
 
 fn decode_index(bytes: &[u8]) -> io::Result<GitIndex> {
@@ -914,7 +1025,10 @@ fn decode_index_extensions(
             ));
         }
         let signature = &bytes[cursor..cursor + 4];
-        if signature.iter().any(u8::is_ascii_lowercase) && signature != SPARSE_DIRECTORY_EXTENSION {
+        if signature.iter().any(u8::is_ascii_lowercase)
+            && signature != SPARSE_DIRECTORY_EXTENSION
+            && signature != SPLIT_INDEX_LINK_EXTENSION
+        {
             let extension = index_extension_name(signature);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
