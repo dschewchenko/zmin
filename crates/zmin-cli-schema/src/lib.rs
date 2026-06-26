@@ -992,10 +992,16 @@ pub enum Command {
         refresh: u8,
         #[arg(long = "really-refresh", action = ArgAction::Count)]
         really_refresh: u8,
+        #[arg(long = "ignore-submodules", action = ArgAction::Count)]
+        ignore_submodules: u8,
         #[arg(long = "ignore-missing", action = ArgAction::Count)]
         ignore_missing: u8,
         #[arg(long = "unmerged", action = ArgAction::Count)]
         unmerged: u8,
+        #[arg(long = "ignore-skip-worktree-entries", action = ArgAction::Count)]
+        ignore_skip_worktree_entries: u8,
+        #[arg(long = "no-ignore-skip-worktree-entries", action = ArgAction::Count)]
+        no_ignore_skip_worktree_entries: u8,
         #[arg(long = "unresolve", action = ArgAction::Count)]
         unresolve: u8,
         #[arg(long = "info-only", action = ArgAction::Count)]

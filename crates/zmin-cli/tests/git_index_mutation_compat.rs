@@ -141,6 +141,57 @@ fn resolved_conflict_repos() -> (TempDir, TempDir) {
     (git_repo, zmin_repo)
 }
 
+fn missing_skip_worktree_repos() -> (TempDir, TempDir) {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+    git(git_repo.path(), ["update-index", "--skip-worktree", "a.txt"]);
+    run_zmin(zmin_repo.path(), ["update-index", "--skip-worktree", "a.txt"]);
+    fs::remove_file(git_repo.path().join("a.txt")).expect("remove git skip-worktree file");
+    fs::remove_file(zmin_repo.path().join("a.txt")).expect("remove zmin skip-worktree file");
+    (git_repo, zmin_repo)
+}
+
+fn dirty_submodule_repos() -> (TempDir, TempDir) {
+    fn create(repo: &TempDir) {
+        let root = repo.path();
+        let child = root.join("_child_source");
+        fs::create_dir_all(&child).expect("create child dir");
+        git(child.as_path(), ["init"]);
+        configure_identity(child.as_path());
+        write_file(child.as_path(), "f.txt", "sub\n");
+        git(child.as_path(), ["add", "f.txt"]);
+        git_with_env(child.as_path(), ["commit", "-m", "sub"]);
+
+        git(root, ["init"]);
+        configure_identity(root);
+        write_file(root, "top.txt", "base\n");
+        git(root, ["add", "top.txt"]);
+        git_with_env(root, ["commit", "-m", "base"]);
+        command_output_with_env(
+            "git",
+            root,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "./_child_source",
+                "submod",
+            ],
+            &[],
+            "git",
+        );
+        git_with_env(root, ["commit", "-am", "add-submodule"]);
+        write_file(root.join("submod").as_path(), "f.txt", "sub\ndirty\n");
+    }
+
+    let git_root = TempDir::new().expect("git tempdir");
+    let zmin_root = TempDir::new().expect("zmin tempdir");
+    create(&git_root);
+    create(&zmin_root);
+    (git_root, zmin_root)
+}
+
 #[cfg(unix)]
 fn make_executable(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -1733,6 +1784,87 @@ fn update_index_unresolve_matches_stock_git() {
     assert_eq!(
         git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
         git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+    );
+}
+
+#[test]
+fn update_index_ignore_submodules_and_skip_worktree_remove_match_stock_git() {
+    let (git_repo, zmin_repo) = dirty_submodule_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--refresh", "--ignore-submodules", "submod"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--refresh", "--ignore-submodules", "submod"],
+            "git",
+        )
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let (git_repo, zmin_repo) = missing_skip_worktree_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "--remove", "--ignore-skip-worktree-entries", "a.txt"],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &["update-index", "--remove", "--ignore-skip-worktree-entries", "a.txt"],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
+    );
+
+    let (git_repo, zmin_repo) = missing_skip_worktree_repos();
+    assert_eq!(
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &[
+                "update-index",
+                "--remove",
+                "--no-ignore-skip-worktree-entries",
+                "a.txt",
+            ],
+            "zmin",
+        ),
+        command_any_output(
+            "git",
+            git_repo.path(),
+            &[
+                "update-index",
+                "--remove",
+                "--no-ignore-skip-worktree-entries",
+                "a.txt",
+            ],
+            "git",
+        )
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["ls-files", "--stage", "a.txt"]),
+        git(git_repo.path(), ["ls-files", "--stage", "a.txt"])
+    );
+    assert_eq!(
+        run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+        git(git_repo.path(), ["status", "--porcelain=v1"])
     );
 }
 

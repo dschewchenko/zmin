@@ -12,23 +12,25 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
-`--unresolve` documented-option closure on the current local lane. The selected
-change added one exact stock-Git row for `update-index --unresolve f.txt` on a
-resolved-conflict lane with resolve-undo metadata, then promoted the newly
-represented documented option into
-`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+1`
-matrix row, `+1` complete documented option pair, `+1` represented documented
-option pair, `+1` verified row, `+0` invalid-input rows, and `+0` complete
-command matrices. Current census counts are `5971` matrix rows, `5197`
-verified rows, `738` invalid-input rows, `12` exact-open rows,
-`146/151` complete command matrices, `1906/3212` complete documented option
-pairs, and `1914/3212` represented documented option pairs. `update-index`
-now sits at `25/38` reviewed-complete documented option pairs with `56`
-written rows, `56` classified rows, `48` stock-matching rows, `8`
+skip-worktree/remove plus submodule-refresh documented-option expansion on the
+current local lane. The selected change added three exact stock-Git rows for
+`update-index --refresh --ignore-submodules submod`,
+`update-index --remove --ignore-skip-worktree-entries a.txt`, and
+`update-index --remove --no-ignore-skip-worktree-entries a.txt`, then promoted
+three newly represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Actual delta is `+3`
+matrix rows, `+3` complete documented option pairs, `+3` represented
+documented option pairs, `+3` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `5974` matrix rows,
+`5200` verified rows, `738` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1909/3212` complete documented option
+pairs, and `1917/3212` represented documented option pairs. `update-index`
+now sits at `28/38` reviewed-complete documented option pairs with `59`
+written rows, `59` classified rows, `51` stock-matching rows, `8`
 invalid-input rows, and `0` exact-open rows. The next default follow-up
 should stay on the remaining safe helper-free `update-index` local tail,
-starting with `--ignore-submodules` and `--ignore-skip-worktree-entries`
-before the more helper-like fsmonitor/split-index/untracked-cache families.
+which now mostly narrows to the more helper-like fsmonitor, split-index, and
+untracked-cache families unless a new represented local lane is promoted.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 refresh-family documented-option expansion on the current local lane. The

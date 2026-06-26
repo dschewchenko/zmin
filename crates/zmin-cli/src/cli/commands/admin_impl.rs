@@ -47,8 +47,11 @@ pub(crate) struct UpdateIndexCommandOptions {
     pub(crate) again: bool,
     pub(crate) quiet: bool,
     pub(crate) refresh: bool,
+    pub(crate) ignore_submodules: bool,
     pub(crate) ignore_missing: bool,
     pub(crate) unmerged: bool,
+    pub(crate) ignore_skip_worktree_entries: bool,
+    pub(crate) no_ignore_skip_worktree_entries: bool,
     pub(crate) unresolve: bool,
     pub(crate) info_only: bool,
     pub(crate) cacheinfo: Vec<String>,
@@ -549,8 +552,11 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
     };
     let _ = (
         options.quiet,
+        options.ignore_submodules,
         options.ignore_missing,
         options.unmerged,
+        options.ignore_skip_worktree_entries,
+        options.no_ignore_skip_worktree_entries,
         options.unresolve,
     );
     if options.show_index_version {
@@ -698,6 +704,7 @@ fn update_index_has_only_flag_changes(options: &UpdateIndexCommandOptions) -> bo
         && !options.again
         && !options.refresh
         && !options.unresolve
+        && !options.ignore_submodules
         && options.cacheinfo.is_empty()
         && !options.index_info
         && options.chmod.is_none()
@@ -788,6 +795,12 @@ fn update_index_path(
         });
     }
     if options.remove {
+        if options.ignore_skip_worktree_entries
+            && !options.no_ignore_skip_worktree_entries
+            && find_index_entry(index, &relative).is_some_and(|entry| entry.skip_worktree())
+        {
+            return Ok(());
+        }
         index.remove_path(&relative)?;
         return Ok(());
     }

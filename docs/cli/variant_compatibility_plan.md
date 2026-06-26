@@ -22,42 +22,45 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
-`--unresolve` documented-option closure on the current local lane. The selected
-change added one exact stock-Git row for `update-index --unresolve f.txt` on a
-resolved-conflict repository carrying a resolve-undo entry, then promoted the
-newly represented documented option into
+skip-worktree/remove plus submodule-refresh documented-option expansion on the
+current local lane. The selected change added three exact stock-Git rows for
+`update-index --refresh --ignore-submodules submod`,
+`update-index --remove --ignore-skip-worktree-entries a.txt`, and
+`update-index --remove --no-ignore-skip-worktree-entries a.txt`, then promoted
+three newly represented documented options into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`.
 
-The batch fixed three concrete runtime gaps on the update-index/add path:
+The batch fixed three concrete runtime gaps on the update-index/status path:
 
-- `update-index --unresolve <path>` now restores stages `1/2/3` from the
-  resolve-undo extension, removes the stage-0 resolved entry, and returns the
-  path to `UU` status like stock Git
-- resolving an unmerged path through normal staging now persists resolve-undo
-  records, which unlocks stock-compatible later `--unresolve` behavior
-- symlink/content-resolution staging now removes indexed parent file entries
-  before inserting a nested path, matching stock Git on file-to-directory swaps
+- `update-index --ignore-skip-worktree-entries` now preserves missing
+  skip-worktree entries during remove mode, matching stock Git index and
+  status side effects
+- `update-index --no-ignore-skip-worktree-entries` now explicitly restores the
+  stock default remove behavior for missing skip-worktree entries
+- status and worktree snapshots now ignore missing skip-worktree entries,
+  eliminating false deleted-path reporting on index-only lanes and aligning the
+  resulting observable state with stock Git
 
 Actual durable census after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `1906 / 3212`
-- represented documented command-option pairs: `1914 / 3212`
-- matrix rows: `5971`
-- verified rows: `5197`
+- complete documented command-option pairs: `1909 / 3212`
+- represented documented command-option pairs: `1917 / 3212`
+- matrix rows: `5974`
+- verified rows: `5200`
 - invalid-input rows: `738`
 - open or partial exact rows: `12`
 
 Per-command position on the active shared surface:
 
-- `update-index`: `25 / 38` reviewed-complete documented option pairs, `56`
-  written rows, `56` classified rows, `48` stock-matching rows, `8`
+- `update-index`: `28 / 38` reviewed-complete documented option pairs, `59`
+  written rows, `59` classified rows, `51` stock-matching rows, `8`
   invalid-input rows, `0` exact-open rows
 
 The next best helper-free follow-up should stay on the remaining `update-index`
-tail and evaluate `--ignore-submodules` plus
-`--ignore-skip-worktree-entries` before revisiting the more helper-like
-`fsmonitor` / `split-index` / `untracked-cache` families.
+tail, with the more helper-like `fsmonitor`, `split-index`, and
+`untracked-cache` families now standing out as the main unresolved documented
+surface unless another safe represented local lane appears first.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git update-index`
 refresh-family documented-option expansion on the current local lane. The

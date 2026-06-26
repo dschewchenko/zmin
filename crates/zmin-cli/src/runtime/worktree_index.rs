@@ -431,6 +431,9 @@ fn worktree_index_snapshot_with_missing(
 ) -> Result<GitIndex> {
     let mut snapshot = index.clone();
     for entry in index.entries().iter().filter(|entry| entry.stage == 0) {
+        if entry.skip_worktree() {
+            continue;
+        }
         let absolute = worktree_path_for_index_entry(&repo.root, &entry.path);
         if path_exists(&absolute) {
             if entry.mode == IndexMode::Gitlink {
@@ -1406,6 +1409,9 @@ pub(crate) fn worktree_status(repo: &GitRepo, index: &GitIndex) -> Result<Vec<(V
             return Err(CliError::Message(
                 "status cannot inspect an index with unresolved conflicts".into(),
             ));
+        }
+        if entry.skip_worktree() {
+            continue;
         }
         let path = worktree_path_for_index_entry(&repo.root, &entry.path);
         let metadata = match fs::symlink_metadata(&path) {
