@@ -353,10 +353,46 @@ fn shortlog_grep_family_matches_stock_git() {
         ["shortlog", "--grep=BA[N]ANA", "-E", "HEAD"].as_slice(),
         ["shortlog", "--grep=BA[N]ANA", "--extended-regexp", "HEAD"].as_slice(),
         ["shortlog", "--grep=BA[N]ANA", "-i", "-E", "HEAD"].as_slice(),
+        ["shortlog", "--grep=BA[N]ANA", "-E", "-F", "HEAD"].as_slice(),
+        ["shortlog", "--grep=BA[N]ANA", "-F", "-E", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "-F", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "--fixed-strings", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--grep=BA[N]ANA",
+            "--extended-regexp",
+            "--fixed-strings",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "shortlog",
+            "--grep=BA[N]ANA",
+            "--fixed-strings",
+            "--extended-regexp",
+            "HEAD",
+        ]
+        .as_slice(),
         ["shortlog", "--grep=ba.+na", "-P", "HEAD"].as_slice(),
         ["shortlog", "--grep=ba.+na", "--perl-regexp", "HEAD"].as_slice(),
+        ["shortlog", "--grep=ba.+na", "-P", "-F", "HEAD"].as_slice(),
+        ["shortlog", "--grep=ba.+na", "-F", "-P", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--grep=ba.+na",
+            "--perl-regexp",
+            "--fixed-strings",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "shortlog",
+            "--grep=ba.+na",
+            "--fixed-strings",
+            "--perl-regexp",
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),

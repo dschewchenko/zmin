@@ -12,6 +12,24 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
+grep-mode ordering closure plus reviewed-complete promotion. The selected
+change makes repeated `-E`/`-F`/`-P` and long
+`--extended-regexp`/`--fixed-strings`/`--perl-regexp` combinations follow
+stock last-one-wins ordering, adds exact stock-Git evidence for both short
+and long ordering permutations on the modeled helper-free local grep lane,
+and then promotes those six documented option pairs into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+8` matrix rows, `+6` complete documented option pairs, `+0` represented
+documented option pairs, `+8` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Actual delta matched. `shortlog` now sits at
+`18/29` reviewed-complete documented option pairs, `29/125` represented
+documented option pairs, `52/52` classified rows, `47` stock-matching rows,
+`5` invalid-input rows, and `0` exact-open rows. The next best helper-free
+follow-up can stay on the remaining shortlog review tail around `--group`,
+grep-family compositions, and reflog-family review closure, or move to
+another dense represented family if it offers a larger safe closure batch.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git shortlog`
 repeated scalar-option closure plus reviewed-complete promotion. The selected
 change makes repeated `--format`, `--date`, and `-w` accept stock
 last-one-wins ordering, adds exact stock-Git evidence for both repeated

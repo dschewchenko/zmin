@@ -625,11 +625,26 @@ pub enum Command {
         all_match: bool,
         #[arg(short = 'i', long = "regexp-ignore-case", action = ArgAction::SetTrue)]
         regexp_ignore_case: bool,
-        #[arg(short = 'E', long = "extended-regexp", action = ArgAction::SetTrue)]
+        #[arg(
+            short = 'E',
+            long = "extended-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["fixed_strings", "perl_regexp"]
+        )]
         extended_regexp: bool,
-        #[arg(short = 'F', long = "fixed-strings", action = ArgAction::SetTrue)]
+        #[arg(
+            short = 'F',
+            long = "fixed-strings",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["extended_regexp", "perl_regexp"]
+        )]
         fixed_strings: bool,
-        #[arg(short = 'P', long = "perl-regexp", action = ArgAction::SetTrue)]
+        #[arg(
+            short = 'P',
+            long = "perl-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["extended_regexp", "fixed_strings"]
+        )]
         perl_regexp: bool,
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,

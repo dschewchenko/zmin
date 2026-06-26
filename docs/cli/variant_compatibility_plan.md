@@ -300,23 +300,24 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git shortlog` repeated
-scalar-option closure plus reviewed-complete promotion. Zmin now accepts
-repeated `--format`, `--date`, and `-w` values with stock last-one-wins
-ordering, carries exact stock-Git evidence for both repeated orderings on the
-modeled local helper-free shortlog lanes, and promotes those three documented
-option pairs into the reviewed-complete census list.
+The latest completed slice is a helper-free `git shortlog` grep-mode
+ordering closure plus reviewed-complete promotion. Zmin now matches stock Git
+for last-one-wins ordering across repeated `-E`/`-F`/`-P` and long
+`--extended-regexp`/`--fixed-strings`/`--perl-regexp` combinations on the
+modeled helper-free local shortlog grep lane, and promotes those six
+documented option pairs into the reviewed-complete census list.
 
 Current counts are `102/151` complete command matrices,
-`1483/3156` complete documented option pairs,
-`1508/3156` represented documented option pairs, `5494` written rows,
-`4778` verified rows, `12` open rows, and `701` invalid-input rows.
-`shortlog` now sits at `12/29` reviewed-complete documented option pairs,
-`29/125` represented documented option pairs, `44/44` classified rows, `39`
+`1489/3156` complete documented option pairs,
+`1508/3156` represented documented option pairs, `5502` written rows,
+`4786` verified rows, `12` open rows, and `701` invalid-input rows.
+`shortlog` now sits at `18/29` reviewed-complete documented option pairs,
+`29/125` represented documented option pairs, `52/52` classified rows, `47`
 stock-matching rows, and `5` invalid-input rows. The next bounded
 high-throughput follow-up can stay on the remaining `shortlog` expansion tail
-or move to another dense helper-free represented family, but should continue
-selecting from the refreshed census queue instead of raw chat memory.
+for `--group`, `--grep`, and reflog-family review closure or move to another
+dense helper-free represented family, but should continue selecting from the
+refreshed census queue instead of raw chat memory.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,
