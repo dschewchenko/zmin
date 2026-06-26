@@ -7,8 +7,8 @@ use std::process::{Command, Stdio};
 
 use common::{
     clone_repo_fixture, command_any_output, configure_identity, git, git_args, git_failure_output,
-    git_init, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_with_env,
-    write_file, zmin_bin,
+    git_init, git_with_env, git_with_stdin, run_zmin, run_zmin_args, run_zmin_failure_output,
+    run_zmin_with_env, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -2101,6 +2101,87 @@ fn config_type_bool_or_str_matches_stock_git() {
             git_repo.path(),
             ["config", "--type=bool-or-str", "demo.label"]
         )
+    );
+}
+
+#[test]
+fn config_modern_get_read_options_match_stock_git() {
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let home = TempDir::new().expect("home dir");
+    let system_config = home.path().join("system.cfg");
+    fs::write(&system_config, "[demo]\n\tfromsystem = sys\n").expect("write system config");
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["config", "demo.single", "value"]);
+        git(repo, ["config", "--add", "demo.multi", "one"]);
+        git(repo, ["config", "--add", "demo.multi", "two"]);
+        git(repo, ["config", "demo.bool", "true"]);
+        fs::write(repo.join("inc.cfg"), "[demo]\n\tinc = from-include\n").expect("write include");
+        let local_config = repo.join(".git/config");
+        let mut config = fs::read_to_string(&local_config).expect("read local config");
+        config.push_str("[include]\n\tpath = ../inc.cfg\n");
+        fs::write(local_config, config).expect("write local config");
+    }
+
+    let git_blob = git_with_stdin(git_repo.path(), ["hash-object", "-w", "--stdin"], "[demo]\n\tfromblob = blobv\n");
+    let zmin_blob =
+        git_with_stdin(zmin_repo.path(), ["hash-object", "-w", "--stdin"], "[demo]\n\tfromblob = blobv\n");
+    assert_eq!(git_blob, zmin_blob, "blob ids should match for identical config payloads");
+
+    for args in [
+        &["config", "get", "demo.single"][..],
+        &["config", "get", "--all", "demo.multi"],
+        &["config", "get", "--regexp", "^demo\\."],
+        &["config", "get", "--all", "--regexp", "^demo\\."],
+        &["config", "--name-only", "--list"],
+        &["config", "--type=bool", "--no-type", "demo.bool"],
+        &["config", "--no-includes", "--get", "demo.inc"],
+    ] {
+        assert_eq!(
+            command_any_with_isolated_config_and_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                home.path(),
+                &[],
+                args,
+            ),
+            command_any_with_isolated_config_and_env("git", git_repo.path(), home.path(), &[], args),
+            "config modern read options mismatch for {args:?}"
+        );
+    }
+
+    let system_env = [(
+        "GIT_CONFIG_SYSTEM",
+        system_config.to_str().expect("system config path utf8"),
+    )];
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            home.path(),
+            &system_env,
+            &["config", "--system", "demo.fromsystem"],
+        ),
+        command_any_with_isolated_config_and_env(
+            "git",
+            git_repo.path(),
+            home.path(),
+            &system_env,
+            &["config", "--system", "demo.fromsystem"],
+        )
+    );
+
+    let blob_args = ["config", "--blob", git_blob.as_str(), "demo.fromblob"];
+    assert_eq!(
+        command_any_with_isolated_config_and_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            home.path(),
+            &[],
+            &blob_args,
+        ),
+        command_any_with_isolated_config_and_env("git", git_repo.path(), home.path(), &[], &blob_args)
     );
 }
 

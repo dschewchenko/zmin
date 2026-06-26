@@ -5,7 +5,24 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         args.unset = true;
         args.name = args.value.take();
     }
-    let _includes = args.includes;
+    if args.all && !args.modern_get {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "--all requires `git config get`".into(),
+        });
+    }
+    if args.regexp && !args.modern_get {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "--regexp requires `git config get`".into(),
+        });
+    }
+    if args.blob.is_some() && (args.unset || args.unset_all || args.value.is_some() || args.append) {
+        return Err(CliError::Fatal {
+            code: 129,
+            message: "--blob cannot be combined with config writes".into(),
+        });
+    }
     let value_type = config_value_type(&args)?;
     let scoped_file = config_file_scope_path(&args)?;
     if args.list {
@@ -23,21 +40,11 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
                 message: "--list cannot be combined with config get/set arguments".into(),
             });
         }
-        let entries = if let Some(path) = scoped_file.as_ref() {
-            read_config_file(path)?
-        } else if args.worktree {
-            let repo = find_repo_or_bare()?;
-            ensure_worktree_config_scope(&repo)?;
-            read_scoped_worktree_config_entries(&repo)?
-        } else if args.local {
-            let repo = find_repo_or_bare()?;
-            read_local_config_entries_with_includes(&repo)?
-        } else {
-            let repo = find_repo_or_bare()?;
-            read_config_entries(&repo)?
-        };
+        let entries = scoped_config_entries(&args, scoped_file.as_ref())?;
         for entry in entries {
-            let value = if args.null {
+            let value = if args.name_only {
+                entry.name()
+            } else if args.null {
                 format_config_null_list_value(&entry)
             } else {
                 entry.list_line()
@@ -47,7 +54,7 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         return Ok(());
     }
 
-    let Some(name) = args.name else {
+    let Some(name) = args.name.clone() else {
         return Err(CliError::Fatal {
             code: 129,
             message: "config key is required".into(),
@@ -99,7 +106,7 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
                 code: 1,
                 message: err.to_string(),
             })?;
-        let entries = scoped_config_entries(args.worktree, args.local, scoped_file.as_ref())?;
+        let entries = scoped_config_entries(&args, scoped_file.as_ref())?;
         let mut matched = false;
         for entry in entries {
             let entry_name = entry.name();
@@ -118,6 +125,45 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         }
         if !matched {
             return Err(CliError::Exit(1));
+        }
+        return Ok(());
+    }
+
+    if args.modern_get {
+        let entries = if args.regexp {
+            matching_config_entries_regexp(&args, scoped_file.as_ref(), &name)?
+        } else {
+            matching_config_entries(&args, scoped_file.as_ref(), &name)?
+        };
+        if entries.is_empty() {
+            let Some(default) = args.default.as_deref() else {
+                return Err(CliError::Exit(1));
+            };
+            let value = if let Some(value_type) = value_type {
+                format_config_default_value(&name, default, value_type)?
+            } else {
+                default.to_owned()
+            };
+            if !args.name_only {
+                println!("{value}");
+            }
+            return Ok(());
+        }
+        if args.name_only {
+            return Ok(());
+        }
+        let selected = if args.all {
+            entries
+        } else {
+            vec![entries.last().expect("non-empty entries").clone()]
+        };
+        for entry in selected {
+            let value = if let Some(value_type) = value_type {
+                format_config_value(&name, &entry, value_type)?
+            } else {
+                entry.value.clone()
+            };
+            print_config_output_line(&entry, &value, args.show_origin, args.show_scope, args.null)?;
         }
         return Ok(());
     }
@@ -153,8 +199,7 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
     }
 
     if args.get_all {
-        let entries =
-            matching_config_entries(args.worktree, args.local, scoped_file.as_ref(), &name)?;
+        let entries = matching_config_entries(&args, scoped_file.as_ref(), &name)?;
         if entries.is_empty() {
             let Some(default) = args.default.as_deref() else {
                 return Err(CliError::Exit(1));
@@ -178,30 +223,9 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         return Ok(());
     }
 
-    let entry = if let Some(path) = scoped_file.as_ref() {
-        read_config_file(path)?.into_iter().rev().find(|entry| {
-            parse_config_name(&name).is_ok_and(|(section, subsection, key)| {
-                entry.section == section && entry.subsection == subsection && entry.key == key
-            })
-        })
-    } else if args.worktree {
-        let repo = find_repo_or_bare()?;
-        ensure_worktree_config_scope(&repo)?;
-        read_worktree_config_entry(&repo, &name)?
-    } else if args.local {
-        let repo = find_repo_or_bare()?;
-        read_local_config_entries_with_includes(&repo)?
-            .into_iter()
-            .rev()
-            .find(|entry| {
-                parse_config_name(&name).is_ok_and(|(section, subsection, key)| {
-                    entry.section == section && entry.subsection == subsection && entry.key == key
-                })
-            })
-    } else {
-        let repo = find_repo_or_bare()?;
-        read_config_entry(&repo, &name)?
-    };
+    let entry = matching_config_entries(&args, scoped_file.as_ref(), &name)?
+        .into_iter()
+        .last();
     match entry {
         Some(entry) => {
             let value = if let Some(value_type) = value_type {
@@ -279,28 +303,38 @@ fn format_config_get_regexp_value(entry: &ConfigEntry, name: &str, null: bool) -
 }
 
 fn scoped_config_entries(
-    worktree: bool,
-    local: bool,
+    args: &ConfigArgs,
     scoped_file: Option<&PathBuf>,
 ) -> Result<Vec<ConfigEntry>> {
+    if let Some(objectish) = args.blob.as_deref() {
+        let repo = find_repo_or_bare()?;
+        return parse_config_blob_entries(&repo, objectish);
+    }
     if let Some(path) = scoped_file {
         Ok(read_config_file(path)?)
-    } else if worktree {
+    } else if args.worktree {
         let repo = find_repo_or_bare()?;
         ensure_worktree_config_scope(&repo)?;
         Ok(read_scoped_worktree_config_entries(&repo)?)
-    } else if local {
+    } else if args.local {
         let repo = find_repo_or_bare()?;
-        Ok(read_local_config_entries_with_includes(&repo)?)
+        if args.no_includes {
+            Ok(read_local_config_entries(&repo)?)
+        } else {
+            Ok(read_local_config_entries_with_includes(&repo)?)
+        }
     } else {
         let repo = find_repo_or_bare()?;
-        Ok(read_config_entries(&repo)?)
+        if args.no_includes {
+            Ok(read_config_entries_no_includes(&repo)?)
+        } else {
+            Ok(read_config_entries(&repo)?)
+        }
     }
 }
 
 fn matching_config_entries(
-    worktree: bool,
-    local: bool,
+    args: &ConfigArgs,
     scoped_file: Option<&PathBuf>,
     name: &str,
 ) -> Result<Vec<ConfigEntry>> {
@@ -308,7 +342,7 @@ fn matching_config_entries(
         code: 1,
         message: format!("invalid config key: {name}"),
     })?;
-    let entries = scoped_config_entries(worktree, local, scoped_file)?;
+    let entries = scoped_config_entries(args, scoped_file)?;
     Ok(entries
         .into_iter()
         .filter(|entry| {
@@ -317,8 +351,30 @@ fn matching_config_entries(
         .collect())
 }
 
+fn matching_config_entries_regexp(
+    args: &ConfigArgs,
+    scoped_file: Option<&PathBuf>,
+    pattern: &str,
+) -> Result<Vec<ConfigEntry>> {
+    let name_regex = Regex::new(pattern).map_err(|err| CliError::Fatal {
+        code: 1,
+        message: err.to_string(),
+    })?;
+    Ok(scoped_config_entries(args, scoped_file)?
+        .into_iter()
+        .filter(|entry| name_regex.is_match(entry.name().as_bytes()))
+        .collect())
+}
+
 fn config_file_scope_path(args: &ConfigArgs) -> Result<Option<PathBuf>> {
-    let scope_count = [args.file.is_some(), args.global, args.local, args.worktree]
+    let scope_count = [
+        args.blob.is_some(),
+        args.file.is_some(),
+        args.global,
+        args.local,
+        args.system,
+        args.worktree,
+    ]
         .into_iter()
         .filter(|present| *present)
         .count();
@@ -337,6 +393,9 @@ fn config_file_scope_path(args: &ConfigArgs) -> Result<Option<PathBuf>> {
             .next()
             .ok_or(CliError::Exit(1))?;
         return Ok(Some(home.join(".gitconfig")));
+    }
+    if args.system {
+        return Ok(Some(explicit_system_config_path()));
     }
     Ok(None)
 }
@@ -361,6 +420,9 @@ fn format_config_output_line(
 }
 
 fn config_value_type(args: &ConfigArgs) -> Result<Option<ConfigValueType>> {
+    if args.no_type {
+        return Ok(None);
+    }
     let shorthand_types = [
         args.bool_value,
         args.int_value,

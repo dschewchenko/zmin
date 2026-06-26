@@ -4,11 +4,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use zmin_git_core::{GitHashAlgorithm, RefStore, RefTarget};
+use zmin_git_core::{GitHashAlgorithm, GitObjectKind, LooseObjectStore, RefStore, RefTarget};
 
 use crate::runtime::{git_path_config_output, normalize_windows_input_path};
 
-use super::{CliError, GitRepo, Result, bytes_eq, bytes_starts_with, wildcard_match_pathspec};
+use super::{
+    CliError, GitRepo, Result, bytes_eq, bytes_starts_with, resolve_objectish,
+    wildcard_match_pathspec,
+};
 
 static GLOBAL_CONFIG_ENTRIES: OnceLock<Vec<ConfigEntry>> = OnceLock::new();
 
@@ -205,6 +208,29 @@ pub(crate) fn read_config_entries(repo: &GitRepo) -> io::Result<Vec<ConfigEntry>
     Ok(entries)
 }
 
+pub(crate) fn read_config_entries_no_includes(repo: &GitRepo) -> io::Result<Vec<ConfigEntry>> {
+    let mut entries = Vec::new();
+    for path in system_config_paths() {
+        entries.extend(read_config_file_raw(
+            &path,
+            ConfigScope::System,
+            format!("file:{}", path.display()),
+        )?);
+    }
+    for global in global_config_paths() {
+        entries.extend(read_config_file_raw(
+            &global,
+            ConfigScope::Global,
+            format!("file:{}", global.display()),
+        )?);
+    }
+    entries.extend(read_local_config_entries(repo)?);
+    if let Some(global_entries) = GLOBAL_CONFIG_ENTRIES.get() {
+        entries.extend(global_entries.clone());
+    }
+    Ok(entries)
+}
+
 fn global_config_paths() -> Vec<PathBuf> {
     if let Some(path) = std::env::var_os("GIT_CONFIG_GLOBAL") {
         return vec![normalize_windows_input_path(PathBuf::from(path))];
@@ -259,6 +285,9 @@ pub(crate) fn system_config_paths() -> Vec<PathBuf> {
     if std::env::var_os("GIT_CONFIG_NOSYSTEM").is_some() {
         return Vec::new();
     }
+    if let Some(path) = explicit_system_config_path_from_env() {
+        return vec![path];
+    }
     #[cfg(target_os = "macos")]
     {
         for path in [
@@ -278,6 +307,35 @@ pub(crate) fn system_config_paths() -> Vec<PathBuf> {
     {
         vec![PathBuf::from("/etc/gitconfig")]
     }
+}
+
+pub(crate) fn explicit_system_config_path() -> PathBuf {
+    if let Some(path) = explicit_system_config_path_from_env() {
+        return path;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        for path in [
+            "/Applications/Xcode.app/Contents/Developer/usr/share/git-core/gitconfig",
+            "/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig",
+            "/opt/homebrew/etc/gitconfig",
+            "/etc/gitconfig",
+        ] {
+            let path = PathBuf::from(path);
+            if path.exists() {
+                return path;
+            }
+        }
+        PathBuf::from("/etc/gitconfig")
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        PathBuf::from("/etc/gitconfig")
+    }
+}
+
+fn explicit_system_config_path_from_env() -> Option<PathBuf> {
+    std::env::var_os("GIT_CONFIG_SYSTEM").map(|path| normalize_windows_input_path(PathBuf::from(path)))
 }
 
 pub(crate) fn read_local_config_entries(repo: &GitRepo) -> io::Result<Vec<ConfigEntry>> {
@@ -617,9 +675,41 @@ fn read_config_file_raw(
     let Ok(content) = fs::read_to_string(path) else {
         return Ok(Vec::new());
     };
+    let source = config_error_source(path, &origin);
+    parse_config_text(&content, scope, origin, &source)
+}
+
+pub(crate) fn parse_config_blob_entries(
+    repo: &GitRepo,
+    objectish: &str,
+) -> Result<Vec<ConfigEntry>> {
+    let object_id = resolve_objectish(repo, objectish)?;
+    let store = LooseObjectStore::new(&repo.objects_dir, GitHashAlgorithm::Sha1);
+    let object = store.read_object(&object_id)?;
+    if object.kind != GitObjectKind::Blob {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("object {objectish} is not a blob"),
+        });
+    }
+    let origin = format!("blob:{objectish}");
+    parse_config_text(
+        &String::from_utf8_lossy(&object.content),
+        ConfigScope::Local,
+        origin.clone(),
+        &origin,
+    )
+    .map_err(CliError::from)
+}
+
+fn parse_config_text(
+    content: &str,
+    scope: ConfigScope,
+    origin: String,
+    source: &str,
+) -> io::Result<Vec<ConfigEntry>> {
     let mut current_section = None::<(String, String)>;
     let mut entries = Vec::new();
-    let source = config_error_source(path, &origin);
     for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
         let mut trimmed = line.trim();

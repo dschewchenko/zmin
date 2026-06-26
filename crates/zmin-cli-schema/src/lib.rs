@@ -1132,6 +1132,10 @@ pub enum Command {
     Config {
         #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
         null: bool,
+        #[arg(long = "all", action = ArgAction::SetTrue)]
+        all: bool,
+        #[arg(long = "blob")]
+        blob: Option<String>,
         #[arg(long = "get", action = ArgAction::SetTrue)]
         get: bool,
         #[arg(long = "get-all", action = ArgAction::SetTrue)]
@@ -1140,6 +1144,16 @@ pub enum Command {
         get_regexp: bool,
         #[arg(long = "list", short = 'l', action = ArgAction::SetTrue)]
         list: bool,
+        #[arg(long = "name-only", action = ArgAction::SetTrue)]
+        name_only: bool,
+        #[arg(long = "no-includes", action = ArgAction::SetTrue)]
+        no_includes: bool,
+        #[arg(long = "no-type", action = ArgAction::SetTrue)]
+        no_type: bool,
+        #[arg(long = "regexp", action = ArgAction::SetTrue)]
+        regexp: bool,
+        #[arg(long = "system", action = ArgAction::SetTrue)]
+        system: bool,
         #[arg(long = "unset", action = ArgAction::SetTrue)]
         unset: bool,
         #[arg(long = "unset-all", action = ArgAction::SetTrue)]
@@ -4213,10 +4227,17 @@ pub struct RmOptions {
 
 pub struct ConfigArgs {
     pub null: bool,
+    pub all: bool,
+    pub blob: Option<String>,
     pub get: bool,
     pub get_all: bool,
     pub get_regexp: bool,
     pub list: bool,
+    pub name_only: bool,
+    pub no_includes: bool,
+    pub no_type: bool,
+    pub regexp: bool,
+    pub system: bool,
     pub unset: bool,
     pub unset_all: bool,
     pub append: bool,
@@ -4233,6 +4254,7 @@ pub struct ConfigArgs {
     pub global: bool,
     pub file: Option<PathBuf>,
     pub includes: bool,
+    pub modern_get: bool,
     pub show_origin: bool,
     pub show_scope: bool,
     pub name: Option<String>,

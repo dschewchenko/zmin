@@ -11,6 +11,26 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free `git config`
+modern read-family schema/runtime expansion. The selected change adds eight
+exact stock-Git rows for `config get --all`, `config get --regexp`,
+`config get --all --regexp`, `config --name-only --list`,
+`config --type=bool --no-type`, `config --no-includes --get`,
+`config --system`, and `config --blob`, while extending the explicit schema
+surface for the documented `--all`, `--blob`, `--name-only`,
+`--no-includes`, `--no-type`, `--regexp`, and `--system` options without
+pulling in the heavier `--replace-all`, `--fixed-value`, `--comment`,
+`--url`, or `--get-colorbool` tails. Expected delta was `+8` matrix rows,
+`+7` represented documented option pairs, `+8` verified rows, `+0`
+invalid-input rows, `+0` complete documented option pairs, and `+0`
+complete command matrices. Actual delta matched. `config` now sits at
+`18/30` reviewed-complete documented option pairs, `25/30` represented
+documented option pairs, `145/145` classified rows, `132` stock-matching
+rows, `13` invalid-input rows, and `0` exact-open rows. The next best
+helper-free follow-up can stay on the remaining compact `config` documented
+tails if another coherent family appears; otherwise it should move to the
+next dense represented command from the refreshed census queue.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git add`
 interactive and patch quit-lane closure plus reviewed-complete promotion. The
 selected change adds four exact stock-Git rows for `--interactive`,
