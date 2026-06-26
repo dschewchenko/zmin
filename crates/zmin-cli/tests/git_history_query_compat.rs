@@ -3049,6 +3049,8 @@ fn log_object_and_selector_family_matches_stock_git() {
         .as_slice(),
         ["log", "--no-object-names", "HEAD"].as_slice(),
         ["log", "--objects", "--no-object-names", "HEAD"].as_slice(),
+        ["log", "--object-names", "HEAD"].as_slice(),
+        ["log", "--timestamp", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),

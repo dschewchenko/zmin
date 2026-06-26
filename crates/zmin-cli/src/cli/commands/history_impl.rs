@@ -6260,6 +6260,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _trace = phase_trace("log.total");
     let _ = options.count;
     let _accepted_quiet = options.quiet;
+    for unsupported in ["--object-names", "--timestamp"] {
+        if raw_arg_present_before_dashdash(options.raw_args, unsupported) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("unrecognized argument: {unsupported}"),
+            });
+        }
+    }
     let (revs, max_count, parsed_zero) =
         split_log_revs_and_count(options.revs.clone(), options.max_count)?;
     let zero = options.zero || parsed_zero;
@@ -7579,6 +7587,13 @@ fn raw_arg_last_toggle(raw_args: &[String], enabled_name: &str, disabled_name: &
         }
     }
     last
+}
+
+fn raw_arg_present_before_dashdash(raw_args: &[String], name: &str) -> bool {
+    raw_args
+        .iter()
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == name)
 }
 
 fn resolve_history_walk_mode(raw_args: &[String], no_walk: bool, do_walk: bool) -> bool {

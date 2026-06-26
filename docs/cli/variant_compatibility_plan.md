@@ -21,6 +21,50 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch closes the final two shared
+`log` schema-tail doc-option seeds by proving stock-compatible rejection for
+`log --object-names` and `log --timestamp`. This was a narrow helper-free
+invalid-input closure on the existing object-selector family, not a schema or
+feature expansion batch.
+
+The batch fixed one concrete parser/runtime mismatch on the `log` path:
+
+- Zmin no longer treats `--object-names` and `--timestamp` as revision-like
+  arguments on `log`; both now fail early with the same stock
+  `unrecognized argument` fatal that Git 2.47.1 emits
+
+Focused verification was
+`cargo test -p zmin-cli --test git_history_query_compat log_object_and_selector_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `1939 / 3212`
+- represented documented command-option pairs: `1939 / 3212`
+- matrix rows: `5996`
+- verified rows: `5231`
+- invalid-input rows: `740`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `log`: `84 / 199` reviewed-complete documented option pairs, `131` written
+  rows, `84` classified rows on the reviewed-complete surface, `187`
+  stock-matching rows overall, `12` invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up should now move off this narrowed `log`
+tail entirely, because the remaining shared history doc-option seeds are no
+longer on `log`. The default next queue should be reselected from the updated
+top of `docs/cli/census/remaining_to_fix_or_verify.tsv`, with the next densest
+helper-free family likely on `shortlog` or another represented command cluster
+rather than `log`.
+
 As of 2026-06-27 the latest completed batch closes a shared helper-free
 history schema/runtime family across `log` and `rev-list`. This batch added
 ten documented-option closures by implementing and proving stock-Git parity
