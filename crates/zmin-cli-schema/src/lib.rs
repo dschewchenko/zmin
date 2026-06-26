@@ -3711,6 +3711,14 @@ pub enum Command {
         notes: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]
         no_notes: bool,
+        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+        show_notes: bool,
+        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+        show_notes_by_default: bool,
+        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+        standard_notes: bool,
+        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+        no_standard_notes: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
         abbrev_commit: bool,
         #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
@@ -3801,6 +3809,8 @@ pub enum Command {
         children: bool,
         #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
         walk_reflogs: bool,
+        #[arg(long = "reflog", action = ArgAction::SetTrue)]
+        reflog: bool,
         #[arg(long = "grep-reflog")]
         grep_reflog: Vec<String>,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
@@ -3839,8 +3849,12 @@ pub enum Command {
         since: Option<String>,
         #[arg(long = "until", alias = "before")]
         until: Option<String>,
+        #[arg(long = "relative-date", action = ArgAction::SetTrue)]
+        relative_date: bool,
         #[arg(long = "date")]
         date: Option<String>,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(long = "format")]
         format: Option<String>,
         #[arg(long = "pretty")]

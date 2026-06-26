@@ -9593,6 +9593,10 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) no_expand_tabs: bool,
     pub(crate) notes: bool,
     pub(crate) no_notes: bool,
+    pub(crate) show_notes: bool,
+    pub(crate) show_notes_by_default: bool,
+    pub(crate) standard_notes: bool,
+    pub(crate) no_standard_notes: bool,
     pub(crate) abbrev_commit: bool,
     pub(crate) no_abbrev_commit: bool,
     pub(crate) grep: Vec<String>,
@@ -9618,6 +9622,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) first_parent: bool,
     pub(crate) children: bool,
     pub(crate) walk_reflogs: bool,
+    pub(crate) reflog: bool,
     pub(crate) grep_reflog: Vec<String>,
     pub(crate) reverse: bool,
     pub(crate) full_history: bool,
@@ -9637,7 +9642,9 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) max_count: Option<usize>,
     pub(crate) since: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
+    pub(crate) relative_date: bool,
     pub(crate) date: Option<&'a str>,
+    pub(crate) quiet: bool,
     pub(crate) format: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
     pub(crate) revs: Vec<String>,
@@ -9678,6 +9685,70 @@ fn rev_list_walk_reflogs_exclusion_target(revs: &[String]) -> Option<String> {
     None
 }
 
+fn rev_list_reflog_embedded_format<'a>(revs: &'a [String]) -> Option<&'a str> {
+    revs.iter().find_map(|rev| {
+        rev.strip_prefix("--format=")
+            .or_else(|| rev.strip_prefix("--pretty="))
+    })
+}
+
+fn rev_list_reflog_embedded_date<'a>(revs: &'a [String]) -> Option<&'a str> {
+    revs.iter().find_map(|rev| rev.strip_prefix("--date="))
+}
+
+fn rev_list_reflog_targets(revs: &[String]) -> Vec<String> {
+    revs.iter()
+        .filter(|rev| {
+            rev.as_str() != "--"
+                && !rev.starts_with("--format=")
+                && !rev.starts_with("--pretty=")
+                && !rev.starts_with("--date=")
+        })
+        .cloned()
+        .collect()
+}
+
+fn render_rev_list_format(
+    format: &LogFormat<'_>,
+    id: &ObjectId,
+    commit: &zmin_git_core::CommitObject,
+    parents: bool,
+    abbrev_len: usize,
+    marker: Option<HistoryTraversalMarker>,
+    default_commit_abbrev: bool,
+    expand_tabs: bool,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+) -> Result<String> {
+    match format {
+        LogFormat::Custom { pattern, .. } if log_format_uses_placeholder(pattern, 'N') => {
+            let literal_pattern = pattern.replace("%N", "%%N");
+            render_log_format(
+                &literal_pattern,
+                id,
+                commit,
+                abbrev_len,
+                decorations,
+                notes,
+                date_mode,
+            )
+        }
+        _ => format.render_with_context(
+            id,
+            commit,
+            parents,
+            abbrev_len,
+            marker,
+            default_commit_abbrev,
+            expand_tabs,
+            decorations,
+            notes,
+            date_mode,
+        ),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 enum RevListObjectFilter {
     BlobNone,
@@ -9697,6 +9768,10 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         no_expand_tabs,
         notes,
         no_notes,
+        show_notes,
+        show_notes_by_default,
+        standard_notes,
+        no_standard_notes,
         abbrev_commit,
         no_abbrev_commit,
         grep,
@@ -9722,6 +9797,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         first_parent,
         children,
         walk_reflogs,
+        reflog,
         grep_reflog,
         reverse,
         full_history,
@@ -9741,7 +9817,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         max_count,
         since,
         until,
+        relative_date,
         date,
+        quiet,
         format,
         pretty,
         revs,
@@ -9752,6 +9830,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let _accepted_show_pulls = show_pulls;
     let _accepted_simplify_merges = simplify_merges;
     let _accepted_no_notes = no_notes;
+    let _accepted_standard_notes = standard_notes;
+    let _accepted_no_standard_notes = no_standard_notes;
+    let walk_reflogs = walk_reflogs || reflog;
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
             code: 128,
@@ -9771,7 +9852,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let Some(until) = parse_log_until(until) else {
         return Ok(());
     };
-    if notes {
+    if notes || show_notes || show_notes_by_default {
         return Err(CliError::Fatal {
             code: 128,
             message: "rev-list does not support display of notes".into(),
@@ -9779,6 +9860,31 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     let grep_mode =
         parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
+    let date = if relative_date && date.is_none() {
+        Some("relative")
+    } else {
+        date
+    };
+    let embedded_date = if walk_reflogs {
+        rev_list_reflog_embedded_date(&revs).map(str::to_owned)
+    } else {
+        None
+    };
+    let embedded_format = if walk_reflogs {
+        rev_list_reflog_embedded_format(&revs).map(str::to_owned)
+    } else {
+        None
+    };
+    let date = date
+        .map(str::to_owned)
+        .or(embedded_date)
+        .unwrap_or_default();
+    let date = (!date.is_empty()).then_some(date);
+    let format = format
+        .map(str::to_owned)
+        .or(embedded_format)
+        .unwrap_or_default();
+    let format = (!format.is_empty()).then_some(format);
     let rendered_format = if oneline
         || format.is_some()
         || pretty.is_some()
@@ -9787,11 +9893,11 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         || expand_tabs
         || no_expand_tabs
     {
-        Some(LogFormat::parse(oneline, format, pretty)?)
+        Some(LogFormat::parse(oneline, format.as_deref(), pretty)?)
     } else {
         None
     };
-    let date_mode = parse_log_date_mode(date)?;
+    let date_mode = parse_log_date_mode(date.as_deref())?;
     let expand_tabs = false;
     let abbrev_len = if no_abbrev_commit {
         GitHashAlgorithm::Sha1.digest_len() * 2
@@ -9831,7 +9937,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     if walk_reflogs {
-        if let Some(target) = rev_list_walk_reflogs_exclusion_target(&revs) {
+        let reflog_revs = rev_list_reflog_targets(&revs);
+        if let Some(target) = rev_list_walk_reflogs_exclusion_target(&reflog_revs) {
             return Err(CliError::Fatal {
                 code: 128,
                 message: format!("cannot walk reflogs for {target}"),
@@ -9851,11 +9958,24 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
                 count,
                 max_count,
             },
-            &revs,
+            &reflog_revs,
             &grep_reflog,
         );
     }
     let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
+    if quiet
+        && rendered_format.is_none()
+        && !objects
+        && !count
+        && !parents
+        && !children
+        && !left_right
+        && !cherry_pick
+        && !cherry_mark
+        && !boundary
+    {
+        return Ok(());
+    }
     if objects && no_object_names && object_filter.is_some() {
         let filter = object_filter.expect("checked filter");
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
@@ -10124,7 +10244,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         let marker = traversal.markers.get(id).copied();
         if let Some(format) = rendered_format.as_ref() {
             let commit = commit_cache.read_commit(id)?;
-            let rendered = format.render_with_context(
+            let rendered = render_rev_list_format(
+                format,
                 id,
                 commit.as_ref(),
                 parents,
@@ -10233,7 +10354,8 @@ fn rev_list_walk_reflogs(
     for id in &commit_ids {
         if let Some(format) = options.rendered_format {
             let commit = commit_cache.read_commit(id)?;
-            let rendered = format.render_with_context(
+            let rendered = render_rev_list_format(
+                format,
                 id,
                 commit.as_ref(),
                 options.parents,

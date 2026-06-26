@@ -1208,6 +1208,66 @@ fn rev_list_date_and_format_modes_match_stock_git() {
 }
 
 #[test]
+fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_author(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "1700000000 +0000",
+        "feat: base",
+    );
+
+    for args in [
+        ["rev-list", "--quiet", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--relative-date", "--format=%ad|%cd", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--reflog", "HEAD", "--format=%H"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    git(repo.path(), ["notes", "add", "-m", "note body"]);
+
+    for args in [
+        ["rev-list", "--no-standard-notes", "--pretty=format:%N", "-1", "HEAD"].as_slice(),
+        ["rev-list", "--standard-notes", "--pretty=format:%N", "-1", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["rev-list", "--show-notes", "--pretty=format:%N", "-1", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--show-notes-by-default",
+            "--pretty=format:%N",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_notes_and_abbrev_commit_family_matches_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

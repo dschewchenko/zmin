@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1867/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1881/3212 represented doc-option pairs / 5903 written rows / 5136/5903 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1867/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1888/3212 represented doc-option pairs / 5910 written rows / 5141/5910 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,37 +300,41 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git log` reflog/date/notes
-schema-tail parser-plus-evidence expansion on the current local lane. Zmin now
-accepts and matches stock Git for `log --quiet`, `--relative-date`,
-`--show-notes`, `--show-notes-by-default`, `--no-standard-notes`, and
-`--reflog` on modeled single-commit local history and HEAD reflog lanes,
-including the current stock no-op `--quiet` surface, the `--date=relative`
-aliasing behavior for `%ad` and `%cd`, notes-enabled and notes-suppressed
-custom-format lanes, and the explicit `--format=%H` reflog-walk output surface
-behind the long `--reflog` spelling.
+The latest completed slice is a helper-free `git rev-list`
+reflog/date/notes schema-tail parser-plus-evidence expansion on the current
+local lane. Zmin now accepts and matches stock Git for `rev-list --quiet`,
+`--relative-date`, `--reflog`, `--no-standard-notes`, and
+`--standard-notes`, and matches the current stock invalid-input behavior for
+`rev-list --show-notes` and `--show-notes-by-default` on modeled
+single-commit local history, commit-note, and HEAD reflog lanes, including
+the current stock empty-output `--quiet` surface, the `--date=relative`
+aliasing behavior for `%ad` and `%cd`, the explicit `--format=%H`
+reflog-walk output surface behind the long `--reflog` spelling, the current
+stock literal `%N` pretty-format lanes for `--no-standard-notes` and
+`--standard-notes`, and the stock `rev-list does not support display of
+notes` fatal for the show-notes aliases.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat log_reflog_relative_date_and_notes_aliases_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat rev_list_reflog_relative_date_and_notes_aliases_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
 `tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
 `git diff --check`.
-Actual delta from the prior `log` object-selector closure is `+6` matrix rows,
-`+0` complete documented option pairs, `+6` represented documented option
-pairs, `+6` verified rows, `+0` invalid-input rows, and `+0` complete command
-matrices. Current census counts are `5903` matrix rows, `5136` verified rows,
-`730` invalid-input rows, `12` exact-open rows, `146/151` complete command
-matrices, `1867/3212` complete documented option pairs, and
-`1881/3212` represented documented option pairs. `log` now sits at
-`71/131` reviewed-complete documented option pairs with `176` written rows,
-`175` classified rows, `165` stock-matching rows, `10` invalid-input rows,
-and `0` exact-open rows. The next default follow-up should keep expanding
-these newly represented history-query tails with additional value and
-combination lanes, especially `log --show-notes`, `--reflog`,
-`--relative-date`, and the overlapping `rev-list` surfaces, instead of
-switching back to isolated one-row tails.
+Actual delta from the prior `log` reflog/date/notes closure is `+7` matrix
+rows, `+0` complete documented option pairs, `+7` represented documented
+option pairs, `+5` verified rows, `+2` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `5910` matrix rows,
+`5141` verified rows, `732` invalid-input rows, `12` exact-open rows,
+`146/151` complete command matrices, `1867/3212` complete documented option
+pairs, and `1888/3212` represented documented option pairs. `rev-list` now
+sits at `68/117` reviewed-complete documented option pairs with `112` written
+rows, `112` classified rows, `107` stock-matching rows, `5` invalid-input
+rows, and `0` exact-open rows. The next default follow-up should keep
+expanding these newly represented shared history-query tails with additional
+value and combination lanes, especially `rev-list --reflog`,
+`--relative-date`, `--quiet`, and overlapping `log` notes/reflog/date
+surfaces, instead of switching back to isolated one-row tails.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family
