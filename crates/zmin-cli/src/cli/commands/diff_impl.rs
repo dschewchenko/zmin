@@ -1919,6 +1919,7 @@ fn print_diff_tree_log_format(
         false,
         default_abbrev_len(store)?,
         false,
+        true,
         &history_commands::LogDecorations::empty(),
         notes,
     )?;

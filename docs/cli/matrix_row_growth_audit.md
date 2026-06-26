@@ -12,6 +12,31 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git show`
+As of 2026-06-26 the latest completed batch is a helper-free shared `git log`
+and `git show` text-rendering documented-option family expansion on the
+current local lane. The selected change added six exact stock-Git rows for
+`log --encoding=UTF-8`, `log --expand-tabs`, `log --no-expand-tabs`,
+`show --encoding=UTF-8`, `show --expand-tabs`, and
+`show --no-expand-tabs`, then promoted six represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+6` matrix rows, `+6` complete documented option pairs, `+6`
+represented documented option pairs, `+5` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5791` matrix rows, `5035` verified rows, `720`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1784/3212` complete documented option pairs, and
+`1792/3212` represented documented option pairs. `log` now sits at
+`50/131` reviewed-complete documented option pairs with `144` written rows,
+`143` classified rows, `137` stock-matching rows, `6` invalid-input rows,
+and `0` exact-open rows, while `show` now sits at `14/15`
+reviewed-complete documented option pairs with `49/49` classified rows,
+`49` stock-matching rows, `0` invalid-input rows, and `0` exact-open rows on
+their current modeled surfaces. The next default follow-up should return to a
+denser shared history-query family such as `log` topology/object selection or
+`rev-list` object/filter expansion, rather than spending the next iteration on
+the one-row `show-signature` tail by itself.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git show`
 notes-alias plus abbrev-commit documented-option family expansion on the
 current local lane. The selected change added eight exact stock-Git `show`
 rows for `--notes`, `--no-notes`, `--show-notes`, `--standard-notes`,

@@ -300,38 +300,40 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git show` notes-alias plus
-abbrev-commit documented-option family expansion on the current local lane.
-Zmin now accepts and matches stock Git for `show --notes`, `--no-notes`,
-`--show-notes`, `--standard-notes`, `--show-notes-by-default`,
-`--no-standard-notes`, `--abbrev-commit`, and
-`--oneline --no-abbrev-commit`, including the current stock default-note
-show lane, stock note suppression aliases, the current standalone
-`standard-notes` and `no-standard-notes` no-note lanes on this machine,
-default commit-header abbreviation, and full oneline hash restoration.
+The latest completed slice is a helper-free shared `git log`/`git show`
+text-rendering documented-option family expansion on the current local lane.
+Zmin now accepts and matches stock Git for `log --encoding=UTF-8`,
+`log --expand-tabs`, `log --no-expand-tabs`, `show --encoding=UTF-8`,
+`show --expand-tabs`, and `show --no-expand-tabs`, including the current
+stock UTF-8 no-op lane, default expanded tab rendering, and literal-tab
+preservation for commit-message output on the helper-free no-walk/no-patch
+surfaces.
 Focused gates were
+`cargo test -p zmin-cli --test git_history_query_compat log_and_show_text_rendering_options_match_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_notes_and_abbrev_commit_family_matches_stock_git -- --nocapture`,
 `cargo test -p zmin-cli --test git_history_query_compat show_notes_aliases_and_abbrev_commit_family_matches_stock_git -- --nocapture`,
 `cargo test -p zmin-cli --test git_object_plumbing_compat show_matches_stock_git_for_raw_commits_trees_blobs_and_tags -- --nocapture`,
-`cargo test -p zmin-cli --test git_diff_compat show_patch_with_stat_matches_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(show|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|show|summary)\t'`, and
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1778/3212` complete documented option pairs,
-`1786/3212` represented documented option pairs, `5785` written rows,
-`5030` verified rows, `12` open rows, and `720` invalid-input rows.
-`show` now sits at `11/15` reviewed-complete documented option pairs,
-`46` written rows, `46` classified rows, `46` stock-matching rows,
-`0` invalid-input rows, and `0` exact-open rows on its current modeled
-surface. The next bounded high-throughput follow-up can either finish the
-small remaining `show` tail (`--encoding`, `--expand-tabs`,
-`--no-expand-tabs`, `--show-signature`) or return to a denser shared
+`1784/3212` complete documented option pairs,
+`1792/3212` represented documented option pairs, `5791` written rows,
+`5035` verified rows, `12` open rows, and `720` invalid-input rows.
+`log` now sits at `50/131` reviewed-complete documented option pairs with
+`144` written rows, `143` classified rows, `137` stock-matching rows, `6`
+invalid-input rows, and `0` exact-open rows, while `show` sits at `14/15`
+reviewed-complete documented option pairs with `49/49` classified rows,
+`49` stock-matching rows, `0` invalid-input rows, and `0` exact-open rows.
+The next bounded high-throughput follow-up should return to a denser shared
 history-query family such as `log` topology/object-selection filters or a
-`rev-list` object/filter expansion.
+`rev-list` object/filter expansion; the remaining one-row `show-signature`
+tail is not the default next slice unless it joins a larger signed-output
+batch.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

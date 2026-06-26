@@ -845,6 +845,35 @@ fn show_notes_aliases_and_abbrev_commit_family_matches_stock_git() {
 }
 
 #[test]
+fn log_and_show_text_rendering_options_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+
+    write_file(repo.path(), "a.txt", "body\n");
+    git(repo.path(), ["add", "-A"]);
+    let message_path = repo.path().join("message.txt");
+    fs::write(&message_path, "subject\n\nline\twith\ttabs\n").expect("write message");
+    git(repo.path(), ["commit", "-F", "message.txt"]);
+
+    for args in [
+        ["log", "--no-walk", "HEAD"].as_slice(),
+        ["log", "--no-walk", "--expand-tabs", "HEAD"].as_slice(),
+        ["log", "--no-walk", "--no-expand-tabs", "HEAD"].as_slice(),
+        ["log", "--no-walk", "--encoding=UTF-8", "HEAD"].as_slice(),
+        ["show", "--no-patch", "HEAD"].as_slice(),
+        ["show", "--no-patch", "--expand-tabs", "HEAD"].as_slice(),
+        ["show", "--no-patch", "--no-expand-tabs", "HEAD"].as_slice(),
+        ["show", "--no-patch", "--encoding=UTF-8", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn blame_line_range_forms_match_stock_git() {
     let git_repo = blame_line_range_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

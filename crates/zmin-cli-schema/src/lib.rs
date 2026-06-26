@@ -3129,6 +3129,12 @@ pub enum Command {
         name_only: bool,
         #[arg(long = "name-status", action = ArgAction::SetTrue)]
         name_status: bool,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]
@@ -3579,6 +3585,12 @@ pub enum Command {
         name_only: bool,
         #[arg(long = "name-status", action = ArgAction::SetTrue)]
         name_status: bool,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]

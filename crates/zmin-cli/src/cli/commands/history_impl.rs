@@ -5804,6 +5804,9 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) name_only: bool,
     pub(crate) name_status: bool,
+    pub(crate) encoding: Option<&'a str>,
+    pub(crate) expand_tabs: bool,
+    pub(crate) no_expand_tabs: bool,
     pub(crate) notes: bool,
     pub(crate) no_notes: bool,
     pub(crate) diff_required: bool,
@@ -6012,6 +6015,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.merges,
     )?;
     let date_mode = parse_log_date_mode(options.date)?;
+    let expand_tabs = log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs);
     let repo = find_repo()?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
     let diff_format = options.diff_format(parsed_log_revs.patch);
@@ -6221,6 +6225,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                     options.parents,
                     abbrev_len,
                     default_commit_abbrev,
+                    expand_tabs,
                     &decorations,
                     &notes,
                     date_mode,
@@ -6286,6 +6291,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             options.parents,
             abbrev_len,
             default_commit_abbrev,
+            expand_tabs,
             &decorations,
             &notes,
             date_mode,
@@ -7422,6 +7428,7 @@ impl<'a> LogFormat<'a> {
             parents,
             abbrev_len,
             false,
+            true,
             &decorations,
             &notes,
         )
@@ -7434,6 +7441,7 @@ impl<'a> LogFormat<'a> {
         parents: bool,
         abbrev_len: usize,
         default_commit_abbrev: bool,
+        expand_tabs: bool,
         decorations: &LogDecorations,
         notes: &LogNotes,
     ) -> Result<String> {
@@ -7443,6 +7451,7 @@ impl<'a> LogFormat<'a> {
             parents,
             abbrev_len,
             default_commit_abbrev,
+            expand_tabs,
             decorations,
             notes,
             LogDateMode::Builtin(BlameDateMode::Default),
@@ -7456,6 +7465,7 @@ impl<'a> LogFormat<'a> {
         parents: bool,
         abbrev_len: usize,
         default_commit_abbrev: bool,
+        expand_tabs: bool,
         decorations: &LogDecorations,
         notes: &LogNotes,
         date_mode: LogDateMode<'_>,
@@ -7467,6 +7477,7 @@ impl<'a> LogFormat<'a> {
                 parents,
                 abbrev_len,
                 default_commit_abbrev,
+                expand_tabs,
                 decorations,
                 notes,
                 date_mode,
@@ -7505,6 +7516,7 @@ impl<'a> LogFormat<'a> {
         parents: bool,
         abbrev_len: usize,
         default_commit_abbrev: bool,
+        expand_tabs: bool,
         decorations: &LogDecorations,
         notes: &LogNotes,
         date_mode: LogDateMode<'_>,
@@ -7517,6 +7529,7 @@ impl<'a> LogFormat<'a> {
                 parents,
                 abbrev_len,
                 default_commit_abbrev,
+                expand_tabs,
                 date_mode,
             ),
             _ => self.render_with_context(
@@ -7525,6 +7538,7 @@ impl<'a> LogFormat<'a> {
                 parents,
                 abbrev_len,
                 default_commit_abbrev,
+                expand_tabs,
                 decorations,
                 notes,
                 date_mode,
@@ -7550,6 +7564,7 @@ fn render_default_log(
     parents: bool,
     abbrev_len: usize,
     default_commit_abbrev: bool,
+    expand_tabs: bool,
     decorations: &LogDecorations,
     notes: &LogNotes,
     date_mode: LogDateMode<'_>,
@@ -7590,7 +7605,7 @@ fn render_default_log(
     out.push_str("\n\n");
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
-        out.push_str(&String::from_utf8_lossy(line));
+        append_indented_log_line(&mut out, line, expand_tabs);
         out.push('\n');
     }
     if let Some(note) = notes.get(id) {
@@ -7598,7 +7613,7 @@ fn render_default_log(
         out.push_str("Notes:\n");
         for line in split_log_message_lines(note) {
             out.push_str("    ");
-            out.push_str(&String::from_utf8_lossy(line));
+            append_indented_log_line(&mut out, line, expand_tabs);
             out.push('\n');
         }
     }
@@ -7612,6 +7627,7 @@ fn render_default_log_from_parent(
     parents: bool,
     abbrev_len: usize,
     default_commit_abbrev: bool,
+    expand_tabs: bool,
     date_mode: LogDateMode<'_>,
 ) -> Result<String> {
     let mut out = String::new();
@@ -7646,10 +7662,31 @@ fn render_default_log_from_parent(
     out.push_str("\n\n");
     for line in split_log_message_lines(&commit.message) {
         out.push_str("    ");
-        out.push_str(&String::from_utf8_lossy(line));
+        append_indented_log_line(&mut out, line, expand_tabs);
         out.push('\n');
     }
     Ok(out)
+}
+
+fn append_indented_log_line(out: &mut String, line: &[u8], expand_tabs: bool) {
+    let text = String::from_utf8_lossy(line);
+    if expand_tabs {
+        let mut column = 0usize;
+        for ch in text.chars() {
+            if ch == '\t' {
+                let spaces = 8 - (column % 8);
+                for _ in 0..spaces {
+                    out.push(' ');
+                }
+                column += spaces;
+            } else {
+                out.push(ch);
+                column += 1;
+            }
+        }
+    } else {
+        out.push_str(&text);
+    }
 }
 
 fn log_format_uses_placeholder(pattern: &str, target: char) -> bool {
@@ -7827,6 +7864,18 @@ fn log_notes_enabled(format: &LogFormat<'_>, notes: bool, no_notes: bool) -> boo
     notes || matches!(format, LogFormat::Default)
 }
 
+fn log_expand_tabs_enabled(
+    _encoding: Option<&str>,
+    expand_tabs: bool,
+    no_expand_tabs: bool,
+) -> bool {
+    if no_expand_tabs {
+        return false;
+    }
+    let _ = expand_tabs;
+    true
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ShowOptions<'a> {
     pub(crate) no_patch: bool,
@@ -7841,6 +7890,9 @@ pub(crate) struct ShowOptions<'a> {
     pub(crate) summary: bool,
     pub(crate) name_only: bool,
     pub(crate) name_status: bool,
+    pub(crate) encoding: Option<&'a str>,
+    pub(crate) expand_tabs: bool,
+    pub(crate) no_expand_tabs: bool,
     pub(crate) notes: bool,
     pub(crate) no_notes: bool,
     pub(crate) show_notes: bool,
@@ -8043,6 +8095,9 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         summary: options.summary,
         name_only: options.name_only,
         name_status: options.name_status,
+        encoding: options.encoding,
+        expand_tabs: options.expand_tabs,
+        no_expand_tabs: options.no_expand_tabs,
         notes: options.notes || options.show_notes || options.show_notes_by_default,
         no_notes: options.no_notes || options.standard_notes || options.no_standard_notes,
         diff_required: false,
@@ -8098,6 +8153,7 @@ fn show_name_only_multi(options: ShowOptions<'_>) -> Result<()> {
             false,
             default_abbrev_len(&store)?,
             false,
+            true,
             &LogDecorations::empty(),
             &LogNotes::empty(),
         )?;
@@ -8186,6 +8242,7 @@ fn show_object(
                     false,
                     abbrev_len,
                     default_commit_abbrev,
+                    log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
                     &LogDecorations::empty(),
                     &notes,
                 )?;
@@ -8228,6 +8285,7 @@ fn show_object(
                         false,
                         abbrev_len,
                         default_commit_abbrev,
+                        log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
                         &decorations,
                         &notes,
                         LogDateMode::Builtin(BlameDateMode::Default),
@@ -8268,6 +8326,7 @@ fn show_object(
                 false,
                 abbrev_len,
                 default_commit_abbrev,
+                log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
                 &LogDecorations::empty(),
                 &notes,
             )?;
