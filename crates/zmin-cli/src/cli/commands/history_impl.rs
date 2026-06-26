@@ -5776,6 +5776,15 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) oneline: bool,
     pub(crate) zero: bool,
     pub(crate) all: bool,
+    pub(crate) author: Option<&'a str>,
+    pub(crate) committer: Option<&'a str>,
+    pub(crate) count: bool,
+    pub(crate) max_parents: Option<&'a str>,
+    pub(crate) no_max_parents: bool,
+    pub(crate) merges: bool,
+    pub(crate) min_parents: Option<&'a str>,
+    pub(crate) no_min_parents: bool,
+    pub(crate) no_merges: bool,
     pub(crate) parents: bool,
     pub(crate) first_parent: bool,
     pub(crate) no_diff_merges: bool,
@@ -5817,6 +5826,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) format: Option<&'a str>,
     pub(crate) max_count: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
+    pub(crate) until: Option<&'a str>,
     pub(crate) date: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
     pub(crate) revs: Vec<String>,
@@ -5922,6 +5932,7 @@ pub(crate) fn log(options: LogOptions<'_>) -> Result<()> {
 
 fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _trace = phase_trace("log.total");
+    let _ = options.count;
     let (revs, max_count, parsed_zero) =
         split_log_revs_and_count(options.revs.clone(), options.max_count)?;
     let zero = options.zero || parsed_zero;
@@ -5983,6 +5994,19 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let Some(since) = parse_log_since(options.since) else {
         return Ok(());
     };
+    let Some(until) = parse_log_until(options.until) else {
+        return Ok(());
+    };
+    let author_pattern = options.author;
+    let committer_pattern = options.committer;
+    let (min_parents, max_parents) = parse_log_parent_bounds(
+        options.min_parents,
+        options.no_min_parents,
+        options.no_merges,
+        options.max_parents,
+        options.no_max_parents,
+        options.merges,
+    )?;
     let date_mode = parse_log_date_mode(options.date)?;
     let repo = find_repo()?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
@@ -6026,7 +6050,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         regex_mode: parsed_log_revs.pickaxe_regex_mode,
         all: parsed_log_revs.pickaxe_all,
     };
-    let collect_max_count = if pickaxe_options.enabled() {
+    let post_collection_filters = since.is_some()
+        || until.is_some()
+        || !options.grep.is_empty()
+        || author_pattern.is_some()
+        || committer_pattern.is_some()
+        || min_parents.is_some()
+        || max_parents.is_some();
+    let collect_max_count = if pickaxe_options.enabled() || post_collection_filters {
         None
     } else {
         max_count
@@ -6066,6 +6097,13 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
                 .is_some_and(|timestamp| timestamp > since)
         });
     }
+    if let Some(until) = until {
+        commits.retain(|entry| {
+            signature_timestamp_timezone(&entry.commit.committer)
+                .map(|(timestamp, _)| timestamp)
+                .is_some_and(|timestamp| timestamp < until)
+        });
+    }
     if !options.grep.is_empty() {
         commits.retain(|entry| {
             shortlog_commit_matches_grep(
@@ -6079,6 +6117,31 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             .unwrap_or(false)
         });
     }
+    if let Some(pattern) = author_pattern {
+        commits.retain(|entry| {
+            log_signature_matches_pattern(
+                &entry.commit.author,
+                pattern,
+                options.regexp_ignore_case,
+                grep_mode,
+            )
+        });
+    }
+    if let Some(pattern) = committer_pattern {
+        commits.retain(|entry| {
+            log_signature_matches_pattern(
+                &entry.commit.committer,
+                pattern,
+                options.regexp_ignore_case,
+                grep_mode,
+            )
+        });
+    }
+    if min_parents.is_some() || max_parents.is_some() {
+        commits.retain(|entry| {
+            log_parent_count_matches_bounds(entry.commit.parents.len(), min_parents, max_parents)
+        });
+    }
     if pickaxe_options.enabled() {
         commits = filter_log_commits_by_pickaxe(
             &repo,
@@ -6088,9 +6151,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             pickaxe_options,
             options.first_parent,
         )?;
-        if let Some(max_count) = max_count {
-            commits.truncate(max_count);
-        }
+    }
+    if let Some(max_count) = max_count {
+        commits.truncate(max_count);
     }
     if options.reverse {
         commits.reverse();
@@ -7000,6 +7063,65 @@ fn parse_log_since(value: Option<&str>) -> Option<Option<i64>> {
     None
 }
 
+fn parse_log_until(value: Option<&str>) -> Option<Option<i64>> {
+    parse_log_since(value)
+}
+
+fn parse_log_parent_count_option(name: &str, value: Option<&str>) -> Result<Option<usize>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let parsed = value.parse::<usize>().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("invalid value for '{name}': '{value}'"),
+    })?;
+    Ok(Some(parsed))
+}
+
+fn parse_log_parent_bounds(
+    min_parents: Option<&str>,
+    no_min_parents: bool,
+    no_merges: bool,
+    max_parents: Option<&str>,
+    no_max_parents: bool,
+    merges: bool,
+) -> Result<(Option<usize>, Option<usize>)> {
+    let mut min = parse_log_parent_count_option("--min-parents", min_parents)?;
+    let mut max = parse_log_parent_count_option("--max-parents", max_parents)?;
+    if no_min_parents {
+        min = None;
+    }
+    if no_max_parents {
+        max = None;
+    }
+    if merges {
+        min = Some(2);
+    }
+    if no_merges {
+        max = Some(1);
+    }
+    Ok((min, max))
+}
+
+fn log_signature_matches_pattern(
+    signature: &[u8],
+    pattern: &str,
+    regexp_ignore_case: bool,
+    mode: ShortlogPatternMode,
+) -> bool {
+    let rendered = String::from_utf8_lossy(signature);
+    shortlog_text_matches_pattern(&rendered, pattern, regexp_ignore_case, mode)
+}
+
+fn log_parent_count_matches_bounds(
+    parent_count: usize,
+    min_parents: Option<usize>,
+    max_parents: Option<usize>,
+) -> bool {
+    min_parents.is_none_or(|min| parent_count >= min)
+        && max_parents.is_none_or(|max| parent_count <= max)
+}
+
 fn parse_relative_log_since(value: &str) -> Option<i64> {
     let normalized = value.trim().to_ascii_lowercase();
     let now = current_unix_timestamp().ok()?;
@@ -7826,6 +7948,15 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         oneline: options.oneline,
         zero: options.zero,
         all: false,
+        author: None,
+        committer: None,
+        count: false,
+        max_parents: None,
+        no_max_parents: false,
+        merges: false,
+        min_parents: None,
+        no_min_parents: false,
+        no_merges: false,
         parents: false,
         first_parent: options.first_parent,
         no_diff_merges: false,
@@ -7874,6 +8005,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         format: options.format,
         max_count: None,
         since: None,
+        until: None,
         date: None,
         pretty: options.pretty,
         revs: options.args,

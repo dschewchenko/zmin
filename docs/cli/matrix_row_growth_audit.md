@@ -12,6 +12,28 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free `git log`
+identity, time, and parent-count documented-option family expansion on the
+current local lane. The selected change added twelve exact stock-Git `log`
+rows for `--author`, `--committer`, `--after`, `--until`, `--before`,
+`--count`, `--merges`, `--no-merges`, `--max-parents`, `--no-max-parents`,
+`--min-parents`, and `--no-min-parents`, then promoted twelve represented
+documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+12` matrix rows, `+12` complete documented option pairs, `+12`
+represented documented option pairs, `+12` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5773` matrix rows, `5018` verified rows, `720`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1766/3212` complete documented option pairs, and
+`1774/3212` represented documented option pairs. `log` now sits at
+`43/131` reviewed-complete documented option pairs with `137/137`
+classified rows, `131` stock-matching rows, `6` invalid-input rows, and `0`
+exact-open rows on the current modeled surface. The next default follow-up
+should stay on shared history-query surfaces and prioritize another dense
+reusable helper-free family rather than switching back to already saturated
+promotion lanes.
+
+As of 2026-06-26 the latest completed batch is a helper-free `git log`
 grep plus reflog-grep documented-option family expansion on the current local
 lane. The selected change added fourteen exact stock-Git `log` rows for
 `--grep`, `--all-match`, `--invert-grep`, `--regexp-ignore-case`,

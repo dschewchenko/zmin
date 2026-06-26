@@ -117,7 +117,7 @@ Progress reports use these numbers:
 
 For the current branch:
 
-`146/151 complete command matrices / 1754/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1762/3212 represented doc-option pairs / 5761 written rows / 5006/5761 written rows matching stock Git / 0 partial written rows / 12 open written rows`
+`146/151 complete command matrices / 1766/3212 complete doc-option matrices / 155/151 commands with matrix rows / 1774/3212 represented doc-option pairs / 5773 written rows / 5018/5773 written rows matching stock Git / 0 partial written rows / 12 open written rows`
 
 Represented doc-option pairs still do not mean support. They only mean at
 least one behavior row exists for that documented option spelling. One option
@@ -300,16 +300,18 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free `git log` grep and reflog-grep
-documented-option family expansion on the current local lane. Zmin now accepts
-and matches stock Git for `--grep`, `--all-match`, `--invert-grep`,
-`--regexp-ignore-case`, `--basic-regexp`, `--extended-regexp`,
-`--fixed-strings`, `--perl-regexp`, `--grep-reflog`, and the short pattern
-mode aliases `-E`, `-F`, `-P`, and `-i`, including order-sensitive pattern
-mode precedence and the fatal guard when `--grep-reflog` appears without
-`--walk-reflogs`.
+The latest completed slice is a helper-free `git log` identity, time, and
+parent-count documented-option family expansion on the current local lane.
+Zmin now accepts and matches stock Git for `--author`, `--committer`,
+`--after`, `--until`, `--before`, `--count`, `--merges`, `--no-merges`,
+`--max-parents`, `--no-max-parents`, `--min-parents`, and
+`--no-min-parents`, including the current stock no-op behavior for `log
+--count`, absolute RFC3339 cutoff handling for `after/until/before`, and
+merge-only versus non-merge-only parent-count filtering on a no-ff merge
+graph.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat log_grep_ -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_grep_family_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat log_identity_time_and_parent_filters_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -318,16 +320,16 @@ Focused gates were
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1754/3212` complete documented option pairs,
-`1762/3212` represented documented option pairs, `5761` written rows,
-`5006` verified rows, `12` open rows, and `720` invalid-input rows.
-`log` now sits at `31/131` reviewed-complete documented option pairs,
-`125` written rows, `125` classified rows, `119` stock-matching rows,
+`1766/3212` complete documented option pairs,
+`1774/3212` represented documented option pairs, `5773` written rows,
+`5018` verified rows, `12` open rows, and `720` invalid-input rows.
+`log` now sits at `43/131` reviewed-complete documented option pairs,
+`137` written rows, `137` classified rows, `131` stock-matching rows,
 `6` invalid-input rows, and `0` exact-open rows on its current modeled
 surface. The next bounded high-throughput follow-up should stay on shared
 history-query surfaces and prioritize another helper-free family with broad
-reuse, such as `log` author/committer/date-alias filters or a `rev-list`
-object/filter family, rather than returning to already saturated `tag`,
+reuse, such as `log` topology and object-selection filters or a `rev-list`
+object/filter expansion, rather than returning to already saturated `tag`,
 `clone`, `init`, `fetch`, `pull`, or `shortlog` lanes.
 
 The focused `git_object_plumbing_compat.rs`,

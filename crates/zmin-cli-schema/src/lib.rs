@@ -3073,6 +3073,24 @@ pub enum Command {
         zero: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "author")]
+        author: Option<String>,
+        #[arg(long = "committer")]
+        committer: Option<String>,
+        #[arg(long = "count", action = ArgAction::SetTrue)]
+        count: bool,
+        #[arg(long = "max-parents")]
+        max_parents: Option<String>,
+        #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
+        no_max_parents: bool,
+        #[arg(long = "merges", action = ArgAction::SetTrue)]
+        merges: bool,
+        #[arg(long = "min-parents")]
+        min_parents: Option<String>,
+        #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
+        no_min_parents: bool,
+        #[arg(long = "no-merges", action = ArgAction::SetTrue)]
+        no_merges: bool,
         #[arg(long = "parents", action = ArgAction::SetTrue)]
         parents: bool,
         #[arg(long = "first-parent", action = ArgAction::SetTrue)]
@@ -3177,6 +3195,8 @@ pub enum Command {
         max_count: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
+        #[arg(long = "until", alias = "before")]
+        until: Option<String>,
         #[arg(long = "date")]
         date: Option<String>,
         #[arg(long = "pretty")]

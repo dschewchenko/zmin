@@ -64,6 +64,33 @@ fn git_commit_with_author(
     );
 }
 
+fn git_commit_with_identities(
+    cwd: &std::path::Path,
+    author_name: &str,
+    author_email: &str,
+    committer_name: &str,
+    committer_email: &str,
+    date: &str,
+    message: &str,
+) {
+    let output = Command::new(stock_git_bin())
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", message])
+        .env("GIT_AUTHOR_NAME", author_name)
+        .env("GIT_AUTHOR_EMAIL", author_email)
+        .env("GIT_AUTHOR_DATE", date)
+        .env("GIT_COMMITTER_NAME", committer_name)
+        .env("GIT_COMMITTER_EMAIL", committer_email)
+        .env("GIT_COMMITTER_DATE", date)
+        .current_dir(cwd)
+        .output()
+        .expect("git commit with identities");
+    assert!(
+        output.status.success(),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn write_loose_blob(cwd: &std::path::Path, content: &str) {
     let mut child = Command::new(stock_git_bin())
         .args(["hash-object", "-w", "--stdin"])
@@ -649,6 +676,107 @@ fn log_grep_reflog_requires_walk_reflogs_and_matches_stock_git() {
         run_zmin_failure_output(repo.path(), &["log", "--grep-reflog=commit", "HEAD"]),
         git_failure_output(repo.path(), &["log", "--grep-reflog=commit", "HEAD"])
     );
+}
+
+#[test]
+fn log_identity_time_and_parent_filters_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_identities(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "Carol",
+        "carol@example.test",
+        "2023-11-14T22:13:20Z",
+        "feat: base",
+    );
+
+    git(repo.path(), ["checkout", "-b", "topic"]);
+    write_file(repo.path(), "topic.txt", "topic\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_identities(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "Eve",
+        "eve@example.test",
+        "2023-11-14T22:33:20Z",
+        "feat: topic",
+    );
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "main.txt", "main\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_identities(
+        repo.path(),
+        "Bob",
+        "bob@example.test",
+        "Dana",
+        "dana@example.test",
+        "2023-11-14T22:23:20Z",
+        "fix: main",
+    );
+
+    let merge = Command::new(stock_git_bin())
+        .args(["merge", "--no-ff", "topic", "-m", "merge topic"])
+        .env("GIT_AUTHOR_NAME", "Frank")
+        .env("GIT_AUTHOR_EMAIL", "frank@example.test")
+        .env("GIT_AUTHOR_DATE", "2023-11-14T22:43:20Z")
+        .env("GIT_COMMITTER_NAME", "Frank")
+        .env("GIT_COMMITTER_EMAIL", "frank@example.test")
+        .env("GIT_COMMITTER_DATE", "2023-11-14T22:43:20Z")
+        .current_dir(repo.path())
+        .output()
+        .expect("git merge");
+    assert!(
+        merge.status.success(),
+        "git merge failed: {}",
+        String::from_utf8_lossy(&merge.stderr)
+    );
+
+    for args in [
+        ["log", "--author=Alice", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--committer=Eve", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--after=2023-11-14T22:20:00Z",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--until=2023-11-14T22:20:00Z",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--before=2023-11-14T22:20:00Z",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["log", "--count", "--author=Alice", "HEAD"].as_slice(),
+        ["log", "--merges", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--no-merges", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--max-parents=1", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--no-max-parents", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--min-parents=2", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--no-min-parents", "--format=%s", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
 }
 
 #[test]
