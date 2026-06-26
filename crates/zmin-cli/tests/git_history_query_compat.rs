@@ -704,6 +704,59 @@ fn shortlog_shared_history_schema_batch_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_proof_only_option_surface_batch_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
+    write_commit_with_date(repo.path(), "a.txt", "three\n", "1700001200 +0000", "three");
+
+    for args in [
+        ["shortlog", "-sne", "--ignore-missing", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--indexed-objects", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--objects-edge", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--objects-edge-aggressive", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--quiet", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--standard-notes", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-standard-notes", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--notes", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-notes", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--show-notes", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--show-notes-by-default", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-abbrev-commit", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-expand-tabs", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--show-pulls", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--simplify-merges", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--sparse", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--unpacked", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--remotes", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--remove-empty", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--relative-date", "--group=format:%ad", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["shortlog", "-sne", "--header", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--progress", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--no-filter", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--missing", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--use-bitmap-index", "HEAD"].as_slice(),
+        ["shortlog", "-sne", "--timestamp", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_family_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

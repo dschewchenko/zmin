@@ -1899,12 +1899,32 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) min_parents: Option<&'a str>,
     pub(crate) no_min_parents: bool,
     pub(crate) first_parent: bool,
+    pub(crate) ignore_missing: bool,
+    pub(crate) indexed_objects: bool,
+    pub(crate) unpacked: bool,
+    pub(crate) remotes: bool,
+    pub(crate) remove_empty: bool,
+    pub(crate) notes: bool,
+    pub(crate) no_notes: bool,
+    pub(crate) show_notes: bool,
+    pub(crate) show_notes_by_default: bool,
+    pub(crate) standard_notes: bool,
+    pub(crate) no_standard_notes: bool,
+    pub(crate) no_abbrev_commit: bool,
+    pub(crate) no_expand_tabs: bool,
+    pub(crate) objects_edge: bool,
+    pub(crate) objects_edge_aggressive: bool,
+    pub(crate) quiet: bool,
+    pub(crate) show_pulls: bool,
+    pub(crate) simplify_merges: bool,
+    pub(crate) sparse: bool,
     pub(crate) parents: bool,
     pub(crate) objects: bool,
     pub(crate) graph: bool,
     pub(crate) show_signature: bool,
     pub(crate) format: Option<&'a str>,
     pub(crate) date: Option<&'a str>,
+    pub(crate) relative_date: bool,
     pub(crate) group: Vec<String>,
     pub(crate) wrap: Option<&'a str>,
     pub(crate) stdin: bool,
@@ -1923,6 +1943,12 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) no_object_names: bool,
     pub(crate) mailmap: bool,
     pub(crate) source: bool,
+    pub(crate) header: bool,
+    pub(crate) progress: bool,
+    pub(crate) no_filter: bool,
+    pub(crate) missing: bool,
+    pub(crate) use_bitmap_index: bool,
+    pub(crate) timestamp: bool,
     pub(crate) raw_args: &'a [String],
     pub(crate) revs: Vec<String>,
 }
@@ -1987,12 +2013,32 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         min_parents,
         no_min_parents,
         first_parent,
+        ignore_missing,
+        indexed_objects,
+        unpacked,
+        remotes,
+        remove_empty,
+        notes,
+        no_notes,
+        show_notes,
+        show_notes_by_default,
+        standard_notes,
+        no_standard_notes,
+        no_abbrev_commit,
+        no_expand_tabs,
+        objects_edge,
+        objects_edge_aggressive,
+        quiet,
+        show_pulls,
+        simplify_merges,
+        sparse,
         parents,
         objects,
         graph,
         show_signature,
         format,
         date,
+        relative_date,
         group,
         wrap,
         stdin,
@@ -2011,6 +2057,12 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         no_object_names,
         mailmap,
         source,
+        header,
+        progress,
+        no_filter,
+        missing,
+        use_bitmap_index,
+        timestamp,
         raw_args,
         revs,
     } = options;
@@ -2029,6 +2081,25 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let _accepted_cherry_mark = cherry_mark;
     let _accepted_boundary = boundary;
     let _accepted_children = children;
+    let _accepted_ignore_missing = ignore_missing;
+    let _accepted_indexed_objects = indexed_objects;
+    let _accepted_unpacked = unpacked;
+    let _accepted_remotes = remotes;
+    let _accepted_remove_empty = remove_empty;
+    let _accepted_notes = notes;
+    let _accepted_no_notes = no_notes;
+    let _accepted_show_notes = show_notes;
+    let _accepted_show_notes_by_default = show_notes_by_default;
+    let _accepted_standard_notes = standard_notes;
+    let _accepted_no_standard_notes = no_standard_notes;
+    let _accepted_no_abbrev_commit = no_abbrev_commit;
+    let _accepted_no_expand_tabs = no_expand_tabs;
+    let _accepted_objects_edge = objects_edge;
+    let _accepted_objects_edge_aggressive = objects_edge_aggressive;
+    let _accepted_quiet = quiet;
+    let _accepted_show_pulls = show_pulls;
+    let _accepted_simplify_merges = simplify_merges;
+    let _accepted_sparse = sparse;
     let _accepted_parents = parents;
     let _accepted_objects = objects;
     let _accepted_graph = graph;
@@ -2047,6 +2118,24 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     }
     if source {
         return Err(shortlog_unknown_option("--source"));
+    }
+    if header {
+        return Err(shortlog_unknown_option("--header"));
+    }
+    if progress {
+        return Err(shortlog_unknown_option("--progress"));
+    }
+    if no_filter {
+        return Err(shortlog_unknown_option("--no-filter"));
+    }
+    if missing {
+        return Err(shortlog_unknown_option("--missing"));
+    }
+    if use_bitmap_index {
+        return Err(shortlog_unknown_option("--use-bitmap-index"));
+    }
+    if timestamp {
+        return Err(shortlog_unknown_option("--timestamp"));
     }
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
@@ -2145,7 +2234,8 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         commits.truncate(max_count);
     }
     let groups_spec = parse_shortlog_groups(&group, committer)?;
-    let date_mode = parse_log_date_mode(date)?;
+    let date_arg = history_raw_date_arg(raw_args, date, relative_date);
+    let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
     let grep_mode = parse_shortlog_pattern_mode(
         basic_regexp,

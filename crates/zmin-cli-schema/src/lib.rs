@@ -663,6 +663,44 @@ pub enum Command {
         no_min_parents: bool,
         #[arg(long = "first-parent", action = ArgAction::SetTrue)]
         first_parent: bool,
+        #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
+        ignore_missing: bool,
+        #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
+        indexed_objects: bool,
+        #[arg(long = "unpacked", action = ArgAction::SetTrue)]
+        unpacked: bool,
+        #[arg(long = "remotes", action = ArgAction::SetTrue)]
+        remotes: bool,
+        #[arg(long = "remove-empty", action = ArgAction::SetTrue)]
+        remove_empty: bool,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
+        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+        show_notes: bool,
+        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+        show_notes_by_default: bool,
+        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+        standard_notes: bool,
+        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+        no_standard_notes: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
+        #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
+        objects_edge: bool,
+        #[arg(long = "objects-edge-aggressive", action = ArgAction::SetTrue)]
+        objects_edge_aggressive: bool,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
+        show_pulls: bool,
+        #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
+        simplify_merges: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
         #[arg(long = "parents", action = ArgAction::SetTrue)]
         parents: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
@@ -675,6 +713,8 @@ pub enum Command {
         format: Vec<String>,
         #[arg(long = "date")]
         date: Vec<String>,
+        #[arg(long = "relative-date", action = ArgAction::SetTrue)]
+        relative_date: bool,
         #[arg(long = "group")]
         group: Vec<String>,
         #[arg(short = 'w', num_args = 0..=1, default_missing_value = "")]
@@ -730,6 +770,18 @@ pub enum Command {
         mailmap: bool,
         #[arg(long = "source", action = ArgAction::SetTrue)]
         source: bool,
+        #[arg(long = "header", action = ArgAction::SetTrue)]
+        header: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-filter", action = ArgAction::SetTrue)]
+        no_filter: bool,
+        #[arg(long = "missing", action = ArgAction::SetTrue)]
+        missing: bool,
+        #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
+        use_bitmap_index: bool,
+        #[arg(long = "timestamp", action = ArgAction::SetTrue)]
+        timestamp: bool,
         #[arg(long = "max-count")]
         max_count: Option<String>,
         #[arg(long = "max-age")]

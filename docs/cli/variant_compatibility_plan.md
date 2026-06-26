@@ -21,25 +21,29 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-27 the latest completed batch is a helper-free shared-history
-`shortlog` schema closure. This batch added thirteen documented option
-closures by implementing and proving stock-Git parity for
-`shortlog --since`, `--until`, `--max-age`, `--min-age`, `--skip`,
-`--first-parent`, `--no-walk`, `--max-parents`, `--min-parents`,
-`--merges`, `--no-max-parents`, `--no-min-parents`, and `--reverse` on the
-modeled summary lane.
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`shortlog` option-surface closure. This batch added twenty-six documented
+option closures by proving stock-Git parity for accepted summary-lane flags
+`shortlog --ignore-missing`, `--indexed-objects`, `--objects-edge`,
+`--objects-edge-aggressive`, `--quiet`, `--standard-notes`,
+`--no-standard-notes`, `--notes`, `--no-notes`, `--show-notes`,
+`--show-notes-by-default`, `--no-abbrev-commit`, `--no-expand-tabs`,
+`--show-pulls`, `--simplify-merges`, `--sparse`, `--unpacked`, `--remotes`,
+`--remove-empty`, and `--relative-date`, plus stock-compatible
+unknown-option rejection for `shortlog --header`, `--progress`,
+`--no-filter`, `--missing`, `--use-bitmap-index`, and `--timestamp`.
 
 The batch fixed one cohesive parser/runtime gap on the `shortlog` path:
 
-- Zmin now reuses the shared history helper surface for canonical age bounds,
-  skip handling, no-walk collection, first-parent traversal, and parent-count
-  filtering on `shortlog`, instead of leaving these documented spellings out
-  of schema coverage while the same logic already existed on `log` and
-  `rev-list`
+- Zmin now exposes the represented shortlog surface that stock Git already
+  accepts or rejects on the modeled helper-free summary lanes, instead of
+  misparsing those spellings as revisions or silently leaving them outside the
+  compatibility schema; `--relative-date` now also reuses the existing shared
+  raw-date helper for format-based date grouping
 
 Focused verification was
 `cargo check -p zmin-cli`,
-`cargo test -p zmin-cli --test git_history_query_compat shortlog_shared_history_schema_batch_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat shortlog_proof_only_option_surface_batch_matches_stock_git -- --nocapture`,
 `cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -50,17 +54,17 @@ and `git diff --check`.
 Actual durable census after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `1980 / 3212`
-- represented documented command-option pairs: `1980 / 3212`
-- matrix rows: `6039`
-- verified rows: `5270`
-- invalid-input rows: `744`
+- complete documented command-option pairs: `2006 / 3212`
+- represented documented command-option pairs: `2006 / 3212`
+- matrix rows: `6065`
+- verified rows: `5290`
+- invalid-input rows: `750`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
-- `shortlog`: `70 / 125` reviewed-complete documented option pairs, `102`
-  written rows, `102` classified rows, `93` stock-matching rows, `9`
+- `shortlog`: `96 / 125` reviewed-complete documented option pairs, `128`
+  written rows, `128` classified rows, `113` stock-matching rows, `15`
   invalid-input rows, `0` exact-open rows
 
 The next best high-throughput follow-up should stay off the stateful `am`
