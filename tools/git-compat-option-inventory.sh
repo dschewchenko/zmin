@@ -109,7 +109,7 @@ awk '$1 ~ /^git-/ { command = $1; sub(/^git-/, "", command); print command }' "$
         $pending_heading = "";
 
         next unless $section eq "OPTIONS";
-        next unless /^\s*-/;
+        next unless /^\s*[`+]*-/;
         next unless /::\s*$/;
 
         s/`//g;

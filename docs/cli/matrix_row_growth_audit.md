@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-26 the latest completed batch is a helper-free Git-doc option
+inventory extractor repair for markup-wrapped option definitions on the
+current local lane. The selected change broadens
+`tools/git-compat-option-inventory.sh` so AsciiDoc option lines wrapped in
+backticks or `++` markup are seeded instead of being skipped, which restores
+documented option visibility for `clone` and other commands using the same
+formatting style without changing any behavior matrix rows. Expected delta was
+`+56` documented option seed rows, `+45` represented documented option pairs,
+`+0` complete documented option pairs, `+0` matrix rows, `+0` verified rows,
+`+0` invalid-input rows, and `+0` complete command matrices. Actual delta
+matched. Current census counts are `5747` matrix rows, `4993` verified rows,
+`719` invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1696/3212` complete documented option pairs, and
+`1749/3212` represented documented option pairs. `clone` now reports a
+visible documented surface at `36/47` represented option pairs with `96`
+written rows, `96` classified rows, `86` stock-matching rows, `10`
+invalid-input rows, and `0` exact-open rows instead of the prior misleading
+`0/0` doc-option denominator. The next default follow-up should use the
+corrected seed to prioritize another dense helper-free represented family or a
+clone-specific review-promotion sweep rather than continue from the stale
+pre-fix denominator.
+
 As of 2026-06-26 the latest completed batch is a helper-free `git tag`
 documented creation and listing family expansion on the current local lane.
 The selected change added seven exact stock-Git `tag` rows for `--message`,
