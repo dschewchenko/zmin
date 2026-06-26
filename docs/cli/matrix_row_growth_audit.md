@@ -12,6 +12,27 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-26 the latest completed batch is a helper-free shared
+`git rev-list` identity/time/parent filter documented-option family
+expansion on the current local lane. The selected change added twelve exact
+stock-Git rows for `rev-list --author`, `--committer`, `--since`, `--after`,
+`--until`, `--before`, `--merges`, `--no-merges`, `--max-parents`,
+`--no-max-parents`, `--min-parents`, and `--no-min-parents`, then promoted
+twelve represented documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. Expected delta was
+`+12` matrix rows, `+12` complete documented option pairs, `+12`
+represented documented option pairs, `+12` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Actual delta matched.
+Current census counts are `5841` matrix rows, `5081` verified rows, `723`
+invalid-input rows, `12` exact-open rows, `146/151` complete command
+matrices, `1830/3212` complete documented option pairs, and
+`1838/3212` represented documented option pairs. `rev-list` now sits at
+`38/117` reviewed-complete documented option pairs with `59/59` classified
+rows, `59` stock-matching rows, `0` invalid-input rows, and `0` exact-open
+rows on its current modeled surface. The next default follow-up should stay
+on shared history-query represented families rather than switching back to
+single-row tails.
+
+As of 2026-06-26 the latest completed batch is a helper-free shared
 `git switch`/`git fetch`/`git pull` transport-and-invalid-input closure on
 the current local lane. The selected change added six exact stock-Git rows for
 `switch --track`, `switch --no-track`, `switch -t`, `fetch --porcelain`,

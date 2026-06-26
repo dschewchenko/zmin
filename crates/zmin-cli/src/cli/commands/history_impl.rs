@@ -1959,8 +1959,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_mode = parse_log_date_mode(date)?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
-    let grep_mode =
-        parse_shortlog_pattern_mode(false, extended_regexp, fixed_strings, perl_regexp);
+    let grep_mode = parse_shortlog_pattern_mode(false, extended_regexp, fixed_strings, perl_regexp);
     let _ = reflog;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
@@ -1980,14 +1979,8 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         )? {
             continue;
         }
-        let subject = render_shortlog_subject(
-            &entry.id,
-            commit,
-            format,
-            &decorations,
-            &notes,
-            date_mode,
-        )?;
+        let subject =
+            render_shortlog_subject(&entry.id, commit, format, &decorations, &notes, date_mode)?;
         let mut keys = HashSet::new();
         for group in &groups_spec {
             for key in shortlog_group_keys(group, &entry.id, commit, email, date_mode)? {
@@ -2040,19 +2033,22 @@ fn parse_shortlog_groups(values: &[String], committer: bool) -> Result<Vec<Short
             ShortlogGroup::Author
         }]);
     }
-    values.iter().map(|value| parse_shortlog_group(value)).collect()
+    values
+        .iter()
+        .map(|value| parse_shortlog_group(value))
+        .collect()
 }
 
 fn parse_shortlog_group(value: &str) -> Result<ShortlogGroup> {
     match value {
         "author" => Ok(ShortlogGroup::Author),
         "committer" => Ok(ShortlogGroup::Committer),
-        value if value.starts_with("trailer:") => Ok(ShortlogGroup::Trailer(
-            value["trailer:".len()..].to_owned(),
-        )),
-        value if value.starts_with("format:") => Ok(ShortlogGroup::Format(
-            value["format:".len()..].to_owned(),
-        )),
+        value if value.starts_with("trailer:") => {
+            Ok(ShortlogGroup::Trailer(value["trailer:".len()..].to_owned()))
+        }
+        value if value.starts_with("format:") => {
+            Ok(ShortlogGroup::Format(value["format:".len()..].to_owned()))
+        }
         _ => Err(CliError::Stderr {
             code: 129,
             text: format!("error: unknown group type: {value}\n"),
@@ -2218,7 +2214,11 @@ fn wrap_shortlog_subject(subject: &str, wrap: ShortlogWrap) -> Vec<String> {
     let mut current_width = wrap.indent1;
     let mut first_line = true;
     for word in words {
-        let indent_width = if first_line { wrap.indent1 } else { wrap.indent2 };
+        let indent_width = if first_line {
+            wrap.indent1
+        } else {
+            wrap.indent2
+        };
         let space = usize::from(current_width > indent_width);
         let word_len = word.chars().count();
         if current_width + space + word_len > wrap.width && current_width > indent_width {
@@ -2272,13 +2272,13 @@ fn shortlog_commit_matches_grep(
     }
     let text = String::from_utf8_lossy(message);
     let matched = if all_match {
-        patterns.iter().all(|pattern| {
-            shortlog_text_matches_pattern(&text, pattern, regexp_ignore_case, mode)
-        })
+        patterns
+            .iter()
+            .all(|pattern| shortlog_text_matches_pattern(&text, pattern, regexp_ignore_case, mode))
     } else {
-        patterns.iter().any(|pattern| {
-            shortlog_text_matches_pattern(&text, pattern, regexp_ignore_case, mode)
-        })
+        patterns
+            .iter()
+            .any(|pattern| shortlog_text_matches_pattern(&text, pattern, regexp_ignore_case, mode))
     };
     Ok(if invert_grep { !matched } else { matched })
 }
@@ -2543,7 +2543,8 @@ pub(crate) fn blame(long: bool, root: bool, annotate: bool, args: Vec<String>) -
         let (start, end) = resolve_blame_line_range(&lines, range)?;
         lines.retain(|line| (start..=end).contains(&line.line_no));
     }
-    let annotate_structured = annotate && (options.incremental || options.porcelain || options.line_porcelain);
+    let annotate_structured =
+        annotate && (options.incremental || options.porcelain || options.line_porcelain);
     let effective_root = if annotate_structured {
         options.root
     } else {
@@ -4269,11 +4270,7 @@ fn print_annotate_lines(
             options.abbrev_width,
             options.blank_boundary,
         );
-        print!(
-            "{}\t({author:>10}\t{date}\t{})",
-            display_id,
-            line.line_no
-        );
+        print!("{}\t({author:>10}\t{date}\t{})", display_id, line.line_no);
         io::stdout().write_all(&line.content)?;
         if !line.content.ends_with(b"\n") {
             println!();
@@ -4518,9 +4515,7 @@ pub(crate) fn show_branch(options: ShowBranchOptions) -> Result<()> {
         !reflog_mode,
     )?;
     for id in commits {
-        if options.topics
-            && show_branch_commit_is_first_branch_only(&commit_cache, &heads, &id)?
-        {
+        if options.topics && show_branch_commit_is_first_branch_only(&commit_cache, &heads, &id)? {
             continue;
         }
         let mut prefix = String::new();
@@ -4672,7 +4667,11 @@ fn show_branch_commits(
     reverse_heads: bool,
 ) -> Result<Vec<ObjectId>> {
     let mut pending = if reverse_heads {
-        heads.iter().rev().map(|head| head.id.clone()).collect::<Vec<_>>()
+        heads
+            .iter()
+            .rev()
+            .map(|head| head.id.clone())
+            .collect::<Vec<_>>()
     } else {
         heads.iter().map(|head| head.id.clone()).collect::<Vec<_>>()
     };
@@ -5127,10 +5126,7 @@ pub(crate) fn describe(options: DescribeOptions) -> Result<()> {
                         id
                     )
                 };
-                return Err(CliError::Fatal {
-                    code: 128,
-                    message,
-                });
+                return Err(CliError::Fatal { code: 128, message });
             }
         }
     }
@@ -5274,7 +5270,8 @@ fn describe_commit(
     let mut best = None::<(&DescribeCandidate, usize)>;
     let candidate_limit = options.candidates.unwrap_or(10);
     for candidate in candidates.iter().take(candidate_limit.max(1)) {
-        let Some(depth) = describe_candidate_depth(commit_cache, id, candidate, options, &depths)? else {
+        let Some(depth) = describe_candidate_depth(commit_cache, id, candidate, options, &depths)?
+        else {
             continue;
         };
         if (options.exact_match || options.candidates == Some(0)) && depth != 0 {
@@ -6320,7 +6317,11 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.merges,
     )?;
     let date_mode = parse_log_date_mode(options.date)?;
-    let expand_tabs = log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs);
+    let expand_tabs = log_expand_tabs_enabled(
+        options.encoding,
+        options.expand_tabs,
+        options.no_expand_tabs,
+    );
     let repo = find_repo()?;
     let show_root = options.root || log_showroot_enabled(&repo)?;
     let diff_format = options.diff_format(parsed_log_revs.patch);
@@ -6373,8 +6374,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_show_pulls = options.show_pulls;
     let _accepted_simplify_merges = options.simplify_merges;
     let history_order = options.history_order();
-    let simplify_history_topo =
-        options.simplify_merges || options.simplify_by_decoration;
+    let simplify_history_topo = options.simplify_merges || options.simplify_by_decoration;
     let post_collection_filters = since.is_some()
         || until.is_some()
         || !options.grep.is_empty()
@@ -6490,7 +6490,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     }
     let mut traversal_markers = HashMap::new();
     if options.left_right || options.cherry_pick || options.cherry_mark || options.boundary {
-        let commit_ids = commits.iter().map(|entry| entry.id.clone()).collect::<Vec<_>>();
+        let commit_ids = commits
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
         let traversal = collect_history_traversal_decoration(
             &repo,
             &store,
@@ -6515,9 +6518,9 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         }
         traversal_markers = traversal.markers;
     }
-    if let Some(order) = history_order.or_else(|| {
-        simplify_history_topo.then_some(HistoryCommitOrder::Topo)
-    }) {
+    if let Some(order) =
+        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+    {
         commits = reorder_collected_commits(commits, order)?;
     }
     if let Some(max_count) = max_count {
@@ -7847,7 +7850,9 @@ impl<'a> LogFormat<'a> {
             ),
             Self::ShortOneline => Ok(format!(
                 "{}{}{}{} {}",
-                marker.map(HistoryTraversalMarker::log_prefix).unwrap_or_default(),
+                marker
+                    .map(HistoryTraversalMarker::log_prefix)
+                    .unwrap_or_default(),
                 short_object_id_len(id, abbrev_len),
                 short_parent_suffix(commit, parents, abbrev_len),
                 render_oneline_decorations(decorations, id),
@@ -7855,7 +7860,9 @@ impl<'a> LogFormat<'a> {
             )),
             Self::FullOneline => Ok(format!(
                 "{}{}{}{} {}",
-                marker.map(HistoryTraversalMarker::log_prefix).unwrap_or_default(),
+                marker
+                    .map(HistoryTraversalMarker::log_prefix)
+                    .unwrap_or_default(),
                 id.to_hex(),
                 parent_suffix(commit, parents),
                 render_oneline_decorations(decorations, id),
@@ -8396,17 +8403,23 @@ fn collect_history_patch_equivalent_ids(
     let tree_cache = TreeObjectCache::new(store);
     let mut left_patch_ids = HashSet::new();
     for id in left_ids {
-        if let Some(patch_id) =
-            reference_commands::commit_patch_id_for_cherry_cached(store, commit_cache, &tree_cache, id)?
-        {
+        if let Some(patch_id) = reference_commands::commit_patch_id_for_cherry_cached(
+            store,
+            commit_cache,
+            &tree_cache,
+            id,
+        )? {
             left_patch_ids.insert(patch_id);
         }
     }
     let mut right_patch_ids = HashSet::new();
     for id in right_ids {
-        if let Some(patch_id) =
-            reference_commands::commit_patch_id_for_cherry_cached(store, commit_cache, &tree_cache, id)?
-        {
+        if let Some(patch_id) = reference_commands::commit_patch_id_for_cherry_cached(
+            store,
+            commit_cache,
+            &tree_cache,
+            id,
+        )? {
             right_patch_ids.insert(patch_id);
         }
     }
@@ -8419,9 +8432,14 @@ fn collect_history_patch_equivalent_ids(
     }
     let mut equivalent_ids = HashSet::new();
     for id in left_ids.iter().chain(right_ids.iter()) {
-        if reference_commands::commit_patch_id_for_cherry_cached(store, commit_cache, &tree_cache, id)?
-            .as_ref()
-            .is_some_and(|patch_id| shared_patch_ids.contains(patch_id))
+        if reference_commands::commit_patch_id_for_cherry_cached(
+            store,
+            commit_cache,
+            &tree_cache,
+            id,
+        )?
+        .as_ref()
+        .is_some_and(|patch_id| shared_patch_ids.contains(patch_id))
         {
             equivalent_ids.insert(id.clone());
         }
@@ -8828,7 +8846,11 @@ fn show_object(
                     abbrev_len,
                     None,
                     default_commit_abbrev,
-                    log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
+                    log_expand_tabs_enabled(
+                        options.encoding,
+                        options.expand_tabs,
+                        options.no_expand_tabs,
+                    ),
                     &LogDecorations::empty(),
                     &notes,
                 )?;
@@ -8872,7 +8894,11 @@ fn show_object(
                         abbrev_len,
                         None,
                         default_commit_abbrev,
-                        log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
+                        log_expand_tabs_enabled(
+                            options.encoding,
+                            options.expand_tabs,
+                            options.no_expand_tabs,
+                        ),
                         &decorations,
                         &notes,
                         LogDateMode::Builtin(BlameDateMode::Default),
@@ -8914,7 +8940,11 @@ fn show_object(
                 abbrev_len,
                 None,
                 default_commit_abbrev,
-                log_expand_tabs_enabled(options.encoding, options.expand_tabs, options.no_expand_tabs),
+                log_expand_tabs_enabled(
+                    options.encoding,
+                    options.expand_tabs,
+                    options.no_expand_tabs,
+                ),
                 &LogDecorations::empty(),
                 &notes,
             )?;
@@ -9470,9 +9500,17 @@ fn signature_without_timestamp(signature: &[u8]) -> &[u8] {
         .unwrap_or(signature)
 }
 
-pub(crate) struct RevListOptions {
+pub(crate) struct RevListOptions<'a> {
     pub(crate) all: bool,
+    pub(crate) author: Option<&'a str>,
+    pub(crate) committer: Option<&'a str>,
     pub(crate) count: bool,
+    pub(crate) max_parents: Option<&'a str>,
+    pub(crate) no_max_parents: bool,
+    pub(crate) merges: bool,
+    pub(crate) min_parents: Option<&'a str>,
+    pub(crate) no_min_parents: bool,
+    pub(crate) no_merges: bool,
     pub(crate) objects: bool,
     pub(crate) no_object_names: bool,
     pub(crate) filter: Option<String>,
@@ -9495,10 +9533,12 @@ pub(crate) struct RevListOptions {
     pub(crate) cherry_mark: bool,
     pub(crate) boundary: bool,
     pub(crate) max_count: Option<usize>,
+    pub(crate) since: Option<&'a str>,
+    pub(crate) until: Option<&'a str>,
     pub(crate) revs: Vec<String>,
 }
 
-fn rev_list_history_order(options: &RevListOptions) -> Option<HistoryCommitOrder> {
+fn rev_list_history_order(options: &RevListOptions<'_>) -> Option<HistoryCommitOrder> {
     if options.author_date_order {
         Some(HistoryCommitOrder::AuthorDate)
     } else if options.date_order {
@@ -9517,11 +9557,19 @@ enum RevListObjectFilter {
     ObjectType(GitObjectKind),
 }
 
-pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
+pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let history_order = rev_list_history_order(&options);
     let RevListOptions {
         all,
+        author,
+        committer,
         count,
+        max_parents,
+        no_max_parents,
+        merges,
+        min_parents,
+        no_min_parents,
+        no_merges,
         objects,
         no_object_names,
         filter,
@@ -9544,6 +9592,8 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         cherry_mark,
         boundary,
         max_count,
+        since,
+        until,
         revs,
     } = options;
     let _accepted_full_history = full_history;
@@ -9552,10 +9602,34 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     let _accepted_show_pulls = show_pulls;
     let _accepted_simplify_merges = simplify_merges;
     let simplify_history_topo = simplify_merges || simplify_by_decoration;
+    let Some(since) = parse_log_since(since) else {
+        return Ok(());
+    };
+    let Some(until) = parse_log_until(until) else {
+        return Ok(());
+    };
+    let (min_parents, max_parents) = parse_log_parent_bounds(
+        min_parents,
+        no_min_parents,
+        no_merges,
+        max_parents,
+        no_max_parents,
+        merges,
+    )?;
     let revs = revs
         .into_iter()
         .take_while(|rev| rev != "--")
         .collect::<Vec<_>>();
+    let post_collection_filters = since.is_some()
+        || until.is_some()
+        || author.is_some()
+        || committer.is_some()
+        || min_parents.is_some()
+        || max_parents.is_some()
+        || ancestry_path
+        || simplify_by_decoration
+        || simplify_history_topo
+        || history_order.is_some();
     let object_filter = filter.as_deref().map(parse_rev_list_filter).transpose()?;
     let _ = filter_provided_objects;
     if revs.is_empty() && !all {
@@ -9643,7 +9717,7 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         )?;
         return Ok(());
     }
-    if count && !objects && history_order.is_none() && !ancestry_path && !simplify_history_topo {
+    if count && !objects && !post_collection_filters {
         println!(
             "{}",
             count_commits_with_exclusions(&repo, &store, &revs, max_count)?
@@ -9684,7 +9758,63 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
         return Ok(());
     }
 
-    let mut commit_ids = collect_commits_with_exclusions(&repo, &store, &revs, max_count)?;
+    let mut commit_ids = if post_collection_filters {
+        let commit_cache = CommitObjectCache::new(&store);
+        let collect_max_count = if count || objects { None } else { max_count };
+        let mut commits = collect_commit_objects_with_exclusions_cached(
+            &repo,
+            &store,
+            &commit_cache,
+            &revs,
+            collect_max_count,
+        )?;
+        if let Some(since) = since {
+            commits.retain(|entry| {
+                signature_timestamp_timezone(&entry.commit.committer)
+                    .map(|(timestamp, _)| timestamp)
+                    .is_some_and(|timestamp| timestamp > since)
+            });
+        }
+        if let Some(until) = until {
+            commits.retain(|entry| {
+                signature_timestamp_timezone(&entry.commit.committer)
+                    .map(|(timestamp, _)| timestamp)
+                    .is_some_and(|timestamp| timestamp < until)
+            });
+        }
+        if let Some(pattern) = author {
+            commits.retain(|entry| {
+                log_signature_matches_pattern(
+                    &entry.commit.author,
+                    pattern,
+                    false,
+                    ShortlogPatternMode::Basic,
+                )
+            });
+        }
+        if let Some(pattern) = committer {
+            commits.retain(|entry| {
+                log_signature_matches_pattern(
+                    &entry.commit.committer,
+                    pattern,
+                    false,
+                    ShortlogPatternMode::Basic,
+                )
+            });
+        }
+        if min_parents.is_some() || max_parents.is_some() {
+            commits.retain(|entry| {
+                log_parent_count_matches_bounds(
+                    entry.commit.parents.len(),
+                    min_parents,
+                    max_parents,
+                )
+            });
+        }
+        commits.into_iter().map(|entry| entry.id).collect()
+    } else {
+        collect_commits_with_exclusions(&repo, &store, &revs, max_count)?
+    };
     if ancestry_path {
         commit_ids =
             filter_commit_ids_by_ancestry_path(&repo, &store, &commit_cache, &revs, commit_ids)?;
@@ -9710,9 +9840,9 @@ pub(crate) fn rev_list(options: RevListOptions) -> Result<()> {
     if boundary {
         commit_ids.extend(traversal.boundary_ids.iter().cloned());
     }
-    if let Some(order) = history_order.or_else(|| {
-        simplify_history_topo.then_some(HistoryCommitOrder::Topo)
-    }) {
+    if let Some(order) =
+        history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
+    {
         commit_ids = reorder_commit_ids(&commit_cache, commit_ids, order)?;
     }
     if reverse {
@@ -10238,12 +10368,10 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     let empty_tree = if options.prune_empty {
-        Some(
-            store.write_object(
-                GitObjectKind::Tree,
-                &encode_tree(&[]).map_err(CliError::Io)?,
-            )?,
-        )
+        Some(store.write_object(
+            GitObjectKind::Tree,
+            &encode_tree(&[]).map_err(CliError::Io)?,
+        )?)
     } else {
         None
     };
@@ -10388,10 +10516,7 @@ pub(crate) fn filter_branch(options: FilterBranchOptions) -> Result<()> {
                 &parents,
             )?
         {
-            parents
-                .first()
-                .map(ObjectId::to_hex)
-                .unwrap_or_default()
+            parents.first().map(ObjectId::to_hex).unwrap_or_default()
         } else {
             let encoded = encode_raw_commit(&tree, &parents, &author, &committer, &message)?;
             let new_id = store.write_object(GitObjectKind::Commit, &encoded)?;

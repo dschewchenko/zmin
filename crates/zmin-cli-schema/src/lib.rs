@@ -3666,8 +3666,24 @@ pub enum Command {
     RevList {
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "author")]
+        author: Option<String>,
+        #[arg(long = "committer")]
+        committer: Option<String>,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(long = "max-parents")]
+        max_parents: Option<String>,
+        #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
+        no_max_parents: bool,
+        #[arg(long = "merges", action = ArgAction::SetTrue)]
+        merges: bool,
+        #[arg(long = "min-parents")]
+        min_parents: Option<String>,
+        #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
+        no_min_parents: bool,
+        #[arg(long = "no-merges", action = ArgAction::SetTrue)]
+        no_merges: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
         objects: bool,
         #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
@@ -3712,6 +3728,10 @@ pub enum Command {
         boundary: bool,
         #[arg(long = "max-count", short = 'n')]
         max_count: Option<usize>,
+        #[arg(long = "since", alias = "after")]
+        since: Option<String>,
+        #[arg(long = "until", alias = "before")]
+        until: Option<String>,
         #[arg(allow_hyphen_values = true)]
         revs: Vec<String>,
     },
@@ -4021,11 +4041,7 @@ pub enum Command {
         git_common_dir: bool,
         #[arg(long = "resolve-git-dir")]
         resolve_git_dir: Vec<PathBuf>,
-        #[arg(
-            long = "output-object-format",
-            num_args = 1,
-            require_equals = true
-        )]
+        #[arg(long = "output-object-format", num_args = 1, require_equals = true)]
         output_object_format: Vec<String>,
         #[arg(long = "disambiguate", require_equals = true)]
         disambiguate: Vec<String>,

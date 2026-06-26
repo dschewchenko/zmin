@@ -1,8 +1,8 @@
 mod common;
 
+use std::fs;
 use std::io::Write;
 use std::process::{Command, Stdio};
-use std::fs;
 
 use tempfile::TempDir;
 
@@ -309,7 +309,14 @@ fn shortlog_documented_option_family_matches_stock_git() {
         .as_slice(),
         ["shortlog", "--group=format:%an", "-sn", "HEAD"].as_slice(),
         ["shortlog", "--format=%h %s", "HEAD"].as_slice(),
-        ["shortlog", "--date=short", "--group=format:%ad", "-sn", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--date=short",
+            "--group=format:%ad",
+            "-sn",
+            "HEAD",
+        ]
+        .as_slice(),
         ["shortlog", "--format=%s", "--format=%h", "HEAD"].as_slice(),
         ["shortlog", "--format=%h", "--format=%s", "HEAD"].as_slice(),
         [
@@ -340,7 +347,14 @@ fn shortlog_documented_option_family_matches_stock_git() {
 
     for args in [
         ["shortlog", "--group=bogus", "HEAD"].as_slice(),
-        ["shortlog", "--date=bogus", "--group=format:%ad", "-sn", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--date=bogus",
+            "--group=format:%ad",
+            "-sn",
+            "HEAD",
+        ]
+        .as_slice(),
         ["shortlog", "-wbogus", "HEAD"].as_slice(),
         ["shortlog", "--stdin"].as_slice(),
     ] {
@@ -414,7 +428,14 @@ fn shortlog_grep_family_matches_stock_git() {
         ["shortlog", "--grep=banana", "-i", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "--regexp-ignore-case", "HEAD"].as_slice(),
         ["shortlog", "--grep=banana", "--invert-grep", "HEAD"].as_slice(),
-        ["shortlog", "--grep=banana", "--grep=carrot", "--all-match", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "--grep=banana",
+            "--grep=carrot",
+            "--all-match",
+            "HEAD",
+        ]
+        .as_slice(),
         ["shortlog", "--grep=banana", "--grep=carrot", "HEAD"].as_slice(),
         ["shortlog", "--grep=BA[N]ANA", "-E", "HEAD"].as_slice(),
         ["shortlog", "--grep=BA[N]ANA", "--extended-regexp", "HEAD"].as_slice(),
@@ -514,9 +535,7 @@ fn shortlog_reflog_option_family_matches_stock_git() {
         );
     }
 
-    for args in [
-        ["shortlog", "--grep-reflog=one", "HEAD"].as_slice(),
-    ] {
+    for args in [["shortlog", "--grep-reflog=one", "HEAD"].as_slice()] {
         assert_eq!(
             run_zmin_failure_output(repo.path(), args),
             git_failure_output(repo.path(), args),
@@ -568,7 +587,14 @@ fn log_grep_family_matches_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["log", "--grep=banana", "--invert-grep", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=banana",
+            "--invert-grep",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "log",
             "--grep=banana",
@@ -578,7 +604,14 @@ fn log_grep_family_matches_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["log", "--grep=banana", "--grep=carrot", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=banana",
+            "--grep=carrot",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
         ["log", "--grep=BA[N]ANA", "-E", "--format=%s", "HEAD"].as_slice(),
         [
             "log",
@@ -588,7 +621,14 @@ fn log_grep_family_matches_stock_git() {
             "HEAD",
         ]
         .as_slice(),
-        ["log", "--grep=BA[N]ANA", "--basic-regexp", "--format=%s", "HEAD"].as_slice(),
+        [
+            "log",
+            "--grep=BA[N]ANA",
+            "--basic-regexp",
+            "--format=%s",
+            "HEAD",
+        ]
+        .as_slice(),
         ["log", "--grep=banana", "-F", "--format=%s", "HEAD"].as_slice(),
         [
             "log",
@@ -770,20 +810,8 @@ fn log_identity_time_and_parent_filters_match_stock_git() {
     for args in [
         ["log", "--author=Alice", "--format=%s", "HEAD"].as_slice(),
         ["log", "--committer=Eve", "--format=%s", "HEAD"].as_slice(),
-        [
-            "log",
-            "--after=2023-11-14T22:20:00Z",
-            "--format=%s",
-            "HEAD",
-        ]
-        .as_slice(),
-        [
-            "log",
-            "--until=2023-11-14T22:20:00Z",
-            "--format=%s",
-            "HEAD",
-        ]
-        .as_slice(),
+        ["log", "--after=2023-11-14T22:20:00Z", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--until=2023-11-14T22:20:00Z", "--format=%s", "HEAD"].as_slice(),
         [
             "log",
             "--before=2023-11-14T22:20:00Z",
@@ -798,6 +826,89 @@ fn log_identity_time_and_parent_filters_match_stock_git() {
         ["log", "--no-max-parents", "--format=%s", "HEAD"].as_slice(),
         ["log", "--min-parents=2", "--format=%s", "HEAD"].as_slice(),
         ["log", "--no-min-parents", "--format=%s", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn rev_list_identity_time_and_parent_filters_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+
+    write_file(repo.path(), "a.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_identities(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "Carol",
+        "carol@example.test",
+        "2023-11-14T22:13:20Z",
+        "feat: base",
+    );
+
+    git(repo.path(), ["checkout", "-b", "topic"]);
+    write_file(repo.path(), "topic.txt", "topic\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_identities(
+        repo.path(),
+        "Alice",
+        "alice@example.test",
+        "Eve",
+        "eve@example.test",
+        "2023-11-14T22:33:20Z",
+        "feat: topic",
+    );
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "main.txt", "main\n");
+    git(repo.path(), ["add", "-A"]);
+    git_commit_with_identities(
+        repo.path(),
+        "Bob",
+        "bob@example.test",
+        "Dana",
+        "dana@example.test",
+        "2023-11-14T22:23:20Z",
+        "fix: main",
+    );
+
+    let merge = Command::new(stock_git_bin())
+        .args(["merge", "--no-ff", "topic", "-m", "merge topic"])
+        .env("GIT_AUTHOR_NAME", "Frank")
+        .env("GIT_AUTHOR_EMAIL", "frank@example.test")
+        .env("GIT_AUTHOR_DATE", "2023-11-14T22:43:20Z")
+        .env("GIT_COMMITTER_NAME", "Frank")
+        .env("GIT_COMMITTER_EMAIL", "frank@example.test")
+        .env("GIT_COMMITTER_DATE", "2023-11-14T22:43:20Z")
+        .current_dir(repo.path())
+        .output()
+        .expect("git merge");
+    assert!(
+        merge.status.success(),
+        "git merge failed: {}",
+        String::from_utf8_lossy(&merge.stderr)
+    );
+
+    for args in [
+        ["rev-list", "--author=Alice", "HEAD"].as_slice(),
+        ["rev-list", "--committer=Eve", "HEAD"].as_slice(),
+        ["rev-list", "--since=2023-11-14T22:20:00Z", "HEAD"].as_slice(),
+        ["rev-list", "--after=2023-11-14T22:20:00Z", "HEAD"].as_slice(),
+        ["rev-list", "--until=2023-11-14T22:20:00Z", "HEAD"].as_slice(),
+        ["rev-list", "--before=2023-11-14T22:20:00Z", "HEAD"].as_slice(),
+        ["rev-list", "--merges", "HEAD"].as_slice(),
+        ["rev-list", "--no-merges", "HEAD"].as_slice(),
+        ["rev-list", "--max-parents=1", "HEAD"].as_slice(),
+        ["rev-list", "--no-max-parents", "HEAD"].as_slice(),
+        ["rev-list", "--min-parents=2", "HEAD"].as_slice(),
+        ["rev-list", "--no-min-parents", "HEAD"].as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1064,7 +1175,11 @@ fn blame_documented_option_family_matches_stock_git() {
         ["blame", "--ignore-revs-file", "ignore-revs.txt", "a.txt"].as_slice(),
         ["blame", "-S", "revs.txt", "a.txt"].as_slice(),
     ] {
-        assert_eq!(run_zmin_args(repo.path(), args), git_args(repo.path(), args), "args: {args:?}");
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
     }
 
     for args in [
@@ -1135,11 +1250,25 @@ fn annotate_documented_option_family_matches_stock_git() {
     assert_eq!(
         run_zmin_args(
             zmin_repo.path(),
-            &["annotate", "--contents", &zmin_contents, "HEAD", "--", "a.txt"],
+            &[
+                "annotate",
+                "--contents",
+                &zmin_contents,
+                "HEAD",
+                "--",
+                "a.txt"
+            ],
         ),
         git_args(
             git_repo.path(),
-            &["annotate", "--contents", &git_contents, "HEAD", "--", "a.txt"],
+            &[
+                "annotate",
+                "--contents",
+                &git_contents,
+                "HEAD",
+                "--",
+                "a.txt"
+            ],
         )
     );
 
@@ -1150,8 +1279,16 @@ fn annotate_documented_option_family_matches_stock_git() {
     git_with_env(opt_git_repo.path(), ["commit", "-m", "init"]);
     let opt_zmin_repo = clone_repo_fixture(opt_git_repo.path());
     let opt_head = command_output("git", opt_git_repo.path(), &["rev-parse", "HEAD"], "git").1;
-    write_file(opt_git_repo.path(), "ignore-revs.txt", &format!("{opt_head}\n"));
-    write_file(opt_zmin_repo.path(), "ignore-revs.txt", &format!("{opt_head}\n"));
+    write_file(
+        opt_git_repo.path(),
+        "ignore-revs.txt",
+        &format!("{opt_head}\n"),
+    );
+    write_file(
+        opt_zmin_repo.path(),
+        "ignore-revs.txt",
+        &format!("{opt_head}\n"),
+    );
     write_file(opt_git_repo.path(), "revs.txt", &format!("{opt_head}\n"));
     write_file(opt_zmin_repo.path(), "revs.txt", &format!("{opt_head}\n"));
 
@@ -2443,7 +2580,14 @@ fn log_and_rev_list_left_right_cherry_boundary_family_matches_stock_git() {
             "left...main",
         ]
         .as_slice(),
-        ["log", "--left-right", "--boundary", "--oneline", "left...main"].as_slice(),
+        [
+            "log",
+            "--left-right",
+            "--boundary",
+            "--oneline",
+            "left...main",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),

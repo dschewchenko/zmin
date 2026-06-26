@@ -300,25 +300,21 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free shared `git switch` track-flag
-invalid-input closure plus `git fetch`/`git pull` transport-family evidence
-batch on the current local lane. Zmin now matches stock Git for
-`switch --track`, `switch --no-track`, and `switch -t` on the existing-branch
-missing-creation lane by rejecting them with the stock `missing branch name;
-try -c` fatal, emits stock-shaped local transport porcelain rows for
-`fetch --porcelain <named-local-remote>`, matches the stock no-op
-up-to-date lane for `fetch --progress <named-local-remote>`, and handles
-`pull --all` by fetching each configured remote before returning the stock
-missing-tracking diagnostic on a branch with no upstream.
+The latest completed slice is a helper-free shared `git rev-list`
+identity/time/parent filter documented-option family expansion on the current
+local lane. Zmin now accepts and matches stock Git for `rev-list --author`,
+`--committer`, `--since`, `--after`, `--until`, `--before`, `--merges`,
+`--no-merges`, `--max-parents`, `--no-max-parents`, `--min-parents`, and
+`--no-min-parents` on the modeled local merge-graph lane, including absolute
+RFC3339 time cutoffs, mixed author/committer identities, and merge-parent
+bound filtering.
 Focused gates were
-`cargo test -p zmin-cli --test git_worktree_state_compat switch_track_flags_require_branch_creation_like_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat fetch_porcelain_and_progress_match_stock_git_for_named_local_remote -- --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat pull_all_fetches_all_remotes_then_reports_missing_tracking_like_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_history_query_compat rev_list_identity_time_and_parent_filters_match_stock_git -- --nocapture`,
 `cargo check -p zmin-cli --bin zmin --profile compat`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(switch|fetch|pull|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
 `git diff --check`.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
@@ -342,18 +338,17 @@ Focused gates were
 `git diff --check`.
 
 Current counts are `146/151` complete command matrices,
-`1818/3212` complete documented option pairs,
-`1826/3212` represented documented option pairs, `5829` written rows,
-`5069` verified rows, `12` open rows, and `723` invalid-input rows.
-`switch` is now fully reviewed complete at `25/25` documented option pairs
-with `26/26` classified rows and `0` exact-open rows, `fetch` is now fully
-reviewed complete at `63/63` documented option pairs with `379/379`
-classified rows and `0` exact-open rows, and `pull` now sits at `37/99`
-reviewed-complete documented option pairs with `62/62` classified rows,
-`60` stock-matching rows, `2` invalid-input rows, and `0` exact-open rows.
-The next bounded high-throughput follow-up should return to the next largest
-census-first represented family rather than spend another iteration on a
-single-row transport tail.
+`1830/3212` complete documented option pairs,
+`1838/3212` represented documented option pairs, `5841` written rows,
+`5081` verified rows, `12` open rows, and `723` invalid-input rows.
+`rev-list` now sits at `38/117` reviewed-complete documented option pairs
+with `59/59` classified rows, `59` stock-matching rows, `0` invalid-input
+rows, and `0` exact-open rows, while `log` remains at `64/131`
+reviewed-complete documented option pairs with `160` written rows, `159`
+classified rows, `153` stock-matching rows, `6` invalid-input rows, and `0`
+exact-open rows. The next bounded high-throughput follow-up should stay on
+shared history-query represented families rather than switching back to
+single-row tails.
 
 The focused `git_object_plumbing_compat.rs`,
 `git_transport_http_compat.rs`,

@@ -233,9 +233,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             start,
             url,
             end,
-        } => {
-            super::history_commands::request_pull(patch > 0, &start, &url, end.as_deref())
-        }
+        } => super::history_commands::request_pull(patch > 0, &start, &url, end.as_deref()),
         runtime::Command::Describe {
             all,
             tags,
@@ -635,7 +633,15 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         }),
         runtime::Command::RevList {
             all,
+            author,
+            committer,
             count,
+            max_parents,
+            no_max_parents,
+            merges,
+            min_parents,
+            no_min_parents,
+            no_merges,
             objects,
             no_object_names,
             filter,
@@ -658,10 +664,20 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             cherry_mark,
             boundary,
             max_count,
+            since,
+            until,
             revs,
         } => super::history_commands::rev_list(super::history_commands::RevListOptions {
             all,
+            author: author.as_deref(),
+            committer: committer.as_deref(),
             count,
+            max_parents: max_parents.as_deref(),
+            no_max_parents,
+            merges,
+            min_parents: min_parents.as_deref(),
+            no_min_parents,
+            no_merges,
             objects,
             no_object_names,
             filter,
@@ -684,6 +700,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             cherry_mark,
             boundary,
             max_count,
+            since: since.as_deref(),
+            until: until.as_deref(),
             revs,
         }),
         runtime::Command::MergeBase {
@@ -709,7 +727,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
     }
 }
 
-fn serialize_reflog_args(command: Option<runtime::ReflogCommand>, mut args: Vec<String>) -> Vec<String> {
+fn serialize_reflog_args(
+    command: Option<runtime::ReflogCommand>,
+    mut args: Vec<String>,
+) -> Vec<String> {
     let Some(command) = command else {
         return args;
     };
