@@ -4462,6 +4462,8 @@ pub enum Command {
     Grep {
         #[arg(long = "cached", action = ArgAction::SetTrue)]
         cached: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
         ignore_case: bool,
         #[arg(short = 'v', long = "invert-match", action = ArgAction::SetTrue)]
@@ -4470,6 +4472,8 @@ pub enum Command {
         line_number: bool,
         #[arg(short = 'l', long = "files-with-matches", action = ArgAction::SetTrue)]
         files_with_matches: bool,
+        #[arg(long = "name-only", action = ArgAction::SetTrue)]
+        name_only: bool,
         #[arg(short = 'L', long = "files-without-match", action = ArgAction::SetTrue)]
         files_without_match: bool,
         #[arg(short = 'c', long = "count", action = ArgAction::SetTrue)]
@@ -4478,14 +4482,28 @@ pub enum Command {
         max_count: Option<usize>,
         #[arg(short = 'H', action = ArgAction::SetTrue)]
         with_filename: bool,
+        #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
+        null_terminated: bool,
         #[arg(long = "full-name", action = ArgAction::SetTrue)]
         full_name: bool,
         #[arg(long = "heading", action = ArgAction::SetTrue)]
         heading: bool,
         #[arg(long = "break", action = ArgAction::SetTrue)]
         break_: bool,
+        #[arg(short = 'G', long = "basic-regexp", action = ArgAction::SetTrue)]
+        basic_regexp: bool,
+        #[arg(short = 'E', long = "extended-regexp", action = ArgAction::SetTrue)]
+        extended_regexp: bool,
         #[arg(short = 'F', long = "fixed-strings", action = ArgAction::SetTrue)]
         fixed_strings: bool,
+        #[arg(short = 'a', long = "text", action = ArgAction::SetTrue)]
+        text: bool,
+        #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
+        no_textconv: bool,
+        #[arg(long = "column", action = ArgAction::SetTrue)]
+        column: bool,
+        #[arg(short = 'o', long = "only-matching", action = ArgAction::SetTrue)]
+        only_matching: bool,
         pattern: String,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,

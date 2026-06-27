@@ -2,18 +2,27 @@ use super::*;
 
 pub(crate) fn grep(
     cached: bool,
+    quiet: bool,
     ignore_case: bool,
     invert_match: bool,
     line_number: bool,
     files_with_matches: bool,
+    name_only: bool,
     files_without_match: bool,
     count: bool,
     max_count: Option<usize>,
     with_filename: bool,
+    null_terminated: bool,
     full_name: bool,
     heading: bool,
     break_groups: bool,
+    basic_regexp: bool,
+    extended_regexp: bool,
     fixed_strings: bool,
+    text: bool,
+    no_textconv: bool,
+    column: bool,
+    only_matching: bool,
     pattern: &str,
     args: Vec<String>,
 ) -> Result<()> {
@@ -31,6 +40,8 @@ pub(crate) fn grep(
         pathspecs.push(cwd_prefix.clone());
     }
     let matcher = GrepMatcher::new(pattern, fixed_strings, ignore_case)?;
+    let files_with_matches = files_with_matches || name_only;
+    let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv);
     let mut selected_any = false;
     let mut printed_group = false;
 
@@ -69,9 +80,13 @@ pub(crate) fn grep(
             count,
             max_count,
             with_filename,
+            null_terminated,
             full_name,
             heading,
             break_groups,
+            quiet,
+            column,
+            only_matching,
             printed_group,
         )?;
         selected_any |= if files_without_match {
@@ -189,22 +204,35 @@ impl GrepMatcher {
             })
     }
 
-    fn is_match(&self, line: &[u8]) -> bool {
+    fn match_ranges(&self, line: &[u8]) -> Vec<(usize, usize)> {
         match self {
             Self::Fixed(pattern) => {
+                if pattern.is_empty() {
+                    return vec![(0, 0)];
+                }
                 let owned;
-                let haystack = if pattern
-                    .iter()
-                    .any(|byte| byte.is_ascii_uppercase())
-                {
+                let haystack = if pattern.iter().any(|byte| byte.is_ascii_uppercase()) {
                     line
                 } else {
                     owned = line.iter().copied().map(lower_ascii).collect::<Vec<_>>();
                     owned.as_slice()
                 };
-                pattern.is_empty() || haystack.windows(pattern.len()).any(|w| w == pattern)
+                let mut ranges = Vec::new();
+                let mut start = 0usize;
+                while start + pattern.len() <= haystack.len() {
+                    if &haystack[start..start + pattern.len()] == pattern.as_slice() {
+                        ranges.push((start, start + pattern.len()));
+                        start += pattern.len().max(1);
+                    } else {
+                        start += 1;
+                    }
+                }
+                ranges
             }
-            Self::Regex(regex) => regex.is_match(line),
+            Self::Regex(regex) => regex
+                .find_iter(line)
+                .map(|m| (m.start(), m.end()))
+                .collect(),
         }
     }
 }
@@ -235,9 +263,13 @@ fn grep_file(
     count: bool,
     max_count: Option<usize>,
     with_filename: bool,
+    null_terminated: bool,
     full_name: bool,
     heading: bool,
     break_groups: bool,
+    quiet: bool,
+    column: bool,
+    only_matching: bool,
     printed_group: bool,
 ) -> Result<GrepFileOutcome> {
     let mut matched = false;
@@ -247,12 +279,16 @@ fn grep_file(
     let display_path = String::from_utf8_lossy(&display_path);
     let filename_prefix = with_filename || output_prefix.is_some() || !heading;
     for (idx, line) in grep_lines(content).enumerate() {
-        let is_match = matcher.is_match(line);
+        let ranges = matcher.match_ranges(line);
+        let is_match = !ranges.is_empty();
         if is_match == invert_match {
             continue;
         }
         matched = true;
         match_count += 1;
+        if quiet {
+            continue;
+        }
         if files_without_match {
             return Ok(GrepFileOutcome {
                 matched: true,
@@ -266,7 +302,11 @@ fn grep_file(
             if let Some(prefix) = output_prefix {
                 print!("{prefix}:");
             }
-            println!("{display_path}");
+            if null_terminated {
+                print!("{display_path}\0");
+            } else {
+                println!("{display_path}");
+            }
             return Ok(GrepFileOutcome {
                 matched: true,
                 printed: true,
@@ -286,6 +326,28 @@ fn grep_file(
                 println!("{display_path}");
             }
         }
+        if only_matching {
+            for (start, end) in ranges {
+                if let Some(prefix) = output_prefix {
+                    print!("{prefix}:");
+                }
+                if filename_prefix {
+                    print!("{display_path}:");
+                }
+                if line_number {
+                    print!("{}:", idx + 1);
+                }
+                if column {
+                    print!("{}:", start + 1);
+                }
+                println!("{}", String::from_utf8_lossy(&line[start..end]));
+                emitted = true;
+            }
+            if max_count.is_some_and(|limit| match_count >= limit) {
+                break;
+            }
+            continue;
+        }
         if let Some(prefix) = output_prefix {
             print!("{prefix}:");
         }
@@ -297,6 +359,9 @@ fn grep_file(
             }
         } else if line_number {
             print!("{}:", idx + 1);
+        }
+        if column {
+            print!("{}:", ranges[0].0 + 1);
         }
         io::stdout().write_all(line)?;
         println!();

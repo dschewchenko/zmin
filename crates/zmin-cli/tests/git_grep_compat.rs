@@ -4,7 +4,7 @@ use std::fs;
 
 use common::{
     configure_identity, git, git_args, git_init, git_status, git_with_env, run_zmin,
-    run_zmin_args, run_zmin_status,
+    run_zmin_args, run_zmin_status, run_zmin_status_args, git_status_args,
 };
 
 #[test]
@@ -130,6 +130,59 @@ fn grep_documented_local_option_batch_matches_stock_git() {
             run_zmin_args(&subdir, args),
             git_args(&subdir, args),
             "subdir args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn grep_regex_filename_and_output_shape_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::write(
+        repo.path().join("a.txt"),
+        b"Hello\nworld\nHELLO\nhello.world\nextra hello\n",
+    )
+    .expect("write a");
+    fs::write(repo.path().join("b.txt"), b"alpha\nhello beta\ngamma\nhello\n").expect("write b");
+    fs::write(repo.path().join("dir/c.txt"), b"nested hello\nline two\n").expect("write c");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    for args in [
+        ["grep", "--name-only", "hello"].as_slice(),
+        ["grep", "-q", "hello"].as_slice(),
+        ["grep", "--quiet", "hello"].as_slice(),
+        ["grep", "-G", "hello"].as_slice(),
+        ["grep", "--basic-regexp", "hello"].as_slice(),
+        ["grep", "-E", "hello|world"].as_slice(),
+        ["grep", "--extended-regexp", "hello|world"].as_slice(),
+        ["grep", "-z", "-l", "hello"].as_slice(),
+        ["grep", "--null", "-l", "hello"].as_slice(),
+        ["grep", "-a", "hello"].as_slice(),
+        ["grep", "--text", "hello"].as_slice(),
+        ["grep", "--no-textconv", "hello"].as_slice(),
+        ["grep", "--column", "hello"].as_slice(),
+        ["grep", "-o", "hello"].as_slice(),
+        ["grep", "--only-matching", "hello"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status args: {args:?}"
+        );
+    }
+
+    for args in [["grep", "-q", "absent"].as_slice(), ["grep", "--quiet", "absent"].as_slice()] {
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status args: {args:?}"
         );
     }
 }

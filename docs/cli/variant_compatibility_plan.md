@@ -22,6 +22,51 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`grep` regex, filename, and output-shape closure across the modeled tracked
+text-file local lane. This batch added exact stock-Git evidence and runtime
+support for `--name-only`, `-q`, `--quiet`, `-G`, `--basic-regexp`, `-E`,
+`--extended-regexp`, `-z`, `--null`, `-a`, `--text`, `--no-textconv`,
+`--column`, `-o`, and `--only-matching`. The implementation stayed bounded to
+the helper-free local text surface: basic and extended regexp mode flags are
+accepted on the current regex engine lanes, quiet preserves the stock zero-
+output success and failure exits, null filename mode now emits stock NUL
+separators, and column or only-matching now render the same first-match byte
+offsets and per-occurrence fragments as stock Git on the current fixture.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_grep_compat -- --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(grep|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2343 / 3212`
+- matrix rows: `6522`
+- verified rows: `5710`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `grep`: `21 / 73` reviewed-complete documented option pairs,
+  `36 / 73` represented documented option pairs, `53` written rows, `53`
+  classified rows, `53` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should likely stay on `grep`, because
+it remains the largest safe local helper-free documented queue after this
+batch. The remaining documented tails are now concentrated around context and
+boolean-expression families such as `-A`, `-B`, `-C`, `--context`, `--and`,
+`--or`, `--not`, plus additional local output toggles like `--color`,
+`--no-color`, `-h`, `-w`, `-e`, and `-f`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` mail-series tail closure across the modeled two-patch and
 single-commit stdout mail lanes. This batch closed the remaining command-
 specific schema/evidence tails around `--base`, `--no-base`,
