@@ -1,4 +1,5 @@
 use super::*;
+use crate::runtime::current_unix_timestamp;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AmOptions {
@@ -759,9 +760,20 @@ pub(crate) fn format_patch(
     numbered_files: bool,
     start_number: Option<&str>,
     cover_letter: bool,
+    thread: bool,
+    to: Vec<String>,
+    cc: Vec<String>,
+    add_header: Vec<String>,
+    in_reply_to: Option<&str>,
+    from: Option<&str>,
+    force_in_body_from: bool,
+    no_force_in_body_from: bool,
     signoff: bool,
     signature: Option<&str>,
+    signature_file: Option<&Path>,
     no_signature: bool,
+    encode_email_headers: bool,
+    no_encode_email_headers: bool,
     reroll_count: Option<&str>,
     rfc: Option<&str>,
     zero_commit: bool,
@@ -856,6 +868,12 @@ pub(crate) fn format_patch(
         .unwrap_or(1);
     let signature_text = if no_signature {
         None
+    } else if let Some(signature_file) = signature_file {
+        Some(
+            fs::read_to_string(signature_file)?
+                .trim_end_matches(['\r', '\n'])
+                .to_owned(),
+        )
     } else {
         Some(signature.unwrap_or("0.1.0.zmin").to_owned())
     };
@@ -865,6 +883,20 @@ pub(crate) fn format_patch(
             "Signed-off-by: {} <{}>",
             committer.name, committer.email
         ))
+    } else {
+        None
+    };
+    let mut extra_headers = Vec::new();
+    extra_headers.extend(to.into_iter().map(|value| format!("To: {value}")));
+    extra_headers.extend(cc.into_iter().map(|value| format!("Cc: {value}")));
+    extra_headers.extend(add_header);
+    let _accepted_parser_only = (
+        no_force_in_body_from,
+        encode_email_headers,
+        no_encode_email_headers,
+    );
+    let message_id_timestamp = if thread {
+        Some(current_unix_timestamp()?)
     } else {
         None
     };
@@ -891,6 +923,12 @@ pub(crate) fn format_patch(
             raw,
             summary,
         ),
+        thread,
+        extra_headers: &extra_headers,
+        in_reply_to,
+        sender_override: from,
+        body_from_override: from.map(|_| true).or(Some(force_in_body_from)).filter(|value| *value).is_some(),
+        message_id_timestamp,
         keep_subject,
         number_offset: start_number.saturating_sub(1),
         signoff_line: signoff_line.as_deref(),

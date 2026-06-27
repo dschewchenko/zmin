@@ -3887,12 +3887,28 @@ pub enum Command {
         no_renames: bool,
         #[arg(long = "no-thread", action = ArgAction::SetTrue)]
         no_thread: bool,
+        #[arg(long = "thread", action = ArgAction::SetTrue)]
+        thread: bool,
         #[arg(long = "name-only", action = ArgAction::SetTrue)]
         name_only: bool,
         #[arg(long = "name-status", action = ArgAction::SetTrue)]
         name_status: bool,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
+        #[arg(long = "to")]
+        to: Vec<String>,
+        #[arg(long = "cc")]
+        cc: Vec<String>,
+        #[arg(long = "add-header")]
+        add_header: Vec<String>,
+        #[arg(long = "in-reply-to")]
+        in_reply_to: Option<String>,
+        #[arg(long = "from")]
+        from: Option<String>,
+        #[arg(long = "force-in-body-from", action = ArgAction::SetTrue)]
+        force_in_body_from: bool,
+        #[arg(long = "no-force-in-body-from", action = ArgAction::SetTrue)]
+        no_force_in_body_from: bool,
         #[arg(long = "output-indicator-context")]
         output_indicator_context: Option<String>,
         #[arg(long = "output-indicator-new")]
@@ -3979,8 +3995,14 @@ pub enum Command {
         signoff: bool,
         #[arg(long = "signature")]
         signature: Option<String>,
+        #[arg(long = "signature-file", value_hint = ValueHint::FilePath)]
+        signature_file: Option<PathBuf>,
         #[arg(long = "no-signature", action = ArgAction::SetTrue)]
         no_signature: bool,
+        #[arg(long = "encode-email-headers", action = ArgAction::SetTrue)]
+        encode_email_headers: bool,
+        #[arg(long = "no-encode-email-headers", action = ArgAction::SetTrue)]
+        no_encode_email_headers: bool,
         #[arg(short = 'v', long = "reroll-count")]
         reroll_count: Option<String>,
         #[arg(

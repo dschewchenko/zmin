@@ -77,7 +77,9 @@ fn normalize_format_patch_version(output: &str) -> String {
             version_line = false;
             continue;
         }
-        if line.starts_with("Content-Type: multipart/mixed; boundary=\"------------") {
+        if line.starts_with("Message-ID: <") {
+            normalized.push("Message-ID: <git-version>");
+        } else if line.starts_with("Content-Type: multipart/mixed; boundary=\"------------") {
             normalized.push("Content-Type: multipart/mixed; boundary=\"------------git-version\"");
         } else if line.starts_with("--------------") {
             let suffix = if line.ends_with("--") { "--" } else { "" };
@@ -656,6 +658,52 @@ fn format_patch_keep_subject_family_matches_stock_git() {
         assert_eq!(
             run_zmin_status_args(repo.path(), &args),
             git_status_args(repo.path(), &args),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
+fn format_patch_mail_header_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    write_file(repo.path(), "custom-signature.txt", "custom sig\n");
+    let cases: Vec<Vec<String>> = vec![
+        vec!["--to=a@example.test".into()],
+        vec!["--cc=c@example.test".into()],
+        vec!["--add-header=X-Test: 1".into()],
+        vec!["--in-reply-to=<msgid@example.test>".into()],
+        vec!["--thread".into()],
+        vec!["--from=Sender <sender@example.test>".into()],
+        vec![
+            "--from=Sender <sender@example.test>".into(),
+            "--force-in-body-from".into(),
+        ],
+        vec![
+            "--from=Sender <sender@example.test>".into(),
+            "--no-force-in-body-from".into(),
+        ],
+        vec!["--signature-file=custom-signature.txt".into()],
+        vec!["--encode-email-headers".into()],
+        vec!["--no-encode-email-headers".into()],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
             "status case mismatch"
         );
     }

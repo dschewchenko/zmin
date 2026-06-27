@@ -22,6 +22,50 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` mail-header closure on the already modeled single-commit stdout
+mail-series lane. This batch added exact stock-Git matrix evidence for
+`--to`, `--cc`, `--add-header`, `--in-reply-to`, `--thread`, `--from`,
+`--force-in-body-from`, `--no-force-in-body-from`, `--signature-file`,
+`--encode-email-headers`, and `--no-encode-email-headers`. The runtime
+highlight stayed focused on mail metadata rather than diff output: this slice
+extended header rendering to match stock header order, dynamic Message-ID
+presence, sender override handling, body author preservation for `--from`, and
+footer replacement from a signature file on the existing stdout lane.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_mail_header_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2297 / 3212`
+- matrix rows: `6443`
+- verified rows: `5631`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `131 / 131` reviewed-complete documented option pairs,
+  `131 / 131` represented documented option pairs, `139` written rows, `139`
+  classified rows, `139` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has `31` remaining `doc_option_not_in_zmin_schema` rows, now
+led by helper-free documented tails such as `--base`, `--color-words`,
+`--combined-all-paths`, `--cover-from-description`, `--creation-factor`,
+`--dd`, `--description-file`, `--diff-merges`, `--dirstat`, `--interdiff`,
+`--submodule`, `--word-diff`, `-O`, `-R`, `-X`, `-c`, `-m`, and `-z`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` diff-output closure on the already modeled single-commit stdout
 mail-series lane. This batch added exact stock-Git matrix evidence for
 `--raw`, `--numstat`, `--shortstat`, `--summary`, `--no-patch`, `--no-stat`,

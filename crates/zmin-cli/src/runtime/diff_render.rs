@@ -3515,12 +3515,23 @@ fn write_format_patch_header<W: Write>(
         id.write_hex_io(out)?;
         writeln!(out, " Mon Sep 17 00:00:00 2001")?;
     }
-    writeln!(
-        out,
-        "From: {} <{}>",
-        signature_name(&commit.author),
-        signature_email(&commit.author)
-    )?;
+    if context.thread && let Some(timestamp) = context.message_id_timestamp {
+        writeln!(
+            out,
+            "Message-ID: <{}.{}.git.zmin@example.test>",
+            id.to_hex(),
+            timestamp
+        )?;
+    }
+    if let Some(in_reply_to) = context.in_reply_to {
+        writeln!(out, "In-Reply-To: {in_reply_to}")?;
+        writeln!(out, "References: {in_reply_to}")?;
+    }
+    let sender_header = context
+        .sender_override
+        .map(str::to_owned)
+        .unwrap_or_else(|| author_header_line(&commit.author));
+    writeln!(out, "From: {sender_header}")?;
     writeln!(out, "Date: {}", signature_mail_date(&commit.author)?)?;
     if context.keep_subject {
         writeln!(out, "Subject: {subject}")?;
@@ -3532,6 +3543,9 @@ fn write_format_patch_header<W: Write>(
     } else {
         writeln!(out, "Subject: [{subject_prefix}] {subject}")?;
     }
+    for header in context.extra_headers {
+        writeln!(out, "{header}")?;
+    }
     if context.attach || context.inline {
         writeln!(out, "MIME-Version: 1.0")?;
         writeln!(
@@ -3542,7 +3556,15 @@ fn write_format_patch_header<W: Write>(
         return Ok(());
     }
     writeln!(out)?;
-    write_format_patch_message_body(out, &commit.message, context.signoff_line)?;
+    let body_from_line = context
+        .body_from_override
+        .then(|| format!("From: {}", author_header_line(&commit.author)));
+    write_format_patch_message_body(
+        out,
+        &commit.message,
+        body_from_line.as_deref(),
+        context.signoff_line,
+    )?;
     if context.prelude_mode != FormatPatchPreludeMode::Diffstat {
         writeln!(out)?;
     }
@@ -3573,8 +3595,13 @@ pub(crate) fn write_commit_patch_entries_tree_diff_cached<W: Write, S: GitObject
 fn write_format_patch_message_body<W: Write>(
     out: &mut W,
     message: &[u8],
+    body_from_line: Option<&str>,
     signoff_line: Option<&str>,
 ) -> Result<()> {
+    if let Some(body_from_line) = body_from_line {
+        writeln!(out, "{body_from_line}")?;
+        writeln!(out)?;
+    }
     write_commit_message_body(out, message)?;
     if let Some(signoff_line) = signoff_line {
         if !commit_message_body_view(message).is_empty() {
@@ -3583,6 +3610,14 @@ fn write_format_patch_message_body<W: Write>(
         writeln!(out, "{signoff_line}")?;
     }
     Ok(())
+}
+
+fn author_header_line(signature: &[u8]) -> String {
+    format!(
+        "{} <{}>",
+        signature_name(signature),
+        signature_email(signature)
+    )
 }
 
 fn write_format_patch_footer<W: Write>(out: &mut W, signature: Option<&str>) -> Result<()> {
@@ -4189,6 +4224,12 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) suffix: &'a str,
     pub(crate) subject_prefix: &'a str,
     pub(crate) prelude_mode: FormatPatchPreludeMode,
+    pub(crate) thread: bool,
+    pub(crate) extra_headers: &'a [String],
+    pub(crate) in_reply_to: Option<&'a str>,
+    pub(crate) sender_override: Option<&'a str>,
+    pub(crate) body_from_override: bool,
+    pub(crate) message_id_timestamp: Option<i64>,
     pub(crate) keep_subject: bool,
     pub(crate) number_offset: usize,
     pub(crate) signoff_line: Option<&'a str>,
