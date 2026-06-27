@@ -12,6 +12,24 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local `merge`
+signature-verification closure across the shared non-fast-forward clean merge
+lane. The selected change added three exact stock-Git rows for
+`merge --verify-signatures` on both the signed-feature success lane and the
+unsigned-feature rejection lane, plus `merge --no-verify-signatures` on the
+signed-feature bypass lane, and closed the final documented `merge`
+command-option tail. Actual delta is `+3` matrix rows, `+2` complete
+documented option pairs, `+2` represented documented option pairs, `+2`
+verified rows, `+1` invalid-input row, and `+0` complete command matrices.
+Current census counts are `6702` matrix rows, `5889` verified rows, `788`
+invalid-input rows, `0` exact-open rows, `146/151` complete command matrices,
+`2491/3212` complete documented option pairs, and `2491/3212` represented
+documented option pairs. `merge` now sits at `51/51` reviewed-complete
+documented option pairs with `60/69` stock-matching rows and `9`
+invalid-input rows. The command is fully closed on the documented
+Git-2.47.1 denominator; the next default follow-up should move back to the
+refreshed backlog head outside `merge`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local `merge`
 ff plus message-family and quit closure across the modeled fast-forward branch
 lane, the shared non-fast-forward clean merge lane, and the conflicted
 content-merge state cleanup lane. The selected change added seven exact

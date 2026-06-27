@@ -11668,6 +11668,7 @@ fatal: the remote end hung up unexpectedly\n"
             signoff,
             gpg_sign,
             no_gpg_sign: no_gpg_sign > 0,
+            verify_signatures: false,
             quiet,
             allow_unrelated_histories,
             strategies,

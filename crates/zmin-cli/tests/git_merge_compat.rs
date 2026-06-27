@@ -800,6 +800,28 @@ fn merge_quit_matches_stock_git_with_and_without_in_progress_merge() {
 }
 
 #[test]
+fn merge_verify_signatures_family_matches_stock_git_with_fixture_key() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let script = workspace_root.join("tools/git-merge-verify-signatures-oracle-smoke.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .env("ZMIN_BIN", zmin_bin())
+        .env("GIT_BIN", stock_git_bin())
+        .current_dir(workspace_root)
+        .output()
+        .expect("run merge verify-signatures oracle smoke");
+    assert!(
+        output.status.success(),
+        "merge verify-signatures oracle smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn merge_gpg_sign_family_matches_stock_git_with_fixture_key() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

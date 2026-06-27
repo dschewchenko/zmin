@@ -38,6 +38,8 @@ pub(crate) fn dispatch(
             no_gpg_sign,
             verify,
             no_verify,
+            verify_signatures,
+            no_verify_signatures,
             quiet,
             progress,
             no_progress,
@@ -74,6 +76,13 @@ pub(crate) fn dispatch(
                 progress,
                 no_progress,
             );
+            let verify_signatures = resolve_merge_count_mode(
+                raw_args,
+                "--verify-signatures",
+                "--no-verify-signatures",
+                verify_signatures,
+                no_verify_signatures,
+            );
             super::merge_commands::merge(super::merge_commands::MergeOptions {
                 abort,
                 continue_,
@@ -89,6 +98,7 @@ pub(crate) fn dispatch(
                 signoff,
                 gpg_sign,
                 no_gpg_sign: no_gpg_sign > 0,
+                verify_signatures,
                 quiet,
                 allow_unrelated_histories,
                 strategies,

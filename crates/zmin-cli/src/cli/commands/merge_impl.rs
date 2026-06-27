@@ -15,6 +15,7 @@ pub(crate) struct MergeOptions {
     pub(crate) signoff: bool,
     pub(crate) gpg_sign: Option<String>,
     pub(crate) no_gpg_sign: bool,
+    pub(crate) verify_signatures: bool,
     pub(crate) quiet: bool,
     pub(crate) allow_unrelated_histories: bool,
     pub(crate) strategies: Vec<String>,
@@ -43,6 +44,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         signoff,
         gpg_sign,
         no_gpg_sign,
+        verify_signatures,
         quiet,
         allow_unrelated_histories,
         strategies,
@@ -93,6 +95,9 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
     let commit_cache = CommitObjectCache::new(&store);
     if ff_only && !no_ff {
         return merge_ff_only(&repo, &store, &commit_cache, &commits[0]);
+    }
+    if verify_signatures {
+        verify_merge_target_signature(&repo, &store, &commits[0])?;
     }
     let message_override = resolve_merge_message_override(message, message_file.as_deref())?;
     let mode = MergeCommitMode { no_commit, squash };
@@ -296,6 +301,158 @@ fn resolve_merge_message_override(
         return Ok(Some(clean_merge_message(&message)?));
     }
     Ok(None)
+}
+
+fn verify_merge_target_signature(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    target: &str,
+) -> Result<()> {
+    let id = resolve_commitish(repo, store, target)?;
+    let object = store.read_object(&id)?;
+    let Some((signature, payload)) = commit_signature_payload_for_merge(object.content.as_slice())?
+    else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!(
+                "Commit {} does not have a GPG signature.",
+                short_object_id(&id)
+            ),
+        });
+    };
+    let verification = run_merge_gpg_verification(repo, &signature, &payload)?;
+    if verification.good {
+        println!(
+            "Commit {} has a good GPG signature by {}",
+            short_object_id(&id),
+            verification
+                .signer
+                .as_deref()
+                .unwrap_or("unknown signer")
+        );
+        return Ok(());
+    }
+    if !verification.stderr.is_empty() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: verification.stderr,
+        });
+    }
+    Err(CliError::Exit(1))
+}
+
+fn commit_signature_payload_for_merge(content: &[u8]) -> Result<Option<(Vec<u8>, Vec<u8>)>> {
+    let header_end = content
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit missing header end".into(),
+        })?;
+    let headers = &content[..header_end];
+    let message = &content[header_end + 2..];
+    let mut payload = Vec::with_capacity(content.len());
+    let mut signature = Vec::new();
+    let mut in_signature = false;
+    for line in headers.split(|byte| *byte == b'\n') {
+        if let Some(value) = line.strip_prefix(b"gpgsig ") {
+            if !signature.is_empty() {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: "commit has multiple gpgsig headers".into(),
+                });
+            }
+            signature.extend_from_slice(value);
+            signature.push(b'\n');
+            in_signature = true;
+            continue;
+        }
+        if in_signature && line.starts_with(b" ") {
+            signature.extend_from_slice(&line[1..]);
+            signature.push(b'\n');
+            continue;
+        }
+        in_signature = false;
+        payload.extend_from_slice(line);
+        payload.push(b'\n');
+    }
+    payload.push(b'\n');
+    payload.extend_from_slice(message);
+    if signature.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some((signature, payload)))
+    }
+}
+
+struct MergeSignatureVerification {
+    good: bool,
+    signer: Option<String>,
+    stderr: String,
+}
+
+fn run_merge_gpg_verification(
+    repo: &GitRepo,
+    signature: &[u8],
+    payload: &[u8],
+) -> Result<MergeSignatureVerification> {
+    let program = read_config_value(repo, "gpg.program")?.unwrap_or_else(|| "gpg".to_owned());
+    let signature_path = write_merge_verify_signature_input(signature)?;
+    let mut child = ProcessCommand::new(&program)
+        .arg("--keyid-format=long")
+        .arg("--status-fd=1")
+        .arg("--verify")
+        .arg(&signature_path)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| CliError::Fatal {
+            code: 1,
+            message: format!("cannot exec '{program}': {error}"),
+        })?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| CliError::Fatal {
+            code: 1,
+            message: format!("cannot open stdin for '{program}'"),
+        })?
+        .write_all(payload)?;
+    drop(child.stdin.take());
+    let output = child.wait_with_output()?;
+    let _ = fs::remove_file(&signature_path);
+    let signer = parse_good_gpg_signer(&output.stdout);
+    Ok(MergeSignatureVerification {
+        good: output.status.success() && signer.is_some(),
+        signer,
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+fn parse_good_gpg_signer(status: &[u8]) -> Option<String> {
+    for line in String::from_utf8_lossy(status).lines() {
+        if let Some(rest) = line.strip_prefix("[GNUPG:] GOODSIG ") {
+            let (_, signer) = rest.split_once(' ')?;
+            return Some(signer.to_owned());
+        }
+    }
+    None
+}
+
+fn write_merge_verify_signature_input(signature: &[u8]) -> Result<std::path::PathBuf> {
+    let unique = format!(
+        "zmin-merge-verify-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let path = std::env::temp_dir().join(format!("{unique}.sig"));
+    fs::write(&path, signature)?;
+    Ok(path)
 }
 
 fn merge_with_strategy(

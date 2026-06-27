@@ -22,6 +22,51 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local `merge`
+signature-verification closure across the shared non-fast-forward clean merge
+lane. This batch added three exact stock-Git rows for
+`merge --verify-signatures` on both the signed-feature success lane and the
+unsigned-feature rejection lane, plus `merge --no-verify-signatures` on the
+signed-feature bypass lane, and closed the final documented `merge`
+command-option tail. The runtime changes stay intentionally narrow:
+`merge` now reuses the configured `gpg.program` path to inspect the target
+commit's embedded `gpgsig`, prints the stock good-signature prelude on the
+accepted signed lane, emits the stock fatal missing-signature diagnostic on an
+unsigned target commit, and lets `--no-verify-signatures` bypass that prelude
+without mutating the resulting merge commit object.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_merge_compat merge_verify_signatures_family_matches_stock_git_with_fixture_key -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(merge|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2491 / 3212`
+- represented documented command-option pairs: `2491 / 3212`
+- matrix rows: `6702`
+- verified rows: `5889`
+- invalid-input rows: `788`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `721`
+
+Per-command position on the touched surface:
+
+- `merge`: `51 / 51` reviewed-complete documented option pairs,
+  `51 / 51` represented documented option pairs, `69` written rows, `69`
+  classified rows, `60` stock-matching rows, `9` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move off `merge`, because its
+documented Git-2.47.1 option surface is now fully closed. The refreshed
+backlog head remains on larger queues such as `replay`, `send-email`,
+`rebase`, `log`, `rev-list`, and `pull`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local `merge`
 ff plus message-family and quit closure across the modeled fast-forward branch
 lane, the shared non-fast-forward clean merge lane, and the conflicted
 content-merge state cleanup lane. This batch added seven exact stock-Git rows
