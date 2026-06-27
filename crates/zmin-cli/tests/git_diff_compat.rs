@@ -316,6 +316,63 @@ fn diff_noop_option_surface_matches_stock_git_for_porcelain_and_plumbing() {
 }
 
 #[test]
+fn diff_unmerged_stage_selectors_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"base\n").expect("write base");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "side"]);
+    fs::write(repo.path().join("a.txt"), b"side\n").expect("write side");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "side"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    fs::write(repo.path().join("a.txt"), b"main\n").expect("write main");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "main"]);
+
+    let _ = git_status(repo.path(), ["merge", "side"]);
+
+    for args in [
+        ["diff", "--base"].as_slice(),
+        ["diff", "--ours"].as_slice(),
+        ["diff", "--theirs"].as_slice(),
+        ["diff", "-1"].as_slice(),
+        ["diff", "-2"].as_slice(),
+        ["diff", "-3"].as_slice(),
+        ["diff-files", "--base"].as_slice(),
+        ["diff-files", "--ours"].as_slice(),
+        ["diff-files", "--theirs"].as_slice(),
+        ["diff-files", "-0"].as_slice(),
+        ["diff-files", "-1"].as_slice(),
+        ["diff-files", "-2"].as_slice(),
+        ["diff-files", "-3"].as_slice(),
+        ["diff-files", "--cc"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            common::git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
+fn diff_unmerged_stage_selectors_reject_commit_operands_like_stock_git() {
+    let repo = two_commit_repo();
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["diff", "--ours", "HEAD~1", "HEAD"]),
+        git_failure_output(repo.path(), &["diff", "--ours", "HEAD~1", "HEAD"])
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["diff", "--cached", "--base"]),
+        git_failure_output(repo.path(), &["diff", "--cached", "--base"])
+    );
+}
+
+#[test]
 fn log_merge_diff_modes_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

@@ -5,6 +5,13 @@ struct DirstatMode {
     cumulative: bool,
 }
 
+#[derive(Clone, Copy)]
+enum UnmergedStageSelection {
+    Base = 1,
+    Ours = 2,
+    Theirs = 3,
+}
+
 pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     if options.no_index {
         return diff_no_index(&options);
@@ -155,6 +162,27 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     };
     render_options.validate_format(false)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let unmerged_selection = selected_unmerged_stage(options.base, options.ours, options.theirs);
+    if let Some(stage) = unmerged_selection {
+        if options.cached {
+            return Err(diff_usage_error());
+        }
+        let (revs, _) = split_diff_revs_and_paths(&repo, &store, options.paths.clone())?;
+        if !revs.is_empty() {
+            return Err(diff_usage_error());
+        }
+        let index = read_repo_index(&repo)?;
+        if has_unmerged_entries(&index) {
+            return render_diff_unmerged_stage(
+                &repo,
+                &store,
+                &index,
+                stage,
+                options.paths,
+                render_options,
+            );
+        }
+    }
     if !options.cached
         && let Some(combined_input) =
             parse_porcelain_combined_diff_input(&repo, &store, &options.paths)
@@ -544,8 +572,31 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         ..render_options
     };
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let index = read_repo_index(&repo)?;
-    let index = stage_zero_index(&index)?;
+    let full_index = read_repo_index(&repo)?;
+    let unmerged_selection = selected_unmerged_stage(options.base, options.ours, options.theirs);
+    if has_unmerged_entries(&full_index) {
+        if options.dense_combined || options.combined {
+            return render_diff_files_unmerged_combined(
+                &repo,
+                &store,
+                &full_index,
+                &options,
+                render_options,
+            );
+        }
+        if options.omit_unmerged || unmerged_selection.is_some() {
+            return render_diff_files_unmerged_stage(
+                &repo,
+                &store,
+                &full_index,
+                unmerged_selection,
+                options.omit_unmerged,
+                &options,
+                render_options,
+            );
+        }
+    }
+    let index = stage_zero_index(&full_index)?;
     let new_index = worktree_diff_index_snapshot(&repo, &index)?;
     let (old_index, new_index, render_options) = if options.reverse {
         let mut render_options = render_options;
@@ -655,6 +706,173 @@ fn stage_zero_index(index: &GitIndex) -> Result<GitIndex> {
     )?)
 }
 
+fn selected_unmerged_stage(base: bool, ours: bool, theirs: bool) -> Option<UnmergedStageSelection> {
+    if base {
+        Some(UnmergedStageSelection::Base)
+    } else if ours {
+        Some(UnmergedStageSelection::Ours)
+    } else if theirs {
+        Some(UnmergedStageSelection::Theirs)
+    } else {
+        None
+    }
+}
+
+fn has_unmerged_entries(index: &GitIndex) -> bool {
+    index.entries().iter().any(|entry| entry.stage != 0)
+}
+
+fn unmerged_paths(index: &GitIndex) -> BTreeSet<Vec<u8>> {
+    index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage != 0)
+        .map(|entry| entry.path.clone())
+        .collect()
+}
+
+fn stage_selected_index(
+    index: &GitIndex,
+    selection: UnmergedStageSelection,
+    keep_stage_zero_for_non_unmerged: bool,
+) -> Result<GitIndex> {
+    let unmerged = unmerged_paths(index);
+    let mut entries = Vec::new();
+    for entry in index.entries() {
+        if entry.stage == 0 {
+            if keep_stage_zero_for_non_unmerged && !unmerged.contains(&entry.path) {
+                entries.push(entry.clone());
+            }
+            continue;
+        }
+        if entry.stage == selection as u8 {
+            let mut selected = entry.clone();
+            selected.stage = 0;
+            entries.push(selected);
+        }
+    }
+    GitIndex::from_entries(entries).map_err(CliError::Io)
+}
+
+fn render_diff_unmerged_stage(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    selection: UnmergedStageSelection,
+    paths: Vec<PathBuf>,
+    mut render_options: DiffRenderOptions,
+) -> Result<()> {
+    let old_index = stage_selected_index(index, selection, true)?;
+    let new_index = worktree_diff_index_snapshot(repo, &old_index)?;
+    let pathspecs = paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let entries = diff_entries_for_indexes(&old_index, &new_index, None, None, false)?
+        .into_iter()
+        .filter(|entry| diff_entry_matches_pathspec(entry, &pathspecs))
+        .collect::<Vec<_>>();
+    print_unmerged_patch_markers(index, &pathspecs, render_options.relative_prefix.as_deref())?;
+    render_options.old_source = DiffSideSource::Index;
+    render_options.new_source = DiffSideSource::WorktreeOrIndex;
+    render_diff(repo, store, &old_index, &new_index, &entries, render_options)
+}
+
+fn render_diff_files_unmerged_stage(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    selection: Option<UnmergedStageSelection>,
+    omit_unmerged: bool,
+    options: &PlumbingDiffOptions,
+    mut render_options: DiffRenderOptions,
+) -> Result<()> {
+    let pathspecs = options
+        .paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let unmerged = filtered_unmerged_paths(index, &pathspecs);
+    let raw_only_mode = diff_files_unmerged_raw_only(options);
+    if omit_unmerged {
+        if raw_only_mode {
+            print_diff_files_unmerged_raw(
+                index,
+                &unmerged,
+                render_options.raw_abbrev_len,
+                options.nul_terminated,
+            )?;
+            return Ok(());
+        }
+    } else if raw_only_mode {
+        print_diff_files_unmerged_raw(
+            index,
+            &unmerged,
+            render_options.raw_abbrev_len,
+            options.nul_terminated,
+        )?;
+    }
+    let selected_index = selection
+        .map(|stage| stage_selected_index(index, stage, false))
+        .transpose()?
+        .unwrap_or_else(GitIndex::new);
+    let new_index = if omit_unmerged {
+        GitIndex::new()
+    } else {
+        worktree_diff_index_snapshot(repo, &selected_index)?
+    };
+    let entries = if omit_unmerged {
+        Vec::new()
+    } else {
+        diff_entries_for_indexes(&selected_index, &new_index, None, None, false)?
+            .into_iter()
+            .filter(|entry| diff_entry_matches_pathspec(entry, &pathspecs))
+            .collect::<Vec<_>>()
+    };
+    render_options.old_source = DiffSideSource::Index;
+    render_options.new_source = DiffSideSource::WorktreeOrIndex;
+    if omit_unmerged && raw_only_mode {
+        return Ok(());
+    }
+    render_diff(repo, store, &selected_index, &new_index, &entries, render_options)
+}
+
+fn render_diff_files_unmerged_combined(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    options: &PlumbingDiffOptions,
+    render_options: DiffRenderOptions,
+) -> Result<()> {
+    let ours_index = stage_selected_index(index, UnmergedStageSelection::Ours, false)?;
+    let theirs_index = stage_selected_index(index, UnmergedStageSelection::Theirs, false)?;
+    let template_index = if ours_index.entries().is_empty() {
+        &theirs_index
+    } else {
+        &ours_index
+    };
+    let result_index = worktree_diff_index_snapshot(repo, template_index)?;
+    let pathspecs = options
+        .paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    print_combined_worktree_patches_with_zero_result(
+        store,
+        &[ours_index, theirs_index],
+        &result_index,
+        &pathspecs,
+        CombinedPatchRenderOptions {
+            abbrev_len: render_options.patch_abbrev_len,
+            relative_prefix: render_options.relative_prefix.as_deref(),
+            old_prefix: &render_options.old_prefix,
+            new_prefix: &render_options.new_prefix,
+            dense_combined: options.dense_combined,
+            line_prefix: None,
+        },
+    )
+}
+
 fn unmerged_diff_entries(indexes: [&GitIndex; 2]) -> Vec<zmin_git_core::IndexDiffEntry> {
     let mut paths = BTreeSet::new();
     for index in indexes {
@@ -671,6 +889,139 @@ fn unmerged_diff_entries(indexes: [&GitIndex; 2]) -> Vec<zmin_git_core::IndexDif
             similarity: None,
         })
         .collect()
+}
+
+fn print_combined_worktree_patches_with_zero_result(
+    store: &LooseObjectStore,
+    parent_indexes: &[GitIndex],
+    result_index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+    options: CombinedPatchRenderOptions<'_>,
+) -> Result<()> {
+    let abbrev_len = options.abbrev_len.unwrap_or(default_abbrev_len(store)?);
+    let zero_result_id = short_zero_object_id_len(abbrev_len);
+    for path in combined_diff_tree_paths(parent_indexes, result_index, pathspecs) {
+        let Some(result_entry) = find_index_entry(result_index, &path) else {
+            continue;
+        };
+        if result_entry.mode == IndexMode::Gitlink {
+            continue;
+        }
+        let parent_entries = parent_indexes
+            .iter()
+            .map(|index| find_index_entry(index, &path))
+            .collect::<Vec<_>>();
+        if parent_entries
+            .iter()
+            .any(|entry| entry.is_none_or(|entry| entry.mode == IndexMode::Gitlink))
+        {
+            continue;
+        }
+        let parent_entries = parent_entries
+            .into_iter()
+            .map(|entry| entry.expect("gitlink/missing parent entries skipped"))
+            .collect::<Vec<_>>();
+        let result_content = read_index_entry_content(store, result_entry)?;
+        let parent_contents = parent_entries
+            .iter()
+            .map(|entry| read_index_entry_content(store, entry))
+            .collect::<Result<Vec<_>>>()?;
+        let result_lines = split_combined_patch_lines(&result_content);
+        let parent_lines = parent_contents
+            .iter()
+            .map(|content| split_combined_patch_lines(content))
+            .collect::<Vec<_>>();
+        let display_path = diff_display_path(&path, options.relative_prefix);
+        let old_path = format!("{}{}", options.old_prefix, display_path);
+        let new_path = format!("{}{}", options.new_prefix, display_path);
+        let line_prefix = options.line_prefix.unwrap_or("");
+        if options.dense_combined {
+            println!("{line_prefix}diff --cc {display_path}");
+        } else {
+            println!("{line_prefix}diff --combined {display_path}");
+        }
+        let parent_ids = parent_entries
+            .iter()
+            .map(|entry| short_object_id_len(&entry.id, abbrev_len))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!("{line_prefix}index {parent_ids}..{zero_result_id}");
+        println!("{line_prefix}--- {old_path}");
+        println!("{line_prefix}+++ {new_path}");
+        let parent_ranges = parent_lines
+            .iter()
+            .map(|lines| format!("-1,{}", lines.len()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!(
+            "{line_prefix}@@@ {parent_ranges} +1,{} @@@",
+            result_lines.len()
+        );
+        print_combined_patch_hunk(&parent_lines, &result_lines, line_prefix);
+    }
+    Ok(())
+}
+
+fn filtered_unmerged_paths(index: &GitIndex, pathspecs: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    unmerged_paths(index)
+        .into_iter()
+        .filter(|path| pathspec_matches(path, pathspecs))
+        .collect()
+}
+
+fn print_unmerged_patch_markers(
+    index: &GitIndex,
+    pathspecs: &[Vec<u8>],
+    relative_prefix: Option<&[u8]>,
+) -> Result<()> {
+    for path in filtered_unmerged_paths(index, pathspecs) {
+        println!("* Unmerged path {}", diff_display_path(&path, relative_prefix));
+    }
+    Ok(())
+}
+
+fn diff_files_unmerged_raw_only(options: &PlumbingDiffOptions) -> bool {
+    !options.patch
+        && !options.patch_with_raw
+        && !options.patch_with_stat
+        && !options.stat
+        && !options.compact_summary
+        && !options.numstat
+        && !options.shortstat
+        && options.dirstat.is_none()
+        && !options.cumulative
+        && options.dirstat_by_file.is_none()
+        && !options.summary
+        && !options.name_status
+        && !options.name_only
+        && options.word_diff.is_none()
+        && options.color_words.is_none()
+        && !options.no_patch
+}
+
+fn print_diff_files_unmerged_raw(
+    index: &GitIndex,
+    paths: &[Vec<u8>],
+    raw_abbrev_len: Option<usize>,
+    nul_terminated: bool,
+) -> Result<()> {
+    let abbrev_len = raw_abbrev_len.unwrap_or(GitHashAlgorithm::Sha1.digest_len() * 2);
+    for path in paths {
+        let mode = index
+            .entry(path, 1)
+            .or_else(|| index.entry(path, 2))
+            .or_else(|| index.entry(path, 3))
+            .map(|entry| index_mode_octal(entry.mode))
+            .unwrap_or("000000");
+        let zero = diff_raw_zero_object_id_len(abbrev_len);
+        let display = diff_display_path(path, None);
+        if nul_terminated {
+            print!(":000000 {mode} {zero} {zero} U\0{display}\0");
+        } else {
+            println!(":000000 {mode} {zero} {zero} U\t{display}");
+        }
+    }
+    Ok(())
 }
 
 fn append_worktree_stat_dirty_entries(

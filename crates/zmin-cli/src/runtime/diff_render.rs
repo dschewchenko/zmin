@@ -2874,7 +2874,7 @@ fn diff_operand_object_kind(
     Ok(Some(store.read_object(&resolved.id)?.kind))
 }
 
-fn diff_usage_error() -> CliError {
+pub(crate) fn diff_usage_error() -> CliError {
     CliError::Stderr {
         code: 129,
         text: concat!(

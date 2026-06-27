@@ -2765,6 +2765,12 @@ pub enum Command {
         nul_terminated: bool,
         #[arg(long = "cached", alias = "staged", action = ArgAction::SetTrue)]
         cached: bool,
+        #[arg(short = '1', long = "base", action = ArgAction::SetTrue, conflicts_with_all = ["ours", "theirs"])]
+        base: bool,
+        #[arg(short = '2', long = "ours", action = ArgAction::SetTrue, conflicts_with_all = ["base", "theirs"])]
+        ours: bool,
+        #[arg(short = '3', long = "theirs", action = ArgAction::SetTrue, conflicts_with_all = ["base", "ours"])]
+        theirs: bool,
         #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
@@ -2825,8 +2831,6 @@ pub enum Command {
         merge: bool,
         #[arg(short = 't', action = ArgAction::SetTrue)]
         tree_in_diff: bool,
-        #[arg(long = "cc", action = ArgAction::SetTrue)]
-        dense_combined: bool,
         #[arg(short = 'S')]
         pickaxe_string: Option<String>,
         #[arg(short = 'G')]
@@ -3025,12 +3029,24 @@ pub enum Command {
         find_copies: Option<String>,
         #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
         find_copies_harder: bool,
+        #[arg(short = '0', action = ArgAction::SetTrue)]
+        omit_unmerged: bool,
+        #[arg(short = '1', long = "base", action = ArgAction::SetTrue, conflicts_with_all = ["ours", "theirs"])]
+        base: bool,
+        #[arg(short = '2', long = "ours", action = ArgAction::SetTrue, conflicts_with_all = ["base", "theirs"])]
+        ours: bool,
+        #[arg(short = '3', long = "theirs", action = ArgAction::SetTrue, conflicts_with_all = ["base", "ours"])]
+        theirs: bool,
         #[arg(long = "no-renames", action = ArgAction::SetTrue)]
         no_renames: bool,
         #[arg(short = 'l')]
         rename_limit_short: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(short = 'c', action = ArgAction::SetTrue)]
+        combined: bool,
+        #[arg(long = "cc", action = ArgAction::SetTrue)]
+        dense_combined: bool,
         #[arg(short = 't', action = ArgAction::SetTrue)]
         tree_in_diff: bool,
         #[arg(short = 'R', action = ArgAction::SetTrue)]
@@ -6111,6 +6127,9 @@ pub struct DiffOptions {
     pub no_index: bool,
     pub nul_terminated: bool,
     pub cached: bool,
+    pub base: bool,
+    pub ours: bool,
+    pub theirs: bool,
     pub reverse: bool,
     pub check: bool,
     pub patch_with_raw: bool,
@@ -6204,6 +6223,9 @@ impl Default for DiffOptions {
             no_index: false,
             nul_terminated: false,
             cached: false,
+            base: false,
+            ours: false,
+            theirs: false,
             reverse: false,
             check: false,
             patch_with_raw: false,
@@ -6320,6 +6342,10 @@ pub struct PlumbingDiffOptions {
     pub ignore_submodules: Option<String>,
     pub find_copies: Option<String>,
     pub find_copies_harder: bool,
+    pub omit_unmerged: bool,
+    pub base: bool,
+    pub ours: bool,
+    pub theirs: bool,
     pub no_renames: bool,
     pub rename_limit_short: Option<String>,
     pub merge: bool,
