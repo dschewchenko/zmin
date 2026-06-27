@@ -1670,7 +1670,7 @@ pub enum Command {
         verbose: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
-        #[arg(short = 'n', long = "dry-run", action = ArgAction::SetTrue)]
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
         dry_run: bool,
         #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
         force: bool,
@@ -1774,6 +1774,10 @@ pub enum Command {
         no_all: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        #[arg(short = 'f', long = "force", action = ArgAction::SetTrue)]
+        force: bool,
         #[arg(short = 'p', long = "prune", action = ArgAction::SetTrue)]
         prune: bool,
         #[arg(long = "no-tags", action = ArgAction::SetTrue)]
@@ -1804,6 +1808,10 @@ pub enum Command {
         show_forced_updates: bool,
         #[arg(long = "no-show-forced-updates", action = ArgAction::SetTrue)]
         no_show_forced_updates: bool,
+        #[arg(long = "set-upstream", action = ArgAction::SetTrue)]
+        set_upstream: bool,
+        #[arg(short = 'a', long = "append", action = ArgAction::SetTrue)]
+        append: bool,
         #[arg(long = "ff", action = ArgAction::SetTrue)]
         ff: bool,
         #[arg(long = "ff-only", action = ArgAction::SetTrue)]
@@ -1880,10 +1888,18 @@ pub enum Command {
         strategies: Vec<String>,
         #[arg(short = 'X', long = "strategy-option")]
         strategy_options: Vec<String>,
-        #[arg(long = "rebase", num_args = 0..=1, default_missing_value = "true")]
+        #[arg(
+            short = 'r',
+            long = "rebase",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )]
         rebase: Option<String>,
         #[arg(long = "no-rebase", action = ArgAction::SetTrue)]
         no_rebase: bool,
+        #[arg(long = "refmap", num_args = 0..=1, default_missing_value = "", require_equals = true)]
+        refmap: Vec<String>,
         #[arg(long = "depth")]
         depth: Option<String>,
         #[arg(long = "deepen")]
@@ -1896,6 +1912,8 @@ pub enum Command {
         shallow_since: Option<String>,
         #[arg(long = "shallow-exclude")]
         shallow_exclude: Vec<String>,
+        #[arg(long = "negotiation-tip")]
+        negotiation_tip: Vec<String>,
         #[arg(long = "upload-pack")]
         upload_pack: Option<String>,
         remote: Option<String>,

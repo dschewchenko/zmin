@@ -22,20 +22,23 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local `pull`
-signature-verification closure across the explicit local no-rebase merge lane.
-This batch added three exact stock-Git rows for `pull --verify-signatures` on
-both the signed-remote-tip success lane and the unsigned-target rejection
-lane, plus `pull --no-verify-signatures` on the signed bypass lane. The
-runtime change stayed intentionally narrow: `pull` now threads documented
-signature-verification toggles through the existing explicit-local merge path,
-reuses the already modeled `merge` verification engine without widening other
-transport behavior, preserves the stock fetch prelude and `FETCH_HEAD` side
-effects, and matches stock merge commit objects or fatal diagnostics on all
-three lanes.
+fetch-inherited tail closure across the named-local ff-only lane plus the
+existing-`FETCH_HEAD` append rejection lane. This batch added nine exact
+stock-Git rows for `pull --append`, `--dry-run`, `--force`,
+`--negotiation-tip=HEAD`, `--refmap=+refs/heads/*:refs/remotes/origin/*`,
+`--set-upstream`, `-a`, `-f`, and `-r`, and closes the final documented
+`pull` option tail. The runtime changes stayed bounded but real: `pull` now
+threads the remaining fetch-inherited flags through the fetch path, preserves
+stock dry-run behavior on the local branch lane by avoiding tracking-ref and
+`FETCH_HEAD` mutation, accepts short `-r` without consuming following
+positionals, matches the current-host append multiple-branch fatal diagnostic
+after an existing `FETCH_HEAD` entry, and aligns the tags/refmap render path
+with stock fetch preludes.
 
 Focused verification was
-`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_verify_signatures_family_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
-`bash tools/git-pull-verify-signatures-oracle-smoke.sh`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_fetch_inherited_option_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_fetch_inherited_short_aliases_match_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_append_with_existing_fetch_head_matches_stock_git -- --exact --nocapture`,
 `cargo check -p zmin-cli -p zmin-cli-schema`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -46,25 +49,25 @@ and `git diff --check`.
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2493 / 3212`
-- represented documented command-option pairs: `2493 / 3212`
-- matrix rows: `6705`
-- verified rows: `5891`
-- invalid-input rows: `789`
+- complete documented command-option pairs: `2523 / 3212`
+- represented documented command-option pairs: `2523 / 3212`
+- matrix rows: `6735`
+- verified rows: `5898`
+- invalid-input rows: `812`
 - open or partial exact rows: `0`
-- remaining to fix or verify rows: `719`
+- remaining to fix or verify rows: `689`
 
 Per-command position on the touched surface:
 
-- `pull`: `69 / 99` reviewed-complete documented option pairs,
-  `69 / 99` represented documented option pairs, `97` written rows, `97`
-  classified rows, `94` stock-matching rows, `3` invalid-input rows, and `0`
-  exact-open rows
+- `pull`: `99 / 99` reviewed-complete documented option pairs,
+  `99 / 99` represented documented option pairs, `127` written rows, `127`
+  classified rows, `101` stock-matching rows, `26` invalid-input rows, and
+  `0` exact-open rows
 
 The next best high-throughput follow-up should stay off one-row cleanup and
 reselect from the refreshed backlog head, where the largest remaining queues
-still sit on `replay`, `send-email`, `rebase`, `log`, `rev-list`, `pull`, and
-the `diff*` family.
+now sit on `replay`, `send-email`, `rebase`, `log`, `rev-list`, `diff-tree`,
+`pack-objects`, `p4`, `diff-files`, and `diff`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local `merge`
 signature-verification closure across the shared non-fast-forward clean merge

@@ -12,6 +12,25 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local `pull`
+fetch-inherited tail closure across the named-local ff-only lane plus the
+existing-`FETCH_HEAD` append rejection lane. The selected change added nine
+exact stock-Git rows for `pull --append`, `--dry-run`, `--force`,
+`--negotiation-tip=HEAD`,
+`--refmap=+refs/heads/*:refs/remotes/origin/*`, `--set-upstream`, `-a`,
+`-f`, and `-r`, and closes the final documented `pull` command-option tail.
+Actual delta is `+9` matrix rows, `+9` complete documented option pairs, `+9`
+represented documented option pairs, `+7` verified rows, `+2` invalid-input
+rows, and `+0` complete command matrices. Current census counts are `6735`
+matrix rows, `5898` verified rows, `812` invalid-input rows, `0` exact-open
+rows, `146/151` complete command matrices, `2523/3212` complete documented
+option pairs, and `2523/3212` represented documented option pairs. `pull` is
+now fully closed at `99/99` reviewed-complete documented option pairs with
+`101/127` stock-matching rows and `26` invalid-input rows. The next default
+follow-up should move off `pull` and reselect from the larger backlog head,
+which is still led by `replay`, `send-email`, `rebase`, `log`, `rev-list`,
+and the `diff*` family.
+
+As of 2026-06-27 the latest completed batch is a helper-free local `pull`
 invalid fetch-inherited closure across the named-local ff-only lane. The
 selected change added twenty-one exact stock-Git invalid-input rows for
 `pull --atomic`, `--auto-gc`, `--auto-maintenance`, `--multiple`,

@@ -286,6 +286,56 @@ fn assert_named_local_pull_matches_stock_git(label: &str, args: &[&str]) {
     }
 }
 
+fn assert_named_local_pull_with_existing_fetch_head_matches_stock_git(label: &str, args: &[&str]) {
+    let (_dir, source, git_client, zmin_client) = setup_named_local_pull_clients(label);
+    let prefetch_args = ["fetch", "origin", "main"];
+    let git_prefetch = command_any_output("git", &git_client, &prefetch_args, label);
+    let zmin_prefetch = command_any_output(zmin_bin(), &zmin_client, &prefetch_args, label);
+    let source_path = source.to_string_lossy();
+    assert_eq!(zmin_prefetch.0, git_prefetch.0, "{label} prefetch exit code");
+    assert_eq!(zmin_prefetch.1, git_prefetch.1, "{label} prefetch stdout");
+    assert_eq!(
+        normalize_remote_output(&zmin_prefetch.2, &source_path),
+        normalize_remote_output(&git_prefetch.2, &source_path),
+        "{label} prefetch stderr"
+    );
+
+    let git_output = command_any_output("git", &git_client, args, label);
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, args, label);
+    assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+    assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+    assert_eq!(
+        normalize_remote_output(&zmin_output.2, &source_path),
+        normalize_remote_output(&git_output.2, &source_path),
+        "{label} stderr"
+    );
+    assert_eq!(
+        git(&zmin_client, ["rev-parse", "HEAD"]),
+        git(&git_client, ["rev-parse", "HEAD"]),
+        "{label} HEAD"
+    );
+    assert_eq!(
+        git(&zmin_client, ["cat-file", "-p", "HEAD^{tree}"]),
+        git(&git_client, ["cat-file", "-p", "HEAD^{tree}"]),
+        "{label} HEAD tree"
+    );
+    assert_eq!(
+        run_zmin(&zmin_client, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_client, ["status", "--porcelain=v1", "--branch"]),
+        "{label} status"
+    );
+    assert_eq!(
+        git(&zmin_client, ["show-ref"]),
+        git(&git_client, ["show-ref"]),
+        "{label} show-ref"
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_client.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_client.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+        "{label} FETCH_HEAD"
+    );
+}
+
 fn pack_dir_files(repo: &Path) -> Vec<std::path::PathBuf> {
     let pack_dir = repo.join(".git/objects/pack");
     if !pack_dir.exists() {
@@ -621,7 +671,7 @@ fn pull_all_fetches_all_remotes_then_reports_missing_tracking_like_stock_git() {
 
 #[test]
 fn pull_fetch_inherited_option_family_matches_stock_git() {
-    let cases: [(&str, &[&str]); 20] = [
+    let cases: [(&str, &[&str]); 25] = [
         (
             "pull --show-forced-updates",
             &[
@@ -726,6 +776,38 @@ fn pull_fetch_inherited_option_family_matches_stock_git() {
                 "main",
             ],
         ),
+        (
+            "pull --dry-run",
+            &["pull", "--ff-only", "--dry-run", "origin", "main"],
+        ),
+        (
+            "pull --force",
+            &["pull", "--ff-only", "--force", "origin", "main"],
+        ),
+        (
+            "pull --negotiation-tip",
+            &[
+                "pull",
+                "--ff-only",
+                "--negotiation-tip=HEAD",
+                "origin",
+                "main",
+            ],
+        ),
+        (
+            "pull --refmap",
+            &[
+                "pull",
+                "--ff-only",
+                "--refmap=+refs/heads/*:refs/remotes/origin/*",
+                "origin",
+                "main",
+            ],
+        ),
+        (
+            "pull --set-upstream",
+            &["pull", "--ff-only", "--set-upstream", "origin", "main"],
+        ),
         ("pull -4", &["pull", "--ff-only", "-4", "origin", "main"]),
         ("pull -6", &["pull", "--ff-only", "-6", "origin", "main"]),
         ("pull -k", &["pull", "--ff-only", "-k", "origin", "main"]),
@@ -743,9 +825,11 @@ fn pull_fetch_inherited_option_family_matches_stock_git() {
 
 #[test]
 fn pull_fetch_inherited_short_aliases_match_stock_git() {
-    let cases: [(&str, &[&str]); 4] = [
+    let cases: [(&str, &[&str]); 6] = [
         ("pull -t", &["pull", "--ff-only", "-t", "origin", "main"]),
         ("pull -v", &["pull", "--ff-only", "-v", "origin", "main"]),
+        ("pull -f", &["pull", "--ff-only", "-f", "origin", "main"]),
+        ("pull -r", &["pull", "--ff-only", "-r", "origin", "main"]),
         (
             "pull -j",
             &[
@@ -774,6 +858,18 @@ fn pull_fetch_inherited_short_aliases_match_stock_git() {
     for (label, args) in cases {
         assert_named_local_pull_matches_stock_git(label, args);
     }
+}
+
+#[test]
+fn pull_append_with_existing_fetch_head_matches_stock_git() {
+    assert_named_local_pull_with_existing_fetch_head_matches_stock_git(
+        "pull --append",
+        &["pull", "--ff-only", "--append", "origin", "main"],
+    );
+    assert_named_local_pull_with_existing_fetch_head_matches_stock_git(
+        "pull -a",
+        &["pull", "--ff-only", "-a", "origin", "main"],
+    );
 }
 
 #[test]

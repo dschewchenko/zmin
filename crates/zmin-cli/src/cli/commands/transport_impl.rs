@@ -11310,6 +11310,8 @@ fn fetch_remote_url(repo: &GitRepo, remote: &str) -> Result<String> {
 
 pub(crate) fn run_pull(
     all: bool,
+    dry_run: bool,
+    force: bool,
     ff: bool,
     ff_only: bool,
     no_ff: bool,
@@ -11341,6 +11343,8 @@ pub(crate) fn run_pull(
     no_progress: u8,
     allow_unrelated_histories: bool,
     no_all: bool,
+    set_upstream: bool,
+    append: bool,
     prune: bool,
     no_tags: bool,
     tags: bool,
@@ -11348,12 +11352,14 @@ pub(crate) fn run_pull(
     strategy_options: Vec<String>,
     rebase_mode: Option<String>,
     no_rebase: bool,
+    refmap: Vec<String>,
     depth: Option<String>,
     deepen: Option<String>,
     unshallow: bool,
     update_shallow: bool,
     shallow_since: Option<String>,
     shallow_exclude: Vec<String>,
+    negotiation_tips: Vec<String>,
     upload_pack: Option<String>,
     remote: Option<String>,
     branch: Option<String>,
@@ -11362,6 +11368,7 @@ pub(crate) fn run_pull(
     let _trace = phase_trace("pull.total");
     let _ = ff;
     let _ = no_all;
+    let _ = force;
     let repo = find_repo_or_bare()?;
     let show_diffstat =
         resolve_pull_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
@@ -11424,10 +11431,10 @@ pub(crate) fn run_pull(
                 false,
                 false,
                 false,
-                false,
-                false,
-                false,
-                idx > 0,
+                dry_run,
+                force,
+                set_upstream,
+                append || idx > 0,
                 prune,
                 false,
                 false,
@@ -11436,11 +11443,11 @@ pub(crate) fn run_pull(
                 false,
                 false,
                 true,
-                Vec::new(),
+                refmap.clone(),
                 depth.clone(),
                 unshallow,
                 update_shallow,
-                Vec::new(),
+                negotiation_tips.clone(),
                 false,
                 None,
                 false,
@@ -11467,12 +11474,6 @@ pub(crate) fn run_pull(
         let _trace = phase_trace("pull.resolve_config");
         pull_rebase_after_fetch(&repo, &current_branch_short, rebase_mode)?
     };
-    if rebase_mode.is_some() && pull_rebase_mode.rebases() && ff_only {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "options '--rebase' and '--ff-only' cannot be used together".into(),
-        });
-    }
     if pull_rebase_mode.rebases() && !strategies.is_empty() {
         return Err(CliError::Fatal {
             code: 128,
@@ -11549,6 +11550,7 @@ fatal: the remote end hung up unexpectedly\n"
             });
         }
     }
+    let pull_fetch_refmap: &[String] = if refmap.is_empty() { &refmap } else { &[] };
     let target = if explicit_local_remote {
         {
             let _trace = phase_trace("pull.fetch_explicit_local");
@@ -11563,8 +11565,9 @@ fatal: the remote end hung up unexpectedly\n"
                 &shallow_exclude,
                 1,
                 quiet,
-                false,
-                false,
+                dry_run,
+                append,
+                set_upstream,
                 prune,
                 false,
                 false,
@@ -11572,9 +11575,8 @@ fatal: the remote end hung up unexpectedly\n"
                 tags,
                 false,
                 false,
-                false,
                 true,
-                &[],
+                pull_fetch_refmap,
                 false,
                 false,
                 recurse_submodules_mode,
@@ -11600,8 +11602,9 @@ fatal: the remote end hung up unexpectedly\n"
                 &shallow_exclude,
                 1,
                 quiet,
-                false,
-                false,
+                dry_run,
+                append,
+                set_upstream,
                 prune,
                 false,
                 false,
@@ -11609,9 +11612,8 @@ fatal: the remote end hung up unexpectedly\n"
                 tags,
                 false,
                 false,
-                false,
                 true,
-                &[],
+                pull_fetch_refmap,
                 false,
                 false,
                 recurse_submodules_mode,
@@ -11622,6 +11624,20 @@ fatal: the remote end hung up unexpectedly\n"
         write_fetch_show_forced_updates_warning_if_needed(show_forced_updates_mode)?;
         format!("refs/remotes/{remote}/{branch}")
     };
+    if dry_run {
+        return Ok(());
+    }
+    if append && fetch_head_merge_candidate_count(&repo)? > 1 {
+        let text = if pull_rebase_mode.rebases() {
+            "fatal: Cannot rebase onto multiple branches.\n"
+        } else {
+            "fatal: Cannot fast-forward to multiple branches.\n"
+        };
+        return Err(CliError::Stderr {
+            code: 128,
+            text: text.into(),
+        });
+    }
     if pull_rebase_mode.rebases() && !ff_only {
         return sequencer_commands::rebase(
             false,
@@ -11697,6 +11713,17 @@ fatal: the remote end hung up unexpectedly\n"
         let _trace = phase_trace("pull.fast_forward");
         fast_forward_to(&repo, &store, &target, "pull", ff_only)
     }
+}
+
+fn fetch_head_merge_candidate_count(repo: &GitRepo) -> Result<usize> {
+    let path = repo.git_dir.join("FETCH_HEAD");
+    let Ok(content) = fs::read_to_string(path) else {
+        return Ok(0);
+    };
+    Ok(content
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count())
 }
 
 fn resolve_pull_merge_commit_mode(
@@ -13192,6 +13219,39 @@ pub(crate) fn fetch_with_repo_and_remote(
             format!("refs/remotes/{remote}/{branch}")
         };
         let old_id = destination_refs.resolve(&destination_ref).ok();
+        if dry_run {
+            if tags {
+                if !quiet {
+                    print_named_branch_fetch_with_tags(
+                        &url,
+                        branch,
+                        &remote,
+                        &source_refs,
+                        old_id.as_ref(),
+                        &id,
+                    )?;
+                }
+            } else if !quiet {
+                eprintln!("From {}", fetch_head_url_display(&url));
+                eprintln!(" * branch            {branch}       -> FETCH_HEAD");
+                if let Some(old_id) = old_id.as_ref() {
+                    if old_id != &id {
+                        eprintln!(
+                            "{}",
+                            fetch_fast_forward_update_row(
+                                &ref_name,
+                                &destination_ref,
+                                old_id,
+                                &id
+                            )
+                        );
+                    }
+                } else {
+                    eprintln!("{}", fetch_update_row(&ref_name, &destination_ref));
+                }
+            }
+            return Ok(());
+        }
         let atomic_updates = if atomic {
             let mut updates = Vec::with_capacity(1);
             push_atomic_fetch_ref_update(
@@ -13241,7 +13301,14 @@ pub(crate) fn fetch_with_repo_and_remote(
             copy_configured_fetch_tags(&source_refs, &destination_refs)?;
             write_branch_fetch_head_with_tags_file(&repo, &id, &ref_name, &source_refs, &url)?;
             if !quiet {
-                print_named_branch_fetch_with_tags(&url, branch, &remote, &source_refs)?;
+                print_named_branch_fetch_with_tags(
+                    &url,
+                    branch,
+                    &remote,
+                    &source_refs,
+                    old_id.as_ref(),
+                    &id,
+                )?;
             }
         } else {
             write_branch_fetch_head_file(&repo, &id, &ref_name, &url, append, prefetch)?;
@@ -16491,9 +16558,27 @@ fn print_named_branch_fetch_with_tags(
     branch: &str,
     remote: &str,
     source_refs: &RefStore,
+    old_id: Option<&ObjectId>,
+    new_id: &ObjectId,
 ) -> Result<()> {
     print_branch_fetch_with_tags(url, branch, source_refs)?;
-    eprintln!(" * [new branch]      {branch:<11}-> {remote}/{branch}");
+    let source_ref = format!("refs/heads/{branch}");
+    let destination_ref = format!("refs/remotes/{remote}/{branch}");
+    if let Some(old_id) = old_id {
+        if old_id != new_id {
+            eprintln!(
+                "{}",
+                fetch_fast_forward_update_row(
+                    &source_ref,
+                    &destination_ref,
+                    old_id,
+                    new_id
+                )
+            );
+        }
+    } else {
+        eprintln!("{}", fetch_update_row(&source_ref, &destination_ref));
+    }
     Ok(())
 }
 
