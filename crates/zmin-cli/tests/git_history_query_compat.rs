@@ -4033,6 +4033,61 @@ fn log_remaining_documented_tail_matches_stock_git() {
 }
 
 #[test]
+fn rev_list_documented_tail_batch_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
+    git(repo.path(), ["branch", "side", "HEAD~1"]);
+    git(repo.path(), ["tag", "v1", "HEAD~1"]);
+
+    for args in [
+        ["rev-list", "--alternate-refs", "HEAD"].as_slice(),
+        ["rev-list", "--commit-header", "HEAD"].as_slice(),
+        ["rev-list", "--exclude=main", "--all"].as_slice(),
+        ["rev-list", "--exclude-first-parent-only", "--all"].as_slice(),
+        ["rev-list", "--exclude-hidden=fetch", "--all"].as_slice(),
+        ["rev-list", "--exclude-promisor-objects", "HEAD"].as_slice(),
+        ["rev-list", "--filter-print-omitted", "HEAD"].as_slice(),
+        ["rev-list", "--glob=main", "HEAD"].as_slice(),
+        ["rev-list", "--ignore-missing", "HEAD"].as_slice(),
+        ["rev-list", "--in-commit-order", "HEAD"].as_slice(),
+        ["rev-list", "--indexed-objects", "HEAD"].as_slice(),
+        ["rev-list", "--left-only", "HEAD...side"].as_slice(),
+        ["rev-list", "--no-commit-header", "HEAD"].as_slice(),
+        ["rev-list", "--no-filter", "HEAD"].as_slice(),
+        ["rev-list", "--no-walk", "HEAD"].as_slice(),
+        ["rev-list", "--remove-empty", "HEAD"].as_slice(),
+        ["rev-list", "--right-only", "HEAD...side"].as_slice(),
+        ["rev-list", "--show-linear-break", "HEAD"].as_slice(),
+        ["rev-list", "--show-signature", "HEAD"].as_slice(),
+        ["rev-list", "--since-as-filter=1700000300", "HEAD"].as_slice(),
+        ["rev-list", "--single-worktree", "HEAD"].as_slice(),
+        ["rev-list", "--stdin", "HEAD"].as_slice(),
+        ["rev-list", "--unpacked", "HEAD"].as_slice(),
+        ["rev-list", "--use-bitmap-index", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["rev-list", "--merge", "HEAD"].as_slice(),
+        ["rev-list", "--missing", "HEAD"].as_slice(),
+        ["rev-list", "--progress", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_date_formats_match_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

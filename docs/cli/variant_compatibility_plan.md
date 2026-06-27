@@ -5362,3 +5362,27 @@ Next helper-free family candidates now remain:
 
 - another zero-code command promotion or dense evidence-import batch from the
   census after the recent `read-tree` and `repack` durable closures
+- 2026-06-28 `rev-list` documented tail batch: promoted twenty-seven
+  additional `rev-list` documented option pairs through one helper-free local
+  stock-Git oracle batch. The slice covered accepted no-op surfaces
+  (`--alternate-refs`, `--commit-header`, `--exclude=*`, `--exclude-hidden`,
+  `--exclude-promisor-objects`, `--filter-print-omitted`, `--glob`,
+  `--ignore-missing`, `--in-commit-order`, `--indexed-objects`,
+  `--no-commit-header`, `--no-filter`, `--remove-empty`,
+  `--show-linear-break`, `--show-signature`, `--single-worktree`, `--stdin`,
+  `--unpacked`, `--use-bitmap-index`), real traversal behavior
+  (`--left-only`, `--right-only`, `--no-walk`, `--since-as-filter`), and the
+  stock invalid-input lanes for `--merge`, `--missing`, and `--progress`.
+  Focused verification was `cargo check -p zmin-cli -p zmin-cli-schema`,
+  `cargo test -p zmin-cli --test git_history_query_compat rev_list_documented_tail_batch_matches_stock_git -- --exact --nocapture`,
+  `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+  `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+  `tools/git-cli-readiness-status.sh`, `tools/git-compat-command-summary.sh --tsv | rg '^(rev-list|summary)\t'`,
+  and `git diff --check`. Current census counts are `146/151` complete command
+  matrices, `2651/3212` complete documented option pairs, `6954` written
+  rows, `6092` verified rows, `837` invalid-input rows, and `561` remaining
+  checklist rows. `rev-list` now sits at `108/117` reviewed-complete
+  documented option pairs with `160/160` classified rows and `147/160`
+  verified exact rows; the remaining `rev-list` tail is the smaller
+  special-output cluster around `--bisect*`, `--disk-usage`, `--graph`,
+  `--header`, `--objects-edge*`, and any still-unmodeled `--cherry` surface.

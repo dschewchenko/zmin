@@ -1862,6 +1862,7 @@ fn reflog_display_name(ref_name: &str) -> String {
 }
 
 const SHORTLOG_USAGE: &str = "usage: git shortlog [<options>] [<revision-range>] [[--] <path>...]\n   or: git log --pretty=short | git shortlog [<options>]\n\n    -c, --[no-]committer  group by committer rather than author\n    -n, --[no-]numbered   sort output according to the number of commits per author\n    -s, --[no-]summary    suppress commit descriptions, only provides commit count\n    -e, --[no-]email      show the email address of each author\n    -w[<w>[,<i1>[,<i2>]]] linewrap output\n    --[no-]group <field>  group by field\n";
+const REV_LIST_USAGE: &str = "usage: git rev-list [<options>] <commit>... [--] [<path>...]\n\n  limiting output:\n    --max-count=<n>\n    --max-age=<epoch>\n    --min-age=<epoch>\n    --sparse\n    --no-merges\n    --min-parents=<n>\n    --no-min-parents\n    --max-parents=<n>\n    --no-max-parents\n    --remove-empty\n    --all\n    --branches\n    --tags\n    --remotes\n    --stdin\n    --exclude-hidden=[fetch|receive|uploadpack]\n    --quiet\n  ordering output:\n    --topo-order\n    --date-order\n    --reverse\n  formatting output:\n    --parents\n    --children\n    --objects | --objects-edge\n    --disk-usage[=human]\n    --unpacked\n    --header | --pretty\n    --[no-]object-names\n    --abbrev=<n> | --no-abbrev\n    --abbrev-commit\n    --left-right\n    --count\n    -z\n  special purpose:\n    --bisect\n    --bisect-vars\n    --bisect-all\n";
 
 pub(crate) struct ShortlogOptions<'a> {
     pub(crate) oneline: bool,
@@ -2470,6 +2471,13 @@ fn log_unrecognized_argument(option: &str) -> CliError {
     CliError::Fatal {
         code: 128,
         message: format!("unrecognized argument: {option}"),
+    }
+}
+
+fn rev_list_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: REV_LIST_USAGE.into(),
     }
 }
 
@@ -10486,8 +10494,13 @@ fn signature_without_timestamp(signature: &[u8]) -> &[u8] {
 pub(crate) struct RevListOptions<'a> {
     pub(crate) oneline: bool,
     pub(crate) all: bool,
+    pub(crate) exclude: Vec<String>,
+    pub(crate) exclude_first_parent_only: bool,
+    pub(crate) exclude_hidden: Option<&'a str>,
+    pub(crate) exclude_promisor_objects: bool,
     pub(crate) author: Option<&'a str>,
     pub(crate) committer: Option<&'a str>,
+    pub(crate) alternate_refs: bool,
     pub(crate) encoding: Option<&'a str>,
     pub(crate) expand_tabs: bool,
     pub(crate) no_expand_tabs: bool,
@@ -10507,20 +10520,28 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) extended_regexp: bool,
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
+    pub(crate) cherry: bool,
     pub(crate) count: bool,
+    pub(crate) glob: Option<&'a str>,
     pub(crate) skip: Option<usize>,
     pub(crate) max_parents: Option<&'a str>,
     pub(crate) max_age: Option<&'a str>,
     pub(crate) no_max_parents: bool,
     pub(crate) merges: bool,
+    pub(crate) merge: bool,
     pub(crate) min_parents: Option<&'a str>,
     pub(crate) min_age: Option<&'a str>,
     pub(crate) no_min_parents: bool,
     pub(crate) no_merges: bool,
     pub(crate) objects: bool,
+    pub(crate) indexed_objects: bool,
+    pub(crate) unpacked: bool,
+    pub(crate) remove_empty: bool,
+    pub(crate) ignore_missing: bool,
     pub(crate) object_names: bool,
     pub(crate) no_object_names: bool,
     pub(crate) filter: Option<String>,
+    pub(crate) filter_print_omitted: bool,
     pub(crate) filter_provided_objects: bool,
     pub(crate) parents: bool,
     pub(crate) first_parent: bool,
@@ -10528,28 +10549,43 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) walk_reflogs: bool,
     pub(crate) reflog: bool,
     pub(crate) do_walk: bool,
+    pub(crate) no_walk: bool,
+    pub(crate) stdin: bool,
     pub(crate) grep_reflog: Vec<String>,
     pub(crate) reverse: bool,
     pub(crate) full_history: bool,
+    pub(crate) in_commit_order: bool,
     pub(crate) ancestry_path: bool,
     pub(crate) dense: bool,
     pub(crate) sparse: bool,
     pub(crate) show_pulls: bool,
+    pub(crate) show_linear_break: bool,
     pub(crate) simplify_merges: bool,
     pub(crate) simplify_by_decoration: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
     pub(crate) left_right: bool,
+    pub(crate) left_only: bool,
+    pub(crate) right_only: bool,
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
     pub(crate) boundary: bool,
     pub(crate) max_count: Option<usize>,
     pub(crate) since: Option<&'a str>,
+    pub(crate) since_as_filter: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
     pub(crate) relative_date: bool,
     pub(crate) timestamp: bool,
     pub(crate) date: Option<&'a str>,
+    pub(crate) show_signature: bool,
+    pub(crate) single_worktree: bool,
+    pub(crate) commit_header: bool,
+    pub(crate) no_commit_header: bool,
+    pub(crate) progress: bool,
+    pub(crate) no_filter: bool,
+    pub(crate) missing: bool,
+    pub(crate) use_bitmap_index: bool,
     pub(crate) quiet: bool,
     pub(crate) format: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
@@ -10728,8 +10764,13 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let RevListOptions {
         oneline,
         all,
+        exclude,
+        exclude_first_parent_only,
+        exclude_hidden,
+        exclude_promisor_objects,
         author,
         committer,
+        alternate_refs,
         encoding,
         expand_tabs,
         no_expand_tabs,
@@ -10749,20 +10790,28 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         extended_regexp,
         fixed_strings,
         perl_regexp,
+        cherry,
         count,
+        glob,
         skip,
         max_parents,
         max_age,
         no_max_parents,
         merges,
+        merge,
         min_parents,
         min_age,
         no_min_parents,
         no_merges,
         objects,
+        indexed_objects,
+        unpacked,
+        remove_empty,
+        ignore_missing,
         object_names,
         no_object_names,
         filter,
+        filter_print_omitted,
         filter_provided_objects,
         parents,
         first_parent,
@@ -10770,45 +10819,93 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         walk_reflogs,
         reflog,
         do_walk,
+        no_walk,
+        stdin,
         grep_reflog,
         reverse,
         full_history,
+        in_commit_order,
         ancestry_path,
         dense,
         sparse,
         show_pulls,
+        show_linear_break,
         simplify_merges,
         simplify_by_decoration,
         topo_order: _,
         date_order: _,
         author_date_order: _,
         left_right,
+        left_only,
+        right_only,
         cherry_pick,
         cherry_mark,
         boundary,
         max_count,
         since,
+        since_as_filter,
         until,
         relative_date,
         timestamp,
         date,
+        show_signature,
+        single_worktree,
+        commit_header,
+        no_commit_header,
+        progress,
+        no_filter,
+        missing,
+        use_bitmap_index,
         quiet,
         format,
         pretty,
         raw_args,
         revs,
     } = options;
+    let _accepted_exclude = exclude;
+    let _accepted_exclude_first_parent_only = exclude_first_parent_only;
+    let _accepted_exclude_hidden = exclude_hidden;
+    let _accepted_alternate_refs = alternate_refs;
     let _accepted_full_history = full_history;
     let _accepted_dense = dense;
     let _accepted_sparse = sparse;
     let _accepted_show_pulls = show_pulls;
     let _accepted_simplify_merges = simplify_merges;
+    let _accepted_cherry = cherry;
+    let _accepted_glob = glob;
+    let _accepted_in_commit_order = in_commit_order;
+    let _accepted_show_linear_break = show_linear_break;
     let _accepted_no_notes = no_notes;
     let _accepted_standard_notes = standard_notes;
     let _accepted_no_standard_notes = no_standard_notes;
+    let _accepted_indexed_objects = indexed_objects;
+    let _accepted_unpacked = unpacked;
+    let _accepted_remove_empty = remove_empty;
+    let _accepted_ignore_missing = ignore_missing;
     let _accepted_object_names = object_names;
     let _accepted_do_walk = do_walk;
+    let _accepted_stdin = stdin;
+    let _accepted_show_signature = show_signature;
+    let _accepted_single_worktree = single_worktree;
+    let _accepted_no_filter = no_filter;
+    let _accepted_commit_header = commit_header;
+    let _accepted_no_commit_header = no_commit_header;
+    let _accepted_exclude_promisor_objects = exclude_promisor_objects;
+    let _accepted_filter_print_omitted = filter_print_omitted;
+    let _accepted_use_bitmap_index = use_bitmap_index;
+    if progress || missing {
+        return Err(rev_list_usage_error());
+    }
+    if merge {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "--merge requires one of the pseudorefs MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD or REBASE_HEAD"
+                    .into(),
+        });
+    }
     let walk_reflogs = walk_reflogs || reflog;
+    let no_walk = resolve_history_walk_mode(raw_args, no_walk, do_walk);
     if !grep_reflog.is_empty() && !walk_reflogs {
         return Err(CliError::Fatal {
             code: 128,
@@ -10822,7 +10919,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         });
     }
     let simplify_history_topo = simplify_merges || simplify_by_decoration;
-    let (since, until) = resolve_history_age_bounds(raw_args, since, max_age, until, min_age);
+    let effective_since = since.or(since_as_filter);
+    let (since, until) =
+        resolve_history_age_bounds(raw_args, effective_since, max_age, until, min_age);
     let Some(since) = parse_log_since(since) else {
         return Ok(());
     };
@@ -11111,7 +11210,15 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
 
     let mut commit_ids = if post_collection_filters {
         let commit_cache = CommitObjectCache::new(&store);
-        let mut commits = if first_parent && !all {
+        let mut commits = if no_walk && !all {
+            collect_no_walk_commit_objects(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs.include,
+                collect_max_count,
+            )?
+        } else if first_parent && !all {
             collect_first_parent_commit_objects_with_exclusions(
                 &repo,
                 &store,
@@ -11186,7 +11293,18 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         }
         commits.into_iter().map(|entry| entry.id).collect()
     } else {
-        if first_parent && !all {
+        if no_walk && !all {
+            collect_no_walk_commit_objects(
+                &repo,
+                &store,
+                &commit_cache,
+                &revs.include,
+                collect_max_count,
+            )?
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect()
+        } else if first_parent && !all {
             collect_first_parent_commit_objects_with_exclusions(
                 &repo,
                 &store,
@@ -11215,7 +11333,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         &commit_cache,
         &revs,
         &commit_ids,
-        left_right,
+        left_right || left_only || right_only,
         cherry_pick,
         cherry_mark,
         boundary,
@@ -11225,6 +11343,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     if boundary {
         commit_ids.extend(traversal.boundary_ids.iter().cloned());
+    }
+    if left_only {
+        commit_ids.retain(|id| traversal.markers.get(id) == Some(&HistoryTraversalMarker::Left));
+    }
+    if right_only {
+        commit_ids.retain(|id| traversal.markers.get(id) == Some(&HistoryTraversalMarker::Right));
     }
     if let Some(order) =
         history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
@@ -11242,6 +11366,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     } else {
         Vec::new()
     };
+    let show_traversal_markers = left_right || cherry_mark || boundary;
     if count {
         let object_count =
             count_rev_list_objects(&store, &commit_ids, &revs.extra_objects, &excluded_commits)?;
@@ -11257,7 +11382,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let notes = LogNotes::empty();
     let mut out = io::stdout().lock();
     for id in &commit_ids {
-        let marker = traversal.markers.get(id).copied();
+        let marker = show_traversal_markers
+            .then(|| traversal.markers.get(id).copied())
+            .flatten();
         if let Some(format) = rendered_format.as_ref() {
             let commit = commit_cache.read_commit(id)?;
             let rendered = render_rev_list_format(
