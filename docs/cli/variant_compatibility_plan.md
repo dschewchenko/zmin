@@ -22,6 +22,54 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`am` parser and passthrough closure on the modeled single-mail lane. This
+batch added eleven reviewed-complete documented option pairs by proving
+stock-Git parity for `--include`, `--exclude`, the full modeled
+`--patch-format` family, `--gpg-sign`, `--no-gpg-sign`, `-S`,
+`--rerere-autoupdate`, `--no-rerere-autoupdate`, `--resolvemsg`,
+`--interactive`, and `-i`.
+
+The batch fixed one cohesive parser/runtime gap on the `am` path:
+
+- Zmin now exposes the next dense parser-plus-surface `am` family on the
+  existing helper-free single-mail lane, including path-filter acceptance for
+  `include` and `exclude`, the remaining modeled `patch-format` spellings,
+  stock interactive no-tty failure, and the accepted gpg, rerere, and
+  resolvemsg spellings on the current host
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(am|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2100 / 3212`
+- represented documented command-option pairs: `2101 / 3212`
+- matrix rows: `6189`
+- verified rows: `5381`
+- invalid-input rows: `783`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `am`: `51 / 54` reviewed-complete documented option pairs, `52 / 54`
+  represented documented option pairs, `83` written rows, `83` classified
+  rows, `61` stock-matching rows, `22` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `am`, but the head is
+now narrow: `--directory`, `--ignore-date`, and the remaining `--reject`
+expansion tail. After that, `am` should be ready either for reviewed-complete
+command closure or to fall behind a denser non-`am` batch from the refreshed
+backlog head.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `am` empty-mail and value-family closure. This batch added three
 reviewed-complete documented option pairs by proving stock-Git parity for the
 full modeled `--quoted-cr` family, the modeled `--empty` family, and the

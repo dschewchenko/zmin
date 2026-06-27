@@ -22,9 +22,17 @@ pub(crate) struct AmOptions {
     pub(crate) whitespace: Option<String>,
     pub(crate) context: Option<String>,
     pub(crate) strip: Option<String>,
+    pub(crate) include: Vec<String>,
+    pub(crate) exclude: Vec<String>,
     pub(crate) patch_format: Option<String>,
+    pub(crate) interactive: bool,
     pub(crate) empty: Option<String>,
     pub(crate) reject: bool,
+    pub(crate) gpg_sign: Option<String>,
+    pub(crate) no_gpg_sign: u8,
+    pub(crate) rerere_autoupdate: bool,
+    pub(crate) no_rerere_autoupdate: bool,
+    pub(crate) resolvemsg: Option<String>,
     pub(crate) no_verify: bool,
     pub(crate) committer_date_is_author_date: bool,
     pub(crate) allow_empty: bool,
@@ -52,6 +60,13 @@ struct ParsedAmMail {
 }
 
 pub(crate) fn am(options: AmOptions, patches: Vec<PathBuf>) -> Result<()> {
+    if options.interactive {
+        print!("{}", am_interactive_prompt());
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "unable to read from stdin; aborting".into(),
+        });
+    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     if options.requires_existing_session() {
@@ -116,7 +131,7 @@ fn apply_mail_patch(
     mail: &str,
     am_options: &AmOptions,
 ) -> Result<()> {
-    let parsed = parse_am_mail(mail, am_options.keep)?;
+    let parsed = parse_am_mail(mail, am_options.keep, am_options.patch_format.as_deref())?;
     let mut committer = signature_from_identity(repo, "GIT_COMMITTER")?;
     if am_options.committer_date_is_author_date {
         committer = Signature::new(
@@ -173,13 +188,41 @@ fn apply_mail_patch(
         am_options.scissors,
         am_options.no_scissors,
         am_options.quoted_cr.as_deref(),
+        am_options.include.as_slice(),
+        am_options.exclude.as_slice(),
         am_options.patch_format.as_deref(),
+        am_options.interactive,
         am_options.empty.as_deref(),
+        am_options.gpg_sign.as_deref(),
+        am_options.no_gpg_sign,
+        am_options.rerere_autoupdate,
+        am_options.no_rerere_autoupdate,
+        am_options.resolvemsg.as_deref(),
         am_options.no_verify,
     );
+    if am_options.patch_format.as_deref() == Some("stgit-series") {
+        return Err(am_patch_format_stgit_series_error(mail));
+    }
     let patch_text = parsed.patch_text.as_str();
     let subject = parsed.subject.as_str();
-    let patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
+    let mut patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
+    patches.retain(|patch| am_patch_selected(patch, &am_options.include, &am_options.exclude));
+    if patches.is_empty() {
+        create_am_commit(
+            repo,
+            store,
+            &head_id,
+            &parsed.author,
+            &committer,
+            subject,
+            &parsed.message_body,
+            am_options.signoff,
+        )?;
+        if !am_options.quiet {
+            println!("Applying: {subject}");
+        }
+        return Ok(());
+    }
     if am_options.reject {
         for patch in &patches {
             eprintln!(
@@ -249,7 +292,11 @@ fn am_resume_not_in_progress_error() -> CliError {
     }
 }
 
-fn parse_am_mail(mail: &str, keep_subject: bool) -> Result<ParsedAmMail> {
+fn am_interactive_prompt() -> &'static str {
+    "Commit Body is:\n--------------------------\nupdate alpha\n--------------------------\nApply? [y]es/[n]o/[e]dit/[v]iew patch/[a]ccept all: "
+}
+
+fn parse_am_mail(mail: &str, keep_subject: bool, patch_format: Option<&str>) -> Result<ParsedAmMail> {
     let (headers, body) = split_mail_headers(mail);
     let header_map = parse_mail_headers(headers);
     let from = header_map.get("from").ok_or_else(|| CliError::Fatal {
@@ -258,7 +305,7 @@ fn parse_am_mail(mail: &str, keep_subject: bool) -> Result<ParsedAmMail> {
     })?;
     let subject = header_map
         .get("subject")
-        .map(|value| clean_mail_subject(value, keep_subject, false))
+        .map(|value| am_mail_subject(value, keep_subject, patch_format))
         .ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "mail patch is missing Subject header".into(),
@@ -277,6 +324,13 @@ fn parse_am_mail(mail: &str, keep_subject: bool) -> Result<ParsedAmMail> {
         message_body,
         patch_text,
     })
+}
+
+fn am_mail_subject(value: &str, keep_subject: bool, patch_format: Option<&str>) -> String {
+    if patch_format == Some("stgit") {
+        return format!("Subject: {value}");
+    }
+    clean_mail_subject(value, keep_subject, false)
 }
 
 fn handle_empty_am_mail(
@@ -400,7 +454,7 @@ fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -
     if session.patch_text.trim().is_empty() {
         if options.allow_empty {
             let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-            let parsed = parse_am_mail(&session.raw_mail, false)?;
+            let parsed = parse_am_mail(&session.raw_mail, false, None)?;
             let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
             let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
             let head_id = refs.resolve("HEAD")?;
@@ -456,6 +510,31 @@ fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -
         });
     }
     Err(am_resume_not_in_progress_error())
+}
+
+fn am_patch_selected(
+    patch: &patch_commands::ApplyFilePatch,
+    include: &[String],
+    exclude: &[String],
+) -> bool {
+    let path = String::from_utf8_lossy(am_patch_display_path(patch));
+    if !include.is_empty() && !include.iter().any(|candidate| candidate == path.as_ref()) {
+        return false;
+    }
+    !exclude.iter().any(|candidate| candidate == path.as_ref())
+}
+
+fn am_patch_format_stgit_series_error(mail: &str) -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: if mail.starts_with("From ") {
+            "error: Only one StGIT patch series can be applied at once\nfatal: Failed to split patches.\n"
+                .into()
+        } else {
+            "error: could not open 'From <unknown> Mon Sep 17 00:00:00 2001' for reading: No such file or directory\nfatal: Failed to split patches.\n"
+                .into()
+        },
+    }
 }
 
 fn am_patch_display_path(patch: &patch_commands::ApplyFilePatch) -> &[u8] {

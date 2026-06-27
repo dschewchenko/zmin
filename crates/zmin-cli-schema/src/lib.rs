@@ -3316,12 +3316,35 @@ pub enum Command {
         context: Option<String>,
         #[arg(short = 'p')]
         strip: Option<String>,
+        #[arg(long = "include")]
+        include: Vec<String>,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
         #[arg(long = "patch-format")]
         patch_format: Option<String>,
+        #[arg(long = "interactive", short = 'i', action = ArgAction::SetTrue)]
+        interactive: bool,
         #[arg(long = "empty")]
         empty: Option<String>,
         #[arg(long = "reject", action = ArgAction::SetTrue)]
         reject: bool,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::Count, overrides_with = "gpg_sign")]
+        no_gpg_sign: u8,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
+        rerere_autoupdate: bool,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
+        no_rerere_autoupdate: bool,
+        #[arg(long = "resolvemsg")]
+        resolvemsg: Option<String>,
         #[arg(long = "no-verify", short = 'n', action = ArgAction::SetTrue)]
         no_verify: bool,
         #[arg(long = "committer-date-is-author-date", action = ArgAction::SetTrue)]

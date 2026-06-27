@@ -5,10 +5,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, command_output_with_env, configure_identity, git,
-    git_args, git_failure_output, git_init, git_status, git_with_env, read_named_files, run_zmin,
-    run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env, write_file,
-    zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_output_with_env,
+    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
+    read_named_files, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
+    run_zmin_with_env, write_file, zmin_bin,
 };
 
 fn format_patch_fixture_repo() -> TempDir {
@@ -362,7 +362,7 @@ fn am_empty_mail_fixture() -> (TempDir, String) {
 fn am_option_surface_batch_matches_stock_git() {
     let (source, base, patch_path) = am_single_patch_fixture();
     let patch = patch_path.as_str();
-    let success_cases: [(&str, &[&str]); 37] = [
+    let success_cases: [(&str, &[&str]); 46] = [
         ("--quiet", &["am", "--quiet", patch]),
         ("-q", &["am", "-q", patch]),
         ("--utf8", &["am", "--utf8", patch]),
@@ -392,12 +392,24 @@ fn am_option_surface_batch_matches_stock_git() {
         ("--whitespace=warn", &["am", "--whitespace=warn", patch]),
         ("-C1", &["am", "-C1", patch]),
         ("-p1", &["am", "-p1", patch]),
+        ("--include=alpha.txt", &["am", "--include=alpha.txt", patch]),
+        ("--exclude=alpha.txt", &["am", "--exclude=alpha.txt", patch]),
         ("--patch-format=mboxrd", &["am", "--patch-format=mboxrd", patch]),
         ("--patch-format=mbox", &["am", "--patch-format=mbox", patch]),
         ("--patch-format=hg", &["am", "--patch-format=hg", patch]),
+        ("--patch-format=stgit", &["am", "--patch-format=stgit", patch]),
         ("--empty=stop", &["am", "--empty=stop", patch]),
         ("--empty=drop", &["am", "--empty=drop", patch]),
         ("--reject", &["am", "--reject", patch]),
+        ("--gpg-sign", &["am", "--gpg-sign", patch]),
+        ("--no-gpg-sign", &["am", "--no-gpg-sign", patch]),
+        ("-S", &["am", "-S", patch]),
+        ("--rerere-autoupdate", &["am", "--rerere-autoupdate", patch]),
+        (
+            "--no-rerere-autoupdate",
+            &["am", "--no-rerere-autoupdate", patch],
+        ),
+        ("--resolvemsg=hello", &["am", "--resolvemsg=hello", patch]),
         ("--no-verify", &["am", "--no-verify", patch]),
         ("-n", &["am", "-n", patch]),
     ];
@@ -430,6 +442,58 @@ fn am_option_surface_batch_matches_stock_git() {
         );
         assert!(!label.is_empty());
     }
+
+    let invalid_cases: [(&str, &[&str]); 2] = [
+        ("--interactive", &["am", "--interactive", patch]),
+        ("-i", &["am", "-i", patch]),
+    ];
+    for (label, args) in invalid_cases {
+        let git_apply = clone_repo_fixture(source.path());
+        let zmin_apply = clone_repo_fixture(source.path());
+        configure_identity(git_apply.path());
+        configure_identity(zmin_apply.path());
+        git(git_apply.path(), ["reset", "--hard", &base]);
+        git(zmin_apply.path(), ["reset", "--hard", &base]);
+
+        let git_result = command_any_output("git", git_apply.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_apply.path(), args, "zmin");
+        assert_eq!(zmin_result, git_result, "args: {args:?}");
+        assert_eq!(
+            git(zmin_apply.path(), ["status", "--short"]),
+            git(git_apply.path(), ["status", "--short"]),
+            "status args: {args:?}"
+        );
+        assert!(!label.is_empty());
+    }
+
+    let git_apply = clone_repo_fixture(source.path());
+    let zmin_apply = clone_repo_fixture(source.path());
+    configure_identity(git_apply.path());
+    configure_identity(zmin_apply.path());
+    git(git_apply.path(), ["reset", "--hard", &base]);
+    git(zmin_apply.path(), ["reset", "--hard", &base]);
+    let patch_stdin = fs::read_to_string(patch).expect("read stgit-series patch");
+    let git_result = command_any_output_with_stdin(
+        "git",
+        git_apply.path(),
+        &["am", "--patch-format=stgit-series"],
+        &patch_stdin,
+        "git",
+    );
+    let zmin_result = command_any_output_with_stdin(
+        zmin_bin(),
+        zmin_apply.path(),
+        &["am", "--patch-format=stgit-series"],
+        &patch_stdin,
+        "zmin",
+    );
+    assert_eq!(zmin_result, git_result, "args: {:?}", ["am", "--patch-format=stgit-series"]);
+    assert_eq!(
+        git(zmin_apply.path(), ["status", "--short"]),
+        git(git_apply.path(), ["status", "--short"]),
+        "status args: {:?}",
+        ["am", "--patch-format=stgit-series"]
+    );
 }
 
 #[test]
