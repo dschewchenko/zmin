@@ -96,6 +96,11 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         options.no_color_moved_ws,
         options.indent_heuristic,
         options.no_indent_heuristic,
+        options.rename_limit_short.as_deref(),
+        options.merge,
+        options.tree_in_diff,
+        options.rename_empty,
+        options.no_rename_empty,
         options.dense_combined,
     );
     let repo = find_repo()?;
@@ -502,9 +507,15 @@ fn porcelain_diff_prefixes(
 }
 
 pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
-    let detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
+    let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
     let break_rewrites = parse_break_rewrites_option(options.break_rewrites.as_deref())?;
-    let detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
+    let mut detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
+    let mut find_copies_harder = options.find_copies_harder;
+    if options.no_renames {
+        detect_renames = None;
+        detect_copies = None;
+        find_copies_harder = false;
+    }
     let ignore_submodules = parse_ignore_submodules_mode(options.ignore_submodules.as_deref())?;
     let diff_filter = options
         .diff_filter
@@ -555,7 +566,7 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         &options.paths,
         detect_renames,
         detect_copies,
-        options.find_copies_harder,
+        find_copies_harder,
     )?;
     let index_for_stat_dirty = if options.reverse {
         &new_index
@@ -577,7 +588,7 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         SimilarityDetectionOptions {
             rename_threshold: detect_renames,
             copy_threshold: detect_copies,
-            find_copies_harder: options.find_copies_harder,
+            find_copies_harder,
         },
     )?;
     let entries =
@@ -714,9 +725,15 @@ fn normalize_dirstat_mode(
 }
 
 pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
-    let detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
+    let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
     let break_rewrites = parse_break_rewrites_option(options.break_rewrites.as_deref())?;
-    let detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
+    let mut detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
+    let mut find_copies_harder = options.find_copies_harder;
+    if options.no_renames {
+        detect_renames = None;
+        detect_copies = None;
+        find_copies_harder = false;
+    }
     let ignore_submodules = parse_ignore_submodules_mode(options.ignore_submodules.as_deref())?;
     let diff_filter = options
         .diff_filter
@@ -776,7 +793,7 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         &options.paths,
         detect_renames,
         detect_copies,
-        options.find_copies_harder,
+        find_copies_harder,
     )?;
     if !options.cached {
         append_worktree_stat_dirty_entries(&repo, &index, &options.paths, &mut entries)?;
@@ -795,7 +812,7 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         SimilarityDetectionOptions {
             rename_threshold: detect_renames,
             copy_threshold: detect_copies,
-            find_copies_harder: options.find_copies_harder,
+            find_copies_harder,
         },
     )?;
     let entries =
@@ -852,9 +869,15 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
 }
 
 pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
-    let detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
+    let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
     let break_rewrites = parse_break_rewrites_option(options.break_rewrites.as_deref())?;
-    let detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
+    let mut detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
+    let mut find_copies_harder = options.find_copies_harder;
+    if options.no_renames {
+        detect_renames = None;
+        detect_copies = None;
+        find_copies_harder = false;
+    }
     let ignore_submodules = parse_ignore_submodules_mode(options.ignore_submodules.as_deref())?;
     let diff_filter = options
         .diff_filter
@@ -1231,7 +1254,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         &options.paths,
         detect_renames,
         detect_copies,
-        options.find_copies_harder,
+        find_copies_harder,
     )?;
     let compare_old_index = if options.reverse {
         &new_index
@@ -1257,7 +1280,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         SimilarityDetectionOptions {
             rename_threshold: detect_renames,
             copy_threshold: detect_copies,
-            find_copies_harder: options.find_copies_harder,
+            find_copies_harder,
         },
     )?;
     let entries = filter_ignored_submodule_entries(

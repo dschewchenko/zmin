@@ -277,6 +277,45 @@ fn diff_tree_combined_raw_for_merge_matches_stock_git() {
 }
 
 #[test]
+fn diff_noop_option_surface_matches_stock_git_for_porcelain_and_plumbing() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"one\n").expect("write base");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    fs::write(repo.path().join("a.txt"), b"two\n").expect("write second");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "second"]);
+
+    fs::write(repo.path().join("a.txt"), b"three\n").expect("write dirty");
+
+    for args in [
+        ["diff", "--rename-empty"].as_slice(),
+        ["diff", "--no-rename-empty"].as_slice(),
+        ["diff", "-l1"].as_slice(),
+        ["diff", "-m"].as_slice(),
+        ["diff", "-t"].as_slice(),
+        ["diff-files", "--no-renames"].as_slice(),
+        ["diff-files", "-l1"].as_slice(),
+        ["diff-files", "-t"].as_slice(),
+        ["diff-index", "--no-renames", "HEAD"].as_slice(),
+        ["diff-index", "-l1", "HEAD"].as_slice(),
+        ["diff-index", "-t", "HEAD"].as_slice(),
+        ["diff-tree", "--no-renames", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "-l1", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "-t", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "--always", "HEAD~1", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            common::git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_merge_diff_modes_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());

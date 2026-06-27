@@ -2819,6 +2819,12 @@ pub enum Command {
         find_copies_harder: bool,
         #[arg(long = "no-renames", action = ArgAction::SetTrue)]
         no_renames: bool,
+        #[arg(short = 'l')]
+        rename_limit_short: Option<String>,
+        #[arg(short = 'm', action = ArgAction::SetTrue)]
+        merge: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        tree_in_diff: bool,
         #[arg(long = "cc", action = ArgAction::SetTrue)]
         dense_combined: bool,
         #[arg(short = 'S')]
@@ -2925,6 +2931,10 @@ pub enum Command {
         indent_heuristic: bool,
         #[arg(long = "no-indent-heuristic", action = ArgAction::SetTrue)]
         no_indent_heuristic: bool,
+        #[arg(long = "rename-empty", action = ArgAction::SetTrue)]
+        rename_empty: bool,
+        #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
+        no_rename_empty: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -3015,8 +3025,14 @@ pub enum Command {
         find_copies: Option<String>,
         #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
         find_copies_harder: bool,
+        #[arg(long = "no-renames", action = ArgAction::SetTrue)]
+        no_renames: bool,
+        #[arg(short = 'l')]
+        rename_limit_short: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        tree_in_diff: bool,
         #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
@@ -3189,8 +3205,14 @@ pub enum Command {
         find_copies: Option<String>,
         #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
         find_copies_harder: bool,
+        #[arg(long = "no-renames", action = ArgAction::SetTrue)]
+        no_renames: bool,
+        #[arg(short = 'l')]
+        rename_limit_short: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        tree_in_diff: bool,
         #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
@@ -3366,12 +3388,18 @@ pub enum Command {
         find_copies: Option<String>,
         #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
         find_copies_harder: bool,
+        #[arg(long = "no-renames", action = ArgAction::SetTrue)]
+        no_renames: bool,
+        #[arg(short = 'l')]
+        rename_limit_short: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
         #[arg(short = 'c', action = ArgAction::SetTrue)]
         combined: bool,
         #[arg(long = "cc", action = ArgAction::SetTrue)]
         dense_combined: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        tree_in_diff: bool,
         #[arg(short = 'R', action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
@@ -3494,6 +3522,8 @@ pub enum Command {
         pretty: Option<String>,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
+        #[arg(long = "always", action = ArgAction::SetTrue)]
+        always: bool,
         #[arg(long = "format")]
         format: Option<String>,
         old: Option<String>,
@@ -6106,6 +6136,9 @@ pub struct DiffOptions {
     pub find_copies: Option<String>,
     pub find_copies_harder: bool,
     pub no_renames: bool,
+    pub rename_limit_short: Option<String>,
+    pub merge: bool,
+    pub tree_in_diff: bool,
     pub dense_combined: bool,
     pub pickaxe_string: Option<String>,
     pub pickaxe_regex: Option<String>,
@@ -6158,6 +6191,8 @@ pub struct DiffOptions {
     pub no_color_moved_ws: bool,
     pub indent_heuristic: bool,
     pub no_indent_heuristic: bool,
+    pub rename_empty: bool,
+    pub no_rename_empty: bool,
     pub quiet: bool,
     pub exit_code: bool,
     pub paths: Vec<PathBuf>,
@@ -6194,6 +6229,9 @@ impl Default for DiffOptions {
             find_copies: None,
             find_copies_harder: false,
             no_renames: false,
+            rename_limit_short: None,
+            merge: false,
+            tree_in_diff: false,
             dense_combined: false,
             pickaxe_string: None,
             pickaxe_regex: None,
@@ -6246,6 +6284,8 @@ impl Default for DiffOptions {
             no_color_moved_ws: false,
             indent_heuristic: false,
             no_indent_heuristic: false,
+            rename_empty: false,
+            no_rename_empty: false,
             quiet: false,
             exit_code: false,
             paths: Vec::new(),
@@ -6280,9 +6320,12 @@ pub struct PlumbingDiffOptions {
     pub ignore_submodules: Option<String>,
     pub find_copies: Option<String>,
     pub find_copies_harder: bool,
+    pub no_renames: bool,
+    pub rename_limit_short: Option<String>,
     pub merge: bool,
     pub combined: bool,
     pub dense_combined: bool,
+    pub tree_in_diff: bool,
     pub reverse: bool,
     pub root: bool,
     pub pickaxe_string: Option<String>,
@@ -6342,6 +6385,7 @@ pub struct PlumbingDiffOptions {
     pub exit_code: bool,
     pub pretty: Option<String>,
     pub notes: bool,
+    pub always: bool,
     pub format: Option<String>,
     pub stdin: bool,
     pub treeish: Option<String>,
