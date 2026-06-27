@@ -3975,6 +3975,64 @@ fn log_and_rev_list_shared_history_schema_batch_matches_stock_git() {
 }
 
 #[test]
+fn log_remaining_documented_tail_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
+    git(repo.path(), ["branch", "side", "HEAD~1"]);
+    git(repo.path(), ["tag", "v1", "HEAD~1"]);
+
+    for args in [
+        ["log", "--alternate-refs", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--bisect", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--cherry", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--exclude=main", "--all", "--format=%s"].as_slice(),
+        ["log", "--exclude-first-parent-only", "--all", "--format=%s"].as_slice(),
+        ["log", "--exclude-hidden=fetch", "--all", "--format=%s"].as_slice(),
+        ["log", "--glob=main", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--ignore-missing", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--in-commit-order", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--indexed-objects", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--left-only", "--format=%s", "HEAD...side"].as_slice(),
+        ["log", "--no-filter", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--remove-empty", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--right-only", "--format=%s", "HEAD...side"].as_slice(),
+        ["log", "--show-linear-break", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--since-as-filter=1700000300", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--single-worktree", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--stdin", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--unpacked", "--format=%s", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["log", "--bisect-all", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--bisect-vars", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--commit-header", "HEAD"].as_slice(),
+        ["log", "--exclude-promisor-objects", "HEAD"].as_slice(),
+        ["log", "--filter-print-omitted", "HEAD"].as_slice(),
+        ["log", "--header", "HEAD"].as_slice(),
+        ["log", "--merge", "HEAD"].as_slice(),
+        ["log", "--missing", "HEAD"].as_slice(),
+        ["log", "--no-commit-header", "HEAD"].as_slice(),
+        ["log", "--progress", "HEAD"].as_slice(),
+        ["log", "--use-bitmap-index", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_date_formats_match_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

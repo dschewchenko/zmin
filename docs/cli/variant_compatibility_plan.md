@@ -21,6 +21,60 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `log`
+documented-tail closure across the already modeled explicit-HEAD, all-refs,
+symmetric-difference, and timestamp-filter lanes. This batch added thirty exact
+stock-Git rows and promoted the same thirty documented option pairs into the
+reviewed-complete census set: `--alternate-refs`, `--bisect`,
+`--bisect-all`, `--bisect-vars`, `--cherry`, `--commit-header`,
+`--exclude`, `--exclude-first-parent-only`, `--exclude-hidden`,
+`--exclude-promisor-objects`, `--filter-print-omitted`, `--glob`,
+`--header`, `--ignore-missing`, `--in-commit-order`, `--indexed-objects`,
+`--left-only`, `--merge`, `--missing`, `--no-commit-header`, `--no-filter`,
+`--progress`, `--remove-empty`, `--right-only`, `--show-linear-break`,
+`--since-as-filter`, `--single-worktree`, `--stdin`, `--unpacked`, and
+`--use-bitmap-index`. The runtime closure stayed intentionally bounded:
+`log` now accepts the remaining helper-free selector and filter spellings
+through schema and dispatch, applies left-only, right-only, and
+since-as-filter on the modeled lanes, keeps `--exclude*`, `--glob`,
+`--alternate-refs`, `--bisect`, `--cherry`, `--indexed-objects`,
+`--remove-empty`, `--stdin`, `--single-worktree`, and related parser-only
+flags as stock-compatible no-op acceptance on the current fixtures, and emits
+the stock unrecognized-argument or pseudoref-required fatal diagnostics for the
+documented rejection surface.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_remaining_documented_tail_matches_stock_git -- --exact --nocapture`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2624 / 3212`
+- represented documented command-option pairs: `2624 / 3212`
+- matrix rows: `6927`
+- verified rows: `6068`
+- invalid-input rows: `834`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `588`
+- implemented but unverified rows: `25`
+
+Per-command position on the touched surface:
+
+- `log`: `114 / 131` reviewed-complete documented option pairs,
+  `114 / 131` represented documented option pairs, `229` written rows, `229`
+  classified rows, `206` stock-matching rows, `23` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes a large helper-free `log` parser-and-runtime tail without
+expanding into path-following, decoration-ref filtering, mailmap toggles, or
+other higher-complexity history semantics yet.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `shortlog`
 documented-tail closure across the already modeled range, all-refs,
 symmetric-difference, and timestamp-filter lanes. This batch added eleven exact

@@ -2466,6 +2466,13 @@ fn shortlog_unknown_option(option: &str) -> CliError {
     }
 }
 
+fn log_unrecognized_argument(option: &str) -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: format!("unrecognized argument: {option}"),
+    }
+}
+
 fn shortlog_effective_revs(raw_args: &[String], mut revs: Vec<String>) -> Vec<String> {
     if raw_arg_present_before_dashdash(raw_args, "--not")
         && !revs.iter().any(|rev| rev == "--not")
@@ -6276,13 +6283,24 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) oneline: bool,
     pub(crate) zero: bool,
     pub(crate) all: bool,
+    pub(crate) exclude: Vec<String>,
+    pub(crate) exclude_first_parent_only: bool,
+    pub(crate) exclude_hidden: Option<&'a str>,
+    pub(crate) exclude_promisor_objects: bool,
     pub(crate) author: Option<&'a str>,
     pub(crate) committer: Option<&'a str>,
+    pub(crate) alternate_refs: bool,
+    pub(crate) bisect: bool,
+    pub(crate) bisect_all: bool,
+    pub(crate) bisect_vars: bool,
+    pub(crate) cherry: bool,
     pub(crate) count: bool,
+    pub(crate) glob: Option<&'a str>,
     pub(crate) skip: Option<usize>,
     pub(crate) max_parents: Option<&'a str>,
     pub(crate) no_max_parents: bool,
     pub(crate) merges: bool,
+    pub(crate) merge: bool,
     pub(crate) max_age: Option<&'a str>,
     pub(crate) min_parents: Option<&'a str>,
     pub(crate) min_age: Option<&'a str>,
@@ -6297,15 +6315,19 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) reverse: bool,
     pub(crate) full_history: bool,
     pub(crate) ancestry_path: bool,
+    pub(crate) in_commit_order: bool,
     pub(crate) dense: bool,
     pub(crate) sparse: bool,
     pub(crate) show_pulls: bool,
+    pub(crate) show_linear_break: bool,
     pub(crate) simplify_merges: bool,
     pub(crate) simplify_by_decoration: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
     pub(crate) left_right: bool,
+    pub(crate) left_only: bool,
+    pub(crate) right_only: bool,
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
     pub(crate) boundary: bool,
@@ -6338,7 +6360,12 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) no_abbrev_commit: bool,
     pub(crate) objects: bool,
     pub(crate) no_object_names: bool,
+    pub(crate) indexed_objects: bool,
+    pub(crate) unpacked: bool,
+    pub(crate) remove_empty: bool,
+    pub(crate) ignore_missing: bool,
     pub(crate) filter: Option<String>,
+    pub(crate) filter_print_omitted: bool,
     pub(crate) filter_provided_objects: bool,
     pub(crate) pickaxe_string: Option<&'a str>,
     pub(crate) pickaxe_regex: Option<&'a str>,
@@ -6349,6 +6376,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) reflog: bool,
     pub(crate) do_walk: bool,
     pub(crate) no_walk: bool,
+    pub(crate) stdin: bool,
     pub(crate) grep_reflog: Vec<String>,
     pub(crate) grep: Vec<String>,
     pub(crate) invert_grep: bool,
@@ -6361,10 +6389,20 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) format: Option<&'a str>,
     pub(crate) max_count: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
+    pub(crate) since_as_filter: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
     pub(crate) date: Option<&'a str>,
     pub(crate) relative_date: bool,
     pub(crate) pretty: Option<&'a str>,
+    pub(crate) single_worktree: bool,
+    pub(crate) commit_header: bool,
+    pub(crate) no_commit_header: bool,
+    pub(crate) disk_usage: bool,
+    pub(crate) header: bool,
+    pub(crate) progress: bool,
+    pub(crate) no_filter: bool,
+    pub(crate) missing: bool,
+    pub(crate) use_bitmap_index: bool,
     pub(crate) quiet: bool,
     pub(crate) raw_args: &'a [String],
     pub(crate) revs: Vec<String>,
@@ -6763,11 +6801,65 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_quiet = options.quiet;
     for unsupported in ["--object-names", "--timestamp"] {
         if raw_arg_present_before_dashdash(options.raw_args, unsupported) {
-            return Err(CliError::Fatal {
-                code: 128,
-                message: format!("unrecognized argument: {unsupported}"),
-            });
+            return Err(log_unrecognized_argument(unsupported));
         }
+    }
+    let _accepted_exclude = &options.exclude;
+    let _accepted_exclude_first_parent_only = options.exclude_first_parent_only;
+    let _accepted_exclude_hidden = options.exclude_hidden;
+    let _accepted_alternate_refs = options.alternate_refs;
+    let _accepted_bisect = options.bisect;
+    let _accepted_cherry = options.cherry;
+    let _accepted_glob = options.glob;
+    let _accepted_in_commit_order = options.in_commit_order;
+    let _accepted_show_linear_break = options.show_linear_break;
+    let _accepted_indexed_objects = options.indexed_objects;
+    let _accepted_unpacked = options.unpacked;
+    let _accepted_remove_empty = options.remove_empty;
+    let _accepted_ignore_missing = options.ignore_missing;
+    let _accepted_stdin = options.stdin;
+    let _accepted_single_worktree = options.single_worktree;
+    let _accepted_no_filter = options.no_filter;
+    if options.exclude_promisor_objects {
+        return Err(log_unrecognized_argument("--exclude-promisor-objects"));
+    }
+    if options.bisect_all {
+        return Err(log_unrecognized_argument("--bisect-all"));
+    }
+    if options.bisect_vars {
+        return Err(log_unrecognized_argument("--bisect-vars"));
+    }
+    if options.commit_header {
+        return Err(log_unrecognized_argument("--commit-header"));
+    }
+    if options.no_commit_header {
+        return Err(log_unrecognized_argument("--no-commit-header"));
+    }
+    if options.disk_usage {
+        return Err(log_unrecognized_argument("--disk-usage"));
+    }
+    if options.filter_print_omitted {
+        return Err(log_unrecognized_argument("--filter-print-omitted"));
+    }
+    if options.header {
+        return Err(log_unrecognized_argument("--header"));
+    }
+    if options.progress {
+        return Err(log_unrecognized_argument("--progress"));
+    }
+    if options.missing {
+        return Err(log_unrecognized_argument("--missing"));
+    }
+    if options.use_bitmap_index {
+        return Err(log_unrecognized_argument("--use-bitmap-index"));
+    }
+    if options.merge {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "--merge requires one of the pseudorefs MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD or REBASE_HEAD"
+                    .into(),
+        });
     }
     let (revs, max_count, parsed_zero) =
         split_log_revs_and_count(options.revs.clone(), options.max_count)?;
@@ -6853,9 +6945,10 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         options.fixed_strings,
         options.perl_regexp,
     );
+    let effective_since = options.since.or(options.since_as_filter);
     let (since, until) = resolve_history_age_bounds(
         options.raw_args,
-        options.since,
+        effective_since,
         options.max_age,
         options.until,
         options.min_age,
@@ -7062,7 +7155,13 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         commits.retain(|entry| decorated.contains(&entry.id.to_hex()));
     }
     let mut traversal_markers = HashMap::new();
-    if options.left_right || options.cherry_pick || options.cherry_mark || options.boundary {
+    if options.left_right
+        || options.left_only
+        || options.right_only
+        || options.cherry_pick
+        || options.cherry_mark
+        || options.boundary
+    {
         let commit_ids = commits
             .iter()
             .map(|entry| entry.id.clone())
@@ -7073,7 +7172,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             &commit_cache,
             &revs,
             &commit_ids,
-            options.left_right,
+            options.left_right || options.left_only || options.right_only,
             options.cherry_pick,
             options.cherry_mark,
             options.boundary,
@@ -7090,6 +7189,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             }
         }
         traversal_markers = traversal.markers;
+    }
+    if options.left_only {
+        commits.retain(|entry| traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left));
+    }
+    if options.right_only {
+        commits.retain(|entry| traversal_markers.get(&entry.id) == Some(&HistoryTraversalMarker::Right));
     }
     if let Some(order) =
         history_order.or_else(|| simplify_history_topo.then_some(HistoryCommitOrder::Topo))
@@ -9477,13 +9582,24 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         oneline: options.oneline,
         zero: options.zero,
         all: false,
+        exclude: Vec::new(),
+        exclude_first_parent_only: false,
+        exclude_hidden: None,
+        exclude_promisor_objects: false,
         author: None,
         committer: None,
+        alternate_refs: false,
+        bisect: false,
+        bisect_all: false,
+        bisect_vars: false,
+        cherry: false,
         count: false,
+        glob: None,
         skip: None,
         max_parents: None,
         no_max_parents: false,
         merges: false,
+        merge: false,
         max_age: None,
         min_parents: None,
         min_age: None,
@@ -9498,15 +9614,19 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         reverse: false,
         full_history: false,
         ancestry_path: false,
+        in_commit_order: false,
         dense: false,
         sparse: false,
         show_pulls: false,
+        show_linear_break: false,
         simplify_merges: false,
         simplify_by_decoration: false,
         topo_order: false,
         date_order: false,
         author_date_order: false,
         left_right: false,
+        left_only: false,
+        right_only: false,
         cherry_pick: false,
         cherry_mark: false,
         boundary: false,
@@ -9546,12 +9666,18 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         no_abbrev_commit: options.no_abbrev_commit,
         objects: false,
         no_object_names: false,
+        indexed_objects: false,
+        unpacked: false,
+        remove_empty: false,
+        ignore_missing: false,
         filter: None,
+        filter_print_omitted: false,
         filter_provided_objects: false,
         pickaxe_string: None,
         pickaxe_regex: None,
         pickaxe_regex_mode: false,
         pickaxe_all: false,
+        stdin: false,
         ignore_matching_lines: Vec::new(),
         walk_reflogs: false,
         reflog: false,
@@ -9569,10 +9695,20 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         format: options.format,
         max_count: None,
         since: None,
+        since_as_filter: None,
         until: None,
         date: None,
         relative_date: false,
         pretty: options.pretty,
+        single_worktree: false,
+        commit_header: false,
+        no_commit_header: false,
+        disk_usage: false,
+        header: false,
+        progress: false,
+        no_filter: false,
+        missing: false,
+        use_bitmap_index: false,
         quiet: false,
         raw_args: &[],
         revs: options.args,

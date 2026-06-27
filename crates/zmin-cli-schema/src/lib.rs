@@ -3834,6 +3834,14 @@ pub enum Command {
         zero: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
+        #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
+        exclude_first_parent_only: bool,
+        #[arg(long = "exclude-hidden")]
+        exclude_hidden: Option<String>,
+        #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
+        exclude_promisor_objects: bool,
         #[arg(
             long = "tags",
             num_args = 0..=1,
@@ -3845,8 +3853,20 @@ pub enum Command {
         author: Option<String>,
         #[arg(long = "committer")]
         committer: Option<String>,
+        #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
+        alternate_refs: bool,
+        #[arg(long = "bisect", action = ArgAction::SetTrue)]
+        bisect: bool,
+        #[arg(long = "bisect-all", action = ArgAction::SetTrue)]
+        bisect_all: bool,
+        #[arg(long = "bisect-vars", action = ArgAction::SetTrue)]
+        bisect_vars: bool,
+        #[arg(long = "cherry", action = ArgAction::SetTrue)]
+        cherry: bool,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(long = "glob")]
+        glob: Option<String>,
         #[arg(long = "skip")]
         skip: Option<usize>,
         #[arg(long = "max-parents")]
@@ -3855,6 +3875,8 @@ pub enum Command {
         no_max_parents: bool,
         #[arg(long = "merges", action = ArgAction::SetTrue)]
         merges: bool,
+        #[arg(long = "merge", action = ArgAction::SetTrue)]
+        merge: bool,
         #[arg(long = "max-age")]
         max_age: Option<String>,
         #[arg(long = "min-parents")]
@@ -3883,12 +3905,16 @@ pub enum Command {
         full_history: bool,
         #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
         ancestry_path: bool,
+        #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
+        in_commit_order: bool,
         #[arg(long = "dense", action = ArgAction::SetTrue)]
         dense: bool,
         #[arg(long = "sparse", action = ArgAction::SetTrue)]
         sparse: bool,
         #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
         show_pulls: bool,
+        #[arg(long = "show-linear-break", action = ArgAction::SetTrue)]
+        show_linear_break: bool,
         #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
         simplify_merges: bool,
         #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
@@ -3901,6 +3927,10 @@ pub enum Command {
         author_date_order: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
+        #[arg(long = "left-only", action = ArgAction::SetTrue)]
+        left_only: bool,
+        #[arg(long = "right-only", action = ArgAction::SetTrue)]
+        right_only: bool,
         #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
         cherry_pick: bool,
         #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
@@ -3968,8 +3998,18 @@ pub enum Command {
         objects: bool,
         #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
         no_object_names: bool,
+        #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
+        indexed_objects: bool,
+        #[arg(long = "unpacked", action = ArgAction::SetTrue)]
+        unpacked: bool,
+        #[arg(long = "remove-empty", action = ArgAction::SetTrue)]
+        remove_empty: bool,
+        #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
+        ignore_missing: bool,
         #[arg(long = "filter")]
         filter: Option<String>,
+        #[arg(long = "filter-print-omitted", action = ArgAction::SetTrue)]
+        filter_print_omitted: bool,
         #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
         filter_provided_objects: bool,
         #[arg(short = 'S')]
@@ -3990,6 +4030,8 @@ pub enum Command {
         do_walk: bool,
         #[arg(long = "no-walk", action = ArgAction::SetTrue)]
         no_walk: bool,
+        #[arg(long = "stdin", action = ArgAction::SetTrue)]
+        stdin: bool,
         #[arg(long = "grep-reflog")]
         grep_reflog: Vec<String>,
         #[arg(long = "grep")]
@@ -4033,6 +4075,8 @@ pub enum Command {
         max_count: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
+        #[arg(long = "since-as-filter")]
+        since_as_filter: Option<String>,
         #[arg(long = "until", alias = "before")]
         until: Option<String>,
         #[arg(long = "date")]
@@ -4041,6 +4085,24 @@ pub enum Command {
         relative_date: bool,
         #[arg(long = "pretty")]
         pretty: Option<String>,
+        #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
+        single_worktree: bool,
+        #[arg(long = "commit-header", action = ArgAction::SetTrue)]
+        commit_header: bool,
+        #[arg(long = "no-commit-header", action = ArgAction::SetTrue)]
+        no_commit_header: bool,
+        #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
+        disk_usage: bool,
+        #[arg(long = "header", action = ArgAction::SetTrue)]
+        header: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "no-filter", action = ArgAction::SetTrue)]
+        no_filter: bool,
+        #[arg(long = "missing", action = ArgAction::SetTrue)]
+        missing: bool,
+        #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
+        use_bitmap_index: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(allow_hyphen_values = true)]
