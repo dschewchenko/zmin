@@ -3907,10 +3907,24 @@ pub enum Command {
         textconv: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
-        #[arg(long = "patch", action = ArgAction::SetTrue)]
+        #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
         patch: bool,
+        #[arg(long = "patch-with-raw", action = ArgAction::SetTrue)]
+        patch_with_raw: bool,
         #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
         patch_with_stat: bool,
+        #[arg(long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
+        #[arg(long = "no-patch", action = ArgAction::SetTrue)]
+        no_patch: bool,
+        #[arg(long = "numstat", action = ArgAction::SetTrue)]
+        numstat: bool,
+        #[arg(long = "shortstat", action = ArgAction::SetTrue)]
+        shortstat: bool,
+        #[arg(long = "raw", action = ArgAction::SetTrue)]
+        raw: bool,
+        #[arg(long = "summary", action = ArgAction::SetTrue)]
+        summary: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
@@ -3923,6 +3937,8 @@ pub enum Command {
         root: bool,
         #[arg(long = "src-prefix")]
         src_prefix: Option<String>,
+        #[arg(long = "full-index", action = ArgAction::SetTrue)]
+        full_index: bool,
         #[arg(short = 'U', short_alias = 'u', long = "unified", num_args = 0..=1, default_missing_value = "3")]
         unified: Option<String>,
         #[arg(long = "ws-error-highlight")]

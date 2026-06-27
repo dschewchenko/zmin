@@ -22,6 +22,49 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` diff-output closure on the already modeled single-commit stdout
+mail-series lane. This batch added exact stock-Git matrix evidence for
+`--raw`, `--numstat`, `--shortstat`, `--summary`, `--no-patch`, `--no-stat`,
+`--patch-with-raw`, `--full-index`, and `-p`. The runtime highlight stayed
+cohesive: this slice extended the mail-render pipeline so the stock prelude
+block before the patch body now switches correctly between diffstat, raw,
+numstat, shortstat, summary/no-summary suppression, and full-index patch hash
+lengths, while also matching stock blank-line and `---` separator placement.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_diff_output_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2286 / 3212`
+- represented documented command-option pairs: `2286 / 3212`
+- matrix rows: `6432`
+- verified rows: `5620`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `120 / 120` reviewed-complete documented option pairs,
+  `120 / 120` represented documented option pairs, `128` written rows, `128`
+  classified rows, `128` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has `42` remaining `doc_option_not_in_zmin_schema` rows, now
+led by helper-free documented tails such as `--add-header`, `--base`, `--cc`,
+`--color-words`, `--combined-all-paths`, `--cover-from-description`,
+`--description-file`, `--ignore-if-in-upstream`, `--in-reply-to`, and related
+mail or diff spellings.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` mail-render closure on the already modeled two-patch stdout
 range lane. This batch added exact stock-Git matrix evidence for `--signoff`,
 `-s`, `--zero-commit`, `--reroll-count`, `-v`, `--no-signature`,

@@ -740,6 +740,15 @@ pub(crate) fn format_patch(
     check: bool,
     name_only: bool,
     name_status: bool,
+    patch: bool,
+    patch_with_raw: bool,
+    no_stat: bool,
+    no_patch: bool,
+    numstat: bool,
+    shortstat: bool,
+    raw: bool,
+    summary: bool,
+    full_index: bool,
     attach: bool,
     inline: bool,
     suffix: Option<&str>,
@@ -819,6 +828,11 @@ pub(crate) fn format_patch(
     }
     commits.reverse();
     let abbrev_len = default_abbrev_len(&store)?;
+    let patch_abbrev_len = if full_index {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else {
+        abbrev_len
+    };
     let suffix = suffix.unwrap_or(".patch");
     let configured_subject_prefix = read_config_value(&repo, "format.subjectprefix")?;
     let mut subject_prefix = subject_prefix
@@ -858,6 +872,7 @@ pub(crate) fn format_patch(
         repo: &repo,
         store: &store,
         abbrev_len,
+        patch_abbrev_len,
         total: commits.len(),
         no_numbered,
         numbered,
@@ -866,6 +881,16 @@ pub(crate) fn format_patch(
         inline,
         suffix,
         subject_prefix: &subject_prefix,
+        prelude_mode: format_patch_prelude_mode(
+            patch,
+            patch_with_raw,
+            no_stat,
+            no_patch,
+            numstat,
+            shortstat,
+            raw,
+            summary,
+        ),
         keep_subject,
         number_offset: start_number.saturating_sub(1),
         signoff_line: signoff_line.as_deref(),
@@ -969,6 +994,31 @@ pub(crate) fn format_patch(
         println!("{}", git_path_output(&path));
     }
     Ok(())
+}
+
+fn format_patch_prelude_mode(
+    patch: bool,
+    patch_with_raw: bool,
+    no_stat: bool,
+    no_patch: bool,
+    numstat: bool,
+    shortstat: bool,
+    raw: bool,
+    summary: bool,
+) -> FormatPatchPreludeMode {
+    if patch_with_raw || raw {
+        FormatPatchPreludeMode::Raw
+    } else if numstat {
+        FormatPatchPreludeMode::Numstat
+    } else if shortstat {
+        FormatPatchPreludeMode::Shortstat
+    } else if summary {
+        FormatPatchPreludeMode::Summary
+    } else if patch || no_stat || no_patch {
+        FormatPatchPreludeMode::None
+    } else {
+        FormatPatchPreludeMode::Diffstat
+    }
 }
 
 fn git_path_output(path: &std::path::Path) -> String {

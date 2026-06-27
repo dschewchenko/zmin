@@ -504,6 +504,43 @@ fn format_patch_helper_free_pickaxe_and_short_diff_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_diff_output_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let cases: Vec<Vec<String>> = vec![
+        vec!["--raw".into()],
+        vec!["--numstat".into()],
+        vec!["--shortstat".into()],
+        vec!["--summary".into()],
+        vec!["--no-patch".into()],
+        vec!["--no-stat".into()],
+        vec!["--patch-with-raw".into()],
+        vec!["--full-index".into()],
+        vec!["-p".into()],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
 fn format_patch_invalid_surface_and_output_file_match_stock_git() {
     let repo = format_patch_fixture_repo();
     let invalid_cases: [(&str, &[&str]); 5] = [

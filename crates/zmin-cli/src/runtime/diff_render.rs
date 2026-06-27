@@ -3274,8 +3274,11 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
         return Ok(());
     }
     {
+        let _trace = phase_trace("format_patch.write_prelude");
+        write_format_patch_prelude(out, context, tree_cache, old_tree, new_tree)?;
+    }
+    {
         let _trace = phase_trace("format_patch.write_tree_diff");
-        write_format_patch_diffstat(out, context, tree_cache, old_tree, new_tree)?;
         write_commit_patch_entries_tree_diff_cached(
             out,
             context.repo,
@@ -3283,7 +3286,7 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
             tree_cache,
             old_tree,
             new_tree,
-            context.abbrev_len,
+            context.patch_abbrev_len,
             blob_cache,
         )?;
     }
@@ -3315,9 +3318,7 @@ fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
         writeln!(out)?;
         write_commit_message_body(out, &entry.commit.message)?;
     }
-    writeln!(out, "---")?;
-    write_format_patch_diffstat(out, context, tree_cache, old_tree, new_tree)?;
-    writeln!(out)?;
+    write_format_patch_prelude(out, context, tree_cache, old_tree, new_tree)?;
     writeln!(out, "--------------0.1.0.zmin")?;
     writeln!(out, "Content-Type: text/x-patch; name=\"{filename}\"")?;
     writeln!(out, "Content-Transfer-Encoding: 8bit")?;
@@ -3338,7 +3339,7 @@ fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
         tree_cache,
         old_tree,
         new_tree,
-        context.abbrev_len,
+        context.patch_abbrev_len,
         blob_cache,
     )?;
     writeln!(out)?;
@@ -3348,7 +3349,7 @@ fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
     Ok(())
 }
 
-fn write_format_patch_diffstat<W: Write, S: GitObjectStore + ?Sized>(
+fn write_format_patch_prelude<W: Write, S: GitObjectStore + ?Sized>(
     out: &mut W,
     context: &FormatPatchContext<'_>,
     tree_cache: &TreeObjectCache<'_, S>,
@@ -3379,9 +3380,43 @@ fn write_format_patch_diffstat<W: Write, S: GitObjectStore + ?Sized>(
         ignore_blank_lines: false,
         compact_summary: false,
     };
-    write_stat_entries(out, &diff_context, &entries, stat_options)?;
-    write_summary_entries(out, &old_index, &new_index, &entries, None)?;
-    writeln!(out)?;
+    match context.prelude_mode {
+        FormatPatchPreludeMode::Diffstat => {
+            writeln!(out, "---")?;
+            write_stat_entries(out, &diff_context, &entries, stat_options)?;
+            write_summary_entries(out, &old_index, &new_index, &entries, None)?;
+            writeln!(out)?;
+        }
+        FormatPatchPreludeMode::None => {}
+        FormatPatchPreludeMode::Raw => {
+            write_raw_entries_to(out, &diff_context, &entries, context.abbrev_len, None)?;
+            writeln!(out)?;
+        }
+        FormatPatchPreludeMode::Numstat => {
+            write_numstat_entries_to(
+                out,
+                &diff_context,
+                &entries,
+                NumstatOptions {
+                    stat: stat_options,
+                    nul_terminated: false,
+                },
+            )?;
+            writeln!(out)?;
+        }
+        FormatPatchPreludeMode::Shortstat => {
+            write_shortstat_entries_to(out, &diff_context, &entries, stat_options)?;
+            writeln!(out)?;
+        }
+        FormatPatchPreludeMode::Summary => {
+            let mut summary = Vec::new();
+            write_summary_entries(&mut summary, &old_index, &new_index, &entries, None)?;
+            if !summary.is_empty() {
+                out.write_all(&summary)?;
+                writeln!(out)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3424,7 +3459,7 @@ pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Siz
     writeln!(out)?;
     write_format_patch_cover_author_summary(out, commits)?;
     writeln!(out)?;
-    write_format_patch_diffstat(out, context, tree_cache, old_tree, new_tree)?;
+    write_format_patch_prelude(out, context, tree_cache, old_tree, new_tree)?;
     write_format_patch_footer(out, context.signature)?;
     Ok(())
 }
@@ -3508,7 +3543,9 @@ fn write_format_patch_header<W: Write>(
     }
     writeln!(out)?;
     write_format_patch_message_body(out, &commit.message, context.signoff_line)?;
-    writeln!(out, "---")?;
+    if context.prelude_mode != FormatPatchPreludeMode::Diffstat {
+        writeln!(out)?;
+    }
     Ok(())
 }
 
@@ -3931,6 +3968,68 @@ pub(crate) fn print_raw_entries(
     Ok(())
 }
 
+fn write_raw_entries_to<W: Write>(
+    out: &mut W,
+    context: &DiffIndexContext<'_>,
+    entries: &[zmin_git_core::IndexDiffEntry],
+    abbrev_len: usize,
+    relative_prefix: Option<&[u8]>,
+) -> Result<()> {
+    let worktree_index = (context.old_source == DiffSideSource::WorktreeOrIndex
+        || context.new_source == DiffSideSource::WorktreeOrIndex)
+        .then(|| read_repo_index(context.repo))
+        .transpose()?;
+    for entry in entries {
+        let old_entry = find_index_entry(context.old_index, diff_entry_old_path(entry));
+        let new_entry = find_index_entry(context.new_index, &entry.path);
+        let old_mode = old_entry
+            .map(|entry| index_mode_octal(entry.mode))
+            .unwrap_or("000000");
+        let new_mode = new_entry
+            .map(|entry| index_mode_octal(entry.mode))
+            .unwrap_or("000000");
+        let old_id = diff_raw_side_object_id(
+            context,
+            context.old_source,
+            old_entry,
+            worktree_index.as_ref(),
+            abbrev_len,
+        )?;
+        let new_id = diff_raw_side_object_id(
+            context,
+            context.new_source,
+            new_entry,
+            worktree_index.as_ref(),
+            abbrev_len,
+        )?;
+        if matches!(
+            entry.status,
+            IndexDiffStatus::Renamed | IndexDiffStatus::Copied
+        ) {
+            writeln!(
+                out,
+                ":{old_mode} {new_mode} {old_id} {new_id} {}\t{}\t{}",
+                diff_entry_status_name(entry),
+                diff_display_path(diff_entry_old_path(entry), relative_prefix),
+                diff_display_path(&entry.path, relative_prefix)
+            )?;
+        } else {
+            let path = if entry.status == IndexDiffStatus::Modified {
+                diff_entry_old_path(entry)
+            } else {
+                &entry.path
+            };
+            writeln!(
+                out,
+                ":{old_mode} {new_mode} {old_id} {new_id} {}\t{}",
+                diff_entry_status_name(entry),
+                diff_display_path(path, relative_prefix)
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn diff_raw_side_object_id(
     context: &DiffIndexContext<'_>,
     source: DiffSideSource,
@@ -4080,6 +4179,7 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) repo: &'a GitRepo,
     pub(crate) store: &'a LooseObjectStore,
     pub(crate) abbrev_len: usize,
+    pub(crate) patch_abbrev_len: usize,
     pub(crate) total: usize,
     pub(crate) no_numbered: bool,
     pub(crate) numbered: bool,
@@ -4088,11 +4188,22 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) inline: bool,
     pub(crate) suffix: &'a str,
     pub(crate) subject_prefix: &'a str,
+    pub(crate) prelude_mode: FormatPatchPreludeMode,
     pub(crate) keep_subject: bool,
     pub(crate) number_offset: usize,
     pub(crate) signoff_line: Option<&'a str>,
     pub(crate) signature: Option<&'a str>,
     pub(crate) zero_commit: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FormatPatchPreludeMode {
+    Diffstat,
+    None,
+    Raw,
+    Numstat,
+    Shortstat,
+    Summary,
 }
 
 #[derive(Clone, Copy)]
@@ -4312,6 +4423,19 @@ pub(crate) fn print_shortstat_entries(
     Ok(())
 }
 
+fn write_shortstat_entries_to<W: Write>(
+    out: &mut W,
+    context: &DiffIndexContext<'_>,
+    entries: &[zmin_git_core::IndexDiffEntry],
+    options: DiffStatOptions<'_>,
+) -> Result<()> {
+    let rows = diff_stat_rows_with_whitespace(context, entries, options)?;
+    if !rows.is_empty() {
+        write_diff_stat_summary(out, &rows)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn print_numstat_entries(
     context: &DiffIndexContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
@@ -4382,6 +4506,64 @@ pub(crate) fn print_numstat_entries(
             print!("{}\t{}\t{}\0", row.insertions, row.deletions, row.path);
         } else {
             println!("{}\t{}\t{}", row.insertions, row.deletions, row.path);
+        }
+    }
+    Ok(())
+}
+
+fn write_numstat_entries_to<W: Write>(
+    out: &mut W,
+    context: &DiffIndexContext<'_>,
+    entries: &[zmin_git_core::IndexDiffEntry],
+    options: NumstatOptions<'_>,
+) -> Result<()> {
+    let NumstatOptions {
+        stat:
+            DiffStatOptions {
+                whitespace_mode,
+                relative_prefix,
+                ignore_matching_lines,
+                ignore_blank_lines,
+                compact_summary: _,
+            },
+        nul_terminated: _,
+    } = options;
+    for entry in entries {
+        let row = diff_stat_row_with_whitespace(
+            context,
+            entry,
+            DiffStatOptions {
+                whitespace_mode,
+                relative_prefix,
+                ignore_matching_lines,
+                ignore_blank_lines,
+                compact_summary: false,
+            },
+        )?;
+        if (whitespace_mode != DiffWhitespaceMode::None
+            || !ignore_matching_lines.is_empty()
+            || ignore_blank_lines)
+            && !row.binary
+            && row.insertions + row.deletions == 0
+        {
+            continue;
+        }
+        if row.binary {
+            writeln!(out, "-\t-\t{}", row.path)?;
+        } else if matches!(
+            entry.status,
+            IndexDiffStatus::Renamed | IndexDiffStatus::Copied
+        ) {
+            writeln!(
+                out,
+                "{}\t{}\t{} => {}",
+                row.insertions,
+                row.deletions,
+                diff_display_path(diff_entry_old_path(entry), relative_prefix),
+                diff_display_path(&entry.path, relative_prefix)
+            )?;
+        } else {
+            writeln!(out, "{}\t{}\t{}", row.insertions, row.deletions, row.path)?;
         }
     }
     Ok(())

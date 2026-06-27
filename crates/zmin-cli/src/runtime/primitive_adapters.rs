@@ -17,7 +17,8 @@ use zmin_primitives::git_runtime::{
 use zmin_primitives::{Error as PrimitiveError, Result as PrimitiveResult};
 
 use super::{
-    CliError, FormatPatchBlobCache, FormatPatchContext, FormatPatchEntry, GitRepo,
+    CliError, FormatPatchBlobCache, FormatPatchContext, FormatPatchEntry,
+    FormatPatchPreludeMode, GitRepo,
     default_abbrev_len, local_clone_source, local_repository_path_from_location,
     normalize_git_path, read_common_git_dir, read_config_file, run_receive_pack_request_service,
     run_upload_pack_request_service, signature_from_commit_bytes,
@@ -277,6 +278,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             repo: &self.repo,
             store,
             abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
+            patch_abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
             total: 1,
             no_numbered: false,
             numbered: false,
@@ -285,6 +287,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             inline: false,
             suffix: ".patch",
             subject_prefix: "PATCH",
+            prelude_mode: FormatPatchPreludeMode::Diffstat,
             keep_subject: false,
             number_offset: 0,
             signoff_line: None,
@@ -339,6 +342,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             repo: &self.repo,
             store,
             abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
+            patch_abbrev_len: default_abbrev_len(store).map_err(map_cli_result_error)?,
             total: commits.len(),
             no_numbered: false,
             numbered: false,
@@ -347,6 +351,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             inline: false,
             suffix: ".patch",
             subject_prefix: "PATCH",
+            prelude_mode: FormatPatchPreludeMode::Diffstat,
             keep_subject: false,
             number_offset: 0,
             signoff_line: None,
