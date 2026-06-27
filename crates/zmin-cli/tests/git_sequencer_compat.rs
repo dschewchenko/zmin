@@ -461,6 +461,138 @@ fn cherry_pick_and_revert_followup_documented_surface_batch_matches_stock_git() 
 }
 
 #[test]
+fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
+    let source = sequencer_fixture_repo();
+    let feature_commit = git(source.path(), ["rev-parse", "feature"]);
+
+    for args in [
+        ["cherry-pick", "--signoff", "-s", &feature_commit].as_slice(),
+        ["cherry-pick", "--rerere-autoupdate", "--no-rerere-autoupdate", &feature_commit].as_slice(),
+        ["cherry-pick", "-x", "-r", &feature_commit].as_slice(),
+        ["cherry-pick", "--strategy", "ort", "--strategy-option", "patience", &feature_commit].as_slice(),
+        ["cherry-pick", "-X", "patience", &feature_commit].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["checkout", "main"]);
+        git(zmin_repo.path(), ["checkout", "main"]);
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            "args: {args:?}"
+        );
+        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+    }
+
+    for args in [
+        ["cherry-pick", "--edit", "-e", &feature_commit].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["checkout", "main"]);
+        git(zmin_repo.path(), ["checkout", "main"]);
+        let mut env = SEQUENCER_ENV.to_vec();
+        env.push(("GIT_EDITOR", "true"));
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), args, &env, "git"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &env, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            "args: {args:?}"
+        );
+        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+    }
+
+    let source = cherry_pick_initially_empty_fixture_repo();
+    let empty_commit = git(source.path(), ["rev-parse", "feature"]);
+    let args = ["cherry-pick", "--allow-empty", "--keep-redundant-commits", &empty_commit];
+    let git_repo = clone_repo_fixture(source.path());
+    let zmin_repo = clone_repo_fixture(source.path());
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    git(git_repo.path(), ["checkout", "main"]);
+    git(zmin_repo.path(), ["checkout", "main"]);
+    assert_eq!(
+        command_output_with_env("git", git_repo.path(), &args, &SEQUENCER_ENV, "git"),
+        command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &SEQUENCER_ENV, "zmin"),
+    );
+    assert_eq!(
+        git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+        git(zmin_repo.path(), ["cat-file", "-p", "HEAD"])
+    );
+    assert_eq!(git(git_repo.path(), ["status", "--short"]), "");
+    assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "");
+
+    let source = sequencer_fixture_repo();
+    for args in [
+        ["revert", "--signoff", "-s", "HEAD"].as_slice(),
+        ["revert", "--rerere-autoupdate", "--no-rerere-autoupdate", "HEAD"].as_slice(),
+        ["revert", "--strategy", "ort", "--strategy-option", "patience", "HEAD"].as_slice(),
+        ["revert", "-X", "patience", "HEAD"].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["checkout", "feature"]);
+        git(zmin_repo.path(), ["checkout", "feature"]);
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            "args: {args:?}"
+        );
+        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+    }
+
+    for args in [
+        ["revert", "--edit", "-e", "HEAD"].as_slice(),
+        ["revert", "--no-edit", "--edit", "HEAD"].as_slice(),
+        ["revert", "--reference", "--no-edit", "HEAD"].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["checkout", "feature"]);
+        git(zmin_repo.path(), ["checkout", "feature"]);
+        let mut env = SEQUENCER_ENV.to_vec();
+        env.push(("GIT_EDITOR", "true"));
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), args, &env, "git"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &env, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            "args: {args:?}"
+        );
+        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+    }
+}
+
+#[test]
 fn bisect_matches_stock_git_for_linear_history() {
     let git_repo = bisect_fixture_repo();
     let zmin_repo = clone_repo_fixture(git_repo.path());

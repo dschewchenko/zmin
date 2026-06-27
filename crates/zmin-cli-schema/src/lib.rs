@@ -982,28 +982,28 @@ pub enum Command {
         no_commit: bool,
         #[arg(short = 'm', long = "mainline")]
         mainline: Option<usize>,
-        #[arg(short = 'x', action = ArgAction::SetTrue)]
-        record_origin: bool,
-        #[arg(short = 'r', action = ArgAction::SetTrue)]
-        no_record_origin: bool,
-        #[arg(long = "allow-empty", action = ArgAction::SetTrue)]
-        allow_empty: bool,
+        #[arg(short = 'x', action = ArgAction::Count)]
+        record_origin: u8,
+        #[arg(short = 'r', action = ArgAction::Count)]
+        no_record_origin: u8,
+        #[arg(long = "allow-empty", action = ArgAction::Count)]
+        allow_empty: u8,
         #[arg(long = "allow-empty-message", action = ArgAction::SetTrue)]
         allow_empty_message: bool,
-        #[arg(long = "keep-redundant-commits", action = ArgAction::SetTrue)]
-        keep_redundant_commits: bool,
+        #[arg(long = "keep-redundant-commits", action = ArgAction::Count)]
+        keep_redundant_commits: u8,
         #[arg(long = "empty")]
         empty: Option<String>,
-        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
-        signoff: bool,
-        #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue)]
-        edit: bool,
+        #[arg(short = 's', long = "signoff", action = ArgAction::Count)]
+        signoff: u8,
+        #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
+        edit: u8,
         #[arg(long = "cleanup")]
         cleanup: Option<String>,
-        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
-        rerere_autoupdate: bool,
-        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
-        no_rerere_autoupdate: bool,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::Count)]
+        rerere_autoupdate: u8,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::Count)]
+        no_rerere_autoupdate: u8,
         #[arg(long = "strategy")]
         strategy: Option<String>,
         #[arg(short = 'X', long = "strategy-option")]
@@ -1030,22 +1030,22 @@ pub enum Command {
         no_commit: bool,
         #[arg(short = 'm', long = "mainline")]
         mainline: Option<usize>,
-        #[arg(short = 'r', action = ArgAction::SetTrue)]
-        no_record_origin: bool,
-        #[arg(long = "reference", action = ArgAction::SetTrue)]
-        reference: bool,
-        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
-        signoff: bool,
-        #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue, overrides_with = "no_edit")]
-        edit: bool,
-        #[arg(long = "no-edit", action = ArgAction::SetTrue)]
-        no_edit: bool,
+        #[arg(short = 'r', action = ArgAction::Count)]
+        no_record_origin: u8,
+        #[arg(long = "reference", action = ArgAction::Count)]
+        reference: u8,
+        #[arg(short = 's', long = "signoff", action = ArgAction::Count)]
+        signoff: u8,
+        #[arg(short = 'e', long = "edit", action = ArgAction::Count, overrides_with = "no_edit")]
+        edit: u8,
+        #[arg(long = "no-edit", action = ArgAction::Count)]
+        no_edit: u8,
         #[arg(long = "cleanup")]
         cleanup: Option<String>,
-        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
-        rerere_autoupdate: bool,
-        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
-        no_rerere_autoupdate: bool,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::Count)]
+        rerere_autoupdate: u8,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::Count)]
+        no_rerere_autoupdate: u8,
         #[arg(long = "strategy")]
         strategy: Option<String>,
         #[arg(short = 'X', long = "strategy-option")]

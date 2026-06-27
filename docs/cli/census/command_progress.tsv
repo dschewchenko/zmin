@@ -3,12 +3,12 @@ complete_command_matrices	146	151	only commands whose full behavior matrix is fi
 complete_doc_option_pairs	2103	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2157	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	6263	6263	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	5451	6263	closed written rows only
-behavior_rows_classified	6238	6263	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	6263	written rows with incomplete parity
-behavior_rows_open	0	6263	written rows not implemented or not matching yet
-invalid_input_rows	787	6263	rows where stock Git rejects the input
+behavior_rows_written	6277	6277	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	5465	6277	closed written rows only
+behavior_rows_classified	6252	6277	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	6277	written rows with incomplete parity
+behavior_rows_open	0	6277	written rows not implemented or not matching yet
+invalid_input_rows	787	6277	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -30,7 +30,7 @@ check-ref-format	4	4	4	100.0	27	27	100.0	16	59.3	0	0	11	yes
 checkout	34	34	34	100.0	79	79	100.0	67	84.8	0	0	12	yes
 checkout-index	16	16	16	100.0	29	29	100.0	28	96.6	0	0	1	yes
 cherry	1	1	1	100.0	14	14	100.0	12	85.7	0	0	2	yes
-cherry-pick	24	4	24	100.0	28	28	100.0	26	92.9	0	0	2	yes
+cherry-pick	24	4	24	100.0	35	35	100.0	33	94.3	0	0	2	yes
 citool	0	0	0	0.0	5	5	100.0	5	100.0	0	0	0	no
 clean	13	13	13	100.0	68	68	100.0	62	91.2	0	0	6	yes
 clone	47	36	36	76.6	96	96	100.0	86	89.6	0	0	10	yes
@@ -125,7 +125,7 @@ reset	6	0	0	0.0	11	11	100.0	6	54.5	0	0	5	yes
 restore	25	25	25	100.0	100	100	100.0	80	80.0	0	0	20	yes
 rev-list	117	81	81	69.2	133	133	100.0	123	92.5	0	0	10	yes
 rev-parse	51	50	50	98.0	111	111	100.0	102	91.9	0	0	9	yes
-revert	19	4	19	100.0	24	24	100.0	22	91.7	0	0	2	yes
+revert	19	4	19	100.0	31	31	100.0	29	93.5	0	0	2	yes
 rm	12	12	12	100.0	50	50	100.0	41	82.0	0	0	9	yes
 send-email	64	2	2	3.1	18	18	100.0	17	94.4	0	0	1	yes
 send-pack	12	12	12	100.0	22	22	100.0	19	86.4	0	0	3	yes

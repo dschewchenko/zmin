@@ -1394,7 +1394,6 @@ pub(crate) struct SequencerCommandOptions<'a> {
     pub(crate) no_commit: bool,
     pub(crate) mainline: Option<usize>,
     pub(crate) record_origin: bool,
-    pub(crate) no_record_origin: bool,
     pub(crate) allow_empty: bool,
     pub(crate) allow_empty_message: bool,
     pub(crate) keep_redundant_commits: bool,
@@ -1439,7 +1438,6 @@ pub(crate) fn sequencer_command(options: SequencerCommandOptions<'_>) -> Result<
         no_commit: options.no_commit,
         mainline: options.mainline,
         record_origin: options.record_origin,
-        no_record_origin: options.no_record_origin,
         allow_empty: options.allow_empty,
         allow_empty_message: options.allow_empty_message,
         keep_redundant_commits: options.keep_redundant_commits,
@@ -1465,7 +1463,6 @@ pub(crate) struct SequencerPickOptions {
     pub(crate) no_commit: bool,
     pub(crate) mainline: Option<usize>,
     pub(crate) record_origin: bool,
-    pub(crate) no_record_origin: bool,
     pub(crate) allow_empty: bool,
     pub(crate) allow_empty_message: bool,
     pub(crate) keep_redundant_commits: bool,
@@ -1491,7 +1488,6 @@ fn default_sequencer_pick_options(commits: Vec<String>) -> SequencerPickOptions 
         no_commit: false,
         mainline: None,
         record_origin: false,
-        no_record_origin: false,
         allow_empty: false,
         allow_empty_message: false,
         keep_redundant_commits: false,
@@ -1578,7 +1574,7 @@ pub(crate) fn sequencer_pick(
     } else {
         picked.message.clone()
     };
-    if !options.revert && options.record_origin && !options.no_record_origin {
+    if !options.revert && options.record_origin {
         append_cherry_pick_origin(&mut message, &picked_id);
     }
     if options.signoff {
