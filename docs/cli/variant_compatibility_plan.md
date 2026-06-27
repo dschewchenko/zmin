@@ -22,6 +22,51 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` mail-render closure on the already modeled two-patch stdout
+range lane. This batch added exact stock-Git matrix evidence for `--signoff`,
+`-s`, `--zero-commit`, `--reroll-count`, `-v`, `--no-signature`,
+`--signature`, `--start-number`, `--rfc`, `--keep-subject`, and `-k`. The
+runtime highlight stayed narrow but substantive this time: the real closure was
+mail rendering parity for trailers, footer suppression, zeroed `From` ids,
+reroll and RFC subject prefixes, shifted numbering, and raw subject
+preservation on an existing series lane, plus one parser fix so `--rfc` no
+longer consumes the revision range without `=`.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_mail_render_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_keep_subject_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2277 / 3212`
+- represented documented command-option pairs: `2277 / 3212`
+- matrix rows: `6423`
+- verified rows: `5611`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `111 / 111` reviewed-complete documented option pairs,
+  `111 / 111` represented documented option pairs, `119` written rows, `119`
+  classified rows, `119` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has `51` remaining `doc_option_not_in_zmin_schema` rows, now
+led by helper-free documented tails such as `--add-header`, `--base`, `--cc`,
+`--color-words`, `--cover-from-description`, `--description-file`,
+`--full-index`, `--ignore-if-in-upstream`, `--in-reply-to`, and related mail
+or diff spellings.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` invalid-surface and direct-output closure on the already modeled
 single-commit lane. This batch added exact stock-Git matrix evidence for
 `--check`, `--name-only`, `--name-status`, and `--output`, including the

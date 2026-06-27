@@ -3947,14 +3947,35 @@ pub enum Command {
         suffix: Option<String>,
         #[arg(long = "subject-prefix")]
         subject_prefix: Option<String>,
+        #[arg(short = 'k', long = "keep-subject", action = ArgAction::SetTrue)]
+        keep_subject: bool,
         #[arg(long = "no-numbered", action = ArgAction::SetTrue)]
         no_numbered: bool,
         #[arg(short = 'n', long = "numbered", action = ArgAction::SetTrue)]
         numbered: bool,
         #[arg(long = "numbered-files", action = ArgAction::SetTrue)]
         numbered_files: bool,
+        #[arg(long = "start-number")]
+        start_number: Option<String>,
         #[arg(long = "cover-letter", action = ArgAction::SetTrue)]
         cover_letter: bool,
+        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
+        signoff: bool,
+        #[arg(long = "signature")]
+        signature: Option<String>,
+        #[arg(long = "no-signature", action = ArgAction::SetTrue)]
+        no_signature: bool,
+        #[arg(short = 'v', long = "reroll-count")]
+        reroll_count: Option<String>,
+        #[arg(
+            long = "rfc",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "RFC"
+        )]
+        rfc: Option<String>,
+        #[arg(long = "zero-commit", action = ArgAction::SetTrue)]
+        zero_commit: bool,
         #[arg(short = '1', action = ArgAction::SetTrue)]
         one: bool,
         revs: Vec<String>,

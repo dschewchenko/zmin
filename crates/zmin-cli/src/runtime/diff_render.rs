@@ -3287,9 +3287,7 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
             blob_cache,
         )?;
     }
-    writeln!(out, "-- ")?;
-    writeln!(out, "0.1.0.zmin")?;
-    writeln!(out)?;
+    write_format_patch_footer(out, context.signature)?;
     Ok(())
 }
 
@@ -3407,11 +3405,12 @@ pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Siz
         signature_email(cover_signature)
     )?;
     writeln!(out, "Date: {}", signature_mail_date(cover_signature)?)?;
+    let total = context.total + context.number_offset;
     if (context.total > 1 && !context.no_numbered) || context.numbered {
         writeln!(
             out,
             "Subject: [{} 0/{}] *** SUBJECT HERE ***",
-            context.subject_prefix, context.total
+            context.subject_prefix, total
         )?;
     } else {
         writeln!(
@@ -3426,9 +3425,7 @@ pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Siz
     write_format_patch_cover_author_summary(out, commits)?;
     writeln!(out)?;
     write_format_patch_diffstat(out, context, tree_cache, old_tree, new_tree)?;
-    writeln!(out, "-- ")?;
-    writeln!(out, "0.1.0.zmin")?;
-    writeln!(out)?;
+    write_format_patch_footer(out, context.signature)?;
     Ok(())
 }
 
@@ -3472,10 +3469,17 @@ fn write_format_patch_header<W: Write>(
         subject_prefix,
         ..
     } = context;
-    let subject = commit_subject_view(&commit.message);
-    write!(out, "From ")?;
-    id.write_hex_io(out)?;
-    writeln!(out, " Mon Sep 17 00:00:00 2001")?;
+    let number = number + context.number_offset;
+    let total = total + context.number_offset;
+    let raw_subject = commit_subject_view(&commit.message);
+    let subject = format_patch_subject(raw_subject.as_ref(), context.keep_subject);
+    if context.zero_commit {
+        writeln!(out, "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001")?;
+    } else {
+        write!(out, "From ")?;
+        id.write_hex_io(out)?;
+        writeln!(out, " Mon Sep 17 00:00:00 2001")?;
+    }
     writeln!(
         out,
         "From: {} <{}>",
@@ -3483,7 +3487,9 @@ fn write_format_patch_header<W: Write>(
         signature_email(&commit.author)
     )?;
     writeln!(out, "Date: {}", signature_mail_date(&commit.author)?)?;
-    if (*total > 1 && !*no_numbered) || *numbered {
+    if context.keep_subject {
+        writeln!(out, "Subject: {subject}")?;
+    } else if (total > 1 && !*no_numbered) || *numbered {
         writeln!(
             out,
             "Subject: [{subject_prefix} {number}/{total}] {subject}"
@@ -3501,7 +3507,7 @@ fn write_format_patch_header<W: Write>(
         return Ok(());
     }
     writeln!(out)?;
-    write_commit_message_body(out, &commit.message)?;
+    write_format_patch_message_body(out, &commit.message, context.signoff_line)?;
     writeln!(out, "---")?;
     Ok(())
 }
@@ -3525,6 +3531,30 @@ pub(crate) fn write_commit_patch_entries_tree_diff_cached<W: Write, S: GitObject
         WordDiffMode::None,
         blob_cache,
     )
+}
+
+fn write_format_patch_message_body<W: Write>(
+    out: &mut W,
+    message: &[u8],
+    signoff_line: Option<&str>,
+) -> Result<()> {
+    write_commit_message_body(out, message)?;
+    if let Some(signoff_line) = signoff_line {
+        if !commit_message_body_view(message).is_empty() {
+            writeln!(out)?;
+        }
+        writeln!(out, "{signoff_line}")?;
+    }
+    Ok(())
+}
+
+fn write_format_patch_footer<W: Write>(out: &mut W, signature: Option<&str>) -> Result<()> {
+    if let Some(signature) = signature {
+        writeln!(out, "-- ")?;
+        writeln!(out, "{signature}")?;
+        writeln!(out)?;
+    }
+    Ok(())
 }
 
 fn cached_patch_write_context<'a>(
@@ -3584,6 +3614,13 @@ fn commit_subject_view(message: &[u8]) -> Cow<'_, str> {
         Ok(message) => Cow::Borrowed(message),
         Err(_) => Cow::Owned(String::from_utf8_lossy(subject).into_owned()),
     }
+}
+
+fn format_patch_subject(subject: &str, keep_subject: bool) -> Cow<'_, str> {
+    if keep_subject {
+        return Cow::Borrowed(subject);
+    }
+    Cow::Borrowed(subject)
 }
 
 fn commit_message_body_view(message: &[u8]) -> &[u8] {
@@ -4051,6 +4088,11 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) inline: bool,
     pub(crate) suffix: &'a str,
     pub(crate) subject_prefix: &'a str,
+    pub(crate) keep_subject: bool,
+    pub(crate) number_offset: usize,
+    pub(crate) signoff_line: Option<&'a str>,
+    pub(crate) signature: Option<&'a str>,
+    pub(crate) zero_commit: bool,
 }
 
 #[derive(Clone, Copy)]

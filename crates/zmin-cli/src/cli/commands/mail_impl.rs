@@ -744,10 +744,18 @@ pub(crate) fn format_patch(
     inline: bool,
     suffix: Option<&str>,
     subject_prefix: Option<&str>,
+    keep_subject: bool,
     no_numbered: bool,
     numbered: bool,
     numbered_files: bool,
+    start_number: Option<&str>,
     cover_letter: bool,
+    signoff: bool,
+    signature: Option<&str>,
+    no_signature: bool,
+    reroll_count: Option<&str>,
+    rfc: Option<&str>,
+    zero_commit: bool,
     one: bool,
     revs: Vec<String>,
 ) -> Result<()> {
@@ -813,9 +821,39 @@ pub(crate) fn format_patch(
     let abbrev_len = default_abbrev_len(&store)?;
     let suffix = suffix.unwrap_or(".patch");
     let configured_subject_prefix = read_config_value(&repo, "format.subjectprefix")?;
-    let subject_prefix = subject_prefix
+    let mut subject_prefix = subject_prefix
         .or(configured_subject_prefix.as_deref())
-        .unwrap_or("PATCH");
+        .unwrap_or("PATCH")
+        .to_owned();
+    if let Some(rfc) = rfc {
+        subject_prefix = format!("{rfc} {subject_prefix}");
+    }
+    if let Some(reroll_count) = reroll_count {
+        subject_prefix = format!("{subject_prefix} v{reroll_count}");
+    }
+    let start_number = start_number
+        .map(|value| {
+            value.parse::<usize>().map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid start number: {value}"),
+            })
+        })
+        .transpose()?
+        .unwrap_or(1);
+    let signature_text = if no_signature {
+        None
+    } else {
+        Some(signature.unwrap_or("0.1.0.zmin").to_owned())
+    };
+    let signoff_line = if signoff {
+        let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
+        Some(format!(
+            "Signed-off-by: {} <{}>",
+            committer.name, committer.email
+        ))
+    } else {
+        None
+    };
     let format_context = FormatPatchContext {
         repo: &repo,
         store: &store,
@@ -827,7 +865,12 @@ pub(crate) fn format_patch(
         attach,
         inline,
         suffix,
-        subject_prefix,
+        subject_prefix: &subject_prefix,
+        keep_subject,
+        number_offset: start_number.saturating_sub(1),
+        signoff_line: signoff_line.as_deref(),
+        signature: signature_text.as_deref(),
+        zero_commit,
     };
     let tree_cache = TreeObjectCache::new(&packed_store);
     let mut blob_cache = FormatPatchBlobCache::new(&store);

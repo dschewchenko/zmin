@@ -52,6 +52,22 @@ fn range_diff_fixture_repo() -> TempDir {
     repo
 }
 
+fn format_patch_keep_subject_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "alpha.txt", "alpha\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "[PATCH] add alpha"]);
+    write_file(repo.path(), "alpha.txt", "alpha\nbeta\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "[PATCH] update alpha"]);
+    repo
+}
+
 fn normalize_format_patch_version(output: &str) -> String {
     let mut normalized = Vec::new();
     let mut version_line = false;
@@ -545,6 +561,67 @@ fn format_patch_invalid_surface_and_output_file_match_stock_git() {
         normalize_format_patch_version(&zmin_mail),
         normalize_format_patch_version(&git_mail)
     );
+}
+
+#[test]
+fn format_patch_mail_render_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let cases: Vec<Vec<String>> = vec![
+        vec!["--signoff".into()],
+        vec!["-s".into()],
+        vec!["--zero-commit".into()],
+        vec!["--reroll-count=2".into()],
+        vec!["-v".into(), "2".into()],
+        vec!["--no-signature".into()],
+        vec!["--signature=custom".into()],
+        vec!["--start-number".into(), "7".into()],
+        vec!["--rfc".into()],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("HEAD~2..HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
+fn format_patch_keep_subject_family_matches_stock_git() {
+    let repo = format_patch_keep_subject_fixture_repo();
+    let cases = [["--keep-subject"], ["-k"]];
+
+    for extra in cases {
+        let mut args = vec!["format-patch", "--stdout"];
+        args.extend(extra);
+        args.push("HEAD~2..HEAD");
+        let zmin = run_zmin_args(repo.path(), &args);
+        let stock = git_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args),
+            git_status_args(repo.path(), &args),
+            "status case mismatch"
+        );
+    }
 }
 
 #[test]
