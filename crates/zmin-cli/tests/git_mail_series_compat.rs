@@ -531,25 +531,31 @@ fn am_option_surface_batch_matches_stock_git() {
 fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
     let (repo, patch_path, directory) = am_directory_patch_fixture();
     let patch = patch_path.as_str();
-    let dir_args = ["am", &format!("--directory={directory}"), patch];
-
-    let git_repo = clone_repo_fixture(repo.path());
-    let zmin_repo = clone_repo_fixture(repo.path());
-    configure_identity(git_repo.path());
-    configure_identity(zmin_repo.path());
-    let git_result = command_any_output("git", git_repo.path(), &dir_args, "git");
-    let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &dir_args, "zmin");
-    assert_eq!(zmin_result, git_result, "directory args: {dir_args:?}");
-    assert_eq!(
-        git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
-        git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
-        "directory tree"
-    );
-    assert_eq!(
-        git(zmin_repo.path(), ["status", "--short"]),
-        git(git_repo.path(), ["status", "--short"]),
-        "directory status"
-    );
+    let directory_equals = format!("--directory={directory}");
+    let directory_unused = "--directory=unused".to_owned();
+    for args in [
+        ["am", directory_equals.as_str(), patch].as_slice(),
+        ["am", "--directory", directory.as_str(), patch].as_slice(),
+        ["am", directory_unused.as_str(), directory_equals.as_str(), patch].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(repo.path());
+        let zmin_repo = clone_repo_fixture(repo.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        let git_result = command_any_output("git", git_repo.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin");
+        assert_eq!(zmin_result, git_result, "directory args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "directory tree args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "directory status args: {args:?}"
+        );
+    }
 
     let (source, base, patch_path) = am_single_patch_fixture();
     let patch = patch_path.as_str();
@@ -586,31 +592,61 @@ fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
     let git_author = git(git_repo.path(), ["log", "-1", "--format=%ad", "--date=raw"]);
     assert_eq!(zmin_author, git_author);
 
+    let git_combo_repo = clone_repo_fixture(source.path());
+    let zmin_combo_repo = clone_repo_fixture(source.path());
+    configure_identity(git_combo_repo.path());
+    configure_identity(zmin_combo_repo.path());
+    git(git_combo_repo.path(), ["reset", "--hard", &base]);
+    git(zmin_combo_repo.path(), ["reset", "--hard", &base]);
+    let combo_args = ["am", "--ignore-date", "--committer-date-is-author-date", patch];
+    let git_combo_result =
+        command_output_with_env("git", git_combo_repo.path(), &combo_args, &envs, "git");
+    let zmin_combo_result =
+        command_output_with_env(zmin_bin(), zmin_combo_repo.path(), &combo_args, &envs, "zmin");
+    assert_eq!(zmin_combo_result, git_combo_result);
+    assert_eq!(
+        git(
+            zmin_combo_repo.path(),
+            ["log", "-1", "--format=%ad%n%cd%n%B", "--date=raw"]
+        ),
+        git(
+            git_combo_repo.path(),
+            ["log", "-1", "--format=%ad%n%cd%n%B", "--date=raw"]
+        )
+    );
+
     let (source, base, patch_path) = am_conflict_patch_fixture();
     let patch = patch_path.as_str();
-    let git_repo = clone_repo_fixture(source.path());
-    let zmin_repo = clone_repo_fixture(source.path());
-    configure_identity(git_repo.path());
-    configure_identity(zmin_repo.path());
-    git(git_repo.path(), ["reset", "--hard", &base]);
-    git(zmin_repo.path(), ["reset", "--hard", &base]);
-    write_file(git_repo.path(), "a.txt", "one\nlocal\n");
-    write_file(zmin_repo.path(), "a.txt", "one\nlocal\n");
-    git(git_repo.path(), ["add", "a.txt"]);
-    git(zmin_repo.path(), ["add", "a.txt"]);
-    git_with_env(git_repo.path(), ["commit", "-m", "local"]);
-    git_with_env(zmin_repo.path(), ["commit", "-m", "local"]);
-    let git_result = command_any_output("git", git_repo.path(), &["am", "--reject", patch], "git");
-    let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &["am", "--reject", patch], "zmin");
-    assert_eq!(zmin_result, git_result);
-    assert_eq!(
-        fs::read_to_string(zmin_repo.path().join("a.txt.rej")).expect("zmin reject file"),
-        fs::read_to_string(git_repo.path().join("a.txt.rej")).expect("git reject file")
-    );
-    assert_eq!(
-        git(zmin_repo.path(), ["status", "--short"]),
-        git(git_repo.path(), ["status", "--short"])
-    );
+    for args in [
+        ["am", "--reject", patch].as_slice(),
+        ["am", "--reject", "--reject", patch].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["reset", "--hard", &base]);
+        git(zmin_repo.path(), ["reset", "--hard", &base]);
+        write_file(git_repo.path(), "a.txt", "one\nlocal\n");
+        write_file(zmin_repo.path(), "a.txt", "one\nlocal\n");
+        git(git_repo.path(), ["add", "a.txt"]);
+        git(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "local"]);
+        git_with_env(zmin_repo.path(), ["commit", "-m", "local"]);
+        let git_result = command_any_output("git", git_repo.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin");
+        assert_eq!(zmin_result, git_result, "reject args: {args:?}");
+        assert_eq!(
+            fs::read_to_string(zmin_repo.path().join("a.txt.rej")).expect("zmin reject file"),
+            fs::read_to_string(git_repo.path().join("a.txt.rej")).expect("git reject file"),
+            "reject file args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "reject status args: {args:?}"
+        );
+    }
 }
 
 #[test]

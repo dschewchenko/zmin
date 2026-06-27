@@ -3424,7 +3424,7 @@ pub enum Command {
         #[arg(short = 'p')]
         strip: Option<String>,
         #[arg(long = "directory")]
-        directory: Option<String>,
+        directory: Vec<String>,
         #[arg(long = "include")]
         include: Vec<String>,
         #[arg(long = "exclude")]
@@ -3437,8 +3437,8 @@ pub enum Command {
         ignore_date: bool,
         #[arg(long = "empty")]
         empty: Option<String>,
-        #[arg(long = "reject", action = ArgAction::SetTrue)]
-        reject: bool,
+        #[arg(long = "reject", action = ArgAction::Count)]
+        reject: u8,
         #[arg(
             short = 'S',
             long = "gpg-sign",

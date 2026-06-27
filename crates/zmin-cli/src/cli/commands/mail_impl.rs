@@ -22,14 +22,14 @@ pub(crate) struct AmOptions {
     pub(crate) whitespace: Option<String>,
     pub(crate) context: Option<String>,
     pub(crate) strip: Option<String>,
-    pub(crate) directory: Option<String>,
+    pub(crate) directory: Vec<String>,
     pub(crate) include: Vec<String>,
     pub(crate) exclude: Vec<String>,
     pub(crate) patch_format: Option<String>,
     pub(crate) interactive: bool,
     pub(crate) ignore_date: bool,
     pub(crate) empty: Option<String>,
-    pub(crate) reject: bool,
+    pub(crate) reject: u8,
     pub(crate) gpg_sign: Option<String>,
     pub(crate) no_gpg_sign: u8,
     pub(crate) rerere_autoupdate: bool,
@@ -134,15 +134,6 @@ fn apply_mail_patch(
     am_options: &AmOptions,
 ) -> Result<()> {
     let parsed = parse_am_mail(mail, am_options.keep, am_options.patch_format.as_deref())?;
-    let mut committer = signature_from_identity(repo, "GIT_COMMITTER")?;
-    if am_options.committer_date_is_author_date {
-        committer = Signature::new(
-            committer.name.clone(),
-            committer.email.clone(),
-            parsed.author.timestamp,
-            parsed.author.timezone.clone(),
-        )?;
-    }
     let author = if am_options.ignore_date {
         Signature::new(
             parsed.author.name.clone(),
@@ -153,6 +144,15 @@ fn apply_mail_patch(
     } else {
         parsed.author.clone()
     };
+    let mut committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+    if am_options.committer_date_is_author_date {
+        committer = Signature::new(
+            committer.name.clone(),
+            committer.email.clone(),
+            author.timestamp,
+            author.timezone.clone(),
+        )?;
+    }
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
     if parsed.patch_text.trim().is_empty() {
@@ -196,7 +196,7 @@ fn apply_mail_patch(
         intent_to_add: false,
         no_add: false,
         z: false,
-        reject: am_options.reject,
+        reject: am_options.reject > 0,
         three_way: am_options.three_way && !am_options.no_three_way,
         ours: false,
         theirs: false,
@@ -215,7 +215,7 @@ fn apply_mail_patch(
         am_options.scissors,
         am_options.no_scissors,
         am_options.quoted_cr.as_deref(),
-        am_options.directory.as_deref(),
+        am_effective_directory(&am_options.directory),
         am_options.include.as_slice(),
         am_options.exclude.as_slice(),
         am_options.patch_format.as_deref(),
@@ -235,7 +235,7 @@ fn apply_mail_patch(
     let patch_text = parsed.patch_text.as_str();
     let subject = parsed.subject.as_str();
     let mut patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
-    apply_am_directory_prefix(&mut patches, am_options.directory.as_deref());
+    apply_am_directory_prefix(&mut patches, am_effective_directory(&am_options.directory));
     patches.retain(|patch| am_patch_selected(patch, &am_options.include, &am_options.exclude));
     if patches.is_empty() {
         create_am_commit(
@@ -254,7 +254,7 @@ fn apply_mail_patch(
         return Ok(());
     }
     for patch in patches {
-        if am_options.reject {
+        if am_options.reject > 0 {
             eprintln!(
                 "Checking patch {}...",
                 String::from_utf8_lossy(am_patch_display_path(&patch))
@@ -268,12 +268,12 @@ fn apply_mail_patch(
                     println!("Applying: {subject}");
                     println!("Patch failed at 0001 {subject}");
                 }
-                if am_options.reject {
+                if am_options.reject > 0 {
                     write_am_reject_file(repo, &patch)?;
                 }
                 return Err(CliError::Stderr {
                     code: 128,
-                    text: if am_options.reject {
+                    text: if am_options.reject > 0 {
                         am_reject_conflict_stderr(&patch)
                     } else {
                         am_patch_conflict_stderr(&patch)
@@ -282,7 +282,7 @@ fn apply_mail_patch(
             }
             Err(error) => return Err(error),
         };
-        if am_options.reject {
+        if am_options.reject > 0 {
             eprintln!(
                 "Applied patch {} cleanly.",
                 String::from_utf8_lossy(am_patch_display_path(&patch))
@@ -575,6 +575,10 @@ fn apply_am_directory_prefix(
             *new_path = prefixed_am_path(directory, new_path);
         }
     }
+}
+
+fn am_effective_directory(values: &[String]) -> Option<&str> {
+    values.last().map(String::as_str)
 }
 
 fn prefixed_am_path(directory: &str, path: &[u8]) -> Vec<u8> {
