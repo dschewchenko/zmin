@@ -2733,6 +2733,10 @@ pub enum Command {
         diff_filter: Option<String>,
         #[arg(long = "word-diff", num_args = 0..=1, default_missing_value = "plain")]
         word_diff: Option<String>,
+        #[arg(long = "color-words", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        color_words: Option<String>,
+        #[arg(long = "word-diff-regex")]
+        word_diff_regex: Option<String>,
         #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
@@ -2923,6 +2927,10 @@ pub enum Command {
         diff_filter: Option<String>,
         #[arg(long = "word-diff", num_args = 0..=1, default_missing_value = "plain")]
         word_diff: Option<String>,
+        #[arg(long = "color-words", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        color_words: Option<String>,
+        #[arg(long = "word-diff-regex")]
+        word_diff_regex: Option<String>,
         #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
@@ -3089,6 +3097,10 @@ pub enum Command {
         diff_filter: Option<String>,
         #[arg(long = "word-diff", num_args = 0..=1, default_missing_value = "plain")]
         word_diff: Option<String>,
+        #[arg(long = "color-words", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        color_words: Option<String>,
+        #[arg(long = "word-diff-regex")]
+        word_diff_regex: Option<String>,
         #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
@@ -3260,6 +3272,10 @@ pub enum Command {
         diff_filter: Option<String>,
         #[arg(long = "word-diff", num_args = 0..=1, default_missing_value = "plain")]
         word_diff: Option<String>,
+        #[arg(long = "color-words", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        color_words: Option<String>,
+        #[arg(long = "word-diff-regex")]
+        word_diff_regex: Option<String>,
         #[arg(long = "abbrev", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
@@ -5891,6 +5907,8 @@ pub struct DiffOptions {
     pub rotate_to: Option<String>,
     pub diff_filter: Option<String>,
     pub word_diff: Option<String>,
+    pub color_words: Option<String>,
+    pub word_diff_regex: Option<String>,
     pub abbrev: Option<String>,
     pub no_abbrev: bool,
     pub full_index: bool,
@@ -5976,6 +5994,8 @@ impl Default for DiffOptions {
             rotate_to: None,
             diff_filter: None,
             word_diff: None,
+            color_words: None,
+            word_diff_regex: None,
             abbrev: None,
             no_abbrev: false,
             full_index: false,
@@ -6061,6 +6081,8 @@ pub struct PlumbingDiffOptions {
     pub rotate_to: Option<String>,
     pub diff_filter: Option<String>,
     pub word_diff: Option<String>,
+    pub color_words: Option<String>,
+    pub word_diff_regex: Option<String>,
     pub abbrev: Option<String>,
     pub no_abbrev: bool,
     pub full_index: bool,

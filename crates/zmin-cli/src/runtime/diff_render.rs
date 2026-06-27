@@ -1415,6 +1415,7 @@ pub(crate) struct DiffRenderOptions {
     pub(crate) exit_code: bool,
     pub(crate) raw_abbrev_len: Option<usize>,
     pub(crate) word_diff: WordDiffMode,
+    pub(crate) word_diff_regex: Option<String>,
     pub(crate) patch_abbrev_len: Option<usize>,
     pub(crate) old_prefix: String,
     pub(crate) new_prefix: String,
@@ -1881,7 +1882,7 @@ pub(crate) fn print_render_patch_entries(
             old_source: options.old_source,
             new_source: options.new_source,
             word_diff: options.word_diff,
-            word_diff_regex: None,
+            word_diff_regex: options.word_diff_regex.clone(),
             abbrev_len: options.patch_abbrev_len,
             old_prefix: options.old_prefix.clone(),
             new_prefix: options.new_prefix.clone(),
@@ -2664,6 +2665,18 @@ pub(crate) fn plumbing_render_options(options: &PlumbingDiffOptions) -> Result<D
         options.ignore_all_space,
         options.ignore_blank_lines,
     );
+    let word_diff = parse_word_diff_option(
+        options
+            .color_words
+            .as_deref()
+            .map(|_| "color")
+            .or(options.word_diff.as_deref()),
+    )?;
+    let word_diff_regex = options
+        .color_words
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or(options.word_diff_regex.as_deref());
     let color_mode = parse_diff_color_option(options.color.as_deref(), options.no_color)?;
     let _accepted_noops = (
         options.no_ext_diff,
@@ -2693,7 +2706,8 @@ pub(crate) fn plumbing_render_options(options: &PlumbingDiffOptions) -> Result<D
         quiet: options.quiet,
         exit_code: options.quiet || options.exit_code,
         raw_abbrev_len,
-        word_diff: WordDiffMode::None,
+        word_diff,
+        word_diff_regex: word_diff_regex.map(str::to_owned),
         patch_abbrev_len,
         old_prefix,
         new_prefix,

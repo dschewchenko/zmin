@@ -1739,6 +1739,80 @@ fn diff_word_diff_plain_matches_stock_git_for_text_changes() {
 }
 
 #[test]
+fn diff_color_words_and_word_diff_regex_match_stock_git_for_diff_family() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(
+        repo.path().join("a.txt"),
+        b"ctx1\nhello brave world\nsecond line\nctx2\n",
+    )
+    .expect("write base");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    fs::write(
+        repo.path().join("a.txt"),
+        b"ctx1\nhello bright world\nsecond line plus\nctx2\n",
+    )
+    .expect("write committed change");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "change"]);
+    fs::write(
+        repo.path().join("a.txt"),
+        b"ctx1\nhello bolder world\nsecond line plus more\nctx2\n",
+    )
+    .expect("write worktree change");
+
+    for args in [
+        ["diff", "--color-words", "HEAD~1", "HEAD"].as_slice(),
+        ["diff", "--color-words=[a-z]+", "HEAD~1", "HEAD"].as_slice(),
+        [
+            "diff",
+            "--word-diff-regex=[a-z]+",
+            "--word-diff=plain",
+            "HEAD~1",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["diff-files", "-p", "--color-words"].as_slice(),
+        ["diff-files", "-p", "--color-words=[a-z]+"].as_slice(),
+        [
+            "diff-files",
+            "-p",
+            "--word-diff-regex=[a-z]+",
+            "--word-diff=plain",
+        ]
+        .as_slice(),
+        ["diff-index", "-p", "--color-words", "HEAD"].as_slice(),
+        ["diff-index", "-p", "--color-words=[a-z]+", "HEAD"].as_slice(),
+        [
+            "diff-index",
+            "-p",
+            "--word-diff-regex=[a-z]+",
+            "--word-diff=plain",
+            "HEAD",
+        ]
+        .as_slice(),
+        ["diff-tree", "-p", "--color-words", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "-p", "--color-words=[a-z]+", "HEAD~1", "HEAD"].as_slice(),
+        [
+            "diff-tree",
+            "-p",
+            "--word-diff-regex=[a-z]+",
+            "--word-diff=plain",
+            "HEAD~1",
+            "HEAD",
+        ]
+        .as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            common::git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn diff_algorithm_flags_match_stock_git_for_supported_modes() {
     let repo = git_init();
     configure_identity(repo.path());

@@ -22,6 +22,66 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`diff` family color-word-diff and regex closure across the modeled local
+worktree, worktree-versus-HEAD, and tree-to-tree patch lanes. This batch
+added twelve exact stock-Git rows and the shared parser/runtime plumbing
+needed to carry `--color-words` and `--word-diff-regex` through `diff`,
+`diff-files`, `diff-index`, and `diff-tree`. The closure covers the bare
+color-word mode, the explicit `--color-words=<regex>` form, and direct
+`--word-diff-regex=<regex> --word-diff=plain` rendering on all four
+entrypoints. One parser distinction had to be made exact to match stock Git:
+bare `--color-words` now requires the equals form for an attached regex value
+so treeish and revision arguments are not consumed as the optional regex on
+the modeled local lanes.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_diff_compat diff_color_words_and_word_diff_regex_match_stock_git_for_diff_family -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2418 / 3212`
+- represented documented command-option pairs: `2418 / 3212`
+- matrix rows: `6623`
+- verified rows: `5811`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `794`
+
+Per-command position on the touched surface:
+
+- `diff`: `92 / 117` reviewed-complete documented option pairs,
+  `92 / 117` represented documented option pairs, `260` written rows, `260`
+  classified rows, `256` stock-matching rows, `4` invalid-input rows, and `0`
+  exact-open rows
+- `diff-files`: `91 / 118` reviewed-complete documented option pairs,
+  `91 / 118` represented documented option pairs, `111` written rows, `111`
+  classified rows, `111` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+- `diff-index`: `90 / 112` reviewed-complete documented option pairs,
+  `90 / 112` represented documented option pairs, `118` written rows, `118`
+  classified rows, `118` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+- `diff-tree`: `97 / 132` reviewed-complete documented option pairs,
+  `97 / 132` represented documented option pairs, `130` written rows, `130`
+  classified rows, `130` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move off this `diff` family
+runtime tail, because the new rows closed a coherent shared parser/runtime lane
+and left the remaining surface mostly as unrepresented documented-option
+expansion work. The largest remaining documented queues are now the mostly
+unrepresented `replay` (`117`), `pull` (`62`), `send-email` (`62`),
+`rebase` (`54`), `log` (`47`), `merge` (`43`), `rev-list` (`36`),
+`diff-tree` (`35`), `pack-objects` (`30`), and `diff-files` (`27`) tails.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `diff` family reviewed-complete promotion batch across the already represented
 local worktree, index, and tree-to-tree lanes. This batch changed no Rust
 behavior and added no new matrix rows; it harvested the thirty exact
@@ -46,7 +106,7 @@ and `git diff --check`.
 
 Actual durable readiness/status after this batch:
 
-- complete command matrices: `148 / 151`
+- complete command matrices: `146 / 151`
 - complete documented command-option pairs: `2410 / 3212`
 - represented documented command-option pairs: `2410 / 3212`
 - matrix rows: `6611`

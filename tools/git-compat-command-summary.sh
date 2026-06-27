@@ -144,8 +144,10 @@ awk -F'\t' -v format="$format" '
   }
   FILENAME ~ /complete-commands|reviewed_complete_command_matrices/ {
     if (FNR > 1 && $1 != "") {
-      complete[$1] = 1
-      complete_count++
+      if (!($1 in complete)) {
+        complete[$1] = 1
+        complete_count++
+      }
     }
     next
   }

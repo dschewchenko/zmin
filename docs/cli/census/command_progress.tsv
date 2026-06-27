@@ -1,14 +1,14 @@
 metric	count	total	note
-complete_command_matrices	148	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2410	3212	documented command-option pairs whose full behavior matrix is finished
+complete_command_matrices	146	151	only commands whose full behavior matrix is finished
+complete_doc_option_pairs	2418	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	2410	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	6611	6611	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	5799	6611	closed written rows only
-behavior_rows_classified	6586	6611	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	6611	written rows with incomplete parity
-behavior_rows_open	0	6611	written rows not implemented or not matching yet
-invalid_input_rows	787	6611	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	2418	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	6623	6623	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	5811	6623	closed written rows only
+behavior_rows_classified	6598	6623	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	6623	written rows with incomplete parity
+behavior_rows_open	0	6623	written rows not implemented or not matching yet
+invalid_input_rows	787	6623	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -49,10 +49,10 @@ cvsserver	8	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 daemon	27	13	13	48.1	14	14	100.0	13	92.9	0	0	1	yes
 describe	14	14	14	100.0	19	19	100.0	19	100.0	0	0	0	yes
 diagnose	5	5	5	100.0	5	5	100.0	5	100.0	0	0	0	yes
-diff	117	90	90	76.9	257	257	100.0	253	98.4	0	0	4	yes
-diff-files	118	89	89	75.4	108	108	100.0	108	100.0	0	0	0	yes
-diff-index	112	88	88	78.6	115	115	100.0	115	100.0	0	0	0	yes
-diff-tree	132	95	95	72.0	127	127	100.0	127	100.0	0	0	0	yes
+diff	117	92	92	78.6	260	260	100.0	256	98.5	0	0	4	yes
+diff-files	118	91	91	77.1	111	111	100.0	111	100.0	0	0	0	yes
+diff-index	112	90	90	80.4	118	118	100.0	118	100.0	0	0	0	yes
+diff-tree	132	97	97	73.5	130	130	100.0	130	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
 fast-export	18	0	0	0.0	7	7	100.0	4	57.1	0	0	3	yes
 fast-import	19	1	1	5.3	11	11	100.0	8	72.7	0	0	3	yes

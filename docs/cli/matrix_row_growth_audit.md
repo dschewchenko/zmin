@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local `diff`
+family color-word-diff and regex closure across the modeled local patch lanes.
+The selected change added twelve exact stock-Git rows for `diff`,
+`diff-files`, `diff-index`, and `diff-tree` covering bare `--color-words`,
+explicit `--color-words=[a-z]+`, and
+`--word-diff-regex=[a-z]+ --word-diff=plain`, plus the shared parser/runtime
+closure needed to thread `color_words` and `word_diff_regex` through both
+porcelain and plumbing render paths without widening unrelated diff behavior.
+Actual delta is `+12` matrix rows, `+8` complete documented option pairs, `+8`
+represented documented option pairs, `+12` verified rows, `+0` invalid-input
+rows, and `+0` complete command matrices. Current census counts are `6623`
+matrix rows, `5811` verified rows, `787` invalid-input rows, `0` exact-open
+rows, `146/151` complete command matrices, `2418/3212` complete documented
+option pairs, and `2418/3212` represented documented option pairs. The
+touched commands now sit at `92/117` reviewed-complete option pairs for
+`diff`, `91/118` for `diff-files`, `90/112` for `diff-index`, and `97/132`
+for `diff-tree`, with zero exact-open rows across all four modeled surfaces.
+The next default follow-up should move off this runtime tail and reselect from
+the refreshed backlog head, because the remaining `diff*` work is now mostly
+unrepresented documented-option expansion rather than another dense shared
+behavior lane.
+
 As of 2026-06-27 the latest completed batch is a helper-free shared `diff*`
 parser-and-evidence closure for `--output` and plumbing `--line-prefix`. The
 selected change added seven exact stock-Git rows for `diff --output`,

@@ -19,7 +19,18 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         .map(parse_diff_filter)
         .transpose()?
         .unwrap_or_default();
-    let word_diff = parse_word_diff_option(options.word_diff.as_deref())?;
+    let word_diff = parse_word_diff_option(
+        options
+            .color_words
+            .as_deref()
+            .map(|_| "color")
+            .or(options.word_diff.as_deref()),
+    )?;
+    let word_diff_regex = options
+        .color_words
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .or(options.word_diff_regex.as_deref());
     let ignore_submodules = parse_ignore_submodules_mode(options.ignore_submodules.as_deref())?;
     let abbrev_len = parse_diff_abbrev_len(options.abbrev.as_deref(), options.no_abbrev)?;
     let patch_abbrev_len = if options.full_index && !options.no_full_index {
@@ -111,6 +122,7 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         exit_code: options.exit_code,
         raw_abbrev_len: abbrev_len,
         word_diff,
+        word_diff_regex: word_diff_regex.map(str::to_owned),
         patch_abbrev_len,
         old_prefix,
         new_prefix,
@@ -490,7 +502,13 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         .map(parse_diff_filter)
         .transpose()?
         .unwrap_or_default();
-    let word_diff = parse_word_diff_option(options.word_diff.as_deref())?;
+    let word_diff = parse_word_diff_option(
+        options
+            .color_words
+            .as_deref()
+            .map(|_| "color")
+            .or(options.word_diff.as_deref()),
+    )?;
     let render_options = plumbing_render_options(&options)?;
     let render_options = DiffRenderOptions {
         word_diff,
@@ -648,7 +666,13 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         .map(parse_diff_filter)
         .transpose()?
         .unwrap_or_default();
-    let word_diff = parse_word_diff_option(options.word_diff.as_deref())?;
+    let word_diff = parse_word_diff_option(
+        options
+            .color_words
+            .as_deref()
+            .map(|_| "color")
+            .or(options.word_diff.as_deref()),
+    )?;
     let render_options = plumbing_render_options(&options)?;
     let render_options = DiffRenderOptions {
         word_diff,
@@ -758,7 +782,13 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         .map(parse_diff_filter)
         .transpose()?
         .unwrap_or_default();
-    let word_diff = parse_word_diff_option(options.word_diff.as_deref())?;
+    let word_diff = parse_word_diff_option(
+        options
+            .color_words
+            .as_deref()
+            .map(|_| "color")
+            .or(options.word_diff.as_deref()),
+    )?;
     let render_options = plumbing_render_options(&options)?;
     let render_options = DiffRenderOptions {
         word_diff,
@@ -1231,6 +1261,7 @@ pub(crate) fn diff_pairs(options: DiffPairsOptions) -> Result<()> {
         exit_code: false,
         raw_abbrev_len: Some(GitHashAlgorithm::Sha1.digest_len() * 2),
         word_diff,
+        word_diff_regex: None,
         patch_abbrev_len: None,
         old_prefix: "a/".to_owned(),
         new_prefix: "b/".to_owned(),
@@ -1293,6 +1324,7 @@ pub(crate) fn diff_pairs(options: DiffPairsOptions) -> Result<()> {
                 exit_code: render_options.exit_code,
                 raw_abbrev_len: render_options.raw_abbrev_len,
                 word_diff: render_options.word_diff,
+                word_diff_regex: render_options.word_diff_regex.clone(),
                 patch_abbrev_len: render_options.patch_abbrev_len,
                 old_prefix: render_options.old_prefix.clone(),
                 new_prefix: render_options.new_prefix.clone(),
