@@ -2791,18 +2791,30 @@ pub enum Command {
         ignore_matching_lines: Vec<String>,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
+        #[arg(long = "ext-diff", action = ArgAction::SetTrue)]
+        ext_diff: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
+        #[arg(long = "textconv", action = ArgAction::SetTrue)]
+        textconv: bool,
         #[arg(short = 'a', long = "text", action = ArgAction::SetTrue)]
         text: bool,
         #[arg(long = "color", num_args = 0..=1, default_missing_value = "always")]
         color: Option<String>,
         #[arg(long = "no-color", action = ArgAction::SetTrue)]
         no_color: bool,
+        #[arg(long = "color-moved", action = ArgAction::SetTrue)]
+        color_moved: bool,
+        #[arg(long = "color-moved-ws", num_args = 0..=1, default_missing_value = "")]
+        color_moved_ws: Option<String>,
         #[arg(long = "no-color-moved", action = ArgAction::SetTrue)]
         no_color_moved: bool,
         #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
         no_color_moved_ws: bool,
+        #[arg(long = "indent-heuristic", action = ArgAction::SetTrue)]
+        indent_heuristic: bool,
+        #[arg(long = "no-indent-heuristic", action = ArgAction::SetTrue)]
+        no_indent_heuristic: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -2971,16 +2983,32 @@ pub enum Command {
         text: bool,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
+        #[arg(long = "ext-diff", action = ArgAction::SetTrue)]
+        ext_diff: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
+        #[arg(long = "textconv", action = ArgAction::SetTrue)]
+        textconv: bool,
         #[arg(long = "color", num_args = 0..=1, default_missing_value = "always")]
         color: Option<String>,
         #[arg(long = "no-color", action = ArgAction::SetTrue)]
         no_color: bool,
+        #[arg(long = "color-moved", action = ArgAction::SetTrue)]
+        color_moved: bool,
+        #[arg(long = "color-moved-ws", num_args = 0..=1, default_missing_value = "")]
+        color_moved_ws: Option<String>,
         #[arg(long = "no-color-moved", action = ArgAction::SetTrue)]
         no_color_moved: bool,
         #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
         no_color_moved_ws: bool,
+        #[arg(long = "indent-heuristic", action = ArgAction::SetTrue)]
+        indent_heuristic: bool,
+        #[arg(long = "no-indent-heuristic", action = ArgAction::SetTrue)]
+        no_indent_heuristic: bool,
+        #[arg(long = "rename-empty", action = ArgAction::SetTrue)]
+        rename_empty: bool,
+        #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
+        no_rename_empty: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -3121,16 +3149,32 @@ pub enum Command {
         text: bool,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
+        #[arg(long = "ext-diff", action = ArgAction::SetTrue)]
+        ext_diff: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
+        #[arg(long = "textconv", action = ArgAction::SetTrue)]
+        textconv: bool,
         #[arg(long = "color", num_args = 0..=1, default_missing_value = "always")]
         color: Option<String>,
         #[arg(long = "no-color", action = ArgAction::SetTrue)]
         no_color: bool,
+        #[arg(long = "color-moved", action = ArgAction::SetTrue)]
+        color_moved: bool,
+        #[arg(long = "color-moved-ws", num_args = 0..=1, default_missing_value = "")]
+        color_moved_ws: Option<String>,
         #[arg(long = "no-color-moved", action = ArgAction::SetTrue)]
         no_color_moved: bool,
         #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
         no_color_moved_ws: bool,
+        #[arg(long = "indent-heuristic", action = ArgAction::SetTrue)]
+        indent_heuristic: bool,
+        #[arg(long = "no-indent-heuristic", action = ArgAction::SetTrue)]
+        no_indent_heuristic: bool,
+        #[arg(long = "rename-empty", action = ArgAction::SetTrue)]
+        rename_empty: bool,
+        #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
+        no_rename_empty: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -3276,16 +3320,32 @@ pub enum Command {
         text: bool,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
+        #[arg(long = "ext-diff", action = ArgAction::SetTrue)]
+        ext_diff: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
+        #[arg(long = "textconv", action = ArgAction::SetTrue)]
+        textconv: bool,
         #[arg(long = "color", num_args = 0..=1, default_missing_value = "always")]
         color: Option<String>,
         #[arg(long = "no-color", action = ArgAction::SetTrue)]
         no_color: bool,
+        #[arg(long = "color-moved", action = ArgAction::SetTrue)]
+        color_moved: bool,
+        #[arg(long = "color-moved-ws", num_args = 0..=1, default_missing_value = "")]
+        color_moved_ws: Option<String>,
         #[arg(long = "no-color-moved", action = ArgAction::SetTrue)]
         no_color_moved: bool,
         #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
         no_color_moved_ws: bool,
+        #[arg(long = "indent-heuristic", action = ArgAction::SetTrue)]
+        indent_heuristic: bool,
+        #[arg(long = "no-indent-heuristic", action = ArgAction::SetTrue)]
+        no_indent_heuristic: bool,
+        #[arg(long = "rename-empty", action = ArgAction::SetTrue)]
+        rename_empty: bool,
+        #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
+        no_rename_empty: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -5859,12 +5919,18 @@ pub struct DiffOptions {
     pub ignore_blank_lines: bool,
     pub ignore_matching_lines: Vec<String>,
     pub no_ext_diff: bool,
+    pub ext_diff: bool,
     pub no_textconv: bool,
+    pub textconv: bool,
     pub text: bool,
     pub color: Option<String>,
     pub no_color: bool,
+    pub color_moved: bool,
+    pub color_moved_ws: Option<String>,
     pub no_color_moved: bool,
     pub no_color_moved_ws: bool,
+    pub indent_heuristic: bool,
+    pub no_indent_heuristic: bool,
     pub quiet: bool,
     pub exit_code: bool,
     pub paths: Vec<PathBuf>,
@@ -5938,12 +6004,18 @@ impl Default for DiffOptions {
             ignore_blank_lines: false,
             ignore_matching_lines: Vec::new(),
             no_ext_diff: false,
+            ext_diff: false,
             no_textconv: false,
+            textconv: false,
             text: false,
             color: None,
             no_color: false,
+            color_moved: false,
+            color_moved_ws: None,
             no_color_moved: false,
             no_color_moved_ws: false,
+            indent_heuristic: false,
+            no_indent_heuristic: false,
             quiet: false,
             exit_code: false,
             paths: Vec::new(),
@@ -6018,11 +6090,19 @@ pub struct PlumbingDiffOptions {
     pub ignore_matching_lines: Vec<String>,
     pub text: bool,
     pub no_ext_diff: bool,
+    pub ext_diff: bool,
     pub no_textconv: bool,
+    pub textconv: bool,
     pub color: Option<String>,
     pub no_color: bool,
+    pub color_moved: bool,
+    pub color_moved_ws: Option<String>,
     pub no_color_moved: bool,
     pub no_color_moved_ws: bool,
+    pub indent_heuristic: bool,
+    pub no_indent_heuristic: bool,
+    pub rename_empty: bool,
+    pub no_rename_empty: bool,
     pub quiet: bool,
     pub exit_code: bool,
     pub pretty: Option<String>,

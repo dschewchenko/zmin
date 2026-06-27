@@ -126,10 +126,16 @@ run_gap() {
 }
 
 run_case diff_compact_summary make_worktree_repo diff --stat --compact-summary
+run_case diff_color_moved make_worktree_repo diff --color-moved
+run_case diff_color_moved_ws make_worktree_repo diff --color-moved-ws=ignore-space-change
 run_case diff_default_prefix make_worktree_repo diff --default-prefix
+run_case diff_ext_diff make_worktree_repo diff --ext-diff
 run_case diff_ignore_blank_lines make_worktree_repo diff --ignore-blank-lines
+run_case diff_indent_heuristic make_worktree_repo diff --indent-heuristic
+run_case diff_no_indent_heuristic make_worktree_repo diff --no-indent-heuristic
 run_case diff_no_color_moved_ws make_worktree_repo diff --no-color-moved-ws
 run_case diff_no_full_index make_worktree_repo diff --raw --no-full-index
 run_case diff_no_renames make_rename_repo diff --cached --name-status --no-renames
 run_case diff_reverse_long make_worktree_repo diff --reverse -p
+run_case diff_textconv make_worktree_repo diff --textconv
 run_case diff_dense_combined make_merge_repo diff --cc HEAD

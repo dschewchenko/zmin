@@ -75,9 +75,12 @@ run_case() {
 
 run_case diff_index_anchored diff-index -p --anchored=common HEAD
 run_case diff_index_binary diff-index -p --binary HEAD
+run_case diff_index_color_moved diff-index -p --color-moved HEAD
+run_case diff_index_color_moved_ws diff-index -p --color-moved-ws=ignore-space-change HEAD
 run_case diff_index_color diff-index -p --color=never HEAD
 run_case diff_index_compact_summary diff-index --stat --compact-summary HEAD
 run_case diff_index_default_prefix diff-index -p --default-prefix HEAD
+run_case diff_index_ext_diff diff-index -p --ext-diff HEAD
 run_case diff_index_find_copies_long diff-index --name-status --find-copies=50% HEAD
 run_case diff_index_find_copies_harder diff-index --name-status --find-copies-harder HEAD
 run_case diff_index_find_renames_long diff-index --name-status --find-renames=50% HEAD
@@ -87,12 +90,15 @@ run_case diff_index_ignore_blank_lines diff-index -p --ignore-blank-lines HEAD
 run_case diff_index_ignore_cr_at_eol diff-index -p --ignore-cr-at-eol HEAD
 run_case diff_index_ignore_matching_lines_long diff-index -p --ignore-matching-lines=common HEAD
 run_case diff_index_ignore_space_at_eol diff-index -p --ignore-space-at-eol HEAD
+run_case diff_index_indent_heuristic diff-index -p --indent-heuristic HEAD
 run_case diff_index_irreversible_delete_long diff-index -p --irreversible-delete HEAD
 run_case diff_index_minimal diff-index -p --minimal HEAD
 run_case diff_index_no_color diff-index -p --color=always --no-color HEAD
 run_case diff_index_no_color_moved_ws diff-index -p --no-color-moved-ws HEAD
+run_case diff_index_no_indent_heuristic diff-index -p --no-indent-heuristic HEAD
 run_case diff_index_no_ext_diff diff-index -p --no-ext-diff HEAD
 run_case diff_index_no_full_index diff-index --raw --no-full-index HEAD
+run_case diff_index_no_rename_empty diff-index --name-status --no-rename-empty HEAD
 run_case diff_index_no_prefix diff-index -p --no-prefix HEAD
 run_case diff_index_no_relative diff-index --relative=sub --no-relative --name-only HEAD
 run_case diff_index_no_textconv diff-index -p --no-textconv HEAD
@@ -101,10 +107,12 @@ run_case diff_index_patch_long diff-index --patch HEAD
 run_case diff_index_pickaxe_all diff-index -Sneedle --pickaxe-all --name-only HEAD
 run_case diff_index_pickaxe_regex diff-index -Sneed.e --pickaxe-regex --name-only HEAD
 run_case diff_index_quiet diff-index --quiet HEAD
+run_case diff_index_rename_empty diff-index --name-status --rename-empty HEAD
 run_case diff_index_root diff-index --root HEAD
 run_case diff_index_shortstat diff-index --shortstat HEAD
 run_case diff_index_skip_to diff-index --skip-to=b.txt --name-only HEAD
 run_case diff_index_summary diff-index --summary HEAD
+run_case diff_index_textconv diff-index -p --textconv HEAD
 run_case diff_index_text_long diff-index -p --text HEAD
 run_case diff_index_word_diff diff-index --word-diff=plain -p HEAD
 run_case diff_index_pickaxe_G diff-index -Gchanged --name-only HEAD

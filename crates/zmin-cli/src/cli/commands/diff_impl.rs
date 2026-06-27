@@ -70,10 +70,16 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     let color_mode = parse_diff_color_option(options.color.as_deref(), options.no_color)?;
     let _accepted_noops = (
         options.no_ext_diff,
+        options.ext_diff,
         options.no_textconv,
+        options.textconv,
+        options.color_moved,
+        options.color_moved_ws.as_deref(),
         options.no_color,
         options.no_color_moved,
         options.no_color_moved_ws,
+        options.indent_heuristic,
+        options.no_indent_heuristic,
         options.dense_combined,
     );
     let repo = find_repo()?;
