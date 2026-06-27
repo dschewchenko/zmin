@@ -746,12 +746,18 @@ fn format_patch_word_diff_order_and_reverse_family_matches_stock_git() {
     let repo = format_patch_multi_file_fixture_repo();
     write_file(repo.path(), "order.txt", "beta.txt\nalpha.txt\n");
     let cases: Vec<Vec<String>> = vec![
+        vec!["--word-diff".into()],
         vec!["--word-diff=plain".into()],
         vec!["--word-diff=porcelain".into()],
+        vec!["--word-diff=none".into()],
         vec!["--submodule=log".into()],
+        vec!["--submodule=short".into()],
+        vec!["--submodule=diff".into()],
         vec!["-O".into(), "order.txt".into()],
         vec!["--skip-to=beta.txt".into()],
         vec!["--rotate-to=beta.txt".into()],
+        vec!["-O".into(), "order.txt".into(), "--skip-to=beta.txt".into()],
+        vec!["-O".into(), "order.txt".into(), "--rotate-to=beta.txt".into()],
         vec!["-R".into()],
     ];
 
@@ -809,7 +815,9 @@ fn format_patch_prefix_null_and_dirstat_family_matches_stock_git() {
 
     let nested_cases: Vec<Vec<String>> = vec![
         vec!["--dirstat".into()],
+        vec!["--dirstat=files".into()],
         vec!["--dirstat=files,0".into()],
+        vec!["--dirstat=files,10".into()],
         vec!["--dirstat-by-file".into()],
     ];
     for extra in nested_cases {

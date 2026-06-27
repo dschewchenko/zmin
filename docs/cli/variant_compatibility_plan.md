@@ -22,6 +22,56 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` expansion-evidence closure across the existing multi-file and
+nested-directory single-commit stdout mail-series lanes. This batch did not
+change runtime code; it raised exact stock-Git coverage density for already
+implemented shared-diff options by adding rows for bare `--word-diff`,
+`--word-diff=none`, `--submodule=short`, `--submodule=diff`, composed
+`-O order.txt` plus `--skip-to=beta.txt`, composed `-O order.txt` plus
+`--rotate-to=beta.txt`, composed `--no-prefix -z`, and the additional
+directory-stat values `--dirstat=files` and `--dirstat=files,10`. One probed
+candidate was explicitly left out of the closure: `--word-diff=color` is not
+helper-free compatible yet because stock Git also colorizes diff headers and
+diffstat, while the current renderer only colors word hunks.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_word_diff_order_and_reverse_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_prefix_null_and_dirstat_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2307 / 3212`
+- matrix rows: `6466`
+- verified rows: `5654`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `131 / 162` reviewed-complete documented option pairs,
+  `141 / 162` represented documented option pairs, `162` written rows, `162`
+  classified rows, `162` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should still stay on `format-patch`,
+but now the remaining work is more sharply split between true implementation
+tails and non-helper-free render gaps. The remaining implemented-but-unverified
+surface is still led by `--word-diff-regex`, while the documented helper-free
+schema holes are concentrated around `--base`, `--color-words`,
+`--combined-all-paths`, `--cover-from-description`, `--creation-factor`,
+`--dd`, `--description-file`, `--diff-merges`, `--interdiff`, `-X`, `-c`,
+`-m`, and `-t`. `--word-diff=color` should not be reselected as an
+evidence-only row; it needs real colorized mail-render parity first.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` prefix/null/dirstat closure across the modeled single-commit
 stdout mail-series lanes. This batch added exact stock-Git matrix evidence for
 `--no-prefix`, `-z`, `--dirstat`, `--dirstat=files,0`, and
