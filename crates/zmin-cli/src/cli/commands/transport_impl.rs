@@ -9123,6 +9123,12 @@ pub(crate) fn run_ls_remote(
     heads: bool,
     tags: bool,
     refs_only: bool,
+    quiet: bool,
+    get_url: bool,
+    symref: bool,
+    exit_code: bool,
+    server_option: Vec<String>,
+    sort: Option<String>,
     upload_pack: Option<String>,
     repository: Option<String>,
     patterns: Vec<String>,
@@ -9136,36 +9142,58 @@ pub(crate) fn run_ls_remote(
         Some(repo) if remote_exists(repo, &repository)? => remote_url(repo, &repository)?,
         _ => repository.clone(),
     };
+    if get_url {
+        println!("{url}");
+        return Ok(());
+    }
+    let _accepted_noops = (quiet, server_option);
     if is_http_transport_url(&url) {
         let parsed_url = parsed_http_url_with_extra_headers(repo.as_ref(), &url)?;
-        let rows = if parsed_url.scheme == HttpScheme::Http {
-            http_ls_remote_rows_direct(&parsed_url, heads, tags, refs_only, &patterns)?
+        let (mut rows, head_branch) = if parsed_url.scheme == HttpScheme::Http {
+            discover_http_refs(
+                &parsed_url,
+                HttpDiscoveryTransport::Direct,
+                heads,
+                tags,
+                refs_only,
+                &patterns,
+            )?
         } else {
             let mut helper = RemoteHttpHelperSession::spawn(&parsed_url)?;
-            let (rows, _) = discover_http_refs(
+            discover_http_refs(
                 &parsed_url,
                 HttpDiscoveryTransport::Helper(&mut helper),
                 heads,
                 tags,
                 refs_only,
                 &patterns,
-            )?;
-            rows
+            )?
         };
+        sort_ls_remote_rows(&mut rows, sort.as_deref())?;
+        if symref && !refs_only && let Some(branch) = head_branch {
+            println!("ref: refs/heads/{branch}\tHEAD");
+        }
+        if exit_code && rows_is_empty_for_exit_code(&patterns, &rows) {
+            return Err(CliError::Exit(2));
+        }
         for row in rows {
             println!("{}\t{}", row.id.to_hex(), row.name);
         }
         return Ok(());
     }
     if is_git_daemon_transport_url(&url) {
-        let rows = daemon_ls_remote_rows(&url, heads, tags, refs_only, &patterns)?;
+        let mut rows = daemon_ls_remote_rows(&url, heads, tags, refs_only, &patterns)?;
+        sort_ls_remote_rows(&mut rows, sort.as_deref())?;
+        if exit_code && rows_is_empty_for_exit_code(&patterns, &rows) {
+            return Err(CliError::Exit(2));
+        }
         for row in rows {
             println!("{}\t{}", row.id.to_hex(), row.name);
         }
         return Ok(());
     }
     if is_ssh_transport_url(&url) {
-        let rows = ssh_ls_remote_rows_with_upload_pack(
+        let mut rows = ssh_ls_remote_rows_with_upload_pack(
             &url,
             heads,
             tags,
@@ -9173,6 +9201,10 @@ pub(crate) fn run_ls_remote(
             &patterns,
             upload_pack.as_deref(),
         )?;
+        sort_ls_remote_rows(&mut rows, sort.as_deref())?;
+        if exit_code && rows_is_empty_for_exit_code(&patterns, &rows) {
+            return Err(CliError::Exit(2));
+        }
         for row in rows {
             println!("{}\t{}", row.id.to_hex(), row.name);
         }
@@ -9182,7 +9214,7 @@ pub(crate) fn run_ls_remote(
         return Err(unsupported_remote_helper_error(&url, String::new()));
     };
     let remote = source_path.to_string_lossy().to_string();
-    let rows = if let Some(upload_pack) = upload_pack.as_deref() {
+    let mut rows = if let Some(upload_pack) = upload_pack.as_deref() {
         local_upload_pack_ls_remote_rows(upload_pack, &remote, heads, tags, refs_only, &patterns)?
     } else {
         let discovery = CliTransportAdapter
@@ -9200,8 +9232,48 @@ pub(crate) fn run_ls_remote(
         }
         rows
     };
+    sort_ls_remote_rows(&mut rows, sort.as_deref())?;
+    if symref
+        && !refs_only
+        && let Ok(remote_repo) = upload_pack_repo_from_path(&source_path, false)
+        && let Some(target) = local_ls_remote_head_symref(&remote_repo)?
+    {
+        println!("ref: {target}\tHEAD");
+    }
+    if exit_code && rows_is_empty_for_exit_code(&patterns, &rows) {
+        return Err(CliError::Exit(2));
+    }
     for row in rows {
         println!("{}\t{}", row.id.to_hex(), row.name);
+    }
+    Ok(())
+}
+
+fn rows_is_empty_for_exit_code(patterns: &[String], rows: &[LsRemoteRow]) -> bool {
+    !patterns.is_empty() && rows.is_empty()
+}
+
+fn local_ls_remote_head_symref(repo: &GitRepo) -> Result<Option<String>> {
+    let head = fs::read_to_string(repo.git_dir.join("HEAD")).map_err(CliError::Io)?;
+    Ok(head
+        .trim()
+        .strip_prefix("ref: ")
+        .map(str::to_owned))
+}
+
+fn sort_ls_remote_rows(rows: &mut [LsRemoteRow], sort: Option<&str>) -> Result<()> {
+    let Some(sort) = sort else {
+        return Ok(());
+    };
+    match sort {
+        "refname" => rows.sort_by(|left, right| left.name.cmp(&right.name)),
+        "-refname" => rows.sort_by(|left, right| right.name.cmp(&left.name)),
+        _ => {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("unsupported ls-remote sort key: {sort}"),
+            });
+        }
     }
     Ok(())
 }

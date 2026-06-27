@@ -11,6 +11,29 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local `ls-remote`
+option-family expansion across the configured-local bare-remote lane. The
+selected change added thirteen exact stock-Git rows for `--branches`, `-b`,
+`--quiet`, `-q`, `--get-url`, `--symref`, `--exit-code` on both matching and
+missing-pattern lanes, `--server-option=foo`, `-o foo`, `--sort=refname`,
+`--sort=-refname`, and `-t`. The runtime closure stayed intentionally narrow:
+the `ls-remote` schema now accepts the missing spellings, the shared transport
+entry path threads `get-url`, `symref`, `refname` sorting, and pattern-gated
+`exit-code`, and the helper-free local lane treats quiet plus server-option as
+the same stock-compatible no-op observed in Git. Actual delta is `+13` matrix
+rows, `+0` complete documented option pairs, `+11` represented documented
+option pairs, `+12` verified rows, `+1` invalid-input row, and `+0` complete
+command matrices. Current census counts are `6786` matrix rows, `5948`
+verified rows, `813` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2523/3212` complete documented option
+pairs, and `2548/3212` represented documented option pairs. `ls-remote` now
+sits at `14/14` represented documented option pairs with `50/50` classified
+rows, but only `3/14` reviewed-complete documented option pairs. This remains
+an expansion batch rather than a reviewed-complete closure; the next default
+follow-up should widen the same option family across the already modeled HTTP,
+SSH, git-daemon, and file/local non-helper lanes so those documented
+`ls-remote` pairs can move from represented to reviewed-complete.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `diff*`
 dirstat value-form expansion across the existing treeish-pair, tree-to-tree,
 and dirty-worktree nested-directory lanes. The selected change added twenty-four

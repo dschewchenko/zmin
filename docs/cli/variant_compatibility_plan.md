@@ -22,6 +22,56 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`ls-remote` option-family expansion across the existing configured-local
+bare-remote lane. This batch added thirteen exact stock-Git rows for
+`--branches`, `-b`, `--quiet`, `-q`, `--get-url`, `--symref`,
+`--exit-code origin main`, `--exit-code origin no-such*`,
+`--server-option=foo`, `-o foo`, `--sort=refname`, `--sort=-refname`, and
+`-t`. The runtime change stayed intentionally bounded: `ls-remote` now accepts
+the missing option spellings in schema/dispatch, treats local-lane quiet and
+server-option as stock-compatible no-ops, supports `--get-url`, symbolic HEAD
+output, `refname` sorting, and pattern-gated `--exit-code` handling, and keeps
+those semantics aligned across the shared HTTP, SSH, git-daemon, and local
+transport entry paths.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_transport_local_compat ls_remote_option_family_matches_stock_git_for_local_remotes -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat ls_remote -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote -- --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(ls-remote|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2523 / 3212`
+- represented documented command-option pairs: `2548 / 3212`
+- matrix rows: `6786`
+- verified rows: `5948`
+- invalid-input rows: `813`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `689`
+- implemented but unverified rows: `25`
+
+Per-command position on the touched surface:
+
+- `ls-remote`: `3 / 14` reviewed-complete documented option pairs,
+  `14 / 14` represented documented option pairs, `50` written rows, `50`
+  classified rows, `45` stock-matching rows, `5` invalid-input rows, and `0`
+  exact-open rows
+
+This is a representation-expansion batch rather than a reviewed-complete
+closure: it moved every documented `ls-remote` option into the matrix and
+closed the helper-free local lane for the missing family, but the command still
+needs the same option family widened across the existing non-local transport
+lanes before those documented option pairs can be promoted into the durable
+reviewed-complete census list.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `diff*` dirstat value-form expansion across the existing treeish-pair,
 tree-to-tree, and dirty-worktree nested-directory lanes. This batch added
 twenty-four exact stock-Git rows for `-X10`, `--dirstat=files`,

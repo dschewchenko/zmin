@@ -1644,12 +1644,30 @@ pub enum Command {
         command: Option<RemoteCommand>,
     },
     LsRemote {
-        #[arg(long = "heads", alias = "branches", action = ArgAction::SetTrue)]
+        #[arg(long = "branches", action = ArgAction::SetTrue)]
+        branches: bool,
+        #[arg(short = 'b', action = ArgAction::SetTrue)]
+        branches_short: bool,
+        #[arg(long = "heads", action = ArgAction::SetTrue)]
         heads: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        tags_short: bool,
         #[arg(long = "tags", action = ArgAction::SetTrue)]
         tags: bool,
         #[arg(long = "refs", action = ArgAction::SetTrue)]
         refs_only: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "get-url", action = ArgAction::SetTrue)]
+        get_url: bool,
+        #[arg(long = "symref", action = ArgAction::SetTrue)]
+        symref: bool,
+        #[arg(long = "exit-code", action = ArgAction::SetTrue)]
+        exit_code: bool,
+        #[arg(short = 'o', long = "server-option")]
+        server_option: Vec<String>,
+        #[arg(long = "sort")]
+        sort: Option<String>,
         #[arg(long = "upload-pack")]
         upload_pack: Option<String>,
         repository: Option<String>,

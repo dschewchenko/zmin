@@ -11024,6 +11024,70 @@ fn ls_remote_matches_stock_git_for_local_remotes() {
 }
 
 #[test]
+fn ls_remote_option_family_matches_stock_git_for_local_remotes() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write fixture");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["branch", "feature"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "tag message"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+
+    let cases = [
+        ("ls-remote --branches", vec!["ls-remote", "--branches", "origin"]),
+        ("ls-remote -b", vec!["ls-remote", "-b", "origin"]),
+        ("ls-remote --quiet", vec!["ls-remote", "--quiet", "origin"]),
+        ("ls-remote -q", vec!["ls-remote", "-q", "origin"]),
+        ("ls-remote --get-url", vec!["ls-remote", "--get-url", "origin"]),
+        ("ls-remote --symref", vec!["ls-remote", "--symref", "origin"]),
+        (
+            "ls-remote --exit-code match",
+            vec!["ls-remote", "--exit-code", "origin", "main"],
+        ),
+        (
+            "ls-remote --exit-code miss",
+            vec!["ls-remote", "--exit-code", "origin", "no-such*"],
+        ),
+        (
+            "ls-remote --server-option=foo",
+            vec!["ls-remote", "--server-option=foo", "origin"],
+        ),
+        ("ls-remote -o foo", vec!["ls-remote", "-o", "foo", "origin"]),
+        (
+            "ls-remote --sort=refname",
+            vec!["ls-remote", "--sort=refname", "origin"],
+        ),
+        (
+            "ls-remote --sort=-refname",
+            vec!["ls-remote", "--sort=-refname", "origin"],
+        ),
+        ("ls-remote -t", vec!["ls-remote", "-t", "origin"]),
+    ];
+
+    for (label, args) in cases {
+        let git_output = command_any_output("git", &work, &args, label);
+        let zmin_output = command_any_output(zmin_bin(), &work, &args, label);
+        assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+        assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+        assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
+    }
+}
+
+#[test]
 fn ls_remote_reads_local_gitfile_repository_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote");
