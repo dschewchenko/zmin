@@ -1,6 +1,7 @@
 mod common;
 
 use std::fs;
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::process::{Command, Stdio};
 
@@ -117,6 +118,60 @@ fn assert_demand_hydrate_config(repo: &std::path::Path) {
             ["config", "--get", "zmin.worktreeFirstDemandHydrateRemote"]
         ),
         "origin"
+    );
+}
+
+fn command_any_output_with_env(
+    command: &str,
+    cwd: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    label: &str,
+) -> (i32, String, String) {
+    let program = if command == "git" {
+        stock_git_bin().as_os_str().to_owned()
+    } else {
+        OsString::from(command)
+    };
+    let mut process = Command::new(program);
+    process.args(args).current_dir(cwd);
+    for (key, value) in envs {
+        process.env(key, value);
+    }
+    let output = process
+        .output()
+        .unwrap_or_else(|err| panic!("run {label}: {err}"));
+    (
+        output.status.code().expect("process exit code"),
+        String::from_utf8(output.stdout)
+            .expect("stdout utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+        String::from_utf8(output.stderr)
+            .expect("stderr utf8")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
+
+fn assert_any_ls_remote_output_matches_stock_git(cwd: &std::path::Path, args: &[&str], label: &str) {
+    assert_eq!(
+        command_any_output(zmin_bin(), cwd, args, label),
+        command_any_output("git", cwd, args, label),
+        "{label}: {args:?}"
+    );
+}
+
+fn assert_any_ls_remote_output_matches_stock_git_with_env(
+    cwd: &std::path::Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    label: &str,
+) {
+    assert_eq!(
+        command_any_output_with_env(zmin_bin(), cwd, args, envs, label),
+        command_any_output_with_env("git", cwd, args, envs, label),
+        "{label}: {args:?}"
     );
 }
 
@@ -1985,6 +2040,69 @@ fn ls_remote_reads_git_daemon_remote_like_stock_git() {
 }
 
 #[test]
+fn ls_remote_option_family_matches_stock_git_for_git_daemon_remote() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write a");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["branch", "feature"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "tag"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+    set_bare_head_to_main(&remote);
+
+    let port = unused_local_port();
+    let _daemon = StockGitDaemon::spawn(dir.path(), port);
+    let url = format!("git://127.0.0.1:{port}/remote.git");
+    for (label, args) in [
+        ("ls-remote --branches daemon", vec!["ls-remote", "--branches", url.as_str()]),
+        ("ls-remote -b daemon", vec!["ls-remote", "-b", url.as_str()]),
+        ("ls-remote --quiet daemon", vec!["ls-remote", "--quiet", url.as_str()]),
+        ("ls-remote -q daemon", vec!["ls-remote", "-q", url.as_str()]),
+        ("ls-remote --get-url daemon", vec!["ls-remote", "--get-url", url.as_str()]),
+        ("ls-remote --symref daemon", vec!["ls-remote", "--symref", url.as_str()]),
+        (
+            "ls-remote --exit-code match daemon",
+            vec!["ls-remote", "--exit-code", url.as_str(), "main"],
+        ),
+        (
+            "ls-remote --exit-code miss daemon",
+            vec!["ls-remote", "--exit-code", url.as_str(), "no-such*"],
+        ),
+        (
+            "ls-remote --server-option=foo daemon",
+            vec!["ls-remote", "--server-option=foo", url.as_str()],
+        ),
+        ("ls-remote -o foo daemon", vec!["ls-remote", "-o", "foo", url.as_str()]),
+        (
+            "ls-remote --sort=refname daemon",
+            vec!["ls-remote", "--sort=refname", url.as_str()],
+        ),
+        (
+            "ls-remote --sort=-refname daemon",
+            vec!["ls-remote", "--sort=-refname", url.as_str()],
+        ),
+        ("ls-remote -t daemon", vec!["ls-remote", "-t", url.as_str()]),
+    ] {
+        assert_any_ls_remote_output_matches_stock_git(dir.path(), &args, label);
+    }
+}
+
+#[test]
 fn fetch_reads_git_daemon_remote_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -2367,6 +2485,69 @@ fn ls_remote_reads_ssh_remote_like_stock_git() {
             .1,
             "args: {args:?}"
         );
+    }
+}
+
+#[test]
+fn ls_remote_option_family_matches_stock_git_for_ssh_remote() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write a");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["branch", "feature"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "tag"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+    set_bare_head_to_main(&remote);
+
+    let fake_ssh = write_fake_ssh(dir.path());
+    let fake_ssh_arg = fake_ssh_command_arg(&fake_ssh);
+    let ssh_url = ssh_url_for_remote(&remote);
+    let envs = [("GIT_SSH_COMMAND", fake_ssh_arg.as_str())];
+    for (label, args) in [
+        ("ls-remote --branches ssh", vec!["ls-remote", "--branches", ssh_url.as_str()]),
+        ("ls-remote -b ssh", vec!["ls-remote", "-b", ssh_url.as_str()]),
+        ("ls-remote --quiet ssh", vec!["ls-remote", "--quiet", ssh_url.as_str()]),
+        ("ls-remote -q ssh", vec!["ls-remote", "-q", ssh_url.as_str()]),
+        ("ls-remote --get-url ssh", vec!["ls-remote", "--get-url", ssh_url.as_str()]),
+        ("ls-remote --symref ssh", vec!["ls-remote", "--symref", ssh_url.as_str()]),
+        (
+            "ls-remote --exit-code match ssh",
+            vec!["ls-remote", "--exit-code", ssh_url.as_str(), "main"],
+        ),
+        (
+            "ls-remote --exit-code miss ssh",
+            vec!["ls-remote", "--exit-code", ssh_url.as_str(), "no-such*"],
+        ),
+        (
+            "ls-remote --server-option=foo ssh",
+            vec!["ls-remote", "--server-option=foo", ssh_url.as_str()],
+        ),
+        ("ls-remote -o foo ssh", vec!["ls-remote", "-o", "foo", ssh_url.as_str()]),
+        (
+            "ls-remote --sort=refname ssh",
+            vec!["ls-remote", "--sort=refname", ssh_url.as_str()],
+        ),
+        (
+            "ls-remote --sort=-refname ssh",
+            vec!["ls-remote", "--sort=-refname", ssh_url.as_str()],
+        ),
+        ("ls-remote -t ssh", vec!["ls-remote", "-t", ssh_url.as_str()]),
+    ] {
+        assert_any_ls_remote_output_matches_stock_git_with_env(dir.path(), &args, &envs, label);
     }
 }
 
@@ -8968,6 +9149,58 @@ fn ls_remote_reads_dumb_http_info_refs_like_stock_git() {
 }
 
 #[test]
+fn ls_remote_option_family_matches_stock_git_for_dumb_http_remote() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("a.txt"), b"hello\n").expect("write a");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "initial"]);
+    git(&source, ["branch", "feature"]);
+    git_with_env(&source, ["tag", "-a", "v1", "-m", "tag message"]);
+    git(&source, ["update-server-info"]);
+
+    let server = StaticHttpServer::new(source);
+    let url = format!("http://127.0.0.1:{}/.git", server.port);
+    for (label, args) in [
+        ("ls-remote --branches dumb-http", vec!["ls-remote", "--branches", url.as_str()]),
+        ("ls-remote -b dumb-http", vec!["ls-remote", "-b", url.as_str()]),
+        ("ls-remote --quiet dumb-http", vec!["ls-remote", "--quiet", url.as_str()]),
+        ("ls-remote -q dumb-http", vec!["ls-remote", "-q", url.as_str()]),
+        ("ls-remote --get-url dumb-http", vec!["ls-remote", "--get-url", url.as_str()]),
+        ("ls-remote --symref dumb-http", vec!["ls-remote", "--symref", url.as_str()]),
+        (
+            "ls-remote --exit-code match dumb-http",
+            vec!["ls-remote", "--exit-code", url.as_str(), "main"],
+        ),
+        (
+            "ls-remote --exit-code miss dumb-http",
+            vec!["ls-remote", "--exit-code", url.as_str(), "no-such*"],
+        ),
+        (
+            "ls-remote --server-option=foo dumb-http",
+            vec!["ls-remote", "--server-option=foo", url.as_str()],
+        ),
+        ("ls-remote -o foo dumb-http", vec!["ls-remote", "-o", "foo", url.as_str()]),
+        (
+            "ls-remote --sort=refname dumb-http",
+            vec!["ls-remote", "--sort=refname", url.as_str()],
+        ),
+        (
+            "ls-remote --sort=-refname dumb-http",
+            vec!["ls-remote", "--sort=-refname", url.as_str()],
+        ),
+        ("ls-remote -t dumb-http", vec!["ls-remote", "-t", url.as_str()]),
+    ] {
+        assert_any_ls_remote_output_matches_stock_git(dir.path(), &args, label);
+    }
+}
+
+#[test]
 fn ls_remote_reads_smart_http_info_refs_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("remote.git");
@@ -9007,6 +9240,68 @@ fn ls_remote_reads_smart_http_info_refs_like_stock_git() {
             git_args(dir.path(), &args),
             "args: {args:?}"
         );
+    }
+}
+
+#[test]
+fn ls_remote_option_family_matches_stock_git_for_smart_http_remote() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote.git");
+    let work = dir.path().join("work");
+    git(dir.path(), ["init", "--bare", "remote.git"]);
+    fs::write(remote.join("git-daemon-export-ok"), "").expect("export marker");
+    git(dir.path(), ["init", "-b", "main", "work"]);
+    configure_identity(&work);
+    fs::write(work.join("a.txt"), b"hello\n").expect("write a");
+    git(&work, ["add", "-A"]);
+    git_with_env(&work, ["commit", "-m", "initial"]);
+    git(&work, ["branch", "feature"]);
+    git_with_env(&work, ["tag", "-a", "v1", "-m", "tag message"]);
+    git(
+        &work,
+        [
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("remote path"),
+        ],
+    );
+    git(&work, ["push", "-q", "origin", "main", "feature", "--tags"]);
+    set_bare_head_to_main(&remote);
+
+    let server = SmartHttpServer::new(dir.path().to_path_buf());
+    let url = format!("http://127.0.0.1:{}/remote.git", server.port);
+    for (label, args) in [
+        ("ls-remote --branches smart-http", vec!["ls-remote", "--branches", url.as_str()]),
+        ("ls-remote -b smart-http", vec!["ls-remote", "-b", url.as_str()]),
+        ("ls-remote --quiet smart-http", vec!["ls-remote", "--quiet", url.as_str()]),
+        ("ls-remote -q smart-http", vec!["ls-remote", "-q", url.as_str()]),
+        ("ls-remote --get-url smart-http", vec!["ls-remote", "--get-url", url.as_str()]),
+        ("ls-remote --symref smart-http", vec!["ls-remote", "--symref", url.as_str()]),
+        (
+            "ls-remote --exit-code match smart-http",
+            vec!["ls-remote", "--exit-code", url.as_str(), "main"],
+        ),
+        (
+            "ls-remote --exit-code miss smart-http",
+            vec!["ls-remote", "--exit-code", url.as_str(), "no-such*"],
+        ),
+        (
+            "ls-remote --server-option=foo smart-http",
+            vec!["ls-remote", "--server-option=foo", url.as_str()],
+        ),
+        ("ls-remote -o foo smart-http", vec!["ls-remote", "-o", "foo", url.as_str()]),
+        (
+            "ls-remote --sort=refname smart-http",
+            vec!["ls-remote", "--sort=refname", url.as_str()],
+        ),
+        (
+            "ls-remote --sort=-refname smart-http",
+            vec!["ls-remote", "--sort=-refname", url.as_str()],
+        ),
+        ("ls-remote -t smart-http", vec!["ls-remote", "-t", url.as_str()]),
+    ] {
+        assert_any_ls_remote_output_matches_stock_git(dir.path(), &args, label);
     }
 }
 

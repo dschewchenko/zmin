@@ -11085,6 +11085,61 @@ fn ls_remote_option_family_matches_stock_git_for_local_remotes() {
         assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
         assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
     }
+
+    let remote_file_url = format!("file://{}", remote.display());
+    let file_cases = [
+        (
+            "ls-remote --branches file",
+            vec!["ls-remote", "--branches", remote_file_url.as_str()],
+        ),
+        ("ls-remote -b file", vec!["ls-remote", "-b", remote_file_url.as_str()]),
+        (
+            "ls-remote --quiet file",
+            vec!["ls-remote", "--quiet", remote_file_url.as_str()],
+        ),
+        ("ls-remote -q file", vec!["ls-remote", "-q", remote_file_url.as_str()]),
+        (
+            "ls-remote --get-url file",
+            vec!["ls-remote", "--get-url", remote_file_url.as_str()],
+        ),
+        (
+            "ls-remote --symref file",
+            vec!["ls-remote", "--symref", remote_file_url.as_str()],
+        ),
+        (
+            "ls-remote --exit-code match file",
+            vec!["ls-remote", "--exit-code", remote_file_url.as_str(), "main"],
+        ),
+        (
+            "ls-remote --exit-code miss file",
+            vec!["ls-remote", "--exit-code", remote_file_url.as_str(), "no-such*"],
+        ),
+        (
+            "ls-remote --server-option=foo file",
+            vec!["ls-remote", "--server-option=foo", remote_file_url.as_str()],
+        ),
+        (
+            "ls-remote -o foo file",
+            vec!["ls-remote", "-o", "foo", remote_file_url.as_str()],
+        ),
+        (
+            "ls-remote --sort=refname file",
+            vec!["ls-remote", "--sort=refname", remote_file_url.as_str()],
+        ),
+        (
+            "ls-remote --sort=-refname file",
+            vec!["ls-remote", "--sort=-refname", remote_file_url.as_str()],
+        ),
+        ("ls-remote -t file", vec!["ls-remote", "-t", remote_file_url.as_str()]),
+    ];
+
+    for (label, args) in file_cases {
+        let git_output = command_any_output("git", &work, &args, label);
+        let zmin_output = command_any_output(zmin_bin(), &work, &args, label);
+        assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+        assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+        assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
+    }
 }
 
 #[test]

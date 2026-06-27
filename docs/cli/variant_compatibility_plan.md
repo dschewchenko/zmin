@@ -21,6 +21,58 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
+option-family transport expansion across the existing file URL, dumb HTTP,
+smart HTTP, git-daemon, and SSH lanes. This batch widened the already
+represented `ls-remote` option family beyond the configured-local bare-remote
+lane and added sixty-five exact stock-Git rows covering `--branches`, `-b`,
+`--quiet`, `-q`, `--get-url`, `--symref`, `--exit-code` on both matching and
+missing-pattern lanes, `--server-option=foo`, `-o foo`, `--sort=refname`,
+`--sort=-refname`, and `-t` across those non-local transport surfaces. The
+runtime closure stayed intentionally bounded: `ls-remote` now emits symbolic
+HEAD output for git-daemon and SSH, abandons the SSH advertisement session on
+empty filtered results so `--exit-code` no-match parity returns the stock exit
+status, and rejects SSH `--server-option` / `-o` without protocol v2 using the
+same stock-compatible fatal diagnostic sequence.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote_option_family_matches_stock_git_for_git_daemon_remote -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote_option_family_matches_stock_git_for_ssh_remote -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote_option_family_matches_stock_git_for_dumb_http_remote -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote_option_family_matches_stock_git_for_smart_http_remote -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat ls_remote_option_family_matches_stock_git_for_local_remotes -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat ls_remote -- --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(ls-remote|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2523 / 3212`
+- represented documented command-option pairs: `2548 / 3212`
+- matrix rows: `6851`
+- verified rows: `6006`
+- invalid-input rows: `820`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `689`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `ls-remote`: `3 / 14` reviewed-complete documented option pairs,
+  `14 / 14` represented documented option pairs, `115` written rows, `115`
+  classified rows, `103` stock-matching rows, `12` invalid-input rows, and
+  `0` exact-open rows
+
+This is still an expansion batch rather than a reviewed-complete closure: the
+same documented `ls-remote` option family now has broad transport evidence
+across local, file, HTTP, git-daemon, and SSH lanes, but the command still
+does not satisfy the census completeness heuristic for those pairs and remains
+at `3 / 14` reviewed-complete documented options.
+
 As of 2026-06-27 the latest completed batch is a helper-free local
 `ls-remote` option-family expansion across the existing configured-local
 bare-remote lane. This batch added thirteen exact stock-Git rows for

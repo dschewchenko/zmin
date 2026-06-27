@@ -11,6 +11,31 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
+option-family transport expansion across the existing file URL, dumb HTTP,
+smart HTTP, git-daemon, and SSH lanes. The selected change added sixty-five
+exact stock-Git rows for `--branches`, `-b`, `--quiet`, `-q`, `--get-url`,
+`--symref`, `--exit-code` on both matching and missing-pattern lanes,
+`--server-option=foo`, `-o foo`, `--sort=refname`, `--sort=-refname`, and
+`-t` across those non-local transport surfaces. The runtime closure stayed
+intentionally narrow: `ls-remote` now prints symbolic HEAD output for
+git-daemon and SSH, abandons the SSH advertisement session on empty filtered
+results so `--exit-code` no-match parity returns stock exit `2`, and rejects
+SSH `--server-option` / `-o` without protocol v2 using the same stock fatal
+hint plus remote-hung-up diagnostic sequence. Actual delta is `+65` matrix
+rows, `+0` complete documented option pairs, `+0` represented documented
+option pairs, `+58` verified rows, `+7` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `6851` matrix rows,
+`6006` verified rows, `820` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2523/3212` complete documented option
+pairs, and `2548/3212` represented documented option pairs. `ls-remote` now
+sits at `14/14` represented documented option pairs with `115/115`
+classified rows, but only `3/14` reviewed-complete documented option pairs.
+This remains an expansion batch rather than a reviewed-complete closure; the
+transport-wide option family is now modeled, but more row-level evidence is
+still required before the census can promote those `ls-remote` pairs into the
+durable reviewed-complete list.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `ls-remote`
 option-family expansion across the configured-local bare-remote lane. The
 selected change added thirteen exact stock-Git rows for `--branches`, `-b`,

@@ -9146,7 +9146,7 @@ pub(crate) fn run_ls_remote(
         println!("{url}");
         return Ok(());
     }
-    let _accepted_noops = (quiet, server_option);
+    let _accepted_noops = quiet;
     if is_http_transport_url(&url) {
         let parsed_url = parsed_http_url_with_extra_headers(repo.as_ref(), &url)?;
         let (mut rows, head_branch) = if parsed_url.scheme == HttpScheme::Http {
@@ -9184,6 +9184,9 @@ pub(crate) fn run_ls_remote(
     if is_git_daemon_transport_url(&url) {
         let mut rows = daemon_ls_remote_rows(&url, heads, tags, refs_only, &patterns)?;
         sort_ls_remote_rows(&mut rows, sort.as_deref())?;
+        if symref && !refs_only && let Some(branch) = daemon_head_branch(&url)? {
+            println!("ref: refs/heads/{branch}\tHEAD");
+        }
         if exit_code && rows_is_empty_for_exit_code(&patterns, &rows) {
             return Err(CliError::Exit(2));
         }
@@ -9193,6 +9196,9 @@ pub(crate) fn run_ls_remote(
         return Ok(());
     }
     if is_ssh_transport_url(&url) {
+        if !server_option.is_empty() {
+            return Err(ls_remote_ssh_server_option_requires_protocol_v2_error());
+        }
         let mut rows = ssh_ls_remote_rows_with_upload_pack(
             &url,
             heads,
@@ -9202,6 +9208,12 @@ pub(crate) fn run_ls_remote(
             upload_pack.as_deref(),
         )?;
         sort_ls_remote_rows(&mut rows, sort.as_deref())?;
+        if symref
+            && !refs_only
+            && let Some(branch) = ssh_head_branch_with_upload_pack(&url, upload_pack.as_deref())?
+        {
+            println!("ref: refs/heads/{branch}\tHEAD");
+        }
         if exit_code && rows_is_empty_for_exit_code(&patterns, &rows) {
             return Err(CliError::Exit(2));
         }
@@ -9247,6 +9259,18 @@ pub(crate) fn run_ls_remote(
         println!("{}\t{}", row.id.to_hex(), row.name);
     }
     Ok(())
+}
+
+fn ls_remote_ssh_server_option_requires_protocol_v2_error() -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: concat!(
+            "hint: see protocol.version in 'git help config' for more details\n",
+            "fatal: server options require protocol version 2 or later\n",
+            "fatal: the remote end hung up unexpectedly\n",
+        )
+        .into(),
+    }
 }
 
 fn rows_is_empty_for_exit_code(patterns: &[String], rows: &[LsRemoteRow]) -> bool {
@@ -23266,11 +23290,7 @@ fn ssh_ls_remote_rows_with_shallows_and_upload_pack(
             stdout, heads, tags, refs_only, patterns,
         )?
     };
-    if rows.is_empty() {
-        session.finish()?;
-    } else {
-        session.abandon()?;
-    }
+    session.abandon()?;
     Ok((rows, shallow_boundaries))
 }
 
