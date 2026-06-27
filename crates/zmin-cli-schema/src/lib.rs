@@ -4463,6 +4463,20 @@ pub enum Command {
     Grep {
         #[arg(long = "cached", action = ArgAction::SetTrue)]
         cached: bool,
+        #[arg(long = "untracked", action = ArgAction::SetTrue)]
+        untracked: bool,
+        #[arg(long = "exclude-standard", action = ArgAction::SetTrue)]
+        exclude_standard: bool,
+        #[arg(long = "no-index", action = ArgAction::SetTrue)]
+        no_index: bool,
+        #[arg(long = "recursive", action = ArgAction::SetTrue)]
+        recursive: bool,
+        #[arg(long = "no-recursive", action = ArgAction::SetTrue)]
+        no_recursive: bool,
+        #[arg(long = "max-depth")]
+        max_depth: Option<usize>,
+        #[arg(long = "threads")]
+        threads: Option<usize>,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]

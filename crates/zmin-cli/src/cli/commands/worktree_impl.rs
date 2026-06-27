@@ -2451,11 +2451,7 @@ fn ls_files_index_with_submodules(repo: &GitRepo, index: GitIndex) -> Result<Git
 fn ls_files_excludes(repo: &GitRepo, options: &LsFilesOptions) -> Result<GitIgnore> {
     let mut ignore = GitIgnore::default();
     if options.exclude_standard {
-        append_per_directory_excludes(&repo.root, &repo.root, ".gitignore", &mut ignore)?;
-        append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
-        if let Some(path) = ls_files_global_excludes_file(repo)? {
-            append_ignore_file(&mut ignore, &path, "")?;
-        }
+        ignore = standard_repo_ignore(repo)?;
     }
     if !options.excludes.is_empty() {
         ignore.append(GitIgnore::parse(&options.excludes.join("\n")));
@@ -2466,6 +2462,16 @@ fn ls_files_excludes(repo: &GitRepo, options: &LsFilesOptions) -> Result<GitIgno
     }
     if let Some(name) = &options.exclude_per_directory {
         append_per_directory_excludes(&repo.root, &repo.root, name, &mut ignore)?;
+    }
+    Ok(ignore)
+}
+
+pub(crate) fn standard_repo_ignore(repo: &GitRepo) -> Result<GitIgnore> {
+    let mut ignore = GitIgnore::default();
+    append_per_directory_excludes(&repo.root, &repo.root, ".gitignore", &mut ignore)?;
+    append_ignore_file(&mut ignore, &repo.git_dir.join("info/exclude"), "")?;
+    if let Some(path) = ls_files_global_excludes_file(repo)? {
+        append_ignore_file(&mut ignore, &path, "")?;
     }
     Ok(ignore)
 }

@@ -22,18 +22,19 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`grep` color, all-match, and function-context closure across modeled local
-c-like and tracked-text lanes. This batch added exact stock-Git evidence and
-runtime support for `--color`, `--no-color`, `--all-match`, `-p`,
-`--show-function`, `-W`, and `--function-context`. The implementation stayed
-deliberately helper-free and locally bounded: `--color` now emits the stock
-ANSI-highlighted filename, separator, and match-fragment shape on the modeled
-c-like lane, `--no-color` suppresses those escapes after explicit color
-enablement, `--all-match` restricts output to files that contain every modeled
-pattern on the local `-e ... --or -e ...` lane, and show-function or
-function-context now render stock-compatible `=` and `-` prefixed function
-headers and surrounding body lines on the modeled brace-delimited c-like
-fixture.
+`grep` traversal, untracked, and no-index closure across modeled tracked,
+untracked, ignored, and filesystem-only lanes. This batch added exact
+stock-Git evidence and runtime support for `--untracked`,
+`--exclude-standard`, `--recursive`, `--no-recursive`, `--max-depth`,
+`--threads`, and `--no-index`. The implementation stayed deliberately local
+and helper-free: repo worktree grep now reuses the existing tracked/untracked
+and standard-ignore loaders so `--untracked` includes tracked plus untracked
+files while still excluding ignored paths like stock Git, explicit
+`--no-recursive` and `--max-depth` now gate both tracked and untracked local
+path traversal on the modeled lane, `--threads` is accepted as the stock local
+no-op output lane on this surface, and `--no-index` now searches ordinary
+filesystem paths outside a repository with stock-compatible recursive and
+top-level-only behavior.
 
 Focused verification was
 `cargo test -p zmin-cli --test git_grep_compat -- --nocapture`,
@@ -48,27 +49,28 @@ Actual durable readiness/status after this batch:
 
 - complete command matrices: `148 / 151`
 - complete documented command-option pairs: `2297 / 3212`
-- represented documented command-option pairs: `2364 / 3212`
-- matrix rows: `6546`
-- verified rows: `5734`
+- represented documented command-option pairs: `2371 / 3212`
+- matrix rows: `6558`
+- verified rows: `5746`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
 - `grep`: `21 / 73` reviewed-complete documented option pairs,
-  `57 / 73` represented documented option pairs, `77` written rows, `77`
-  classified rows, `77` stock-matching rows, `0` invalid-input rows, and `0`
+  `64 / 73` represented documented option pairs, `89` written rows, `89`
+  classified rows, `89` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
 
 The next best high-throughput follow-up should likely stay on `grep`, because
 it remains the largest safe local helper-free documented queue after this
-batch. The remaining documented tails are now more concentrated around the
-still-unmodeled local recursion or index toggles and parser families such as
-`--no-index`, `--untracked`, `--exclude-standard`, `--recursive`,
-`--no-recursive`, `--max-depth`, `--threads`, and the remaining regex/filter
-selectors that can still be closed without crossing into remote transport
-work.
+batch. The newly closed traversal and index toggles moved out of the remaining
+tail; the queue is now more concentrated in expansion work on already modeled
+local families such as `--after-context`, `--all-match`, `--and`,
+`--basic-regexp`, `--before-context`, `--color`, `--column`, `--context`,
+`--extended-regexp`, `--function-context`, `--name-only`, `--not`, `--null`,
+`--only-matching`, `--or`, and the remaining schema gaps led by
+`--no-exclude-standard`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` mail-series tail closure across the modeled two-patch and

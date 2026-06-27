@@ -2,6 +2,13 @@ use super::*;
 
 pub(crate) fn grep(
     cached: bool,
+    untracked: bool,
+    exclude_standard: bool,
+    no_index: bool,
+    recursive: bool,
+    no_recursive: bool,
+    max_depth: Option<usize>,
+    threads: Option<usize>,
     quiet: bool,
     ignore_case: bool,
     invert_match: bool,
@@ -41,6 +48,53 @@ pub(crate) fn grep(
     pattern: Option<String>,
     args: Vec<String>,
 ) -> Result<()> {
+    let _threads = threads;
+    if no_index {
+        return grep_no_index(
+            cached,
+            recursive,
+            no_recursive,
+            max_depth,
+            quiet,
+            ignore_case,
+            invert_match,
+            line_number,
+            files_with_matches,
+            name_only,
+            files_without_match,
+            count,
+            all_match,
+            max_count,
+            after_context,
+            before_context,
+            context,
+            and,
+            or,
+            not,
+            patterns,
+            pattern_files,
+            with_filename,
+            no_filename,
+            null_terminated,
+            full_name,
+            heading,
+            break_groups,
+            show_function,
+            function_context,
+            basic_regexp,
+            extended_regexp,
+            fixed_strings,
+            text,
+            no_textconv,
+            color,
+            no_color,
+            word_regexp,
+            column,
+            only_matching,
+            pattern,
+            args,
+        );
+    }
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let index = read_repo_index(&repo)?;
@@ -71,6 +125,19 @@ pub(crate) fn grep(
     let after_context = after_context.unwrap_or(context);
     let color_mode = grep_color_mode(color.as_deref(), no_color)?;
     let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv);
+    if cached && untracked {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--untracked' and '--cached' cannot be used together".into(),
+        });
+    }
+    let recursive_enabled = recursive || !no_recursive;
+    let tracked_paths = worktree_commands::tracked_path_set(&grep_input.index);
+    let repo_ignore = if matches!(grep_input.source, GrepSource::Worktree) && (untracked || exclude_standard) {
+        worktree_commands::standard_repo_ignore(&repo)?
+    } else {
+        GitIgnore::default()
+    };
     let mut selected_any = false;
     let mut printed_group = false;
 
@@ -80,7 +147,10 @@ pub(crate) fn grep(
         .iter()
         .filter(|entry| entry.stage == 0)
     {
-        if !pathspec_matches(&entry.path, &pathspecs) || entry.mode == IndexMode::Gitlink {
+        if !pathspec_matches(&entry.path, &pathspecs)
+            || entry.mode == IndexMode::Gitlink
+            || !grep_path_within_depth(&entry.path, &cwd_prefix, recursive_enabled, max_depth)
+        {
             continue;
         }
         let content = match grep_input.source {
@@ -136,11 +206,276 @@ pub(crate) fn grep(
         }
     }
 
+    if matches!(grep_input.source, GrepSource::Worktree) && untracked {
+        for path in worktree_commands::untracked_files_with_mode(
+            &repo.root,
+            &tracked_paths,
+            &repo_ignore,
+            worktree_commands::UntrackedMode::Normal,
+            false,
+        )? {
+            if !pathspecs.is_empty() && !pathspec_matches(&path, &pathspecs) {
+                continue;
+            }
+            if !grep_path_within_depth(&path, &cwd_prefix, recursive_enabled, max_depth) {
+                continue;
+            }
+            let content = fs::read(repo.root.join(String::from_utf8_lossy(&path).as_ref()))?;
+            let outcome = grep_file(
+                &expression,
+                None,
+                &path,
+                &cwd_prefix,
+                &content,
+                invert_match,
+                line_number,
+                files_with_matches,
+                files_without_match,
+                count,
+                all_match,
+                max_count,
+                before_context,
+                after_context,
+                with_filename,
+                no_filename,
+                null_terminated,
+                full_name,
+                heading,
+                break_groups,
+                show_function,
+                function_context,
+                quiet,
+                color_mode,
+                word_regexp,
+                column,
+                only_matching,
+                printed_group,
+            )?;
+            selected_any |= if files_without_match {
+                outcome.printed
+            } else {
+                outcome.matched
+            };
+            if outcome.printed {
+                printed_group = true;
+            }
+        }
+    }
+
     if selected_any {
         Ok(())
     } else {
         Err(CliError::Exit(1))
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn grep_no_index(
+    cached: bool,
+    recursive: bool,
+    no_recursive: bool,
+    max_depth: Option<usize>,
+    quiet: bool,
+    ignore_case: bool,
+    invert_match: bool,
+    line_number: bool,
+    files_with_matches: bool,
+    name_only: bool,
+    files_without_match: bool,
+    count: bool,
+    all_match: bool,
+    max_count: Option<usize>,
+    after_context: Option<usize>,
+    before_context: Option<usize>,
+    context: Option<usize>,
+    and: bool,
+    or: bool,
+    not: bool,
+    patterns: Vec<String>,
+    pattern_files: Vec<PathBuf>,
+    with_filename: bool,
+    no_filename: bool,
+    null_terminated: bool,
+    full_name: bool,
+    heading: bool,
+    break_groups: bool,
+    show_function: bool,
+    function_context: bool,
+    basic_regexp: bool,
+    extended_regexp: bool,
+    fixed_strings: bool,
+    text: bool,
+    no_textconv: bool,
+    color: Option<String>,
+    no_color: bool,
+    word_regexp: bool,
+    column: bool,
+    only_matching: bool,
+    pattern: Option<String>,
+    args: Vec<String>,
+) -> Result<()> {
+    if cached {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--cached' and '--no-index' cannot be used together".into(),
+        });
+    }
+    let cwd = std::env::current_dir()?;
+    let expression = GrepExpression::new(
+        pattern,
+        patterns,
+        pattern_files,
+        fixed_strings,
+        ignore_case,
+        word_regexp,
+        and,
+        or,
+        not,
+    )?;
+    let files_with_matches = files_with_matches || name_only;
+    let context = context.unwrap_or(0);
+    let before_context = before_context.unwrap_or(context);
+    let after_context = after_context.unwrap_or(context);
+    let color_mode = grep_color_mode(color.as_deref(), no_color)?;
+    let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv, full_name);
+    let recursive_enabled = recursive || !no_recursive;
+    let search_roots = if args.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        args.into_iter().map(PathBuf::from).collect()
+    };
+    let files = grep_no_index_files(&cwd, &search_roots, recursive_enabled, max_depth)?;
+    let mut selected_any = false;
+    let mut printed_group = false;
+    for path in files {
+        let content = fs::read(cwd.join(String::from_utf8_lossy(&path).as_ref()))?;
+        let outcome = grep_file(
+            &expression,
+            None,
+            &path,
+            &[],
+            &content,
+            invert_match,
+            line_number,
+            files_with_matches,
+            files_without_match,
+            count,
+            all_match,
+            max_count,
+            before_context,
+            after_context,
+            with_filename,
+            no_filename,
+            null_terminated,
+            false,
+            heading,
+            break_groups,
+            show_function,
+            function_context,
+            quiet,
+            color_mode,
+            word_regexp,
+            column,
+            only_matching,
+            printed_group,
+        )?;
+        selected_any |= if files_without_match {
+            outcome.printed
+        } else {
+            outcome.matched
+        };
+        if outcome.printed {
+            printed_group = true;
+        }
+    }
+    if selected_any {
+        Ok(())
+    } else {
+        Err(CliError::Exit(1))
+    }
+}
+
+fn grep_no_index_files(
+    cwd: &Path,
+    roots: &[PathBuf],
+    recursive: bool,
+    max_depth: Option<usize>,
+) -> Result<Vec<Vec<u8>>> {
+    let mut files = Vec::new();
+    for root in roots {
+        let absolute = cwd.join(root);
+        match fs::symlink_metadata(&absolute) {
+            Ok(metadata) if metadata.is_dir() => {
+                collect_no_index_files(
+                    cwd,
+                    &absolute,
+                    recursive,
+                    max_depth,
+                    0,
+                    &mut files,
+                )?;
+            }
+            Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {
+                files.push(repo_relative_path(cwd, &absolute)?);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_no_index_files(
+    cwd: &Path,
+    dir: &Path,
+    recursive: bool,
+    max_depth: Option<usize>,
+    depth: usize,
+    files: &mut Vec<Vec<u8>>,
+) -> Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            if recursive && max_depth.is_none_or(|limit| depth < limit) {
+                collect_no_index_files(cwd, &path, recursive, max_depth, depth + 1, files)?;
+            }
+            continue;
+        }
+        if metadata.is_file() || metadata.file_type().is_symlink() {
+            files.push(repo_relative_path(cwd, &path)?);
+        }
+    }
+    Ok(())
+}
+
+fn grep_path_within_depth(
+    path: &[u8],
+    cwd_prefix: &[u8],
+    recursive: bool,
+    max_depth: Option<usize>,
+) -> bool {
+    let relative = if cwd_prefix.is_empty() {
+        path
+    } else if path == cwd_prefix {
+        &[][..]
+    } else if path.starts_with(cwd_prefix) && path.get(cwd_prefix.len()) == Some(&b'/') {
+        &path[cwd_prefix.len() + 1..]
+    } else {
+        path
+    };
+    let depth = relative.iter().filter(|byte| **byte == b'/').count();
+    if !recursive && depth > 0 {
+        return false;
+    }
+    max_depth.is_none_or(|limit| depth <= limit)
 }
 
 struct GrepInput {

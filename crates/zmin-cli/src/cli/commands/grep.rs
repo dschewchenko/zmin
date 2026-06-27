@@ -4,6 +4,13 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
     match command {
         runtime::Command::Grep {
             cached,
+            untracked,
+            exclude_standard,
+            no_index,
+            recursive,
+            no_recursive,
+            max_depth,
+            threads,
             quiet,
             ignore_case,
             invert_match,
@@ -44,6 +51,13 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             args,
         } => super::grep_commands::grep(
             cached,
+            untracked,
+            exclude_standard,
+            no_index,
+            recursive,
+            no_recursive,
+            max_depth,
+            threads,
             quiet,
             ignore_case,
             invert_match,
