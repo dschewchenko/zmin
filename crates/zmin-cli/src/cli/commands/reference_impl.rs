@@ -4427,6 +4427,7 @@ struct TagOptions {
     delete: bool,
     verify: bool,
     list: bool,
+    message_lines: Option<usize>,
     column: Option<String>,
     no_column: bool,
     ignore_case: bool,
@@ -4434,8 +4435,14 @@ struct TagOptions {
     no_color: bool,
     force: bool,
     annotate: bool,
+    edit: bool,
+    sign: bool,
+    no_sign: bool,
+    local_user: Option<String>,
+    cleanup: Option<String>,
     messages: Vec<String>,
     message_files: Vec<PathBuf>,
+    trailers: Vec<String>,
     create_reflog: bool,
     contains: Option<String>,
     no_contains: Option<String>,
@@ -6905,6 +6912,7 @@ fn tag(options: TagOptions) -> Result<()> {
     let _ignore_case = options.ignore_case;
     let _color = &options.color;
     let _no_color = options.no_color;
+    let signing_key = tag_signing_key(&options);
     let repo = find_repo()?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let has_list_filter = options.contains.is_some()
@@ -6916,14 +6924,18 @@ fn tag(options: TagOptions) -> Result<()> {
         || !options.sort.is_empty()
         || options.format.is_some()
         || options.column.is_some()
-        || options.omit_empty;
+        || options.omit_empty
+        || options.message_lines.is_some();
     if options.verify {
         if options.delete
             || options.list
             || options.force
             || options.annotate
+            || options.edit
+            || signing_key.is_some()
             || !options.messages.is_empty()
             || !options.message_files.is_empty()
+            || !options.trailers.is_empty()
             || options.create_reflog
             || has_list_modifier
         {
@@ -6936,8 +6948,11 @@ fn tag(options: TagOptions) -> Result<()> {
     }
     if options.delete {
         if options.annotate
+            || options.edit
+            || signing_key.is_some()
             || !options.messages.is_empty()
             || !options.message_files.is_empty()
+            || !options.trailers.is_empty()
             || options.create_reflog
             || has_list_modifier
         {
@@ -6962,8 +6977,11 @@ fn tag(options: TagOptions) -> Result<()> {
 
     if options.args.is_empty()
         && (options.annotate
+            || options.edit
+            || signing_key.is_some()
             || !options.messages.is_empty()
             || !options.message_files.is_empty()
+            || !options.trailers.is_empty()
             || options.create_reflog)
     {
         return Err(CliError::Stderr {
@@ -6974,8 +6992,11 @@ fn tag(options: TagOptions) -> Result<()> {
 
     if options.list || options.args.is_empty() || has_list_modifier {
         if options.annotate
+            || options.edit
+            || signing_key.is_some()
             || !options.messages.is_empty()
             || !options.message_files.is_empty()
+            || !options.trailers.is_empty()
             || options.create_reflog
         {
             return Err(CliError::Fatal {
@@ -7038,6 +7059,8 @@ fn tag(options: TagOptions) -> Result<()> {
                     println!("{rendered}");
                 }
             }
+        } else if let Some(message_lines) = options.message_lines {
+            print_tag_list_with_messages(&store, &rows, message_lines)?;
         } else if options.column.is_some() {
             print_tag_list_columns(&rows);
         } else {
@@ -7068,28 +7091,40 @@ fn tag(options: TagOptions) -> Result<()> {
         code: 128,
         message: format!("Failed to resolve '{target}' as a valid ref."),
     })?;
-    let create_annotated =
-        options.annotate || !options.messages.is_empty() || !options.message_files.is_empty();
+    let create_annotated = options.annotate
+        || options.edit
+        || signing_key.is_some()
+        || !options.messages.is_empty()
+        || !options.message_files.is_empty()
+        || !options.trailers.is_empty();
     let id = if create_annotated {
-        if options.messages.is_empty() && options.message_files.is_empty() {
+        if options.messages.is_empty() && options.message_files.is_empty() && !options.edit {
             return Err(editor_required_message_error());
         }
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
         let target_object = store.read_object(&id)?;
         let tagger = signature_from_identity(&repo, "GIT_COMMITTER")?;
-        let message = commit_tree_message(
-            options
-                .messages
-                .into_iter()
-                .map(commit_commands::CommitTreeMessageSource::Message)
-                .chain(
-                    options
-                        .message_files
-                        .into_iter()
-                        .map(commit_commands::CommitTreeMessageSource::File),
-                )
-                .collect(),
+        let mut message = tag_message_content(
+            &repo,
+            options.messages,
+            options.message_files,
+            options.edit,
+            options.cleanup.as_deref(),
+            &options.trailers,
         )?;
+        if let Some(signing_key) = signing_key.as_ref().and_then(|key| key.as_deref()) {
+            let signature = tag_gpg_signature(&repo, &message, Some(signing_key))?;
+            if !message.is_empty() && !message.ends_with(b"\n") {
+                message.push(b'\n');
+            }
+            message.extend_from_slice(&signature);
+        } else if signing_key.is_some() {
+            let signature = tag_gpg_signature(&repo, &message, None)?;
+            if !message.is_empty() && !message.ends_with(b"\n") {
+                message.push(b'\n');
+            }
+            message.extend_from_slice(&signature);
+        }
         let tag = TagBuilder::new(id, target_object.kind, name, tagger)?
             .message(message)?
             .encode()?;
@@ -7118,6 +7153,177 @@ fn tag(options: TagOptions) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn tag_signing_key(options: &TagOptions) -> Option<Option<String>> {
+    if options.no_sign {
+        return None;
+    }
+    if let Some(local_user) = options.local_user.as_deref() {
+        return Some(Some(local_user.to_owned()));
+    }
+    if options.sign {
+        return Some(None);
+    }
+    None
+}
+
+fn tag_cleanup_mode(cleanup: Option<&str>) -> Result<CommitCleanupMode> {
+    match cleanup {
+        None => Ok(CommitCleanupMode::Default),
+        Some(raw_mode) => match raw_mode.to_ascii_lowercase().as_str() {
+            "strip" => Ok(CommitCleanupMode::Strip),
+            "whitespace" => Ok(CommitCleanupMode::Whitespace),
+            "verbatim" => Ok(CommitCleanupMode::Verbatim),
+            "scissors" => Ok(CommitCleanupMode::Scissors),
+            "default" => Ok(CommitCleanupMode::Default),
+            _ => Err(CliError::Fatal {
+                code: 128,
+                message: format!("Invalid cleanup mode {raw_mode}"),
+            }),
+        },
+    }
+}
+
+fn tag_message_content(
+    repo: &GitRepo,
+    messages: Vec<String>,
+    message_files: Vec<PathBuf>,
+    edit: bool,
+    cleanup: Option<&str>,
+    trailers: &[String],
+) -> Result<Vec<u8>> {
+    let cleanup_mode = tag_cleanup_mode(cleanup)?;
+    let has_inline_messages = !messages.is_empty();
+    let has_message_files = !message_files.is_empty();
+    let mut message = commit_tree_message(
+        messages
+            .into_iter()
+            .map(commit_commands::CommitTreeMessageSource::Message)
+            .chain(
+                message_files
+                    .into_iter()
+                    .map(commit_commands::CommitTreeMessageSource::File),
+            )
+            .collect(),
+    )?;
+    if edit {
+        message = edit_temp_buffer(repo, "TAG_EDITMSG", &message, true)?;
+    }
+    let mut message = cleanup_commit_message(message, cleanup_mode);
+    if matches!(cleanup_mode, CommitCleanupMode::Verbatim)
+        && has_inline_messages
+        && !has_message_files
+        && message.ends_with(b"\n")
+    {
+        message.pop();
+    }
+    if !trailers.is_empty() {
+        let input = String::from_utf8_lossy(&message);
+        message = interpret_trailers_content(
+            &input,
+            &InterpretTrailersOptions {
+                in_place: false,
+                trim_empty: false,
+                where_: None,
+                if_exists: None,
+                if_missing: None,
+                only_trailers: false,
+                only_input: false,
+                unfold: false,
+                no_divider: false,
+                trailers: trailers.to_vec(),
+                files: Vec::new(),
+            },
+        )?
+        .into_bytes();
+    }
+    Ok(message)
+}
+
+fn tag_gpg_signature(
+    repo: &GitRepo,
+    payload: &[u8],
+    signing_key: Option<&str>,
+) -> Result<Vec<u8>> {
+    let program = read_config_value(repo, "gpg.program")?.unwrap_or_else(|| "gpg".to_owned());
+    let configured_signing_key = if signing_key.is_none() {
+        read_config_value(repo, "user.signingkey")?
+    } else {
+        None
+    };
+    let mut child = ProcessCommand::new(program)
+        .arg("--status-fd=2")
+        .arg("--armor")
+        .arg("--detach-sign")
+        .args(
+            signing_key
+                .iter()
+                .copied()
+                .chain(configured_signing_key.as_deref())
+                .flat_map(|key| ["--local-user", key]),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(CliError::Io)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(payload)?;
+    }
+    let output = child.wait_with_output().map_err(CliError::Io)?;
+    if !output.status.success() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: format!(
+                "error: gpg failed to sign the data:\n{}\nerror: unable to sign the tag\nThe tag message has been left in .git/TAG_EDITMSG\n",
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        });
+    }
+    Ok(output.stdout)
+}
+
+fn print_tag_list_with_messages(
+    store: &LooseObjectStore,
+    rows: &[reference_commands::ForEachRefRow],
+    message_lines: usize,
+) -> Result<()> {
+    for row in rows {
+        let lines = tag_message_preview_lines(store, &row.object_id, message_lines)?;
+        if lines.is_empty() {
+            println!("{}", tag_display_name(&row.ref_name));
+            continue;
+        }
+        println!("{:<16}{}", tag_display_name(&row.ref_name), lines[0]);
+        for line in lines.iter().skip(1) {
+            println!("{:16}{}", "", line);
+        }
+    }
+    Ok(())
+}
+
+fn tag_message_preview_lines(
+    store: &LooseObjectStore,
+    object_id: &ObjectId,
+    message_lines: usize,
+) -> Result<Vec<String>> {
+    if message_lines == 0 {
+        return Ok(Vec::new());
+    }
+    let object = store.read_object(object_id)?;
+    let bytes = match object.kind {
+        GitObjectKind::Tag => decode_tag(GitHashAlgorithm::Sha1, &object.content)?.message,
+        GitObjectKind::Commit => {
+            decode_commit(GitHashAlgorithm::Sha1, &object.content)?.message
+        }
+        _ => return Ok(Vec::new()),
+    };
+    Ok(bytes
+        .split(|byte| *byte == b'\n')
+        .take(message_lines)
+        .map(|line| String::from_utf8_lossy(line).trim_end_matches('\r').to_owned())
+        .collect())
 }
 
 #[derive(Debug, Clone)]
@@ -7488,6 +7694,7 @@ pub(crate) fn tag_command(
     delete: bool,
     verify: bool,
     list: bool,
+    message_lines: Option<usize>,
     column: Option<String>,
     no_column: bool,
     ignore_case: bool,
@@ -7495,8 +7702,14 @@ pub(crate) fn tag_command(
     no_color: bool,
     force: bool,
     annotate: bool,
+    edit: bool,
+    sign: bool,
+    no_sign: bool,
+    local_user: Option<String>,
+    cleanup: Option<String>,
     messages: Vec<String>,
     message_files: Vec<PathBuf>,
+    trailers: Vec<String>,
     create_reflog: bool,
     contains: Option<String>,
     no_contains: Option<String>,
@@ -7512,6 +7725,7 @@ pub(crate) fn tag_command(
         delete,
         verify,
         list,
+        message_lines,
         column,
         no_column,
         ignore_case,
@@ -7519,8 +7733,14 @@ pub(crate) fn tag_command(
         no_color,
         force,
         annotate,
+        edit,
+        sign,
+        no_sign,
+        local_user,
+        cleanup,
         messages,
         message_files,
+        trailers,
         create_reflog,
         contains,
         no_contains,

@@ -5,9 +5,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, command_any_output_with_stdin, command_output_with_env, configure_identity,
-    git, git_args, git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
-    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, write_file, zmin_bin,
+    command_any_output, command_any_output_with_stdin, command_failure_output_with_env,
+    command_output_with_env, configure_identity, git, git_args, git_failure_output, git_init,
+    git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
+    run_zmin_with_env, write_file, zmin_bin,
 };
 
 fn committed_repo() -> TempDir {
@@ -2192,4 +2193,138 @@ fn tag_documented_listing_flags_match_stock_git() {
             "tag refs should remain unchanged for {args:?}"
         );
     }
+}
+
+#[test]
+fn tag_remaining_documented_flags_match_stock_git() {
+    let git_repo = committed_repo();
+    let zmin_repo = committed_repo();
+
+    for repo in [git_repo.path(), zmin_repo.path()] {
+        git(repo, ["tag", "base"]);
+    }
+
+    let editor_env = [
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ("GIT_EDITOR", ":"),
+    ];
+
+    for (args, tag_name) in [
+        (
+            vec!["tag", "--cleanup=verbatim", "v-clean", "-m", "msg"],
+            "v-clean",
+        ),
+        (vec!["tag", "--edit", "v-edit", "-m", "msg"], "v-edit"),
+        (vec!["tag", "--no-sign", "v-nosign", "-m", "msg"], "v-nosign"),
+        (
+            vec![
+                "tag",
+                "--trailer",
+                "Signed-off-by: Me <me@example.com>",
+                "v-trailer",
+                "-m",
+                "msg",
+            ],
+            "v-trailer",
+        ),
+        (vec!["tag", "-e", "v-edit-short", "-m", "msg"], "v-edit-short"),
+    ] {
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), &args, &editor_env, "git tag"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &editor_env, "zmin tag"),
+            "tag args should match for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", &format!("refs/tags/{tag_name}")]),
+            git(git_repo.path(), ["cat-file", "-p", &format!("refs/tags/{tag_name}")]),
+            "tag object payload should match for {args:?}"
+        );
+    }
+
+    assert_eq!(
+        command_output_with_env("git", git_repo.path(), &["tag", "-n"], &editor_env, "git tag -n"),
+        command_output_with_env(zmin_bin(), zmin_repo.path(), &["tag", "-n"], &editor_env, "zmin tag -n"),
+        "tag -n output should match stock Git"
+    );
+
+    let git_gnupg = TempDir::new().expect("git gnupg tempdir");
+    let zmin_gnupg = TempDir::new().expect("zmin gnupg tempdir");
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(git_gnupg.path(), fs::Permissions::from_mode(0o700))
+            .expect("chmod git gnupg");
+        fs::set_permissions(zmin_gnupg.path(), fs::Permissions::from_mode(0o700))
+            .expect("chmod zmin gnupg");
+    }
+    for gnupg_home in [git_gnupg.path(), zmin_gnupg.path()] {
+        let output = std::process::Command::new("gpg")
+            .arg("--list-keys")
+            .env("GNUPGHOME", gnupg_home)
+            .output()
+            .expect("run gpg --list-keys");
+        assert!(
+            output.status.success(),
+            "gpg --list-keys failed for {}: {}",
+            gnupg_home.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let git_gnupg_home = git_gnupg.path().to_str().expect("git gnupg path");
+    let zmin_gnupg_home = zmin_gnupg.path().to_str().expect("zmin gnupg path");
+    let git_gpg_env = [
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ("GNUPGHOME", git_gnupg_home),
+    ];
+    let zmin_gpg_env = [
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1700000000 +0000"),
+        ("GNUPGHOME", zmin_gnupg_home),
+    ];
+
+    for args in [
+        vec!["tag", "--sign", "v-sign", "-m", "msg"],
+        vec!["tag", "-s", "v-sign-short", "-m", "msg"],
+        vec!["tag", "--local-user=test@example.com", "v-local-user", "-m", "msg"],
+        vec!["tag", "-u", "test@example.com", "v-local-user-short", "-m", "msg"],
+    ] {
+        assert_eq!(
+            command_failure_output_with_env("git", git_repo.path(), &args, &git_gpg_env, "git tag"),
+            command_failure_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &args,
+                &zmin_gpg_env,
+                "zmin tag",
+            ),
+            "tag signing failure should match for {args:?}"
+        );
+    }
+
+    assert_eq!(
+        git(
+            zmin_repo.path(),
+            ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"],
+        ),
+        git(
+            git_repo.path(),
+            ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"],
+        ),
+        "tag refs should match after remaining documented flag coverage"
+    );
 }

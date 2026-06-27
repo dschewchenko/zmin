@@ -5728,6 +5728,13 @@ pub enum Command {
         #[arg(short = 'l', long = "list", action = ArgAction::SetTrue)]
         list: bool,
         #[arg(
+            short = 'n',
+            num_args = 0..=1,
+            default_missing_value = "1",
+            value_parser = clap::value_parser!(usize)
+        )]
+        message_lines: Option<usize>,
+        #[arg(
             long = "column",
             overrides_with = "no_column",
             num_args = 0..=1,
@@ -5747,10 +5754,22 @@ pub enum Command {
         force: bool,
         #[arg(short = 'a', long = "annotate", action = ArgAction::SetTrue)]
         annotate: bool,
+        #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue)]
+        edit: bool,
+        #[arg(short = 's', long = "sign", action = ArgAction::SetTrue)]
+        sign: bool,
+        #[arg(long = "no-sign", action = ArgAction::SetTrue)]
+        no_sign: bool,
+        #[arg(short = 'u', long = "local-user")]
+        local_user: Option<String>,
+        #[arg(long = "cleanup")]
+        cleanup: Option<String>,
         #[arg(short = 'm', long = "message")]
         messages: Vec<String>,
         #[arg(short = 'F', long = "file", value_hint = ValueHint::FilePath)]
         message_files: Vec<PathBuf>,
+        #[arg(long = "trailer")]
+        trailers: Vec<String>,
         #[arg(long = "create-reflog", action = ArgAction::SetTrue)]
         create_reflog: bool,
         #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
