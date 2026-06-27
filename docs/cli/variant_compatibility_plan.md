@@ -21,6 +21,52 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `apply`
+reviewed-complete closure on the tracked patch, add-file redirect, tracked-plus-added,
+and invalid-input inaccurate-eof lanes. This batch promoted the existing exact
+stock-Git matrix evidence for `--include`, `--exclude`, `--directory`,
+`--intent-to-add`, `-N`, `--no-add`, `--inaccurate-eof`, and `-3` into the
+reviewed-complete layer, finishing the full represented `apply` surface except
+for the still-unrepresented `--build-fake-ancestor` seed.
+
+The batch closed one cohesive census/evidence gap rather than adding new runtime
+behavior:
+
+- Zmin already matched stock Git on the covered helper-free `apply` family, and
+  the remaining work here was to lift the existing matrix rows and compat-test
+  evidence into reviewed-complete doc-option pairs plus the reviewed-complete
+  command matrix so the represented surface is counted correctly
+
+Focused verification was
+`cargo test -p zmin-cli --test git_apply_compat apply_documented_open_option_batch_matches_stock_git -- --exact --nocapture`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(apply|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2124 / 3212`
+- represented documented command-option pairs: `2178 / 3212`
+- matrix rows: `6319`
+- verified rows: `5507`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `apply`: `37 / 38` reviewed-complete documented option pairs, `37 / 38`
+  represented documented option pairs, `64` written rows, `64` classified
+  rows, `58` stock-matching rows, `6` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move back to the represented
+sequencer head instead of staying on `apply`, because the remaining `apply`
+tail is only the unrepresented `--build-fake-ancestor` seed while
+`cherry-pick` and `revert` still have dense helper-free expansion families
+with large represented-versus-reviewed gaps.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `grep`
 documented-option closure on the tracked mixed-case, grouped-output, capped
 count, files-without-match, and subdirectory-scope lanes. This batch added
