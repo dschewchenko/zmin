@@ -21,6 +21,49 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `reset`
+documented-option family closure across the already modeled revision-reset and
+path-reset lanes. This batch added six exact stock-Git rows and promoted the
+same six documented option pairs into the reviewed-complete census set:
+`--quiet`, `-q`, `--refresh`, `--no-refresh`, `--pathspec-from-file`, and
+`--pathspec-file-nul`. The runtime closure stayed intentionally bounded:
+`reset` now accepts the documented quiet, refresh, and pathspec-file spellings
+through schema/dispatch, normalizes pathspec-file flags even when clap captures
+them after the revision positional, prints the stock mixed-reset unstaged
+summary on stdout, and preserves stock index/worktree behavior for newline- and
+NUL-delimited pathspec-file unstaging.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_worktree_state_compat reset_additional_documented_options_match_stock_git -- --exact --nocapture`,
+`cargo build -p zmin-cli`,
+`python3 tools/git-compat-census.py --root .`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(reset|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2583 / 3212`
+- represented documented command-option pairs: `2583 / 3212`
+- matrix rows: `6886`
+- verified rows: `6041`
+- invalid-input rows: `820`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `629`
+- implemented but unverified rows: `25`
+
+Per-command position on the touched surface:
+
+- `reset`: `6 / 6` reviewed-complete documented option pairs,
+  `6 / 6` represented documented option pairs, `17` written rows, `17`
+  classified rows, `12` stock-matching rows, `5` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes the full represented `reset` documented-option surface and
+fixes the real runtime pathspec-file no-op bug on revision-first invocation.
+
 As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
 option-family review closure across the already represented configured-local,
 file URL, dumb HTTP, smart HTTP, git-daemon, and SSH lanes. This batch did not

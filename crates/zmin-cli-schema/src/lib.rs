@@ -2642,7 +2642,7 @@ pub enum Command {
         pathspec_file_nul: bool,
         #[arg(long = "no-pathspec-file-nul", action = ArgAction::Count)]
         no_pathspec_file_nul: u8,
-        #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
+        #[arg(value_hint = ValueHint::AnyPath)]
         args: Vec<String>,
     },
     CheckoutIndex {
@@ -3751,6 +3751,16 @@ pub enum Command {
         mixed: bool,
         #[arg(long = "hard", action = ArgAction::SetTrue)]
         hard: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "refresh", action = ArgAction::SetTrue)]
+        refresh: bool,
+        #[arg(long = "no-refresh", action = ArgAction::SetTrue)]
+        no_refresh: bool,
+        #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
+        pathspec_from_file: Option<PathBuf>,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
+        pathspec_file_nul: bool,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -6502,4 +6512,17 @@ pub struct PackObjectsOptions {
     pub window: Option<usize>,
     pub depth: Option<usize>,
     pub base_name: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResetOptions {
+    pub soft: bool,
+    pub mixed: bool,
+    pub hard: bool,
+    pub quiet: bool,
+    pub refresh: bool,
+    pub no_refresh: bool,
+    pub pathspec_from_file: Option<PathBuf>,
+    pub pathspec_file_nul: bool,
+    pub args: Vec<String>,
 }

@@ -478,8 +478,23 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             soft,
             mixed,
             hard,
+            quiet,
+            refresh,
+            no_refresh,
+            pathspec_from_file,
+            pathspec_file_nul,
             args,
-        } => run_reset(soft, mixed, hard, args),
+        } => run_reset(runtime::ResetOptions {
+            soft,
+            mixed,
+            hard,
+            quiet,
+            refresh,
+            no_refresh,
+            pathspec_from_file,
+            pathspec_file_nul,
+            args,
+        }),
         runtime::Command::Stash { args } => run_stash(args),
         runtime::Command::Worktree { args } => run_worktree(args),
         runtime::Command::SparseCheckout { args } => run_sparse_checkout(args),
@@ -682,12 +697,9 @@ pub(crate) fn run_clean(args: Vec<String>) -> std::result::Result<(), runtime::C
 }
 
 pub(crate) fn run_reset(
-    soft: bool,
-    mixed: bool,
-    hard: bool,
-    args: Vec<String>,
+    options: runtime::ResetOptions,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::worktree_commands::reset(soft, mixed, hard, args)
+    super::worktree_commands::reset(options)
 }
 
 pub(crate) fn run_stash(args: Vec<String>) -> std::result::Result<(), runtime::CliError> {

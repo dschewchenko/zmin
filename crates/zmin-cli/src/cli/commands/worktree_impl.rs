@@ -4772,8 +4772,13 @@ pub(crate) fn unmatched_restore_pathspec_error(pathspecs: &[Vec<u8>]) -> CliErro
     ))
 }
 
-pub(crate) fn reset(soft: bool, mixed: bool, hard: bool, args: Vec<String>) -> Result<()> {
-    let (soft, mixed, hard, args) = normalize_reset_mode_options(soft, mixed, hard, args)?;
+pub(crate) fn reset(options: ResetOptions) -> Result<()> {
+    let (soft, mixed, hard, args) = normalize_reset_mode_options(
+        options.soft,
+        options.mixed,
+        options.hard,
+        options.args,
+    )?;
     let selected = [soft, mixed, hard]
         .into_iter()
         .filter(|value| *value)
@@ -4793,11 +4798,22 @@ pub(crate) fn reset(soft: bool, mixed: bool, hard: bool, args: Vec<String>) -> R
         let _ = mixed;
         ResetMode::Mixed
     };
+    let should_refresh = options.refresh || !options.no_refresh;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
-    if let Some((source, paths)) = reset_path_mode(&repo, &store, &args)? {
+    let (args, pathspec_from_file, pathspec_file_nul) = normalize_reset_pathspec_file_options(
+        args,
+        options.pathspec_from_file,
+        options.pathspec_file_nul,
+    )?;
+    let pathspec_args = reset_effective_args(
+        args,
+        pathspec_from_file.as_deref(),
+        pathspec_file_nul,
+    )?;
+    if let Some((source, paths)) = reset_path_mode(&repo, &store, &pathspec_args)? {
         if mode != ResetMode::Mixed {
             let mode_name = match mode {
                 ResetMode::Soft => "soft",
@@ -4814,9 +4830,18 @@ pub(crate) fn reset(soft: bool, mixed: bool, hard: bool, args: Vec<String>) -> R
                 "warning: --mixed with paths is deprecated; use 'git reset -- <paths>' instead."
             );
         }
-        return reset_paths(&repo, &store, &commit_cache, &tree_cache, source, paths);
+        return reset_paths(
+            &repo,
+            &store,
+            &commit_cache,
+            &tree_cache,
+            source,
+            paths,
+            options.quiet,
+            should_refresh,
+        );
     }
-    let target = args.first().map(String::as_str).unwrap_or("HEAD");
+    let target = pathspec_args.first().map(String::as_str).unwrap_or("HEAD");
     let target_id = resolve_commitish(&repo, &store, target)?;
     let target_commit = commit_cache.read_commit(&target_id)?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -4833,6 +4858,9 @@ pub(crate) fn reset(soft: bool, mixed: bool, hard: bool, args: Vec<String>) -> R
         ResetMode::Mixed => {
             let new_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
             new_index.write_to_path(&repo.index_path)?;
+            if !options.quiet && should_refresh {
+                print_reset_mixed_refresh_summary(&repo, &new_index, &[])?;
+            }
         }
         ResetMode::Hard => {
             let old_index = read_repo_index(&repo)?;
@@ -4849,14 +4877,115 @@ pub(crate) fn reset(soft: bool, mixed: bool, hard: bool, args: Vec<String>) -> R
                 &new_index,
                 &checkout_metadata,
             )?;
-            refresh_tracked_index_metadata_matching(&repo, &mut new_index, &[])?;
-            new_index.write_to_path(&repo.index_path)?;
-            println!(
-                "HEAD is now at {} {}",
-                short_object_id(&target_id),
-                commit_subject(&target_commit.message)
-            );
+            if should_refresh {
+                refresh_tracked_index_metadata_matching(&repo, &mut new_index, &[])?;
+                new_index.write_to_path(&repo.index_path)?;
+            }
+            if !options.quiet {
+                println!(
+                    "HEAD is now at {} {}",
+                    short_object_id(&target_id),
+                    commit_subject(&target_commit.message)
+                );
+            }
         }
+    }
+    Ok(())
+}
+
+fn reset_effective_args(
+    mut args: Vec<String>,
+    pathspec_from_file: Option<&Path>,
+    pathspec_file_nul: bool,
+) -> Result<Vec<String>> {
+    if let Some(pathspec_file) = pathspec_from_file {
+        let loaded = read_pathspec_file(pathspec_file, pathspec_file_nul)?;
+        if !args.iter().any(|arg| arg == "--") {
+            args.push("--".to_owned());
+        }
+        args.extend(
+            loaded
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned()),
+        );
+    } else if pathspec_file_nul {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--pathspec-file-nul' requires '--pathspec-from-file'".into(),
+        });
+    }
+    Ok(args)
+}
+
+fn normalize_reset_pathspec_file_options(
+    args: Vec<String>,
+    mut pathspec_from_file: Option<PathBuf>,
+    mut pathspec_file_nul: bool,
+) -> Result<(Vec<String>, Option<PathBuf>, bool)> {
+    let mut normalized = Vec::with_capacity(args.len());
+    let mut pathspec_mode = false;
+    let mut cursor = 0;
+    while cursor < args.len() {
+        let arg = &args[cursor];
+        if pathspec_mode {
+            normalized.push(arg.clone());
+            cursor += 1;
+            continue;
+        }
+        match arg.as_str() {
+            "--" => {
+                pathspec_mode = true;
+                normalized.push(arg.clone());
+            }
+            "--pathspec-from-file" => {
+                cursor += 1;
+                let Some(value) = args.get(cursor) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "reset --pathspec-from-file requires a file".into(),
+                    });
+                };
+                pathspec_from_file = Some(PathBuf::from(value));
+            }
+            other if other.starts_with("--pathspec-from-file=") => {
+                let Some(value) = other.strip_prefix("--pathspec-from-file=") else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "reset --pathspec-from-file requires a file".into(),
+                    });
+                };
+                pathspec_from_file = Some(PathBuf::from(value));
+            }
+            "--pathspec-file-nul" => {
+                pathspec_file_nul = true;
+            }
+            other => normalized.push(other.to_owned()),
+        }
+        cursor += 1;
+    }
+    Ok((normalized, pathspec_from_file, pathspec_file_nul))
+}
+
+fn print_reset_mixed_refresh_summary(
+    repo: &GitRepo,
+    new_index: &GitIndex,
+    paths: &[PathBuf],
+) -> Result<()> {
+    let pathspecs = paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    let mut changed = worktree_status(repo, new_index)?
+        .into_iter()
+        .filter(|(path, _)| pathspecs.is_empty() || pathspec_matches(path, &pathspecs))
+        .collect::<Vec<_>>();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    changed.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.cmp(&right.1)));
+    println!("Unstaged changes after reset:");
+    for (path, status) in changed {
+        println!("{status}\t{}", String::from_utf8_lossy(&path));
     }
     Ok(())
 }
@@ -4928,13 +5057,15 @@ fn reset_paths(
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
     source: &str,
     paths: Vec<PathBuf>,
+    quiet: bool,
+    refresh: bool,
 ) -> Result<()> {
     let source_id = resolve_commitish(repo, store, source)?;
     let source_commit = commit_cache.read_commit(&source_id)?;
     let source_index = tree_cache.read_tree_to_index(&source_commit.tree)?;
     let mut index = read_repo_index(repo)?;
-    for path in paths {
-        let pathspec = path_arg_to_repo_relative(repo, &path)?;
+    for path in &paths {
+        let pathspec = path_arg_to_repo_relative(repo, path)?;
         let source_matches = matching_index_entries(&source_index, &pathspec);
         let current_matches = matching_index_entries(&index, &pathspec);
         if source_matches.is_empty() && current_matches.is_empty() {
@@ -4946,6 +5077,9 @@ fn reset_paths(
         }
     }
     index.write_to_path(&repo.index_path)?;
+    if !quiet && refresh {
+        print_reset_mixed_refresh_summary(repo, &index, &paths)?;
+    }
     Ok(())
 }
 

@@ -1952,3 +1952,71 @@ fn reset_paths_match_stock_git_state() {
         git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
     );
 }
+
+#[test]
+fn reset_additional_documented_options_match_stock_git() {
+    for args in [
+        ["reset", "-q", "--mixed", "HEAD~1"].as_slice(),
+        ["reset", "--quiet", "--hard", "HEAD~1"].as_slice(),
+        ["reset", "--refresh", "--mixed", "HEAD~1"].as_slice(),
+        ["reset", "--no-refresh", "--mixed", "HEAD~1"].as_slice(),
+    ] {
+        let git_repo = two_commit_repo();
+        let zmin_repo = two_commit_repo();
+        let git_run = command_any_output("git", git_repo.path(), args, "git reset");
+        let zmin_run = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin reset");
+        assert_eq!(zmin_run, git_run, "reset output mismatch for {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "reset status mismatch for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["diff-files", "--name-only"]),
+            git(git_repo.path(), ["diff-files", "--name-only"]),
+            "reset diff-files mismatch for {args:?}"
+        );
+    }
+
+    for (pathspec_file, nul, file_name) in [
+        (b"a.txt\nnew.txt\n".as_slice(), false, "paths.txt"),
+        (b"a.txt\0new.txt\0".as_slice(), true, "paths.nul"),
+    ] {
+        let git_repo = two_commit_repo();
+        let zmin_repo = two_commit_repo();
+
+        fs::write(git_repo.path().join("a.txt"), b"staged\n").expect("stage git a");
+        fs::write(zmin_repo.path().join("a.txt"), b"staged\n").expect("stage zmin a");
+        fs::write(git_repo.path().join("new.txt"), b"new\n").expect("write git new");
+        fs::write(zmin_repo.path().join("new.txt"), b"new\n").expect("write zmin new");
+        git(git_repo.path(), ["add", "-A"]);
+        run_zmin(zmin_repo.path(), ["add", "-A"]);
+        fs::write(git_repo.path().join(file_name), pathspec_file).expect("write git pathspec file");
+        fs::write(zmin_repo.path().join(file_name), pathspec_file)
+            .expect("write zmin pathspec file");
+
+        let mut args = vec![
+            "reset".to_owned(),
+            "HEAD".to_owned(),
+            format!("--pathspec-from-file={file_name}"),
+        ];
+        if nul {
+            args.push("--pathspec-file-nul".to_owned());
+        }
+        let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+        let git_run = command_any_output("git", git_repo.path(), &arg_refs, "git reset");
+        let zmin_run = command_any_output(zmin_bin(), zmin_repo.path(), &arg_refs, "zmin reset");
+        assert_eq!(zmin_run, git_run, "reset output mismatch for {arg_refs:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "reset status mismatch for {arg_refs:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["diff", "--cached", "--name-status"]),
+            git(git_repo.path(), ["diff", "--cached", "--name-status"]),
+            "reset cached diff mismatch for {arg_refs:?}"
+        );
+    }
+}
