@@ -3218,12 +3218,58 @@ pub enum Command {
         quiet: bool,
     },
     Apply {
+        #[arg(long = "allow-empty", action = ArgAction::SetTrue)]
+        allow_empty: bool,
+        #[arg(long = "allow-binary-replacement", action = ArgAction::SetTrue)]
+        allow_binary_replacement: bool,
+        #[arg(long = "apply", action = ArgAction::SetTrue)]
+        apply: bool,
+        #[arg(long = "binary", action = ArgAction::SetTrue)]
+        binary: bool,
         #[arg(long = "check", action = ArgAction::SetTrue)]
         check: bool,
         #[arg(long = "cached", action = ArgAction::SetTrue)]
         cached: bool,
+        #[arg(long = "stat", action = ArgAction::SetTrue)]
+        stat: bool,
+        #[arg(long = "numstat", action = ArgAction::SetTrue)]
+        numstat: bool,
+        #[arg(long = "summary", action = ArgAction::SetTrue)]
+        summary: bool,
         #[arg(long = "index", action = ArgAction::SetTrue)]
         index: bool,
+        #[arg(long = "recount", action = ArgAction::SetTrue)]
+        recount: bool,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
+        verbose: bool,
+        #[arg(long = "unsafe-paths", action = ArgAction::SetTrue)]
+        unsafe_paths: bool,
+        #[arg(long = "unidiff-zero", action = ArgAction::SetTrue)]
+        unidiff_zero: bool,
+        #[arg(long = "ignore-space-change", action = ArgAction::SetTrue)]
+        ignore_space_change: bool,
+        #[arg(long = "ignore-whitespace", action = ArgAction::SetTrue)]
+        ignore_whitespace: bool,
+        #[arg(long = "whitespace")]
+        whitespace: Option<String>,
+        #[arg(short = 'p')]
+        strip: Option<String>,
+        #[arg(short = 'C')]
+        context: Option<String>,
+        #[arg(short = 'z', action = ArgAction::SetTrue)]
+        z: bool,
+        #[arg(long = "reject", action = ArgAction::SetTrue)]
+        reject: bool,
+        #[arg(long = "3way", action = ArgAction::SetTrue)]
+        three_way: bool,
+        #[arg(long = "ours", action = ArgAction::SetTrue)]
+        ours: bool,
+        #[arg(long = "theirs", action = ArgAction::SetTrue)]
+        theirs: bool,
+        #[arg(long = "union", action = ArgAction::SetTrue)]
+        union: bool,
         #[arg(short = 'R', long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(value_hint = ValueHint::FilePath)]

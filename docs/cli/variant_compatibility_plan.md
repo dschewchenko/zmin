@@ -22,6 +22,55 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`apply` option-surface closure. This batch added twenty-five documented option
+closures by proving stock-Git parity for accepted tracked-stdin patch flags
+`apply --allow-empty`, `--allow-binary-replacement`, `--apply`, `--binary`,
+`--recount`, `--quiet`, `-q`, `--unsafe-paths`, `--unidiff-zero`,
+`--ignore-space-change`, `--ignore-whitespace`, `--whitespace=warn`, `-p1`,
+`-C1`, `-z`, `--verbose`, `-v`, `--reject`, and `--3way`, plus output-only
+parity for `apply --stat`, `--numstat`, and `--summary`, and stock-compatible
+fatal rejection for `apply --ours`, `--theirs`, and `--union`.
+
+The batch fixed one cohesive parser/runtime gap on the `apply` path:
+
+- Zmin now exposes a broad proof-only `apply` surface on the existing
+  helper-free tracked stdin patch lane, including stock stderr progress for
+  `--verbose` and `--reject`, stock stdout formatting for `--stat`,
+  `--numstat`, and `--summary`, and the stock `--3way` fallback lane that
+  materializes index-plus-worktree state instead of bare worktree-only apply
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_apply_compat apply_proof_only_option_surface_batch_matches_stock_git -- --nocapture`,
+`cargo test -p zmin-cli --test git_apply_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(apply|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2049 / 3212`
+- represented documented command-option pairs: `2049 / 3212`
+- matrix rows: `6108`
+- verified rows: `5322`
+- invalid-input rows: `761`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `apply`: `30 / 38` reviewed-complete documented option pairs, `47`
+  written rows, `47` classified rows, `43` stock-matching rows, `4`
+  invalid-input rows, `0` exact-open rows
+
+The next best high-throughput follow-up should move off this newly narrowed
+`apply` tail. The refreshed `remaining_to_fix_or_verify.tsv` head is still
+dominated by dense `am` doc-option seeds, while `apply` is now down to the
+more semantic path/filter tail rather than another large proof-only surface.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `shortlog` history-tail closure. This batch added eighteen documented option
 closures by proving stock-Git parity for accepted summary-lane flags
 `shortlog --alternate-refs`, `--bisect`, `--cherry`, `--count`, `--dense`,

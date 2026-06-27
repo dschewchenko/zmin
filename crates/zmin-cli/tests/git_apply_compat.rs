@@ -119,6 +119,95 @@ fn apply_matches_stock_git_for_worktree_check_and_cached_modes() {
 }
 
 #[test]
+fn apply_proof_only_option_surface_batch_matches_stock_git() {
+    let patch_repo = apply_base_repo();
+    write_file(patch_repo.path(), "a.txt", "one\ntwo\n");
+    fs::remove_file(patch_repo.path().join("b.txt")).expect("remove b");
+    let patch = String::from_utf8(command_stdout_bytes("git", patch_repo.path(), &["diff"]))
+        .expect("diff utf8");
+
+    for args in [
+        ["apply", "--allow-empty"].as_slice(),
+        ["apply", "--allow-binary-replacement"].as_slice(),
+        ["apply", "--apply"].as_slice(),
+        ["apply", "--binary"].as_slice(),
+        ["apply", "--recount"].as_slice(),
+        ["apply", "--quiet"].as_slice(),
+        ["apply", "-q"].as_slice(),
+        ["apply", "--unsafe-paths"].as_slice(),
+        ["apply", "--unidiff-zero"].as_slice(),
+        ["apply", "--ignore-space-change"].as_slice(),
+        ["apply", "--ignore-whitespace"].as_slice(),
+        ["apply", "--whitespace=warn"].as_slice(),
+        ["apply", "-p1"].as_slice(),
+        ["apply", "-C1"].as_slice(),
+        ["apply", "-z"].as_slice(),
+        ["apply", "--verbose"].as_slice(),
+        ["apply", "-v"].as_slice(),
+        ["apply", "--reject"].as_slice(),
+        ["apply", "--3way"].as_slice(),
+    ] {
+        let git_repo = apply_base_repo();
+        let zmin_repo = apply_base_repo();
+        assert_eq!(
+            command_any_output_with_stdin("git", git_repo.path(), args, &patch, "git apply"),
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, &patch, "zmin apply"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["diff"]),
+            git(git_repo.path(), ["diff"]),
+            "worktree args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["diff", "--cached"]),
+            git(git_repo.path(), ["diff", "--cached"]),
+            "index args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["apply", "--stat"].as_slice(),
+        ["apply", "--numstat"].as_slice(),
+        ["apply", "--summary"].as_slice(),
+    ] {
+        let git_repo = apply_base_repo();
+        let zmin_repo = apply_base_repo();
+        assert_eq!(
+            command_any_output_with_stdin("git", git_repo.path(), args, &patch, "git apply"),
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, &patch, "zmin apply"),
+            "args: {args:?}"
+        );
+        assert_eq!(git(zmin_repo.path(), ["diff"]), "", "worktree args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["diff", "--cached"]),
+            "",
+            "index args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["apply", "--ours"].as_slice(),
+        ["apply", "--theirs"].as_slice(),
+        ["apply", "--union"].as_slice(),
+    ] {
+        let git_repo = apply_base_repo();
+        let zmin_repo = apply_base_repo();
+        assert_eq!(
+            command_any_output_with_stdin("git", git_repo.path(), args, &patch, "git apply"),
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, &patch, "zmin apply"),
+            "args: {args:?}"
+        );
+        assert_eq!(git(zmin_repo.path(), ["diff"]), "", "worktree args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["diff", "--cached"]),
+            "",
+            "index args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn apply_binary_literal_patch_matches_stock_git() {
     let patch_repo = git_init();
     configure_identity(patch_repo.path());

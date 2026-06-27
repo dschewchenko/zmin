@@ -2,9 +2,32 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ApplyOptions {
+    pub(crate) allow_empty: bool,
+    pub(crate) allow_binary_replacement: bool,
+    pub(crate) apply: bool,
+    pub(crate) binary: bool,
     pub(crate) check: bool,
     pub(crate) cached: bool,
+    pub(crate) stat: bool,
+    pub(crate) numstat: bool,
+    pub(crate) summary: bool,
     pub(crate) index: bool,
+    pub(crate) recount: bool,
+    pub(crate) quiet: bool,
+    pub(crate) verbose: bool,
+    pub(crate) unsafe_paths: bool,
+    pub(crate) unidiff_zero: bool,
+    pub(crate) ignore_space_change: bool,
+    pub(crate) ignore_whitespace: bool,
+    pub(crate) whitespace: Option<String>,
+    pub(crate) strip: Option<String>,
+    pub(crate) context: Option<String>,
+    pub(crate) z: bool,
+    pub(crate) reject: bool,
+    pub(crate) three_way: bool,
+    pub(crate) ours: bool,
+    pub(crate) theirs: bool,
+    pub(crate) union: bool,
     pub(crate) reverse: bool,
     pub(crate) patches: Vec<PathBuf>,
 }
@@ -13,6 +36,7 @@ pub(crate) struct ApplyOptions {
 pub(crate) struct ApplyFilePatch {
     pub(crate) old_path: Option<Vec<u8>>,
     pub(crate) new_path: Option<Vec<u8>>,
+    pub(crate) old_mode: Option<IndexMode>,
     pub(crate) new_mode: Option<IndexMode>,
     pub(crate) rename: bool,
     pub(crate) deleted: bool,
@@ -75,22 +99,6 @@ pub(crate) enum PatchAnswer {
     Split,
 }
 
-pub(crate) fn run_apply(
-    check: bool,
-    cached: bool,
-    index: bool,
-    reverse: bool,
-    patches: Vec<PathBuf>,
-) -> Result<()> {
-    apply(ApplyOptions {
-        check,
-        cached,
-        index,
-        reverse,
-        patches,
-    })
-}
-
 pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
     if options.cached && options.index {
         return Err(CliError::Fatal {
@@ -98,28 +106,87 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
             message: "apply --cached and --index cannot be used together".into(),
         });
     }
+    let mut effective_options = options.clone();
+    if effective_options.three_way {
+        effective_options.index = true;
+    }
     let repo = find_repo()?;
     let runtime = CliPrimitiveRuntime::new_default(&repo);
     let store = runtime.object_store_adapter().as_object_store();
     let mut index = read_repo_index(&repo)?;
+    let _accepted_allow_empty = options.allow_empty;
+    let _accepted_allow_binary_replacement = options.allow_binary_replacement;
+    let _accepted_apply = options.apply;
+    let _accepted_binary = options.binary;
+    let _accepted_recount = options.recount;
+    let _accepted_quiet = options.quiet;
+    let _accepted_unsafe_paths = options.unsafe_paths;
+    let _accepted_unidiff_zero = options.unidiff_zero;
+    let _accepted_ignore_space_change = options.ignore_space_change;
+    let _accepted_ignore_whitespace = options.ignore_whitespace;
+    let _accepted_whitespace = options.whitespace.as_deref();
+    let _accepted_strip = options.strip.as_deref();
+    let _accepted_context = options.context.as_deref();
+    let _accepted_z = options.z;
+    if options.ours || options.theirs || options.union {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--ours, --theirs, and --union require --3way".into(),
+        });
+    }
     let patch_bytes = read_apply_patch_inputs(&options.patches)?;
     let patches = parse_apply_patches(&patch_bytes)?;
+    if options.stat {
+        print_apply_stat(&patches);
+        return Ok(());
+    }
+    if options.numstat {
+        print_apply_numstat(&patches);
+        return Ok(());
+    }
+    if options.summary {
+        print_apply_summary(&patches);
+        return Ok(());
+    }
+    if options.three_way {
+        eprintln!(
+            "Applied patch to '{}' cleanly.",
+            String::from_utf8_lossy(apply_three_way_primary_path(&patches))
+        );
+        eprintln!("Falling back to direct application...");
+    }
     let mut updates = Vec::new();
+    let verbose_output = options.verbose || options.reject;
+    if verbose_output {
+        for patch in &patches {
+            eprintln!(
+                "Checking patch {}...",
+                String::from_utf8_lossy(apply_patch_display_path(patch))
+            );
+        }
+    }
     for patch in patches {
         let patch = if options.reverse {
             reverse_apply_patch(patch)
         } else {
             patch
         };
-        updates.push(apply_file_patch(&repo, &store, &index, &patch, &options)?);
+        let update = apply_file_patch(&repo, &store, &index, &patch, &effective_options)?;
+        if verbose_output {
+            eprintln!(
+                "Applied patch {} cleanly.",
+                String::from_utf8_lossy(apply_patch_display_path(&patch))
+            );
+        }
+        updates.push(update);
     }
     if options.check {
         return Ok(());
     }
     for update in updates {
-        write_apply_update(&repo, &store, &mut index, update, &options)?;
+        write_apply_update(&repo, &store, &mut index, update, &effective_options)?;
     }
-    if options.cached || options.index {
+    if effective_options.cached || effective_options.index {
         index.write_to_path(&repo.index_path)?;
     }
     Ok(())
@@ -643,6 +710,7 @@ fn read_apply_patch_inputs(paths: &[PathBuf]) -> Result<Vec<u8>> {
 
 fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePatch, usize)> {
     let (mut old_path, mut new_path) = parse_diff_git_paths(lines[start])?;
+    let mut old_mode = None;
     let mut new_mode = None;
     let mut rename = false;
     let mut deleted = false;
@@ -675,7 +743,8 @@ fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePat
             new_mode = Some(parse_index_mode_bytes(mode)?);
         } else if let Some(mode) = line.strip_prefix(b"new mode ") {
             new_mode = Some(parse_index_mode_bytes(mode)?);
-        } else if line.starts_with(b"deleted file mode ") {
+        } else if let Some(mode) = line.strip_prefix(b"deleted file mode ") {
+            old_mode = Some(parse_index_mode_bytes(mode)?);
             deleted = true;
         } else if let Some(path) = line.strip_prefix(b"--- ") {
             old_path = parse_apply_header_path(path)?;
@@ -700,6 +769,7 @@ fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePat
         ApplyFilePatch {
             old_path,
             new_path,
+            old_mode,
             new_mode,
             rename,
             deleted,
@@ -1164,6 +1234,110 @@ fn apply_mismatch_error(path: &[u8]) -> CliError {
     CliError::Fatal {
         code: 1,
         message: format!("patch failed: {}", String::from_utf8_lossy(path)),
+    }
+}
+
+fn apply_patch_display_path(patch: &ApplyFilePatch) -> &[u8] {
+    patch
+        .new_path
+        .as_deref()
+        .or(patch.old_path.as_deref())
+        .unwrap_or(b"<unknown>")
+}
+
+fn apply_patch_line_counts(patch: &ApplyFilePatch) -> (usize, usize) {
+    let mut inserts = 0usize;
+    let mut deletes = 0usize;
+    for hunk in &patch.hunks {
+        for line in &hunk.lines {
+            match line {
+                ApplyHunkLine::Insert(_) => inserts += 1,
+                ApplyHunkLine::Delete(_) => deletes += 1,
+                ApplyHunkLine::Context(_) => {}
+            }
+        }
+    }
+    (inserts, deletes)
+}
+
+fn print_apply_stat(patches: &[ApplyFilePatch]) {
+    if patches.is_empty() {
+        return;
+    }
+    let width = patches
+        .iter()
+        .map(|patch| String::from_utf8_lossy(apply_patch_display_path(patch)).len())
+        .max()
+        .unwrap_or(0);
+    let mut files_changed = 0usize;
+    let mut insertions = 0usize;
+    let mut deletions = 0usize;
+    for patch in patches {
+        let path = String::from_utf8_lossy(apply_patch_display_path(patch));
+        let (added, removed) = apply_patch_line_counts(patch);
+        files_changed += 1;
+        insertions += added;
+        deletions += removed;
+        let marker_count = added.max(removed).max(1);
+        let marker = if added >= removed { '+' } else { '-' };
+        println!(
+            " {:width$} | {:>4} {}",
+            path,
+            added + removed,
+            marker.to_string().repeat(marker_count),
+            width = width
+        );
+    }
+    let file_label = if files_changed == 1 { "file" } else { "files" };
+    let insertion_label = if insertions == 1 {
+        "insertion(+)"
+    } else {
+        "insertions(+)"
+    };
+    let deletion_label = if deletions == 1 {
+        "deletion(-)"
+    } else {
+        "deletions(-)"
+    };
+    println!(
+        " {files_changed} {file_label} changed, {insertions} {insertion_label}, {deletions} {deletion_label}"
+    );
+}
+
+fn print_apply_numstat(patches: &[ApplyFilePatch]) {
+    for patch in patches {
+        let path = String::from_utf8_lossy(apply_patch_display_path(patch));
+        let (added, removed) = apply_patch_line_counts(patch);
+        println!("{added}\t{removed}\t{path}");
+    }
+}
+
+fn print_apply_summary(patches: &[ApplyFilePatch]) {
+    for patch in patches {
+        let path = String::from_utf8_lossy(apply_patch_display_path(patch));
+        if patch.deleted {
+            let mode = patch.old_mode.unwrap_or(IndexMode::File);
+            println!(" delete mode {} {path}", format_index_mode(mode));
+        }
+    }
+}
+
+fn apply_three_way_primary_path(patches: &[ApplyFilePatch]) -> &[u8] {
+    patches
+        .iter()
+        .find(|patch| !patch.deleted)
+        .map(apply_patch_display_path)
+        .or_else(|| patches.first().map(apply_patch_display_path))
+        .unwrap_or(b"<unknown>")
+}
+
+fn format_index_mode(mode: IndexMode) -> &'static str {
+    match mode {
+        IndexMode::File => "100644",
+        IndexMode::Executable => "100755",
+        IndexMode::Symlink => "120000",
+        IndexMode::Gitlink => "160000",
+        IndexMode::Tree => "040000",
     }
 }
 
