@@ -482,6 +482,7 @@ fn print_merge_commit_stat(
             ignore_matching_lines: &[],
             ignore_blank_lines: false,
             compact_summary: false,
+            color: false,
         },
     )?;
     print_summary_entries(old_index, new_index, &entries, None)

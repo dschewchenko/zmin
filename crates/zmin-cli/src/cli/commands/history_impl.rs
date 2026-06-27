@@ -2745,6 +2745,7 @@ pub(crate) fn request_pull(patch: bool, start: &str, url: &str, end: Option<&str
             ignore_matching_lines: &[],
             ignore_blank_lines: false,
             compact_summary: false,
+            color: false,
         },
     )?;
     print_summary_entries(&old_index, &new_index, &entries, None)?;
@@ -10077,6 +10078,7 @@ fn show_diff_between_indexes(
         ignore_matching_lines,
         ignore_blank_lines: false,
         compact_summary: false,
+        color: false,
     };
     match format {
         ShowDiffFormat::Patch => print_patch_entries(

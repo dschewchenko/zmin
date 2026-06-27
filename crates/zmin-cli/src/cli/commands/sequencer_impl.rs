@@ -1723,6 +1723,7 @@ fn print_sequencer_commit_summary(
             ignore_matching_lines: &[],
             ignore_blank_lines: false,
             compact_summary: false,
+            color: false,
         },
     )?;
     if !rows.is_empty() {

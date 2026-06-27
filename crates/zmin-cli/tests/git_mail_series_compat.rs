@@ -784,6 +784,58 @@ fn format_patch_word_diff_order_and_reverse_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_word_diff_color_and_regex_family_matches_stock_git() {
+    let repo = format_patch_multi_file_fixture_repo();
+    let success_cases: Vec<Vec<String>> = vec![
+        vec!["--word-diff=color".into()],
+        vec!["--color-words".into()],
+        vec!["--color-words=[a-z]+".into()],
+        vec!["--word-diff-regex=[a-z]+".into(), "--word-diff=plain".into()],
+        vec![
+            "--word-diff-regex=[a-z]+".into(),
+            "--word-diff=porcelain".into(),
+        ],
+        vec![
+            "--word-diff-regex=[a-z]+".into(),
+            "--word-diff=color".into(),
+        ],
+    ];
+
+    for extra in success_cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+
+    let invalid_args = [
+        "format-patch",
+        "--stdout",
+        "--word-diff-regex=[",
+        "--word-diff=plain",
+        "-1",
+        "HEAD",
+    ];
+    let git_result = git_failure_output(repo.path(), &invalid_args);
+    let zmin_result = run_zmin_failure_output(repo.path(), &invalid_args);
+    assert_eq!(zmin_result, git_result, "args: {invalid_args:?}");
+}
+
+#[test]
 fn format_patch_prefix_null_and_dirstat_family_matches_stock_git() {
     let multi_file_repo = format_patch_multi_file_fixture_repo();
     let nested_repo = format_patch_nested_dir_fixture_repo();

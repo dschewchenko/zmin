@@ -9665,6 +9665,7 @@ fn stash_show(args: &[String]) -> Result<()> {
         ignore_matching_lines: &ignore_matching_lines,
         ignore_blank_lines: false,
         compact_summary: false,
+        color: false,
     };
     if show_raw {
         print_raw_entries(

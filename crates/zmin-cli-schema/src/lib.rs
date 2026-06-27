@@ -3865,6 +3865,8 @@ pub enum Command {
         rotate_to: Option<String>,
         #[arg(long = "word-diff", num_args = 0..=1, default_missing_value = "plain")]
         word_diff: Option<String>,
+        #[arg(long = "color-words", num_args = 0..=1, default_missing_value = "")]
+        color_words: Option<String>,
         #[arg(long = "word-diff-regex")]
         word_diff_regex: Option<String>,
         #[arg(long = "line-prefix")]

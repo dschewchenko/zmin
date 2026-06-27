@@ -930,6 +930,7 @@ fn print_commit_shortstat(
             ignore_matching_lines: &[],
             ignore_blank_lines: false,
             compact_summary: false,
+            color: false,
         },
     )?;
     if !rows.is_empty() {

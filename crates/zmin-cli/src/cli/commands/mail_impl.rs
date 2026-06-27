@@ -760,6 +760,7 @@ pub(crate) fn format_patch(
     skip_to: Option<&str>,
     rotate_to: Option<&str>,
     word_diff: Option<&str>,
+    color_words: Option<&str>,
     word_diff_regex: Option<&str>,
     attach: bool,
     inline: bool,
@@ -859,7 +860,10 @@ pub(crate) fn format_patch(
     let dirstat_by_file = dirstat_by_file
         || dirstat
             .is_some_and(|value| value.split(',').any(|part| part.trim() == "files"));
-    let word_diff = parse_word_diff_option(word_diff)?;
+    let word_diff = parse_word_diff_option(color_words.map(|_| "color").or(word_diff))?;
+    let word_diff_regex = color_words
+        .filter(|value| !value.is_empty())
+        .or(word_diff_regex);
     let submodule_format = parse_submodule_diff_format(submodule)?;
     let suffix = suffix.unwrap_or(".patch");
     let configured_subject_prefix = read_config_value(&repo, "format.subjectprefix")?;
@@ -949,6 +953,7 @@ pub(crate) fn format_patch(
         skip_to,
         rotate_to,
         word_diff,
+        word_diff_regex,
         submodule_format,
         thread,
         extra_headers: &extra_headers,

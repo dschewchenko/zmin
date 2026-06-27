@@ -250,6 +250,7 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
                 ignore_matching_lines: &render_options.ignore_matching_lines,
                 ignore_blank_lines: render_options.ignore_blank_lines,
                 compact_summary: false,
+                color: render_options.color_mode.enabled(),
             },
             options.dirstat_by_file,
         );
@@ -1519,6 +1520,7 @@ pub(crate) fn print_combined_diff_tree_stat(
         ignore_matching_lines: options.ignore_matching_lines,
         ignore_blank_lines: options.ignore_blank_lines,
         compact_summary: false,
+        color: false,
     };
     if options.shortstat {
         print_shortstat_entries(&context, &entries, stat_options)

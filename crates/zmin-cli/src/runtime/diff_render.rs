@@ -1194,6 +1194,7 @@ pub(crate) fn write_no_index_patches(
                 "",
                 HunkFormatOptions {
                     word_diff: parse_word_diff_option(options.word_diff.as_deref())?,
+                    word_diff_regex: None,
                     color: false,
                     unified_context,
                     inter_hunk_context,
@@ -1500,7 +1501,7 @@ pub(crate) enum DiffColorMode {
 }
 
 impl DiffColorMode {
-    fn enabled(self) -> bool {
+    pub(crate) fn enabled(self) -> bool {
         match self {
             Self::Never => false,
             Self::Always => true,
@@ -1705,6 +1706,7 @@ pub(crate) fn render_diff(
         ignore_matching_lines: &options.ignore_matching_lines,
         ignore_blank_lines: options.ignore_blank_lines,
         compact_summary: options.compact_summary,
+        color: options.color_mode.enabled(),
     };
     let raw_options = RawPrintOptions {
         abbrev_len: options.raw_abbrev_len,
@@ -1879,6 +1881,7 @@ pub(crate) fn print_render_patch_entries(
             old_source: options.old_source,
             new_source: options.new_source,
             word_diff: options.word_diff,
+            word_diff_regex: None,
             abbrev_len: options.patch_abbrev_len,
             old_prefix: options.old_prefix.clone(),
             new_prefix: options.new_prefix.clone(),
@@ -3393,6 +3396,7 @@ fn write_format_patch_prelude<W: Write>(
         ignore_matching_lines: &[],
         ignore_blank_lines: false,
         compact_summary: false,
+        color: context.word_diff == WordDiffMode::Color,
     };
     match context.prelude_mode {
         FormatPatchPreludeMode::Diffstat => {
@@ -3460,6 +3464,7 @@ fn write_format_patch_entries<W: Write>(
     entries: &[zmin_git_core::IndexDiffEntry],
     _blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
+    validate_word_diff_regex(context.word_diff_regex)?;
     let (mut old_prefix, mut new_prefix) = diff_prefixes(context.no_prefix, false, None, None);
     if context.reverse {
         std::mem::swap(&mut old_prefix, &mut new_prefix);
@@ -3468,8 +3473,14 @@ fn write_format_patch_entries<W: Write>(
         .with_abbrev_len(Some(context.patch_abbrev_len))
         .with_prefixes(old_prefix, new_prefix)
         .with_binary(true)
+        .with_color_mode(if context.word_diff == WordDiffMode::Color {
+            DiffColorMode::Always
+        } else {
+            DiffColorMode::Never
+        })
         .with_submodule_format(context.submodule_format);
     format.word_diff = context.word_diff;
+    format.word_diff_regex = context.word_diff_regex.map(str::to_owned);
     write_patch_entries(
         out,
         context.repo,
@@ -3730,6 +3741,7 @@ fn cached_patch_write_context<'a>(
         submodule_format: SubmoduleDiffFormat::Short,
         color: false,
         emit_hunk_headers: true,
+        word_diff_regex: None,
     }
 }
 
@@ -4304,6 +4316,7 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) skip_to: Option<&'a str>,
     pub(crate) rotate_to: Option<&'a str>,
     pub(crate) word_diff: WordDiffMode,
+    pub(crate) word_diff_regex: Option<&'a str>,
     pub(crate) submodule_format: SubmoduleDiffFormat,
     pub(crate) thread: bool,
     pub(crate) extra_headers: &'a [String],
@@ -4351,6 +4364,7 @@ pub(crate) struct DiffStatOptions<'a> {
     pub(crate) ignore_matching_lines: &'a [Regex],
     pub(crate) ignore_blank_lines: bool,
     pub(crate) compact_summary: bool,
+    pub(crate) color: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -4426,6 +4440,11 @@ pub(crate) fn write_stat_entries<W: Write>(
         }
         let changes = row.insertions + row.deletions;
         let graph = stat_graph(row.insertions, row.deletions, max_changes, graph_width);
+        let graph = if options.color {
+            colorize_stat_graph(&graph)
+        } else {
+            graph
+        };
         if graph.is_empty() {
             writeln!(
                 out,
@@ -4441,6 +4460,23 @@ pub(crate) fn write_stat_entries<W: Write>(
         }
     }
     write_diff_stat_summary(out, &rows)
+}
+
+fn colorize_stat_graph(graph: &str) -> String {
+    let plus = graph.bytes().take_while(|byte| *byte == b'+').count();
+    let minus = graph.len().saturating_sub(plus);
+    let mut colored = String::new();
+    if plus > 0 {
+        colored.push_str("\x1b[32m");
+        colored.push_str(&"+".repeat(plus));
+        colored.push_str("\x1b[m");
+    }
+    if minus > 0 {
+        colored.push_str("\x1b[31m");
+        colored.push_str(&"-".repeat(minus));
+        colored.push_str("\x1b[m");
+    }
+    colored
 }
 
 fn diff_stat_row_display_path(row: &DiffStatRow) -> String {
@@ -4573,6 +4609,7 @@ pub(crate) fn print_numstat_entries(
                 ignore_matching_lines,
                 ignore_blank_lines,
                 compact_summary: _,
+                color: _,
             },
         nul_terminated,
     } = options;
@@ -4586,6 +4623,7 @@ pub(crate) fn print_numstat_entries(
                 ignore_matching_lines,
                 ignore_blank_lines,
                 compact_summary: false,
+                color: false,
             },
         )?;
         if (whitespace_mode != DiffWhitespaceMode::None
@@ -4649,6 +4687,7 @@ fn write_numstat_entries_to<W: Write>(
                 ignore_matching_lines,
                 ignore_blank_lines,
                 compact_summary: _,
+                color: _,
             },
         nul_terminated: _,
     } = options;
@@ -4662,6 +4701,7 @@ fn write_numstat_entries_to<W: Write>(
                 ignore_matching_lines,
                 ignore_blank_lines,
                 compact_summary: false,
+                color: false,
             },
         )?;
         if (whitespace_mode != DiffWhitespaceMode::None
@@ -4911,6 +4951,7 @@ pub(crate) struct PatchFormatOptions {
     pub(crate) old_source: DiffSideSource,
     pub(crate) new_source: DiffSideSource,
     pub(crate) word_diff: WordDiffMode,
+    pub(crate) word_diff_regex: Option<String>,
     pub(crate) abbrev_len: Option<usize>,
     pub(crate) old_prefix: String,
     pub(crate) new_prefix: String,
@@ -4938,6 +4979,7 @@ impl PatchFormatOptions {
             old_source: DiffSideSource::Index,
             new_source: DiffSideSource::Index,
             word_diff: WordDiffMode::None,
+            word_diff_regex: None,
             abbrev_len: None,
             old_prefix: "a/".to_owned(),
             new_prefix: "b/".to_owned(),
@@ -4965,6 +5007,7 @@ impl PatchFormatOptions {
             old_source: DiffSideSource::Index,
             new_source: DiffSideSource::WorktreeOrIndex,
             word_diff: WordDiffMode::None,
+            word_diff_regex: None,
             abbrev_len: None,
             old_prefix: "a/".to_owned(),
             new_prefix: "b/".to_owned(),
@@ -5106,6 +5149,7 @@ fn write_patch_entries_unprefixed<W: Write>(
         submodule_format: format.submodule_format,
         color: format.color_mode.enabled(),
         emit_hunk_headers: format.emit_hunk_headers,
+        word_diff_regex: format.word_diff_regex.as_deref(),
     };
     for entry in entries {
         let old_entry = find_index_entry(old_index, diff_entry_old_path(entry));
@@ -5337,6 +5381,7 @@ pub(crate) struct PatchWriteContext<'a> {
     pub(crate) submodule_format: SubmoduleDiffFormat,
     pub(crate) color: bool,
     pub(crate) emit_hunk_headers: bool,
+    pub(crate) word_diff_regex: Option<&'a str>,
 }
 
 pub(crate) fn write_patch_entry<W: Write>(
@@ -5779,6 +5824,7 @@ fn write_patch_entry_view<W: Write>(
             &new_display_path,
             HunkFormatOptions {
                 word_diff,
+                word_diff_regex: context.word_diff_regex,
                 color: context.color,
                 unified_context: context.unified_context,
                 inter_hunk_context: context.inter_hunk_context,
@@ -5851,6 +5897,7 @@ fn write_patch_entry_view<W: Write>(
             &new_display_path,
             HunkFormatOptions {
                 word_diff,
+                word_diff_regex: context.word_diff_regex,
                 color: context.color,
                 unified_context: context.unified_context,
                 inter_hunk_context: context.inter_hunk_context,
@@ -6097,6 +6144,7 @@ pub(crate) fn print_unified_full_file_hunk(old: &[u8], new: &[u8], path: &str) -
 #[derive(Clone, Copy)]
 pub(crate) struct HunkFormatOptions<'a> {
     word_diff: WordDiffMode,
+    word_diff_regex: Option<&'a str>,
     color: bool,
     unified_context: usize,
     inter_hunk_context: usize,
@@ -6113,6 +6161,7 @@ impl Default for HunkFormatOptions<'static> {
     fn default() -> Self {
         Self {
             word_diff: WordDiffMode::None,
+            word_diff_regex: None,
             color: false,
             unified_context: 3,
             inter_hunk_context: 0,
@@ -6384,13 +6433,24 @@ fn write_unified_hunk<W: Write>(
                     diff_line_color(format.color, DiffLineColor::Context),
                 )?,
                 DiffLineOp::Delete(line) if format.word_diff != WordDiffMode::None => {
-                    let next_idx =
-                        write_word_diff_change_block(out, ops, idx, end, format.word_diff)?;
+                    let next_idx = write_word_diff_change_block(
+                        out,
+                        ops,
+                        idx,
+                        end,
+                        format.word_diff,
+                        format.word_diff_regex,
+                    )?;
                     if next_idx != idx {
                         idx = next_idx;
                         continue;
                     }
-                    write_word_diff_delete_line(out, line, format.word_diff)?
+                    write_word_diff_delete_line(
+                        out,
+                        line,
+                        format.word_diff,
+                        format.word_diff_regex,
+                    )?
                 }
                 DiffLineOp::Delete(line) => write_diff_line(
                     out,
@@ -6399,7 +6459,12 @@ fn write_unified_hunk<W: Write>(
                     diff_line_color(format.color, DiffLineColor::Delete),
                 )?,
                 DiffLineOp::Insert(line) if format.word_diff != WordDiffMode::None => {
-                    write_word_diff_insert_line(out, line, format.word_diff)?
+                    write_word_diff_insert_line(
+                        out,
+                        line,
+                        format.word_diff,
+                        format.word_diff_regex,
+                    )?
                 }
                 DiffLineOp::Insert(line) => write_diff_line(
                     out,
@@ -6634,11 +6699,12 @@ pub(crate) fn write_word_diff_line<W: Write>(
     old: &[u8],
     new: &[u8],
     mode: WordDiffMode,
+    regex: Option<&str>,
 ) -> Result<()> {
     let old_line = strip_trailing_lf(old);
     let new_line = strip_trailing_lf(new);
-    let old_words = split_word_diff_tokens(old_line);
-    let new_words = split_word_diff_tokens(new_line);
+    let old_words = split_word_diff_tokens(old_line, regex)?;
+    let new_words = split_word_diff_tokens(new_line, regex)?;
     let ops = diff_word_ops(&old_words, &new_words);
     for op in ops.iter().copied() {
         match (mode, op) {
@@ -6703,6 +6769,7 @@ pub(crate) fn write_word_diff_change_block<W: Write>(
     start: usize,
     end: usize,
     mode: WordDiffMode,
+    regex: Option<&str>,
 ) -> Result<usize> {
     let mut delete_end = start;
     while delete_end < end && matches!(ops[delete_end], DiffLineOp::Delete(_)) {
@@ -6731,7 +6798,7 @@ pub(crate) fn write_word_diff_change_block<W: Write>(
                 message: "invalid word diff delete/insert block".into(),
             });
         };
-        write_word_diff_line(out, old_line, new_line, mode)?;
+        write_word_diff_line(out, old_line, new_line, mode, regex)?;
     }
     for op in ops.iter().take(delete_end).skip(start + paired) {
         let DiffLineOp::Delete(line) = op else {
@@ -6740,7 +6807,7 @@ pub(crate) fn write_word_diff_change_block<W: Write>(
                 message: "invalid word diff delete segment".into(),
             });
         };
-        write_word_diff_delete_line(out, line, mode)?;
+        write_word_diff_delete_line(out, line, mode, regex)?;
     }
     for op in ops.iter().take(insert_end).skip(delete_end + paired) {
         let DiffLineOp::Insert(line) = op else {
@@ -6749,7 +6816,7 @@ pub(crate) fn write_word_diff_change_block<W: Write>(
                 message: "invalid word diff insert segment".into(),
             });
         };
-        write_word_diff_insert_line(out, line, mode)?;
+        write_word_diff_insert_line(out, line, mode, regex)?;
     }
     Ok(insert_end)
 }
@@ -6758,22 +6825,28 @@ pub(crate) fn write_word_diff_delete_line<W: Write>(
     out: &mut W,
     line: &[u8],
     mode: WordDiffMode,
+    regex: Option<&str>,
 ) -> Result<()> {
     match mode {
         WordDiffMode::Plain => {
             out.write_all(b"[-")?;
-            out.write_all(strip_trailing_lf(line))?;
+            write_word_diff_regex_line_body(out, strip_trailing_lf(line), regex)?;
             out.write_all(b"-]")?;
             writeln!(out)?;
         }
         WordDiffMode::Color => {
             out.write_all(b"\x1b[31m")?;
-            out.write_all(strip_trailing_lf(line))?;
+            write_word_diff_regex_line_body(out, strip_trailing_lf(line), regex)?;
             out.write_all(b"\x1b[m")?;
             writeln!(out)?;
         }
         WordDiffMode::Porcelain => {
-            write_word_diff_porcelain_segment(out, b'-', strip_trailing_lf(line))?;
+            write_word_diff_porcelain_segment_with_regex(
+                out,
+                b'-',
+                strip_trailing_lf(line),
+                regex,
+            )?;
             writeln!(out, "~")?;
         }
         WordDiffMode::None => {}
@@ -6785,22 +6858,28 @@ pub(crate) fn write_word_diff_insert_line<W: Write>(
     out: &mut W,
     line: &[u8],
     mode: WordDiffMode,
+    regex: Option<&str>,
 ) -> Result<()> {
     match mode {
         WordDiffMode::Plain => {
             out.write_all(b"{+")?;
-            out.write_all(strip_trailing_lf(line))?;
+            write_word_diff_regex_line_body(out, strip_trailing_lf(line), regex)?;
             out.write_all(b"+}")?;
             writeln!(out)?;
         }
         WordDiffMode::Color => {
             out.write_all(b"\x1b[32m")?;
-            out.write_all(strip_trailing_lf(line))?;
+            write_word_diff_regex_line_body(out, strip_trailing_lf(line), regex)?;
             out.write_all(b"\x1b[m")?;
             writeln!(out)?;
         }
         WordDiffMode::Porcelain => {
-            write_word_diff_porcelain_segment(out, b'+', strip_trailing_lf(line))?;
+            write_word_diff_porcelain_segment_with_regex(
+                out,
+                b'+',
+                strip_trailing_lf(line),
+                regex,
+            )?;
             writeln!(out, "~")?;
         }
         WordDiffMode::None => {}
@@ -6883,9 +6962,12 @@ pub(crate) enum DiffWordOp<'a> {
     Insert(&'a [u8]),
 }
 
-pub(crate) fn split_word_diff_tokens(line: &[u8]) -> Vec<&[u8]> {
+pub(crate) fn split_word_diff_tokens<'a>(line: &'a [u8], regex: Option<&str>) -> Result<Vec<&'a [u8]>> {
     if line.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
+    }
+    if let Some(pattern) = regex {
+        return split_word_diff_tokens_with_regex(line, pattern);
     }
     let mut tokens = Vec::new();
     let mut start = 0usize;
@@ -6899,7 +6981,63 @@ pub(crate) fn split_word_diff_tokens(line: &[u8]) -> Vec<&[u8]> {
         }
     }
     tokens.push(&line[start..]);
-    tokens
+    Ok(tokens)
+}
+
+fn validate_word_diff_regex(regex: Option<&str>) -> Result<()> {
+    if let Some(pattern) = regex {
+        Regex::new(pattern).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid regular expression: {pattern}"),
+        })?;
+    }
+    Ok(())
+}
+
+fn split_word_diff_tokens_with_regex<'a>(line: &'a [u8], pattern: &str) -> Result<Vec<&'a [u8]>> {
+    let regex = Regex::new(pattern).map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("invalid regular expression: {pattern}"),
+    })?;
+    let mut tokens = Vec::new();
+    let mut last = 0usize;
+    for matched in regex.find_iter(line) {
+        if matched.start() > last {
+            tokens.push(&line[last..matched.start()]);
+        }
+        tokens.push(&line[matched.start()..matched.end()]);
+        last = matched.end();
+    }
+    if last < line.len() {
+        tokens.push(&line[last..]);
+    }
+    if tokens.is_empty() {
+        tokens.push(line);
+    }
+    Ok(tokens)
+}
+
+fn write_word_diff_regex_line_body<W: Write>(
+    out: &mut W,
+    line: &[u8],
+    regex: Option<&str>,
+) -> Result<()> {
+    for token in split_word_diff_tokens(line, regex)? {
+        out.write_all(token)?;
+    }
+    Ok(())
+}
+
+fn write_word_diff_porcelain_segment_with_regex<W: Write>(
+    out: &mut W,
+    prefix: u8,
+    line: &[u8],
+    regex: Option<&str>,
+) -> Result<()> {
+    for token in split_word_diff_tokens(line, regex)? {
+        write_word_diff_porcelain_segment(out, prefix, token)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn diff_word_ops<'a>(old: &[&'a [u8]], new: &[&'a [u8]]) -> Vec<DiffWordOp<'a>> {
@@ -7863,8 +8001,8 @@ mod tests {
 
     #[test]
     fn diff_word_ops_keeps_current_word_alignment_shape() {
-        let old = split_word_diff_tokens(b"alpha beta gamma");
-        let new = split_word_diff_tokens(b"beta delta gamma");
+        let old = split_word_diff_tokens(b"alpha beta gamma", None).expect("old tokens");
+        let new = split_word_diff_tokens(b"beta delta gamma", None).expect("new tokens");
         let ops = diff_word_ops(&old, &new);
 
         assert_eq!(

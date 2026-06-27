@@ -22,6 +22,53 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` color-word-diff and bounded-regex closure across the modeled
+multi-file single-commit stdout mail-series lane. This batch closed a real
+mail-render gap rather than just expanding evidence: `format-patch` now matches
+stock Git for `--word-diff=color`, `--color-words`, `--color-words=[a-z]+`,
+and the bounded helper-free `--word-diff-regex=[a-z]+` lane across plain,
+porcelain, and color word-diff output. One stock-failure detail also mattered
+for exact parity: invalid `--word-diff-regex=[` now aborts after the mail
+prelude and diffstat block but before `diff --git`, matching stock Git's
+partial stdout shape instead of failing from inside hunk rendering.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_word_diff_color_and_regex_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_word_diff_order_and_reverse_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_prefix_null_and_dirstat_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2309 / 3212`
+- matrix rows: `6473`
+- verified rows: `5661`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `131 / 162` reviewed-complete documented option pairs,
+  `143 / 162` represented documented option pairs, `169` written rows, `169`
+  classified rows, `169` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should still stay on `format-patch`,
+but the queue has moved off the word-diff tail. The bounded helper-free
+`--word-diff-regex` and `--color-words` lanes now have exact stock evidence,
+so the remaining documented schema/behavior tails are led by `--base`,
+`--combined-all-paths`, `--cover-from-description`, `--creation-factor`,
+`--dd`, `--description-file`, `--diff-merges`, `--interdiff`, `-X`, `-c`,
+`-m`, and `-t`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` expansion-evidence closure across the existing multi-file and
 nested-directory single-commit stdout mail-series lanes. This batch did not
 change runtime code; it raised exact stock-Git coverage density for already
