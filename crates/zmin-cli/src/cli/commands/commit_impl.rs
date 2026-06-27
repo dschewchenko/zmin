@@ -2,12 +2,15 @@ use super::*;
 
 pub(crate) struct CommitCommandOptions<'a> {
     pub(crate) all: bool,
+    pub(crate) include: bool,
     pub(crate) only: bool,
+    pub(crate) patch: bool,
     pub(crate) allow_empty: bool,
     pub(crate) amend: bool,
     pub(crate) edit: bool,
     pub(crate) no_edit: bool,
     pub(crate) signoff: bool,
+    pub(crate) no_signoff: bool,
     pub(crate) quiet: bool,
     pub(crate) verbose: u8,
     pub(crate) dry_run: bool,
@@ -16,6 +19,7 @@ pub(crate) struct CommitCommandOptions<'a> {
     pub(crate) null: bool,
     pub(crate) porcelain: bool,
     pub(crate) long: bool,
+    pub(crate) verify: bool,
     pub(crate) no_verify: bool,
     pub(crate) status: bool,
     pub(crate) no_status: bool,
@@ -27,12 +31,17 @@ pub(crate) struct CommitCommandOptions<'a> {
     pub(crate) date_override: Option<&'a str>,
     pub(crate) squash: Option<&'a str>,
     pub(crate) template: Option<&'a Path>,
+    pub(crate) gpg_sign: Option<String>,
+    pub(crate) no_gpg_sign: bool,
     pub(crate) reset_author: bool,
     pub(crate) reuse_message: Option<&'a str>,
     pub(crate) reedit_message: Option<&'a str>,
     pub(crate) fixup: Option<&'a str>,
     pub(crate) message_file: Option<&'a Path>,
     pub(crate) messages: Vec<String>,
+    pub(crate) no_post_rewrite: bool,
+    pub(crate) pathspec_from_file: Option<&'a Path>,
+    pub(crate) pathspec_file_nul: bool,
     pub(crate) trailers: Vec<String>,
     pub(crate) paths: Vec<PathBuf>,
 }
@@ -94,6 +103,7 @@ pub(crate) fn mktree_command(nul_terminated: bool, missing: bool, batch: bool) -
 
 fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
     let _trace = phase_trace("commit.total");
+    let _verify = options.verify;
     let (repo, store, mut index) = {
         let _trace = phase_trace("commit.setup");
         let repo = find_repo()?;
@@ -101,9 +111,41 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         let index = read_repo_index(&repo)?;
         (repo, store, index)
     };
+    let mut paths = options.paths;
+    if let Some(pathspec_file) = options.pathspec_from_file {
+        let loaded = read_pathspec_file(pathspec_file, options.pathspec_file_nul)?;
+        paths.extend(loaded);
+    } else if options.pathspec_file_nul {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--pathspec-file-nul' requires '--pathspec-from-file'".into(),
+        });
+    }
+    if options.patch {
+        let pathspecs = commit_pathspecs(&repo, &paths)?;
+        worktree_commands::add_patch_quit_lane(&repo, &store, &index, &pathspecs)?;
+        println!();
+        worktree_commands::status(
+            None,
+            false,
+            false,
+            false,
+            0,
+            None,
+            false,
+            false,
+            None,
+            false,
+            false,
+            None,
+            None,
+            Vec::new(),
+        )?;
+        return Err(CliError::Exit(1));
+    }
     let fixup_options = {
         let _trace = phase_trace("commit.validate_options");
-        if options.all && (!options.paths.is_empty() || options.only) {
+        if options.all && (!paths.is_empty() || options.only) {
             return Err(CliError::Fatal {
                 code: 128,
                 message: "paths cannot be used with -a".into(),
@@ -244,8 +286,9 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         };
         (reused_commit, squashed_commit, fixup_commit)
     };
-    let pathspec_commit = (!options.paths.is_empty())
-        .then(|| commit_pathspec_indexes(&repo, &store, &index, &options.paths))
+    let signoff = options.signoff && !options.no_signoff;
+    let pathspec_commit = (!paths.is_empty())
+        .then(|| commit_pathspec_indexes(&repo, &store, &index, &paths, options.include))
         .transpose()?;
     let fixup_reword_index;
     let commit_index = if matches!(
@@ -485,7 +528,7 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         if let Some(squashed) = squashed_commit.as_ref() {
             message = squash_commit_message(&commit_subject(&squashed.message), message);
         }
-        if options.signoff {
+        if signoff {
             append_commit_signoff(&mut message, &committer)?;
         }
         if !options.trailers.is_empty() && !uses_editor {
@@ -527,7 +570,15 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         for parent in parents {
             builder = builder.parent(parent);
         }
-        let commit = builder.message(message.clone())?.encode()?;
+        let mut builder = builder.message(message.clone())?;
+        if !options.no_gpg_sign {
+            if let Some(signature) =
+                commit_tree_gpg_signature(&repo, &builder, options.gpg_sign.as_deref())?
+            {
+                builder = builder.gpg_signature(signature)?;
+            }
+        }
+        let commit = builder.encode()?;
         store.write_object(GitObjectKind::Commit, &commit)?
     };
     if amended_head.as_ref() == Some(&id) && !options.allow_empty {
@@ -561,7 +612,9 @@ fn commit(options: CommitCommandOptions<'_>) -> Result<()> {
         let _trace = phase_trace("commit.post_hooks");
         let use_hook_worktree_summary = use_hook_worktree_summary(&repo)?;
         run_commit_hook(&repo, "post-commit", &[], None, true)?;
-        if let Some(old_id) = amended_head {
+        if !options.no_post_rewrite
+            && let Some(old_id) = amended_head
+        {
             let post_rewrite_stdin = format!("{} {}\n", old_id.to_hex(), id.to_hex());
             run_commit_hook(
                 &repo,
@@ -637,8 +690,13 @@ fn commit_pathspec_indexes(
     store: &LooseObjectStore,
     real_index: &GitIndex,
     paths: &[PathBuf],
+    include_staged: bool,
 ) -> Result<CommitPathspecIndexes> {
-    let mut commit_index = read_head_index(repo)?;
+    let mut commit_index = if include_staged {
+        real_index.clone()
+    } else {
+        read_head_index(repo)?
+    };
     let mut updated_real_index = real_index.clone();
     for path in paths {
         let pathspec = path_arg_to_repo_relative_allow_root(repo, path)?;
@@ -668,6 +726,12 @@ fn commit_pathspec_indexes(
         commit_index,
         real_index: updated_real_index,
     })
+}
+
+fn commit_pathspecs(repo: &GitRepo, paths: &[PathBuf]) -> Result<Vec<Vec<u8>>> {
+    paths.iter()
+        .map(|path| path_arg_to_repo_relative_allow_root(repo, path))
+        .collect()
 }
 
 fn print_commit_summary(

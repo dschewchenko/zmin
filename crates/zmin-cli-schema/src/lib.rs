@@ -2042,10 +2042,16 @@ pub enum Command {
     Commit {
         #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(short = 'i', long = "include", action = ArgAction::SetTrue)]
+        include: bool,
         #[arg(short = 'o', long = "only", action = ArgAction::SetTrue)]
         only: bool,
+        #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
+        patch: bool,
         #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
+        #[arg(long = "no-signoff", action = ArgAction::SetTrue, overrides_with = "signoff")]
+        no_signoff: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
@@ -2062,6 +2068,8 @@ pub enum Command {
         porcelain: bool,
         #[arg(long = "long", action = ArgAction::SetTrue)]
         long: bool,
+        #[arg(long = "verify", action = ArgAction::SetTrue, overrides_with = "no_verify")]
+        verify: bool,
         #[arg(short = 'n', long = "no-verify", action = ArgAction::SetTrue)]
         no_verify: bool,
         #[arg(long = "status", action = ArgAction::SetTrue, overrides_with = "no_status")]
@@ -2097,6 +2105,17 @@ pub enum Command {
         squash: Option<String>,
         #[arg(short = 't', long = "template", value_hint = ValueHint::FilePath)]
         template: Option<PathBuf>,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::Count, overrides_with = "gpg_sign")]
+        no_gpg_sign: u8,
         #[arg(long = "reset-author", action = ArgAction::SetTrue)]
         reset_author: bool,
         #[arg(short = 'C', long = "reuse-message")]
@@ -2109,6 +2128,12 @@ pub enum Command {
         message_file: Option<PathBuf>,
         #[arg(short = 'm', long = "message")]
         messages: Vec<String>,
+        #[arg(long = "no-post-rewrite", action = ArgAction::SetTrue)]
+        no_post_rewrite: bool,
+        #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
+        pathspec_from_file: Option<PathBuf>,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
+        pathspec_file_nul: bool,
         #[arg(long = "trailer")]
         trailers: Vec<String>,
         #[arg(value_hint = ValueHint::AnyPath)]

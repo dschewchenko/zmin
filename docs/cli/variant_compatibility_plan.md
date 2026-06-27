@@ -22,6 +22,54 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`commit` documented-option surface closure on the tracked-path, hook, patch,
+and signed-commit lanes. This batch finished representation for all documented
+`commit` option pairs by adding exact stock-Git matrix evidence for
+`--verify`, `--include`, `-i`, `--pathspec-from-file`, `--pathspec-file-nul`,
+`--no-signoff`, `--no-post-rewrite`, `--patch`, `-p`, `--gpg-sign`, `-S`,
+and `--no-gpg-sign`.
+
+The batch fixed one cohesive parser-plus-runtime gap on the `commit` path:
+
+- Zmin now exposes the remaining documented `commit` surface for include-mode
+  path staging, pathspec-file loading, verify/no-signoff/no-post-rewrite
+  toggles, patch quit-lane prompting, and explicit GPG signing or signing
+  suppression, while reusing the existing `commit-tree` signing implementation
+  for the signed commit family and matching stock Git on the modeled fixture
+  key lane
+
+Focused verification was
+`cargo test -p zmin-cli --test git_commit_compat -- --nocapture`,
+`tools/git-commit-gpg-oracle-smoke.sh`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2100 / 3212`
+- represented documented command-option pairs: `2122 / 3212`
+- matrix rows: `6211`
+- verified rows: `5401`
+- invalid-input rows: `785`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `commit`: `46 / 58` reviewed-complete documented option pairs, `58 / 58`
+  represented documented option pairs, `105` written rows, `105` classified
+  rows, `100` stock-matching rows, `5` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should reselect from the refreshed
+backlog head rather than stay on parser closure. `commit` no longer has schema
+gaps; its remaining head is expansion-only tails on the newly represented
+option family.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `apply` documented-option representation closure on the tracked-patch and
 add-file lanes. This batch added exact stock-Git matrix evidence for
 `--directory`, `--include`, `--exclude`, `--intent-to-add`, `--no-add`,

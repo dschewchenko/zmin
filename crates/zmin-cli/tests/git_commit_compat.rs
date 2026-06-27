@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use common::{
-    clone_repo_fixture, command_any_output, command_failure_output_with_env,
-    command_output_with_env, configure_identity, git, git_init, git_with_env, run_zmin,
-    run_zmin_with_env, zmin_bin,
+    clone_repo_fixture, command_any_output, command_any_output_with_stdin,
+    command_failure_output_with_env, command_output_with_env, configure_identity, git, git_init,
+    git_with_env, run_zmin, run_zmin_with_env, zmin_bin,
 };
 
 const COMMIT_ENV: [(&str, &str); 6] = [
@@ -1912,6 +1912,309 @@ fn commit_squash_matches_stock_git_object() {
         git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
         git(git_repo.path(), ["cat-file", "-p", "HEAD"])
     );
+}
+
+#[test]
+fn commit_documented_open_option_batch_matches_stock_git() {
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"verify\n").expect("write verify");
+            git(repo, ["add", "a.txt"]);
+        }
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["commit", "--verify", "-m", "verify"],
+                &COMMIT_ENV,
+                "zmin"
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &["commit", "--verify", "-m", "verify"],
+                &COMMIT_ENV,
+                "git"
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write a");
+            fs::write(repo.join("b.txt"), b"base\n").expect("write b");
+        }
+        git(git_repo.path(), ["add", "a.txt", "b.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt", "b.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"include\n").expect("write include a");
+            fs::write(repo.join("b.txt"), b"left dirty\n").expect("write include b");
+            fs::write(repo.join("paths.txt"), b"a.txt\n").expect("write pathspec file");
+        }
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.txt",
+                    "-m",
+                    "include",
+                ],
+                &COMMIT_ENV,
+                "zmin"
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.txt",
+                    "-m",
+                    "include",
+                ],
+                &COMMIT_ENV,
+                "git"
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"short include\n").expect("write short include");
+        }
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["commit", "-i", "-m", "shortinclude", "a.txt"],
+                &COMMIT_ENV,
+                "zmin"
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &["commit", "-i", "-m", "shortinclude", "a.txt"],
+                &COMMIT_ENV,
+                "git"
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write a");
+            fs::write(repo.join("b.txt"), b"base\n").expect("write b");
+        }
+        git(git_repo.path(), ["add", "a.txt", "b.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt", "b.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"include nul\n").expect("write include nul a");
+            fs::write(repo.join("b.txt"), b"left dirty\n").expect("write include nul b");
+            fs::write(repo.join("paths.nul"), b"a.txt\0").expect("write nul pathspec file");
+        }
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.nul",
+                    "--pathspec-file-nul",
+                    "-m",
+                    "include-nul",
+                ],
+                &COMMIT_ENV,
+                "zmin"
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.nul",
+                    "--pathspec-file-nul",
+                    "-m",
+                    "include-nul",
+                ],
+                &COMMIT_ENV,
+                "git"
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"nosign\n").expect("write nosign");
+            git(repo, ["add", "a.txt"]);
+        }
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["commit", "--signoff", "--no-signoff", "-m", "nosign"],
+                &COMMIT_ENV,
+                "zmin"
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &["commit", "--signoff", "--no-signoff", "-m", "nosign"],
+                &COMMIT_ENV,
+                "git"
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+    }
+
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        install_post_rewrite_hook(git_repo.path());
+        install_post_rewrite_hook(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"amended\n").expect("write amended");
+            git(repo, ["add", "a.txt"]);
+        }
+        assert_eq!(
+            command_output_with_env(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["commit", "--amend", "--no-post-rewrite", "-m", "amended"],
+                &COMMIT_ENV,
+                "zmin"
+            ),
+            command_output_with_env(
+                "git",
+                git_repo.path(),
+                &["commit", "--amend", "--no-post-rewrite", "-m", "amended"],
+                &COMMIT_ENV,
+                "git"
+            )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+        assert!(!git_repo.path().join("rewrite.log").exists());
+        assert!(!zmin_repo.path().join("rewrite.log").exists());
+    }
+
+    for flag in ["--patch", "-p"] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"patch\n").expect("write patch");
+        }
+        let args = ["commit", flag, "-m", "patch"];
+        assert_eq!(
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), &args, "", "zmin"),
+            command_any_output_with_stdin("git", git_repo.path(), &args, "", "git"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+            git(git_repo.path(), ["status", "--porcelain=v1"])
+        );
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["rev-parse", "HEAD"]),
+            git(git_repo.path(), ["rev-parse", "HEAD"])
+        );
+    }
 }
 
 fn install_commit_hook_set(repo: &Path) {

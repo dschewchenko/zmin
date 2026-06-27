@@ -3549,7 +3549,7 @@ fn add_interactive_diff_stat(
     Ok(Some(format!("+{insertions}/-{deletions}")))
 }
 
-fn add_patch_quit_lane(
+pub(crate) fn add_patch_quit_lane(
     repo: &GitRepo,
     store: &LooseObjectStore,
     index: &GitIndex,
