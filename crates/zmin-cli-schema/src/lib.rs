@@ -3777,6 +3777,24 @@ pub enum Command {
         output_directory: Option<PathBuf>,
         #[arg(long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
+        #[arg(long = "binary", action = ArgAction::SetTrue)]
+        binary: bool,
+        #[arg(long = "default-prefix", action = ArgAction::SetTrue)]
+        default_prefix: bool,
+        #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
+        no_ext_diff: bool,
+        #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
+        no_textconv: bool,
+        #[arg(long = "no-color", action = ArgAction::SetTrue)]
+        no_color: bool,
+        #[arg(long = "no-color-moved", action = ArgAction::SetTrue)]
+        no_color_moved: bool,
+        #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
+        no_color_moved_ws: bool,
+        #[arg(long = "stat", action = ArgAction::SetTrue)]
+        stat: bool,
+        #[arg(long = "patch", action = ArgAction::SetTrue)]
+        patch: bool,
         #[arg(long = "attach", action = ArgAction::SetTrue)]
         attach: bool,
         #[arg(long = "inline", action = ArgAction::SetTrue)]

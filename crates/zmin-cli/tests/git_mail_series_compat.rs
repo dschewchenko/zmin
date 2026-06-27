@@ -7,8 +7,8 @@ use tempfile::TempDir;
 use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_output_with_env,
     configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
-    read_named_files, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, write_file, zmin_bin,
+    git_status_args, read_named_files, run_zmin, run_zmin_args, run_zmin_failure_output,
+    run_zmin_status, run_zmin_status_args, run_zmin_with_env, write_file, zmin_bin,
 };
 
 fn format_patch_fixture_repo() -> TempDir {
@@ -261,6 +261,42 @@ fn format_patch_binary_summary_matches_stock_git() {
         git(apply_repo.path(), ["rev-parse", "HEAD^{tree}"]),
         expected_tree
     );
+}
+
+#[test]
+fn format_patch_default_diff_option_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let cases = [
+        ["--binary"],
+        ["--default-prefix"],
+        ["--no-ext-diff"],
+        ["--no-textconv"],
+        ["--no-color"],
+        ["--no-color-moved"],
+        ["--no-color-moved-ws"],
+        ["--stat"],
+        ["--patch"],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch", "--stdout"];
+        args.extend(extra);
+        args.push("-1");
+        args.push("HEAD");
+        let zmin = run_zmin_args(repo.path(), &args);
+        let stock = git_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args),
+            git_status_args(repo.path(), &args),
+            "status case mismatch"
+        );
+    }
 }
 
 #[test]

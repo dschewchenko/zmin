@@ -21,6 +21,56 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` default/no-op diff-option closure on the already modeled
+single-commit stdout mail-series lane. This batch added exact stock-Git matrix
+evidence for `--binary`, `--default-prefix`, `--no-ext-diff`,
+`--no-textconv`, `--no-color`, `--no-color-moved`,
+`--no-color-moved-ws`, `--stat`, and `--patch`, and lifted those nine
+documented option pairs into the reviewed-complete represented surface without
+adding new runtime rendering logic beyond parser/schema acceptance.
+
+The batch closed one cohesive parser-and-evidence gap rather than introducing a
+new `format-patch` behavior family:
+
+- Zmin already matched stock Git on the covered helper-free single-commit
+  stdout mail-series lane, and the remaining work here was to accept the
+  explicit documented default/no-op diff spellings and promote the resulting
+  exact stock-oracle evidence into represented plus reviewed-complete
+  `format-patch` doc-option pairs
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_default_diff_option_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2187 / 3212`
+- represented documented command-option pairs: `2187 / 3212`
+- matrix rows: `6328`
+- verified rows: `5516`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `21 / 21` reviewed-complete documented option pairs,
+  `21 / 21` represented documented option pairs, `24` written rows, `24`
+  classified rows, `24` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has the largest helper-free documented tail at `141`
+remaining `doc_option_not_in_zmin_schema` rows, now led by shared diff and
+mail-surface spellings such as `--abbrev`, `--always`, `--anchored`,
+`--diff-algorithm`, `--color`, and related family members.
+
 As of 2026-06-27 the latest completed batch is a helper-free shared `diff*`
 reviewed-complete closure on the already represented porcelain `--output` plus
 plumbing `--output` and `--line-prefix` lanes. This batch promoted the
