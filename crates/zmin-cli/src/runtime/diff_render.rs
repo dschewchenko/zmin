@@ -3418,6 +3418,12 @@ fn write_format_patch_prelude<W: Write>(
             )?;
             write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
+        FormatPatchPreludeMode::Dirstat => {
+            print_dirstat_entries(out, &diff_context, entries, stat_options, false)?;
+        }
+        FormatPatchPreludeMode::DirstatByFile => {
+            print_dirstat_entries(out, &diff_context, entries, stat_options, true)?;
+        }
         FormatPatchPreludeMode::Shortstat => {
             write_shortstat_entries_to(out, &diff_context, entries, stat_options)?;
             write_format_patch_prelude_separator(out, context.nul_terminated)?;
@@ -3454,11 +3460,10 @@ fn write_format_patch_entries<W: Write>(
     entries: &[zmin_git_core::IndexDiffEntry],
     _blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
-    let (old_prefix, new_prefix) = if context.reverse {
-        ("b/".to_owned(), "a/".to_owned())
-    } else {
-        ("a/".to_owned(), "b/".to_owned())
-    };
+    let (mut old_prefix, mut new_prefix) = diff_prefixes(context.no_prefix, false, None, None);
+    if context.reverse {
+        std::mem::swap(&mut old_prefix, &mut new_prefix);
+    }
     let mut format = PatchFormatOptions::cached()
         .with_abbrev_len(Some(context.patch_abbrev_len))
         .with_prefixes(old_prefix, new_prefix)
@@ -4285,6 +4290,7 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) patch_abbrev_len: usize,
     pub(crate) total: usize,
     pub(crate) nul_terminated: bool,
+    pub(crate) no_prefix: bool,
     pub(crate) no_numbered: bool,
     pub(crate) numbered: bool,
     pub(crate) numbered_files: bool,
@@ -4318,6 +4324,8 @@ pub(crate) enum FormatPatchPreludeMode {
     None,
     Raw,
     Numstat,
+    Dirstat,
+    DirstatByFile,
     Shortstat,
     Summary,
 }
@@ -4685,7 +4693,8 @@ fn write_numstat_entries_to<W: Write>(
     Ok(())
 }
 
-pub(crate) fn print_dirstat_entries(
+pub(crate) fn print_dirstat_entries<W: Write>(
+    out: &mut W,
     context: &DiffIndexContext<'_>,
     entries: &[zmin_git_core::IndexDiffEntry],
     options: DiffStatOptions<'_>,
@@ -4700,7 +4709,7 @@ pub(crate) fn print_dirstat_entries(
             } else if row.binary {
                 row.old_bytes.max(row.new_bytes)
             } else {
-                row.insertions + row.deletions
+                row.old_bytes + row.new_bytes
             }
         })
         .sum::<usize>();
@@ -4717,7 +4726,7 @@ pub(crate) fn print_dirstat_entries(
         } else if row.binary {
             row.old_bytes.max(row.new_bytes)
         } else {
-            row.insertions + row.deletions
+            row.old_bytes + row.new_bytes
         };
         if weight == 0 {
             continue;
@@ -4725,9 +4734,9 @@ pub(crate) fn print_dirstat_entries(
         *dirs.entry(format!("{dir}/")).or_default() += weight;
     }
     for (dir, weight) in dirs {
-        let percent = (weight as f64 * 100.0) / total as f64;
+        let percent = ((weight as f64 * 1000.0) / total as f64).floor() / 10.0;
         if percent >= 3.0 {
-            println!("{percent:6.1}% {dir}");
+            writeln!(out, "{percent:6.1}% {dir}")?;
         }
     }
     Ok(())

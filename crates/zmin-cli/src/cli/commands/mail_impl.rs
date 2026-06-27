@@ -746,11 +746,14 @@ pub(crate) fn format_patch(
     no_stat: bool,
     no_patch: bool,
     numstat: bool,
+    dirstat: Option<&str>,
+    dirstat_by_file: bool,
     shortstat: bool,
     raw: bool,
     summary: bool,
     full_index: bool,
     nul_terminated: bool,
+    no_prefix: bool,
     reverse: bool,
     submodule: Option<&str>,
     order_file: Option<&Path>,
@@ -853,6 +856,9 @@ pub(crate) fn format_patch(
     } else {
         abbrev_len
     };
+    let dirstat_by_file = dirstat_by_file
+        || dirstat
+            .is_some_and(|value| value.split(',').any(|part| part.trim() == "files"));
     let word_diff = parse_word_diff_option(word_diff)?;
     let submodule_format = parse_submodule_diff_format(submodule)?;
     let suffix = suffix.unwrap_or(".patch");
@@ -931,10 +937,13 @@ pub(crate) fn format_patch(
             no_stat,
             no_patch,
             numstat,
+            dirstat.is_some(),
+            dirstat_by_file,
             shortstat,
             raw,
             summary,
         ),
+        no_prefix,
         reverse,
         order_file,
         skip_to,
@@ -1058,6 +1067,8 @@ fn format_patch_prelude_mode(
     no_stat: bool,
     no_patch: bool,
     numstat: bool,
+    dirstat: bool,
+    dirstat_by_file: bool,
     shortstat: bool,
     raw: bool,
     summary: bool,
@@ -1066,6 +1077,10 @@ fn format_patch_prelude_mode(
         FormatPatchPreludeMode::Raw
     } else if numstat {
         FormatPatchPreludeMode::Numstat
+    } else if dirstat_by_file {
+        FormatPatchPreludeMode::DirstatByFile
+    } else if dirstat {
+        FormatPatchPreludeMode::Dirstat
     } else if shortstat {
         FormatPatchPreludeMode::Shortstat
     } else if summary {

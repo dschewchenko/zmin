@@ -239,7 +239,9 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     );
     let entries = filter_diff_relative(entries, render_options.relative_prefix.as_deref());
     if options.dirstat.is_some() || options.dirstat_by_file {
+        let mut out = io::stdout().lock();
         return print_dirstat_entries(
+            &mut out,
             &diff_context,
             &entries,
             DiffStatOptions {

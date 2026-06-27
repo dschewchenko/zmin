@@ -83,6 +83,23 @@ fn format_patch_multi_file_fixture_repo() -> TempDir {
     repo
 }
 
+fn format_patch_nested_dir_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    fs::create_dir_all(repo.path().join("src/lib")).expect("create src/lib");
+    fs::create_dir_all(repo.path().join("tests/unit")).expect("create tests/unit");
+    write_file(repo.path(), "src/lib/alpha.txt", "alpha beta\n");
+    write_file(repo.path(), "tests/unit/beta.txt", "one two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "src/lib/alpha.txt", "alpha gamma beta\n");
+    write_file(repo.path(), "tests/unit/beta.txt", "one changed two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "change"]);
+    repo
+}
+
 fn normalize_format_patch_version(output: &str) -> String {
     let mut normalized = Vec::new();
     let mut version_line = false;
@@ -755,6 +772,63 @@ fn format_patch_word_diff_order_and_reverse_family_matches_stock_git() {
         assert_eq!(
             run_zmin_status_args(repo.path(), &args_ref),
             git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
+fn format_patch_prefix_null_and_dirstat_family_matches_stock_git() {
+    let multi_file_repo = format_patch_multi_file_fixture_repo();
+    let nested_repo = format_patch_nested_dir_fixture_repo();
+
+    let multi_file_cases: Vec<Vec<String>> = vec![
+        vec!["--no-prefix".into()],
+        vec!["-z".into()],
+    ];
+    for extra in multi_file_cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(multi_file_repo.path(), &args_ref);
+        let stock = git_args(multi_file_repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(multi_file_repo.path(), &args_ref),
+            git_status_args(multi_file_repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+
+    let nested_cases: Vec<Vec<String>> = vec![
+        vec!["--dirstat".into()],
+        vec!["--dirstat=files,0".into()],
+        vec!["--dirstat-by-file".into()],
+    ];
+    for extra in nested_cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(nested_repo.path(), &args_ref);
+        let stock = git_args(nested_repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(nested_repo.path(), &args_ref),
+            git_status_args(nested_repo.path(), &args_ref),
             "status case mismatch"
         );
     }

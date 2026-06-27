@@ -3895,6 +3895,8 @@ pub enum Command {
         no_indent_heuristic: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]
         no_notes: bool,
+        #[arg(long = "no-prefix", action = ArgAction::SetTrue)]
+        no_prefix: bool,
         #[arg(long = "no-relative", action = ArgAction::SetTrue)]
         no_relative: bool,
         #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
@@ -3951,6 +3953,10 @@ pub enum Command {
         no_patch: bool,
         #[arg(long = "numstat", action = ArgAction::SetTrue)]
         numstat: bool,
+        #[arg(long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat: Option<String>,
+        #[arg(long = "dirstat-by-file", action = ArgAction::SetTrue)]
+        dirstat_by_file: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
