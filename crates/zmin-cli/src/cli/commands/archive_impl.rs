@@ -328,7 +328,8 @@ fn archive_to_tar_bytes(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let source = archive_tree_source(repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
-    let attributes = load_archive_attributes(repo, &store, &source.tree_id, options.worktree_attributes)?;
+    let attributes =
+        load_archive_attributes(repo, &store, &source.tree_id, options.worktree_attributes)?;
     let mtime = match options.mtime.as_deref() {
         Some(value) => parse_archive_mtime(value)?,
         None => source.mtime,
@@ -397,7 +398,8 @@ fn archive_to_zip_bytes(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let source = archive_tree_source(repo, &store, treeish)?;
     let tree_cache = TreeObjectCache::new(&store);
-    let attributes = load_archive_attributes(repo, &store, &source.tree_id, options.worktree_attributes)?;
+    let attributes =
+        load_archive_attributes(repo, &store, &source.tree_id, options.worktree_attributes)?;
     let mtime = match options.mtime.as_deref() {
         Some(value) => parse_archive_mtime(value)?,
         None => source.mtime,
@@ -902,7 +904,8 @@ fn load_archive_attributes(
     if worktree_attributes {
         return GitAttributes::load_from_root(&repo.root).map_err(CliError::Io);
     }
-    let Some(entry) = find_tree_entry(store, tree_id, b".gitattributes").map_err(CliError::Io)? else {
+    let Some(entry) = find_tree_entry(store, tree_id, b".gitattributes").map_err(CliError::Io)?
+    else {
         return Ok(GitAttributes::default());
     };
     let object = store.read_object(&entry.id)?;
@@ -912,7 +915,9 @@ fn load_archive_attributes(
             message: "tree-ish .gitattributes is not a blob".into(),
         });
     }
-    Ok(GitAttributes::parse(&String::from_utf8_lossy(&object.content)))
+    Ok(GitAttributes::parse(&String::from_utf8_lossy(
+        &object.content,
+    )))
 }
 
 #[cfg(unix)]

@@ -21,6 +21,107 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local
+`diff-tree` dirstat tail expansion across the existing tree-to-tree nested
+directory lane. This batch added four exact stock-Git rows for
+`diff-tree --dirstat`, `diff-tree --dirstat-by-file`, `diff-tree -X`, and
+`diff-tree --dirstat --cumulative`. The runtime change stayed intentionally
+small: `diff-tree` now treats the dirstat family as a recursive-entry mode, so
+it no longer falls into the old non-recursive root-entry renderer that printed
+raw directory records instead of dirstat output.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_diff_compat diff_dirstat_family_matches_stock_git_for_porcelain_and_plumbing -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_diff_compat diff_dirstat_matches_stock_git_for_treeish_pairs -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2523 / 3212`
+- represented documented command-option pairs: `2537 / 3212`
+- matrix rows: `6749`
+- verified rows: `5912`
+- invalid-input rows: `812`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `689`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `diff-tree`: `97 / 132` reviewed-complete documented option pairs,
+  `101 / 132` represented documented option pairs, `134` written rows, `134`
+  classified rows, `134` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+This remains an expansion batch rather than a reviewed-complete closure:
+`diff-tree` no longer has dirstat-family rows without matrix evidence, but the
+whole `diff*` family still has represented documented option pairs that need
+full expansion before they count as reviewed-complete.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
+`diff`/`diff-files`/`diff-index` dirstat-family expansion across the
+treeish-pair porcelain lane plus the dirty-worktree plumbing lanes. This batch
+added ten exact stock-Git rows for `diff -X`, `diff --dirstat --cumulative`,
+`diff-files --dirstat`, `diff-files --dirstat-by-file`, `diff-files -X`,
+`diff-files --dirstat --cumulative`, `diff-index --dirstat`,
+`diff-index --dirstat-by-file`, `diff-index -X`, and
+`diff-index --dirstat --cumulative`. The runtime changes stayed bounded but
+real: the shared diff renderer now computes dirstat percentages from line
+change counts instead of raw byte totals, preserves stock output ordering on
+equal-percentage rows, and supports cumulative directory accumulation; the
+plumbing diff commands now thread the dirstat family through schema, dispatch
+and runtime; and the CLI thread stack increased from `16 MiB` to `64 MiB` so
+the larger clap schema still parses on the dedicated CLI thread without
+overflowing. `diff-tree` dirstat remains a separate follow-up tail and was
+intentionally left out of this batch.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_diff_compat diff_dirstat_family_matches_stock_git_for_porcelain_and_plumbing -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_diff_compat diff_dirstat_matches_stock_git_for_treeish_pairs -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2523 / 3212`
+- represented documented command-option pairs: `2533 / 3212`
+- matrix rows: `6745`
+- verified rows: `5908`
+- invalid-input rows: `812`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `689`
+
+Per-command position on the touched surface:
+
+- `diff`: `92 / 117` reviewed-complete documented option pairs,
+  `94 / 117` represented documented option pairs, `262` written rows, `262`
+  classified rows, `258` stock-matching rows, `4` invalid-input rows, and
+  `0` exact-open rows
+- `diff-files`: `91 / 118` reviewed-complete documented option pairs,
+  `95 / 118` represented documented option pairs, `115` written rows, `115`
+  classified rows, `115` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+- `diff-index`: `90 / 112` reviewed-complete documented option pairs,
+  `94 / 112` represented documented option pairs, `122` written rows, `122`
+  classified rows, `122` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+
+The next best high-throughput follow-up should either finish the remaining
+dirstat-family expansion needed to promote these newly represented option pairs
+into reviewed-complete status, or continue with the still-open `diff-tree`
+dirstat tail before jumping to an unrelated command family.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `pull`
 fetch-inherited tail closure across the named-local ff-only lane plus the
 existing-`FETCH_HEAD` append rejection lane. This batch added nine exact

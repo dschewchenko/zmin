@@ -158,14 +158,7 @@ fn apply_mail_patch(
     let head_id = refs.resolve("HEAD")?;
     if parsed.patch_text.trim().is_empty() {
         return handle_empty_am_mail(
-            repo,
-            store,
-            mail,
-            &head_id,
-            &parsed,
-            &author,
-            &committer,
-            am_options,
+            repo, store, mail, &head_id, &parsed, &author, &committer, am_options,
         );
     }
     let mut index = read_repo_index(repo)?;
@@ -189,8 +182,14 @@ fn apply_mail_patch(
         ignore_whitespace: am_options.ignore_whitespace,
         inaccurate_eof: false,
         whitespace: am_options.whitespace.clone(),
-        strip: am_options.strip.as_ref().and_then(|value| value.parse().ok()),
-        context: am_options.context.as_ref().and_then(|value| value.parse().ok()),
+        strip: am_options
+            .strip
+            .as_ref()
+            .and_then(|value| value.parse().ok()),
+        context: am_options
+            .context
+            .as_ref()
+            .and_then(|value| value.parse().ok()),
         directory: None,
         include: Vec::new(),
         exclude: Vec::new(),
@@ -332,7 +331,11 @@ fn am_interactive_prompt() -> &'static str {
     "Commit Body is:\n--------------------------\nupdate alpha\n--------------------------\nApply? [y]es/[n]o/[e]dit/[v]iew patch/[a]ccept all: "
 }
 
-fn parse_am_mail(mail: &str, keep_subject: bool, patch_format: Option<&str>) -> Result<ParsedAmMail> {
+fn parse_am_mail(
+    mail: &str,
+    keep_subject: bool,
+    patch_format: Option<&str>,
+) -> Result<ParsedAmMail> {
     let (headers, body) = split_mail_headers(mail);
     let header_map = parse_mail_headers(headers);
     let from = header_map.get("from").ok_or_else(|| CliError::Fatal {
@@ -450,7 +453,9 @@ fn load_am_session(repo: &GitRepo) -> Result<Option<AmSession>> {
     Ok(Some(AmSession {
         raw_mail: fs::read_to_string(dir.join("raw-mail"))?,
         patch_text: fs::read_to_string(dir.join("patch"))?,
-        subject: fs::read_to_string(dir.join("subject"))?.trim_end().to_owned(),
+        subject: fs::read_to_string(dir.join("subject"))?
+            .trim_end()
+            .to_owned(),
     }))
 }
 
@@ -689,7 +694,9 @@ fn am_continue_no_changes_stderr(allow_empty: bool) -> String {
     let mut text =
         "hint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\n".to_owned();
     if allow_empty {
-        text.push_str("hint: To record the empty patch as an empty commit, run \"git am --allow-empty\".\n");
+        text.push_str(
+            "hint: To record the empty patch as an empty commit, run \"git am --allow-empty\".\n",
+        );
     }
     text.push_str(
         "hint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n",
@@ -849,7 +856,10 @@ pub(crate) fn format_patch(
     }
     let allows_combined_all_paths = combined_merges
         || diff_merges.is_some_and(|value| {
-            matches!(value, "combined" | "c" | "dense-combined" | "dense_combined" | "cc")
+            matches!(
+                value,
+                "combined" | "c" | "dense-combined" | "dense_combined" | "cc"
+            )
         });
     if combined_all_paths && !allows_combined_all_paths {
         return Err(CliError::Fatal {
@@ -907,7 +917,8 @@ pub(crate) fn format_patch(
     } else {
         abbrev_len
     };
-    let dirstat = normalize_format_patch_dirstat(dirstat, dirstat_short, cumulative, dirstat_by_file);
+    let dirstat =
+        normalize_format_patch_dirstat(dirstat, dirstat_short, cumulative, dirstat_by_file);
     let dirstat_by_file = dirstat
         .as_deref()
         .is_some_and(|value| value.split(',').any(|part| part.trim() == "files"));
@@ -963,7 +974,9 @@ pub(crate) fn format_patch(
                 code: 128,
                 message: "no commits to format".into(),
             })?;
-        Some(render_format_patch_interdiff(&repo, &store, previous, &head)?)
+        Some(render_format_patch_interdiff(
+            &repo, &store, previous, &head,
+        )?)
     } else if let Some(previous) = range_diff {
         let head = commits
             .last()
@@ -1046,7 +1059,11 @@ pub(crate) fn format_patch(
         extra_headers: &extra_headers,
         in_reply_to,
         sender_override: from,
-        body_from_override: from.map(|_| true).or(Some(force_in_body_from)).filter(|value| *value).is_some(),
+        body_from_override: from
+            .map(|_| true)
+            .or(Some(force_in_body_from))
+            .filter(|value| *value)
+            .is_some(),
         message_id_timestamp,
         keep_subject,
         number_offset: start_number.saturating_sub(1),

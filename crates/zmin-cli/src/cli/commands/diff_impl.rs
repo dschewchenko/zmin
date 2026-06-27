@@ -1,5 +1,10 @@
 use super::*;
 
+struct DirstatMode {
+    by_file: bool,
+    cumulative: bool,
+}
+
 pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     if options.no_index {
         return diff_no_index(&options);
@@ -256,7 +261,11 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         options.rotate_to.as_deref(),
     );
     let entries = filter_diff_relative(entries, render_options.relative_prefix.as_deref());
-    if options.dirstat.is_some() || options.dirstat_by_file {
+    if let Some(dirstat_mode) = normalize_dirstat_mode(
+        options.dirstat.as_deref(),
+        options.cumulative,
+        options.dirstat_by_file.as_deref(),
+    ) {
         let mut out = io::stdout().lock();
         return print_dirstat_entries(
             &mut out,
@@ -270,7 +279,8 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
                 compact_summary: false,
                 color: render_options.color_mode.enabled(),
             },
-            options.dirstat_by_file,
+            dirstat_mode.by_file,
+            dirstat_mode.cumulative,
         );
     }
     if options.check {
@@ -591,6 +601,28 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         options.rotate_to.as_deref(),
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
+    if let Some(dirstat_mode) = normalize_dirstat_mode(
+        options.dirstat.as_deref(),
+        options.cumulative,
+        options.dirstat_by_file.as_deref(),
+    ) {
+        let mut out = io::stdout().lock();
+        return print_dirstat_entries(
+            &mut out,
+            &diff_context,
+            &entries,
+            DiffStatOptions {
+                whitespace_mode: render_options.whitespace_mode,
+                relative_prefix: relative_prefix.as_deref(),
+                ignore_matching_lines: &render_options.ignore_matching_lines,
+                ignore_blank_lines: render_options.ignore_blank_lines,
+                compact_summary: false,
+                color: render_options.color_mode.enabled(),
+            },
+            dirstat_mode.by_file,
+            dirstat_mode.cumulative,
+        );
+    }
     render_diff(
         &repo,
         &store,
@@ -653,6 +685,32 @@ fn append_worktree_stat_dirty_entries(
         }
     }
     Ok(())
+}
+
+fn normalize_dirstat_mode(
+    dirstat: Option<&str>,
+    cumulative: bool,
+    dirstat_by_file: Option<&str>,
+) -> Option<DirstatMode> {
+    if dirstat.is_none() && dirstat_by_file.is_none() && !cumulative {
+        return None;
+    }
+    let mut by_file = dirstat_by_file.is_some();
+    let mut cumulative_mode = cumulative;
+    for value in [dirstat, dirstat_by_file].into_iter().flatten() {
+        for token in value.split(',') {
+            match token.trim() {
+                "" => {}
+                "files" => by_file = true,
+                "cumulative" => cumulative_mode = true,
+                _ => {}
+            }
+        }
+    }
+    Some(DirstatMode {
+        by_file,
+        cumulative: cumulative_mode,
+    })
 }
 
 pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
@@ -761,6 +819,28 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         options.rotate_to.as_deref(),
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
+    if let Some(dirstat_mode) = normalize_dirstat_mode(
+        options.dirstat.as_deref(),
+        options.cumulative,
+        options.dirstat_by_file.as_deref(),
+    ) {
+        let mut out = io::stdout().lock();
+        return print_dirstat_entries(
+            &mut out,
+            &diff_context,
+            &entries,
+            DiffStatOptions {
+                whitespace_mode: render_options.whitespace_mode,
+                relative_prefix: relative_prefix.as_deref(),
+                ignore_matching_lines: &render_options.ignore_matching_lines,
+                ignore_blank_lines: render_options.ignore_blank_lines,
+                compact_summary: false,
+                color: render_options.color_mode.enabled(),
+            },
+            dirstat_mode.by_file,
+            dirstat_mode.cumulative,
+        );
+    }
     render_diff(
         &repo,
         &store,
@@ -1205,6 +1285,28 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         options.rotate_to.as_deref(),
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
+    if let Some(dirstat_mode) = normalize_dirstat_mode(
+        options.dirstat.as_deref(),
+        options.cumulative,
+        options.dirstat_by_file.as_deref(),
+    ) {
+        let mut out = io::stdout().lock();
+        return print_dirstat_entries(
+            &mut out,
+            &diff_context,
+            &entries,
+            DiffStatOptions {
+                whitespace_mode: render_options.whitespace_mode,
+                relative_prefix: relative_prefix.as_deref(),
+                ignore_matching_lines: &render_options.ignore_matching_lines,
+                ignore_blank_lines: render_options.ignore_blank_lines,
+                compact_summary: false,
+                color: render_options.color_mode.enabled(),
+            },
+            dirstat_mode.by_file,
+            dirstat_mode.cumulative,
+        );
+    }
     let (old_index, new_index, render_options) = if options.reverse {
         let mut render_options = render_options;
         render_options.old_source = DiffSideSource::Index;
@@ -2354,7 +2456,11 @@ fn resolve_stock_git_binary() -> PathBuf {
     for path in std::env::var_os("PATH")
         .into_iter()
         .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+        .flat_map(|dir| {
+            stock_git_names()
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
     {
         if is_stock_git_binary(&path) {
             return path;

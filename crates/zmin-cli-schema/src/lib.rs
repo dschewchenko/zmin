@@ -2771,10 +2771,12 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
-        #[arg(long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         dirstat: Option<String>,
-        #[arg(long = "dirstat-by-file", action = ArgAction::SetTrue)]
-        dirstat_by_file: bool,
+        #[arg(long = "cumulative", action = ArgAction::SetTrue)]
+        cumulative: bool,
+        #[arg(long = "dirstat-by-file", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat_by_file: Option<String>,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
         raw: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
@@ -2967,6 +2969,12 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
+        #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat: Option<String>,
+        #[arg(long = "cumulative", action = ArgAction::SetTrue)]
+        cumulative: bool,
+        #[arg(long = "dirstat-by-file", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat_by_file: Option<String>,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
         raw: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
@@ -3135,6 +3143,12 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
+        #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat: Option<String>,
+        #[arg(long = "cumulative", action = ArgAction::SetTrue)]
+        cumulative: bool,
+        #[arg(long = "dirstat-by-file", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat_by_file: Option<String>,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
         raw: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
@@ -3306,6 +3320,12 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
+        #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat: Option<String>,
+        #[arg(long = "cumulative", action = ArgAction::SetTrue)]
+        cumulative: bool,
+        #[arg(long = "dirstat-by-file", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat_by_file: Option<String>,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
         raw: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
@@ -6054,7 +6074,8 @@ pub struct DiffOptions {
     pub numstat: bool,
     pub shortstat: bool,
     pub dirstat: Option<String>,
-    pub dirstat_by_file: bool,
+    pub cumulative: bool,
+    pub dirstat_by_file: Option<String>,
     pub raw: bool,
     pub summary: bool,
     pub name_status: bool,
@@ -6141,7 +6162,8 @@ impl Default for DiffOptions {
             numstat: false,
             shortstat: false,
             dirstat: None,
-            dirstat_by_file: false,
+            cumulative: false,
+            dirstat_by_file: None,
             raw: false,
             summary: false,
             name_status: false,
@@ -6226,6 +6248,9 @@ pub struct PlumbingDiffOptions {
     pub compact_summary: bool,
     pub numstat: bool,
     pub shortstat: bool,
+    pub dirstat: Option<String>,
+    pub cumulative: bool,
+    pub dirstat_by_file: Option<String>,
     pub raw: bool,
     pub summary: bool,
     pub name_status: bool,

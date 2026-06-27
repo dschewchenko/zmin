@@ -2343,6 +2343,9 @@ pub(crate) fn diff_tree_needs_recursive_entries(options: &PlumbingDiffOptions) -
         || options.pickaxe_regex.is_some()
         || options.pickaxe_all
         || options.pickaxe_regex_mode
+        || options.dirstat.is_some()
+        || options.cumulative
+        || options.dirstat_by_file.is_some()
 }
 
 pub(crate) struct DiffPairsBatch {
@@ -3311,13 +3314,7 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
     if context.attach || context.inline {
         let _trace = phase_trace("format_patch.write_attach_body");
         write_format_patch_attach_body(
-            out,
-            context,
-            entry,
-            &old_index,
-            &new_index,
-            &entries,
-            blob_cache,
+            out, context, entry, &old_index, &new_index, &entries, blob_cache,
         )?;
         return Ok(());
     }
@@ -3327,14 +3324,7 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
     }
     {
         let _trace = phase_trace("format_patch.write_tree_diff");
-        write_format_patch_entries(
-            out,
-            context,
-            &old_index,
-            &new_index,
-            &entries,
-            blob_cache,
-        )?;
+        write_format_patch_entries(out, context, &old_index, &new_index, &entries, blob_cache)?;
     }
     if !context.attach && !context.inline {
         if let Some(base_information) = context.base_information {
@@ -3448,10 +3438,10 @@ fn write_format_patch_prelude<W: Write>(
             write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
         FormatPatchPreludeMode::Dirstat => {
-            print_dirstat_entries(out, &diff_context, entries, stat_options, false)?;
+            print_dirstat_entries(out, &diff_context, entries, stat_options, false, false)?;
         }
         FormatPatchPreludeMode::DirstatByFile => {
-            print_dirstat_entries(out, &diff_context, entries, stat_options, true)?;
+            print_dirstat_entries(out, &diff_context, entries, stat_options, true, false)?;
         }
         FormatPatchPreludeMode::Shortstat => {
             write_shortstat_entries_to(out, &diff_context, entries, stat_options)?;
@@ -3469,10 +3459,7 @@ fn write_format_patch_prelude<W: Write>(
     Ok(())
 }
 
-fn write_format_patch_prelude_separator<W: Write>(
-    out: &mut W,
-    nul_terminated: bool,
-) -> Result<()> {
+fn write_format_patch_prelude_separator<W: Write>(out: &mut W, nul_terminated: bool) -> Result<()> {
     if nul_terminated {
         out.write_all(b"\0")?;
     } else {
@@ -3660,13 +3647,18 @@ fn write_format_patch_header<W: Write>(
     let raw_subject = commit_subject_view(&commit.message);
     let subject = format_patch_subject(raw_subject.as_ref(), context.keep_subject);
     if context.zero_commit {
-        writeln!(out, "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001")?;
+        writeln!(
+            out,
+            "From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001"
+        )?;
     } else {
         write!(out, "From ")?;
         id.write_hex_io(out)?;
         writeln!(out, " Mon Sep 17 00:00:00 2001")?;
     }
-    if context.thread && let Some(timestamp) = context.message_id_timestamp {
+    if context.thread
+        && let Some(timestamp) = context.message_id_timestamp
+    {
         writeln!(
             out,
             "Message-ID: <{}.{}.git.zmin@example.test>",
@@ -4846,6 +4838,7 @@ pub(crate) fn print_dirstat_entries<W: Write>(
     entries: &[zmin_git_core::IndexDiffEntry],
     options: DiffStatOptions<'_>,
     by_file: bool,
+    cumulative: bool,
 ) -> Result<()> {
     let rows = diff_stat_rows_with_whitespace(context, entries, options)?;
     let total = rows
@@ -4856,7 +4849,7 @@ pub(crate) fn print_dirstat_entries<W: Write>(
             } else if row.binary {
                 row.old_bytes.max(row.new_bytes)
             } else {
-                row.old_bytes + row.new_bytes
+                row.insertions + row.deletions
             }
         })
         .sum::<usize>();
@@ -4873,13 +4866,33 @@ pub(crate) fn print_dirstat_entries<W: Write>(
         } else if row.binary {
             row.old_bytes.max(row.new_bytes)
         } else {
-            row.old_bytes + row.new_bytes
+            row.insertions + row.deletions
         };
         if weight == 0 {
             continue;
         }
-        *dirs.entry(format!("{dir}/")).or_default() += weight;
+        if cumulative {
+            let mut current = Some(dir);
+            while let Some(segment) = current {
+                *dirs.entry(format!("{segment}/")).or_default() += weight;
+                current = segment.rsplit_once('/').map(|(parent, _)| parent);
+            }
+        } else {
+            *dirs.entry(format!("{dir}/")).or_default() += weight;
+        }
     }
+    let mut dirs = dirs.into_iter().collect::<Vec<_>>();
+    dirs.sort_by(|(left_dir, left_weight), (right_dir, right_weight)| {
+        left_weight
+            .cmp(right_weight)
+            .then_with(|| {
+                right_dir
+                    .matches('/')
+                    .count()
+                    .cmp(&left_dir.matches('/').count())
+            })
+            .then_with(|| left_dir.cmp(right_dir))
+    });
     for (dir, weight) in dirs {
         let percent = ((weight as f64 * 1000.0) / total as f64).floor() / 10.0;
         if percent >= 3.0 {
@@ -7069,7 +7082,10 @@ pub(crate) enum DiffWordOp<'a> {
     Insert(&'a [u8]),
 }
 
-pub(crate) fn split_word_diff_tokens<'a>(line: &'a [u8], regex: Option<&str>) -> Result<Vec<&'a [u8]>> {
+pub(crate) fn split_word_diff_tokens<'a>(
+    line: &'a [u8],
+    regex: Option<&str>,
+) -> Result<Vec<&'a [u8]>> {
     if line.is_empty() {
         return Ok(Vec::new());
     }

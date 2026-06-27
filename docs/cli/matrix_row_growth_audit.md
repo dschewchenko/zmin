@@ -11,6 +11,25 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local
+`diff-tree` dirstat tail expansion across the existing tree-to-tree nested
+directory lane. The selected change added four exact stock-Git rows for
+`diff-tree --dirstat`, `diff-tree --dirstat-by-file`, `diff-tree -X`, and
+`diff-tree --dirstat --cumulative`, and closes the prior unverified dirstat
+surface on `diff-tree` by forcing that family onto the recursive-entry path
+instead of the old non-recursive root-entry renderer. Actual delta is `+4`
+matrix rows, `+0` complete documented option pairs, `+4` represented
+documented option pairs, `+4` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `6749` matrix rows,
+`5912` verified rows, `812` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2523/3212` complete documented option
+pairs, and `2537/3212` represented documented option pairs. `diff-tree` now
+sits at `101/132` represented documented option pairs with `134/134`
+stock-matching rows and `0` invalid-input rows. This remains an expansion
+batch rather than a reviewed-complete closure; the next default follow-up
+should still promote the remaining represented `diff*` dirstat-family pairs
+into reviewed-complete status before leaving the diff family.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `pull`
 fetch-inherited tail closure across the named-local ff-only lane plus the
 existing-`FETCH_HEAD` append rejection lane. The selected change added nine
@@ -29,6 +48,32 @@ now fully closed at `99/99` reviewed-complete documented option pairs with
 follow-up should move off `pull` and reselect from the larger backlog head,
 which is still led by `replay`, `send-email`, `rebase`, `log`, `rev-list`,
 and the `diff*` family.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
+`diff`/`diff-files`/`diff-index` dirstat-family expansion across the
+treeish-pair porcelain lane and the dirty-worktree plumbing lanes. The
+selected change added ten exact stock-Git rows for `diff -X`,
+`diff --dirstat --cumulative`, `diff-files --dirstat`,
+`diff-files --dirstat-by-file`, `diff-files -X`,
+`diff-files --dirstat --cumulative`, `diff-index --dirstat`,
+`diff-index --dirstat-by-file`, `diff-index -X`, and
+`diff-index --dirstat --cumulative`, plus the shared dirstat weighting and
+ordering fixes needed to match stock Git on these lanes and a larger CLI
+thread stack to keep the expanded clap schema parseable. Actual delta is `+10`
+matrix rows, `+0` complete documented option pairs, `+10` represented
+documented option pairs, `+10` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `6745` matrix rows,
+`5908` verified rows, `812` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2523/3212` complete documented option
+pairs, and `2533/3212` represented documented option pairs. The touched
+commands now sit at `diff 94/117` represented documented option pairs with
+`258/262` stock-matching rows, `diff-files 95/118` represented documented
+option pairs with `115/115` stock-matching rows, and `diff-index 94/112`
+represented documented option pairs with `122/122` stock-matching rows. This
+was intentionally an expansion batch rather than a reviewed-complete closure;
+the next default follow-up should either finish the remaining dirstat-family
+expansion needed to promote these pairs into reviewed-complete status or close
+the still-open `diff-tree` dirstat tail before leaving the diff family.
 
 As of 2026-06-27 the latest completed batch is a helper-free local `pull`
 invalid fetch-inherited closure across the named-local ff-only lane. The

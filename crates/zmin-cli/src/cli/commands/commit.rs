@@ -144,11 +144,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
     }
 }
 
-fn effective_write_tree_prefix(
-    prefixes: Vec<String>,
-    no_prefix: bool,
-) -> Option<String> {
-    let raw_args: Vec<String> = std::env::args().skip_while(|arg| arg != "write-tree").collect();
+fn effective_write_tree_prefix(prefixes: Vec<String>, no_prefix: bool) -> Option<String> {
+    let raw_args: Vec<String> = std::env::args()
+        .skip_while(|arg| arg != "write-tree")
+        .collect();
     let mut prefix_iter = prefixes.into_iter();
     let mut effective = None;
     let mut index = 0usize;
@@ -156,7 +155,9 @@ fn effective_write_tree_prefix(
         match raw_args[index].as_str() {
             "--prefix" => {
                 if index + 1 < raw_args.len() {
-                    effective = prefix_iter.next().or_else(|| Some(raw_args[index + 1].clone()));
+                    effective = prefix_iter
+                        .next()
+                        .or_else(|| Some(raw_args[index + 1].clone()));
                     index += 2;
                     continue;
                 }
@@ -247,10 +248,7 @@ fn grouped_commit_tree_message_sources(
         .collect()
 }
 
-fn effective_commit_tree_gpg_sign(
-    gpg_sign: Option<String>,
-    no_gpg_sign: bool,
-) -> Option<String> {
+fn effective_commit_tree_gpg_sign(gpg_sign: Option<String>, no_gpg_sign: bool) -> Option<String> {
     let args = std::env::args_os().collect::<Vec<_>>();
     let Some(command_index) = args.iter().position(|arg| arg == "commit-tree") else {
         return (!no_gpg_sign).then_some(gpg_sign).flatten();

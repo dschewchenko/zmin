@@ -731,7 +731,14 @@ fn shortlog_proof_only_option_surface_batch_matches_stock_git() {
         ["shortlog", "-sne", "--unpacked", "HEAD"].as_slice(),
         ["shortlog", "-sne", "--remotes", "HEAD"].as_slice(),
         ["shortlog", "-sne", "--remove-empty", "HEAD"].as_slice(),
-        ["shortlog", "-sne", "--relative-date", "--group=format:%ad", "HEAD"].as_slice(),
+        [
+            "shortlog",
+            "-sne",
+            "--relative-date",
+            "--group=format:%ad",
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1118,7 +1125,10 @@ fn rev_list_reflog_and_first_parent_family_matches_stock_git() {
     write_file(repo.path(), "main.txt", "main\n");
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "main"]);
-    git(repo.path(), ["merge", "--no-ff", "topic", "-m", "merge topic"]);
+    git(
+        repo.path(),
+        ["merge", "--no-ff", "topic", "-m", "merge topic"],
+    );
 
     for args in [
         ["rev-list", "--first-parent", "HEAD"].as_slice(),
@@ -1164,7 +1174,10 @@ fn rev_list_reflog_and_first_parent_expansion_lanes_match_stock_git() {
     write_file(repo.path(), "main.txt", "main\n");
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "main"]);
-    git(repo.path(), ["merge", "--no-ff", "topic", "-m", "merge topic"]);
+    git(
+        repo.path(),
+        ["merge", "--no-ff", "topic", "-m", "merge topic"],
+    );
 
     for args in [
         ["rev-list", "--first-parent", "HEAD~2..HEAD"].as_slice(),
@@ -1428,8 +1441,22 @@ fn rev_list_notes_abbrev_and_text_rendering_match_stock_git() {
         ["rev-list", "--oneline", "--no-abbrev-commit", "-1", "HEAD"].as_slice(),
         ["rev-list", "--pretty=medium", "-1", "HEAD"].as_slice(),
         ["rev-list", "--pretty=medium", "--expand-tabs", "-1", "HEAD"].as_slice(),
-        ["rev-list", "--pretty=medium", "--no-expand-tabs", "-1", "HEAD"].as_slice(),
-        ["rev-list", "--pretty=medium", "--encoding=UTF-8", "-1", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--pretty=medium",
+            "--no-expand-tabs",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--pretty=medium",
+            "--encoding=UTF-8",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1439,8 +1466,14 @@ fn rev_list_notes_abbrev_and_text_rendering_match_stock_git() {
     }
 
     assert_eq!(
-        run_zmin_failure_output(repo.path(), &["rev-list", "--format=%N", "--notes", "-1", "HEAD"]),
-        git_failure_output(repo.path(), &["rev-list", "--format=%N", "--notes", "-1", "HEAD"])
+        run_zmin_failure_output(
+            repo.path(),
+            &["rev-list", "--format=%N", "--notes", "-1", "HEAD"]
+        ),
+        git_failure_output(
+            repo.path(),
+            &["rev-list", "--format=%N", "--notes", "-1", "HEAD"]
+        )
     );
 }
 
@@ -1454,7 +1487,14 @@ fn rev_list_date_and_format_modes_match_stock_git() {
 
     for args in [
         ["rev-list", "--date=iso", "--format=%ad|%cd", "-1", "HEAD"].as_slice(),
-        ["rev-list", "--pretty=format:%ad|%cd", "--date=iso", "-1", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--pretty=format:%ad|%cd",
+            "--date=iso",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(repo.path(), args),
@@ -1483,7 +1523,14 @@ fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
     for args in [
         ["rev-list", "--quiet", "-1", "HEAD"].as_slice(),
         ["rev-list", "--quiet", "--format=%H", "-1", "HEAD"].as_slice(),
-        ["rev-list", "--relative-date", "--format=%ad|%cd", "-1", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--relative-date",
+            "--format=%ad|%cd",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "rev-list",
             "--date=iso",
@@ -1512,14 +1559,7 @@ fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
         ]
         .as_slice(),
         ["rev-list", "--reflog", "HEAD", "--format=%H"].as_slice(),
-        [
-            "rev-list",
-            "--quiet",
-            "--reflog",
-            "HEAD",
-            "--format=%H",
-        ]
-        .as_slice(),
+        ["rev-list", "--quiet", "--reflog", "HEAD", "--format=%H"].as_slice(),
         [
             "rev-list",
             "--reflog",
@@ -1547,8 +1587,22 @@ fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
     git(repo.path(), ["notes", "add", "-m", "note body"]);
 
     for args in [
-        ["rev-list", "--no-standard-notes", "--pretty=format:%N", "-1", "HEAD"].as_slice(),
-        ["rev-list", "--standard-notes", "--pretty=format:%N", "-1", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--no-standard-notes",
+            "--pretty=format:%N",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "rev-list",
+            "--standard-notes",
+            "--pretty=format:%N",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "rev-list",
             "--standard-notes",
@@ -1586,7 +1640,14 @@ fn rev_list_reflog_relative_date_and_notes_aliases_match_stock_git() {
     }
 
     for args in [
-        ["rev-list", "--show-notes", "--pretty=format:%N", "-1", "HEAD"].as_slice(),
+        [
+            "rev-list",
+            "--show-notes",
+            "--pretty=format:%N",
+            "-1",
+            "HEAD",
+        ]
+        .as_slice(),
         [
             "rev-list",
             "--show-notes-by-default",
@@ -1701,18 +1762,32 @@ fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
         ["log", "--quiet", "-1"].as_slice(),
         ["log", "--quiet", "-1", "--format=%H"].as_slice(),
         ["log", "--relative-date", "-1", "--format=%ad|%cd"].as_slice(),
-        ["log", "--date=iso", "--relative-date", "-1", "--format=%ad|%cd"].as_slice(),
-        ["log", "--relative-date", "--date=iso", "-1", "--format=%ad|%cd"].as_slice(),
-        ["log", "--quiet", "--date=relative", "-1", "--format=%ad|%cd"].as_slice(),
-        ["log", "--reflog", "HEAD", "--format=%H"].as_slice(),
+        [
+            "log",
+            "--date=iso",
+            "--relative-date",
+            "-1",
+            "--format=%ad|%cd",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--relative-date",
+            "--date=iso",
+            "-1",
+            "--format=%ad|%cd",
+        ]
+        .as_slice(),
         [
             "log",
             "--quiet",
-            "--reflog",
-            "HEAD",
-            "--format=%H",
+            "--date=relative",
+            "-1",
+            "--format=%ad|%cd",
         ]
         .as_slice(),
+        ["log", "--reflog", "HEAD", "--format=%H"].as_slice(),
+        ["log", "--quiet", "--reflog", "HEAD", "--format=%H"].as_slice(),
         [
             "log",
             "--reflog",
@@ -1744,8 +1819,22 @@ fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
         ["log", "--show-notes-by-default", "-1", "--format=%N"].as_slice(),
         ["log", "--no-standard-notes", "-1", "--format=%N"].as_slice(),
         ["log", "--standard-notes", "-1", "--format=%N"].as_slice(),
-        ["log", "--standard-notes", "--no-standard-notes", "-1", "--format=%N"].as_slice(),
-        ["log", "--show-notes", "--no-standard-notes", "-1", "--format=%N"].as_slice(),
+        [
+            "log",
+            "--standard-notes",
+            "--no-standard-notes",
+            "-1",
+            "--format=%N",
+        ]
+        .as_slice(),
+        [
+            "log",
+            "--show-notes",
+            "--no-standard-notes",
+            "-1",
+            "--format=%N",
+        ]
+        .as_slice(),
         [
             "log",
             "--show-notes-by-default",
@@ -1754,7 +1843,14 @@ fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
             "--format=%N",
         ]
         .as_slice(),
-        ["log", "--standard-notes", "--show-notes", "-1", "--format=%N"].as_slice(),
+        [
+            "log",
+            "--standard-notes",
+            "--show-notes",
+            "-1",
+            "--format=%N",
+        ]
+        .as_slice(),
         [
             "log",
             "--show-notes-by-default",
@@ -1771,7 +1867,14 @@ fn log_reflog_relative_date_and_notes_aliases_match_stock_git() {
             "--format=%N",
         ]
         .as_slice(),
-        ["log", "--show-notes", "--standard-notes", "-1", "--format=%N"].as_slice(),
+        [
+            "log",
+            "--show-notes",
+            "--standard-notes",
+            "-1",
+            "--format=%N",
+        ]
+        .as_slice(),
         [
             "log",
             "--standard-notes",

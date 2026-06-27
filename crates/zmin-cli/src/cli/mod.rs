@@ -1,7 +1,7 @@
 pub(crate) mod commands;
 pub(crate) mod schema;
 
-const CLI_STACK_SIZE: usize = 16 * 1024 * 1024;
+const CLI_STACK_SIZE: usize = 64 * 1024 * 1024;
 
 #[cfg(windows)]
 static REDIRECTED_STD_HANDLES: std::sync::OnceLock<Vec<std::fs::File>> = std::sync::OnceLock::new();

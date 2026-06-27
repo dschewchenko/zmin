@@ -587,7 +587,14 @@ fn reflog_expire_scope_and_short_alias_match_stock_git() {
 
     for args in [
         ["reflog", "expire", "--all", "--expire=all"].as_slice(),
-        ["reflog", "expire", "--all", "--single-worktree", "--expire=all"].as_slice(),
+        [
+            "reflog",
+            "expire",
+            "--all",
+            "--single-worktree",
+            "--expire=all",
+        ]
+        .as_slice(),
     ] {
         let git_repo = git_init();
         let zmin_repo = git_init();
@@ -685,7 +692,10 @@ fn reflog_expire_linked_worktree_fixture(repo: &Path) -> PathBuf {
     git(repo, ["checkout", "-b", "main"]);
     git_with_env(repo, ["commit", "--allow-empty", "-m", "one"]);
     let worktree = repo.join("linked-worktree");
-    git(repo, ["worktree", "add", "-b", "side", worktree.to_str().unwrap()]);
+    git(
+        repo,
+        ["worktree", "add", "-b", "side", worktree.to_str().unwrap()],
+    );
     configure_identity(&worktree);
     git_with_env(&worktree, ["commit", "--allow-empty", "-m", "side1"]);
     worktree

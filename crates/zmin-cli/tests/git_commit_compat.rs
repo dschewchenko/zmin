@@ -166,7 +166,10 @@ fn commit_dry_run_status_modes_match_stock_git() {
         let (git_repo, zmin_repo) = commit_dry_run_fixture_repos();
         let git_run = command_any_output("git", git_repo.path(), args, "git commit");
         let zmin_run = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin commit");
-        assert_eq!(zmin_run, git_run, "commit dry-run output mismatch for {args:?}");
+        assert_eq!(
+            zmin_run, git_run,
+            "commit dry-run output mismatch for {args:?}"
+        );
         assert_eq!(
             git(zmin_repo.path(), ["rev-parse", "HEAD"]),
             git(git_repo.path(), ["rev-parse", "HEAD"])
@@ -1999,14 +2002,26 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             command_output_with_env(
                 zmin_bin(),
                 zmin_repo.path(),
-                &["commit", "--include", "--pathspec-from-file=paths.txt", "-m", "include"],
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.txt",
+                    "-m",
+                    "include"
+                ],
                 &COMMIT_ENV,
                 "zmin"
             ),
             command_output_with_env(
                 "git",
                 git_repo.path(),
-                &["commit", "--include", "--pathspec-from-file=paths.txt", "-m", "include"],
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.txt",
+                    "-m",
+                    "include"
+                ],
                 &COMMIT_ENV,
                 "git"
             )
@@ -2143,14 +2158,28 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             command_output_with_env(
                 zmin_bin(),
                 zmin_repo.path(),
-                &["commit", "--include", "--pathspec-from-file=paths.nul", "--pathspec-file-nul", "-m", "include-nul"],
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.nul",
+                    "--pathspec-file-nul",
+                    "-m",
+                    "include-nul"
+                ],
                 &COMMIT_ENV,
                 "zmin"
             ),
             command_output_with_env(
                 "git",
                 git_repo.path(),
-                &["commit", "--include", "--pathspec-from-file=paths.nul", "--pathspec-file-nul", "-m", "include-nul"],
+                &[
+                    "commit",
+                    "--include",
+                    "--pathspec-from-file=paths.nul",
+                    "--pathspec-file-nul",
+                    "-m",
+                    "include-nul"
+                ],
                 &COMMIT_ENV,
                 "git"
             )
@@ -2274,7 +2303,14 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             fs::write(repo.join("a.txt"), b"nosign\n").expect("write nosign");
             git(repo, ["add", "a.txt"]);
         }
-        let args = ["commit", "--signoff", "--no-signoff", "--no-signoff", "-m", "nosign-repeat"];
+        let args = [
+            "commit",
+            "--signoff",
+            "--no-signoff",
+            "--no-signoff",
+            "-m",
+            "nosign-repeat",
+        ];
         assert_eq!(
             command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &COMMIT_ENV, "zmin"),
             command_output_with_env("git", git_repo.path(), &args, &COMMIT_ENV, "git")
@@ -2343,7 +2379,14 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             fs::write(repo.join("a.txt"), b"amended\n").expect("write amended");
             git(repo, ["add", "a.txt"]);
         }
-        let args = ["commit", "--amend", "--no-post-rewrite", "--no-post-rewrite", "-m", "amended"];
+        let args = [
+            "commit",
+            "--amend",
+            "--no-post-rewrite",
+            "--no-post-rewrite",
+            "-m",
+            "amended",
+        ];
         assert_eq!(
             command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &COMMIT_ENV, "zmin"),
             command_output_with_env("git", git_repo.path(), &args, &COMMIT_ENV, "git")

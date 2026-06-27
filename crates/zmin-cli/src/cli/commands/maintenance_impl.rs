@@ -1621,7 +1621,8 @@ fn repack(options: RepackOptions) -> Result<()> {
     if options.cruft && options.keep_unreachable {
         return Err(CliError::Stderr {
             code: 128,
-            text: "fatal: options '-k/--keep-unreachable' and '--cruft' cannot be used together\n".into(),
+            text: "fatal: options '-k/--keep-unreachable' and '--cruft' cannot be used together\n"
+                .into(),
         });
     }
     if options.filter.is_none() && options.filter_to.is_some() {
@@ -1633,10 +1634,7 @@ fn repack(options: RepackOptions) -> Result<()> {
     let write_cruft_pack = options.cruft && options.delete_redundant;
     let write_bitmap_index = options.write_bitmap_index && !options.no_write_bitmap_index;
     let write_midx = options.write_midx && !options.no_write_midx;
-    let max_pack_size = parse_repack_size_limit(
-        options.max_pack_size.as_deref(),
-        "max-pack-size",
-    )?;
+    let max_pack_size = parse_repack_size_limit(options.max_pack_size.as_deref(), "max-pack-size")?;
     if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
@@ -1650,10 +1648,8 @@ fn repack(options: RepackOptions) -> Result<()> {
     {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
-    let _window_memory = parse_repack_size_limit(
-        options.window_memory.as_deref(),
-        "window-memory",
-    )?;
+    let _window_memory =
+        parse_repack_size_limit(options.window_memory.as_deref(), "window-memory")?;
     let _geometric = parse_repack_geometric_values(&options.geometric)?;
     let unpack_unreachable_expires_now =
         unpack_unreachable_expires_now(options.unpack_unreachable.last().map(String::as_str))?;
@@ -1680,7 +1676,9 @@ fn repack(options: RepackOptions) -> Result<()> {
     let keep_pack_names = normalize_keep_pack_names(&options.keep_pack);
     let keep_pack_object_ids = kept_pack_object_ids(&pack_dir, &old_pack_names, &keep_pack_names)?;
     let all_reachable = options.all || options.all_and_loosen_unreachable || options.cruft;
-    let reachable = all_reachable.then(|| collect_reachable_objects(&repo, &store, &[])).transpose()?;
+    let reachable = all_reachable
+        .then(|| collect_reachable_objects(&repo, &store, &[]))
+        .transpose()?;
     let loosen_unreachable = if options.unpack_unreachable.is_empty() {
         options.all_and_loosen_unreachable
     } else if options.all || options.all_and_loosen_unreachable {
@@ -1688,30 +1686,30 @@ fn repack(options: RepackOptions) -> Result<()> {
     } else {
         false
     };
-    let ids: Vec<ObjectId> = if options.keep_unreachable && all_reachable && options.delete_redundant
-    {
-        collect_all_repack_candidate_ids(&store, &keep_pack_object_ids)?
-    } else if let Some(reachable) = reachable.as_ref() {
-        if loosen_unreachable {
-            loosen_unreachable_packed_objects(&store, reachable)?;
-        }
-        collect_repack_candidate_ids(
-            &repo,
-            &store,
-            options.local,
-            reachable,
-            &keep_pack_object_ids,
-        )?
-    } else {
-        let mut ids = Vec::new();
-        store.for_each_loose_object_id(&mut |id| {
-            if !keep_pack_object_ids.contains(id) {
-                ids.push(id.clone());
+    let ids: Vec<ObjectId> =
+        if options.keep_unreachable && all_reachable && options.delete_redundant {
+            collect_all_repack_candidate_ids(&store, &keep_pack_object_ids)?
+        } else if let Some(reachable) = reachable.as_ref() {
+            if loosen_unreachable {
+                loosen_unreachable_packed_objects(&store, reachable)?;
             }
-            Ok(())
-        })?;
-        ids
-    };
+            collect_repack_candidate_ids(
+                &repo,
+                &store,
+                options.local,
+                reachable,
+                &keep_pack_object_ids,
+            )?
+        } else {
+            let mut ids = Vec::new();
+            store.for_each_loose_object_id(&mut |id| {
+                if !keep_pack_object_ids.contains(id) {
+                    ids.push(id.clone());
+                }
+                Ok(())
+            })?;
+            ids
+        };
     let unreachable_ids = if write_cruft_pack {
         collect_unreachable_repack_candidate_ids(
             &store,
@@ -1898,9 +1896,16 @@ fn write_expire_to_pack(
         .filter(|name| !name.is_empty())
         .unwrap_or("pack");
     let destination_base = repo_root.join(format!("{prefix}-{}", indexed.pack_id.to_hex()));
-    install_temp_repack_file(&destination_base.with_extension("pack"), &temp_pack, &indexed)?;
+    install_temp_repack_file(
+        &destination_base.with_extension("pack"),
+        &temp_pack,
+        &indexed,
+    )?;
     write_content_addressed_file(&destination_base.with_extension("idx"), &indexed.index)?;
-    write_content_addressed_file(&destination_base.with_extension("rev"), &indexed.reverse_index)?;
+    write_content_addressed_file(
+        &destination_base.with_extension("rev"),
+        &indexed.reverse_index,
+    )?;
     write_content_addressed_file(&destination_base.with_extension("mtimes"), &[])?;
     Ok(())
 }
@@ -1971,7 +1976,9 @@ fn parse_repack_geometric(raw: Option<&str>) -> Result<Option<u64>> {
     let Some(size) = parse_size_with_optional_suffix(raw) else {
         return Err(CliError::Stderr {
             code: 129,
-            text: "error: option `geometric' expects an integer value with an optional k/m/g suffix\n".into(),
+            text:
+                "error: option `geometric' expects an integer value with an optional k/m/g suffix\n"
+                    .into(),
         });
     };
     Ok(Some(size))
@@ -2480,7 +2487,8 @@ fn repack_candidate_initial_capacity(count: usize) -> usize {
 }
 
 fn gc(options: GcOptions) -> Result<()> {
-    let max_cruft_size = parse_gc_max_cruft_size(options.max_cruft_size.last().map(String::as_str))?;
+    let max_cruft_size =
+        parse_gc_max_cruft_size(options.max_cruft_size.last().map(String::as_str))?;
     if !options.no_cruft
         && max_cruft_size.is_some_and(|size| size > 0 && size < MIN_CRUFT_PACK_SIZE_BYTES)
     {

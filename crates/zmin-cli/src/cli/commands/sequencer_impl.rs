@@ -1507,9 +1507,7 @@ fn default_sequencer_pick_options(commits: Vec<String>) -> SequencerPickOptions 
     }
 }
 
-pub(crate) fn sequencer_pick(
-    options: SequencerPickOptions,
-) -> Result<()> {
+pub(crate) fn sequencer_pick(options: SequencerPickOptions) -> Result<()> {
     let _rerere_autoupdate = options.rerere_autoupdate;
     let _no_rerere_autoupdate = options.no_rerere_autoupdate;
     let _strategy = options.strategy.as_deref();
@@ -1605,11 +1603,7 @@ pub(crate) fn sequencer_pick(
     let tree = write_tree_from_index(&store, &new_index)?;
     let current_head = commit_cache.read_commit(&head_id)?;
     if current_head.tree == tree
-        && !sequencer_should_commit_empty_cherry_pick(
-            &options,
-            &picked,
-            &parent_commit,
-        )
+        && !sequencer_should_commit_empty_cherry_pick(&options, &picked, &parent_commit)
     {
         return Err(CliError::Message("nothing to commit".into()));
     }
@@ -1622,7 +1616,11 @@ pub(crate) fn sequencer_pick(
     let builder = CommitBuilder::new(tree.clone(), author.clone(), committer).parent(head_id);
     let mut builder = builder.message(message.clone())?;
     if !options.no_gpg_sign {
-        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(&repo, &builder, options.gpg_sign.as_deref())? {
+        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(
+            &repo,
+            &builder,
+            options.gpg_sign.as_deref(),
+        )? {
             builder = builder.gpg_signature(signature)?;
         }
     }
@@ -1681,7 +1679,6 @@ fn edit_sequencer_message(
     }
     Ok(cleanup_commit_message(edited, cleanup_mode))
 }
-
 
 fn print_sequencer_commit_summary(
     repo: &GitRepo,
@@ -1894,7 +1891,10 @@ fn revert_reference_format(id: &ObjectId, commit: &zmin_git_core::CommitObject) 
 
 fn signature_reference_date(raw: &[u8]) -> Option<String> {
     let signature = signature_from_commit_bytes(raw).ok()?;
-    Some(reference_date_string(signature.timestamp, &signature.timezone))
+    Some(reference_date_string(
+        signature.timestamp,
+        &signature.timezone,
+    ))
 }
 
 fn reference_date_string(seconds: i64, offset: &str) -> String {

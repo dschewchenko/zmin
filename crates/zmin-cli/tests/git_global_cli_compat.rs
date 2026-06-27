@@ -850,7 +850,16 @@ fn rev_parse_filter_prefix_and_symbolic_family_matches_stock_git() {
 
     for args in [
         ["rev-parse", "--prefix", "sub/", "--", "a.txt", "../b.txt"].as_slice(),
-        ["rev-parse", "--sq", "--prefix", "sub/", "--", "a.txt", "../b.txt"].as_slice(),
+        [
+            "rev-parse",
+            "--sq",
+            "--prefix",
+            "sub/",
+            "--",
+            "a.txt",
+            "../b.txt",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             command_output(zmin_bin(), &repo.join("sub"), args, "zmin"),
@@ -922,7 +931,14 @@ fn rev_parse_parseopt_and_output_modes_match_stock_git() {
         git_with_stdin_args(dir.path(), &args, spec)
     );
 
-    let args = ["rev-parse", "--parseopt", "--", "--alpha=1", "--beta", "foo"];
+    let args = [
+        "rev-parse",
+        "--parseopt",
+        "--",
+        "--alpha=1",
+        "--beta",
+        "foo",
+    ];
     assert_eq!(
         run_zmin_with_stdin_args(dir.path(), &args, spec),
         git_with_stdin_args(dir.path(), &args, spec)

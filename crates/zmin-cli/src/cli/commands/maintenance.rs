@@ -32,12 +32,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_dry_run,
             quiet,
             no_quiet,
-        } => {
-            super::maintenance_commands::prune_packed_command(
-                dry_run > 0 && no_dry_run == 0,
-                quiet > 0 && no_quiet == 0,
-            )
-        }
+        } => super::maintenance_commands::prune_packed_command(
+            dry_run > 0 && no_dry_run == 0,
+            quiet > 0 && no_quiet == 0,
+        ),
         runtime::Command::Repack {
             all,
             all_and_loosen_unreachable,

@@ -422,7 +422,9 @@ pub(crate) fn write_apply_update(
         }
     }
     if update.intent_to_add {
-        let absolute = repo.root.join(String::from_utf8_lossy(&update.path).as_ref());
+        let absolute = repo
+            .root
+            .join(String::from_utf8_lossy(&update.path).as_ref());
         stage_intent_to_add_file(repo, store, index, &absolute)?;
     } else if options.cached || options.index {
         if let Some(remove_path) = &update.remove_path {
@@ -450,11 +452,7 @@ pub(crate) fn write_apply_update(
     Ok(())
 }
 
-fn apply_patch_selected(
-    patch: &ApplyFilePatch,
-    include: &[String],
-    exclude: &[String],
-) -> bool {
+fn apply_patch_selected(patch: &ApplyFilePatch, include: &[String], exclude: &[String]) -> bool {
     let paths = [patch.old_path.as_ref(), patch.new_path.as_ref()];
     if !include.is_empty() {
         return paths.iter().flatten().any(|path| {

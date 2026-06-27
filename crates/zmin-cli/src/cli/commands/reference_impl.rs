@@ -1534,7 +1534,10 @@ fn symbolic_ref_object_format(repo: &GitRepo) -> Result<GitHashAlgorithm> {
 }
 
 fn symbolic_ref_resolved_id(repo: &GitRepo, name: &str) -> Result<Option<ObjectId>> {
-    let refs = RefStore::new(&read_common_git_dir(&repo.git_dir)?, symbolic_ref_object_format(repo)?);
+    let refs = RefStore::new(
+        &read_common_git_dir(&repo.git_dir)?,
+        symbolic_ref_object_format(repo)?,
+    );
     match refs.resolve(name) {
         Ok(id) => Ok(Some(id)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -1555,7 +1558,10 @@ fn append_symbolic_ref_reflog(
     let Some(new_id) = symbolic_ref_resolved_id(repo, target)? else {
         return Ok(());
     };
-    let zero = ObjectId::new(new_id.algorithm(), &vec![0; new_id.algorithm().digest_len()]);
+    let zero = ObjectId::new(
+        new_id.algorithm(),
+        &vec![0; new_id.algorithm().digest_len()],
+    );
     update_ref_append_reflog(
         repo,
         name,
@@ -1640,7 +1646,12 @@ pub(crate) fn refs_command(command: RefsCommand) -> Result<()> {
     }
 }
 
-fn refs_verify(_strict: bool, verbose: bool, dry_run: bool, ref_format: Option<&str>) -> Result<()> {
+fn refs_verify(
+    _strict: bool,
+    verbose: bool,
+    dry_run: bool,
+    ref_format: Option<&str>,
+) -> Result<()> {
     if dry_run {
         return Err(CliError::Stderr {
             code: 129,
@@ -2069,11 +2080,7 @@ pub(crate) fn show_ref(
     Ok(())
 }
 
-fn show_ref_exclude_existing(
-    repo: &GitRepo,
-    refs: &dyn GitRefsStore,
-    pattern: &str,
-) -> Result<()> {
+fn show_ref_exclude_existing(repo: &GitRepo, refs: &dyn GitRefsStore, pattern: &str) -> Result<()> {
     let common_dir = read_common_git_dir(&repo.git_dir)?;
     for line in io::stdin().lock().lines() {
         let line = line?;
@@ -4602,7 +4609,11 @@ fn ls_tree_effective_paths(
             if normalized.is_empty() || cwd_prefix.is_empty() || full_tree {
                 return Ok(normalized);
             }
-            Ok(format!("{}/{}", String::from_utf8_lossy(cwd_prefix), normalized))
+            Ok(format!(
+                "{}/{}",
+                String::from_utf8_lossy(cwd_prefix),
+                normalized
+            ))
         })
         .collect()
 }
@@ -5420,7 +5431,13 @@ fn branch_list(
     }
     apply_branch_list_sort(repo, &mut entries, &commit_cache, options)?;
     if let Some(format) = options.format.as_deref() {
-        print_branch_list_format(repo, &entries, format, current.as_deref(), options.omit_empty)?;
+        print_branch_list_format(
+            repo,
+            &entries,
+            format,
+            current.as_deref(),
+            options.omit_empty,
+        )?;
         return Ok(());
     }
     if let Some(column_mode) = branch_column_mode(repo, options)? {
@@ -7051,9 +7068,8 @@ fn tag(options: TagOptions) -> Result<()> {
         code: 128,
         message: format!("Failed to resolve '{target}' as a valid ref."),
     })?;
-    let create_annotated = options.annotate
-        || !options.messages.is_empty()
-        || !options.message_files.is_empty();
+    let create_annotated =
+        options.annotate || !options.messages.is_empty() || !options.message_files.is_empty();
     let id = if create_annotated {
         if options.messages.is_empty() && options.message_files.is_empty() {
             return Err(editor_required_message_error());
@@ -7952,11 +7968,11 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 outputs.push(git_dir_display(&ctx.repo, path_format)?);
             }
             "--absolute-git-dir" => outputs.push(git_path_output(&canonical_or_absolute(
-                    cached_rev_parse_repo_context(&mut repo_context)?
-                        .repo
-                        .git_dir
-                        .clone()
-                ))),
+                cached_rev_parse_repo_context(&mut repo_context)?
+                    .repo
+                    .git_dir
+                    .clone(),
+            ))),
             "--git-common-dir" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 outputs.push(git_common_dir_display(&ctx.repo, path_format)?);
@@ -7982,7 +7998,14 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             "--is-inside-work-tree" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                outputs.push(if ctx.inside_work_tree { "true" } else { "false" }.to_owned());
+                outputs.push(
+                    if ctx.inside_work_tree {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                    .to_owned(),
+                );
             }
             "--is-bare-repository" => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
@@ -8177,7 +8200,10 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             other if other.starts_with("--output-object-format=") => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                let mode = other.split_once('=').map(|(_, value)| value).unwrap_or_default();
+                let mode = other
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or_default();
                 let Some(rev) = raw_args.get(index + 1) else {
                     return Err(CliError::Fatal {
                         code: 128,
@@ -8189,7 +8215,10 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
             }
             other if other.starts_with("--disambiguate=") => {
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
-                let prefix = other.split_once('=').map(|(_, value)| value).unwrap_or_default();
+                let prefix = other
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or_default();
                 outputs.extend(rev_parse_disambiguate_values(&ctx.repo, prefix)?);
             }
             other if other.starts_with("--short=") || other.starts_with("--abbrev-ref=") => {}
@@ -8219,13 +8248,11 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
         }
         index += 1;
     }
-    if outputs.is_empty() && let Some(default_arg) = output_options.default_arg {
-        let arg_kind = rev_parse_classify_arg(
-            &mut repo_context,
-            default_arg,
-            options.verify,
-            options,
-        )?;
+    if outputs.is_empty()
+        && let Some(default_arg) = output_options.default_arg
+    {
+        let arg_kind =
+            rev_parse_classify_arg(&mut repo_context, default_arg, options.verify, options)?;
         rev_parse_emit_arg(
             &mut repo_context,
             &mut outputs,
@@ -8354,7 +8381,11 @@ fn print_rev_parse_sq_quote(args: &[String]) {
     println!();
 }
 
-fn shell_quote_join(values: &[impl AsRef<str>], leading_space: bool, trailing_space: bool) -> String {
+fn shell_quote_join(
+    values: &[impl AsRef<str>],
+    leading_space: bool,
+    trailing_space: bool,
+) -> String {
     let mut rendered = String::new();
     let mut first = true;
     for value in values {
@@ -8421,8 +8452,14 @@ fn parse_rev_parse_parseopt_specs(spec_text: &str) -> Vec<RevParseParseOptSpec> 
             let token = token.trim_end_matches('=');
             let mut parts = token.split(',');
             Some(RevParseParseOptSpec {
-                short: parts.next().filter(|value| !value.is_empty()).map(str::to_owned),
-                long: parts.next().filter(|value| !value.is_empty()).map(str::to_owned),
+                short: parts
+                    .next()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
+                long: parts
+                    .next()
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned),
                 takes_value,
             })
         })
@@ -8465,7 +8502,10 @@ fn rev_parse_parseopt_render(
                 .split_once('=')
                 .map(|(left, right)| (left, Some(right)))
                 .unwrap_or((name, None));
-            if let Some(spec) = specs.iter().find(|spec| spec.long.as_deref() == Some(opt_name)) {
+            if let Some(spec) = specs
+                .iter()
+                .find(|spec| spec.long.as_deref() == Some(opt_name))
+            {
                 if spec.takes_value {
                     let value = if let Some(value) = inline_value {
                         value.to_owned()
@@ -8588,7 +8628,10 @@ fn print_rev_parse_local_env_vars() {
     }
 }
 
-fn rev_parse_resolve_git_dir_display(path: &Path, path_format: RevParsePathFormat) -> Result<String> {
+fn rev_parse_resolve_git_dir_display(
+    path: &Path,
+    path_format: RevParsePathFormat,
+) -> Result<String> {
     let absolute = absolute_path_from_arg(path)?;
     let valid = if absolute.is_file() {
         let git_dir = read_gitdir_file(&absolute)?;
@@ -8737,7 +8780,10 @@ fn rev_parse_disambiguate_values(repo: &GitRepo, prefix: &str) -> Result<Vec<Str
 fn rev_parse_shared_index_path(repo: &GitRepo) -> Result<Option<String>> {
     let index = fs::read(&repo.index_path).map_err(CliError::Io)?;
     let marker = b"link\0";
-    let Some(position) = index.windows(marker.len()).position(|window| window == marker) else {
+    let Some(position) = index
+        .windows(marker.len())
+        .position(|window| window == marker)
+    else {
         return Ok(None);
     };
     let start = position + marker.len();
@@ -8748,7 +8794,9 @@ fn rev_parse_shared_index_path(repo: &GitRepo) -> Result<Option<String>> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    Ok(Some(git_path_output(&repo.git_dir.join(format!("sharedindex.{hash}")))))
+    Ok(Some(git_path_output(
+        &repo.git_dir.join(format!("sharedindex.{hash}")),
+    )))
 }
 
 fn rev_parse_object_value(

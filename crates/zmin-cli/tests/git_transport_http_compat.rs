@@ -12122,8 +12122,7 @@ fn http_push_short_delete_aliases_match_stock_git() {
         let remote_git = server.remote_git_dir();
         fs::create_dir_all(remote_git.join("refs/heads")).expect("create remote refs");
         fs::write(remote_git.join("refs/heads/main"), format!("{head}\n")).expect("write main");
-        fs::write(remote_git.join("refs/heads/topic"), format!("{head}\n"))
-            .expect("write topic");
+        fs::write(remote_git.join("refs/heads/topic"), format!("{head}\n")).expect("write topic");
 
         let git_args = ["http-push", short_flag, url.as_str(), "topic"];
         let stock = command_any_output(
@@ -12132,9 +12131,13 @@ fn http_push_short_delete_aliases_match_stock_git() {
             &git_args,
             "stock git http-push short delete",
         );
-        fs::write(remote_git.join("refs/heads/topic"), format!("{head}\n"))
-            .expect("restore topic");
-        let zmin = command_any_output(zmin_bin(), &source, &git_args, "zmin http-push short delete");
+        fs::write(remote_git.join("refs/heads/topic"), format!("{head}\n")).expect("restore topic");
+        let zmin = command_any_output(
+            zmin_bin(),
+            &source,
+            &git_args,
+            "zmin http-push short delete",
+        );
 
         assert_eq!(zmin, stock, "{short_flag}");
         assert!(

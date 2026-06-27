@@ -363,7 +363,10 @@ fn command_any_with_git_editor_env_and_stdin(
     )
 }
 
-fn normalize_bugreport_output(output: &(i32, String, String), output_dir: &Path) -> (i32, String, String) {
+fn normalize_bugreport_output(
+    output: &(i32, String, String),
+    output_dir: &Path,
+) -> (i32, String, String) {
     let placeholder = "__OUT__";
     let output_dir = output_dir.display().to_string();
     (
@@ -396,7 +399,8 @@ fn normalize_bugreport_filename_tokens(text: &str) -> String {
 }
 
 fn normalize_bugreport_token(token: &str) -> String {
-    let trimmed = token.trim_matches(|ch| matches!(ch, '\'' | '"' | '.' | ',' | ';' | ':' | '(' | ')'));
+    let trimmed =
+        token.trim_matches(|ch| matches!(ch, '\'' | '"' | '.' | ',' | ';' | ':' | '(' | ')'));
     let normalized = normalize_bugreport_filename(trimmed);
     if normalized == trimmed {
         token.to_owned()
@@ -653,8 +657,20 @@ fn bugreport_no_diagnose_modes_match_stock_git() {
 
     for args in [
         vec!["bugreport", "-o", "__OUT__", "--no-diagnose"],
-        vec!["bugreport", "-o", "__OUT__", "--diagnose=stats", "--no-diagnose"],
-        vec!["bugreport", "-o", "__OUT__", "--no-diagnose", "--diagnose=stats"],
+        vec![
+            "bugreport",
+            "-o",
+            "__OUT__",
+            "--diagnose=stats",
+            "--no-diagnose",
+        ],
+        vec![
+            "bugreport",
+            "-o",
+            "__OUT__",
+            "--no-diagnose",
+            "--diagnose=stats",
+        ],
     ] {
         let git_args = args
             .iter()
@@ -2124,10 +2140,20 @@ fn config_modern_get_read_options_match_stock_git() {
         fs::write(local_config, config).expect("write local config");
     }
 
-    let git_blob = git_with_stdin(git_repo.path(), ["hash-object", "-w", "--stdin"], "[demo]\n\tfromblob = blobv\n");
-    let zmin_blob =
-        git_with_stdin(zmin_repo.path(), ["hash-object", "-w", "--stdin"], "[demo]\n\tfromblob = blobv\n");
-    assert_eq!(git_blob, zmin_blob, "blob ids should match for identical config payloads");
+    let git_blob = git_with_stdin(
+        git_repo.path(),
+        ["hash-object", "-w", "--stdin"],
+        "[demo]\n\tfromblob = blobv\n",
+    );
+    let zmin_blob = git_with_stdin(
+        zmin_repo.path(),
+        ["hash-object", "-w", "--stdin"],
+        "[demo]\n\tfromblob = blobv\n",
+    );
+    assert_eq!(
+        git_blob, zmin_blob,
+        "blob ids should match for identical config payloads"
+    );
 
     for args in [
         &["config", "get", "demo.single"][..],
@@ -2146,7 +2172,13 @@ fn config_modern_get_read_options_match_stock_git() {
                 &[],
                 args,
             ),
-            command_any_with_isolated_config_and_env("git", git_repo.path(), home.path(), &[], args),
+            command_any_with_isolated_config_and_env(
+                "git",
+                git_repo.path(),
+                home.path(),
+                &[],
+                args
+            ),
             "config modern read options mismatch for {args:?}"
         );
     }
@@ -2181,7 +2213,13 @@ fn config_modern_get_read_options_match_stock_git() {
             &[],
             &blob_args,
         ),
-        command_any_with_isolated_config_and_env("git", git_repo.path(), home.path(), &[], &blob_args)
+        command_any_with_isolated_config_and_env(
+            "git",
+            git_repo.path(),
+            home.path(),
+            &[],
+            &blob_args
+        )
     );
 }
 
@@ -2218,8 +2256,14 @@ fn config_write_value_pattern_and_replace_all_match_stock_git() {
         seed_multi(git_repo.path(), &["one", "two", "three"]);
         seed_multi(zmin_repo.path(), &["one", "two", "three"]);
         assert_eq!(
-            run_zmin(zmin_repo.path(), ["config", "set", "--all", "demo.multi", "keepall"]),
-            git(git_repo.path(), ["config", "set", "--all", "demo.multi", "keepall"])
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "set", "--all", "demo.multi", "keepall"]
+            ),
+            git(
+                git_repo.path(),
+                ["config", "set", "--all", "demo.multi", "keepall"]
+            )
         );
         assert_local_config_matches(git_repo.path(), zmin_repo.path());
     }
@@ -2288,16 +2332,31 @@ fn config_write_value_pattern_and_replace_all_match_stock_git() {
                 zmin_repo.path(),
                 ["config", "get", "--value=a.c", "demo.multi"]
             ),
-            git(git_repo.path(), ["config", "get", "--value=a.c", "demo.multi"])
+            git(
+                git_repo.path(),
+                ["config", "get", "--value=a.c", "demo.multi"]
+            )
         );
         assert_eq!(
             run_zmin(
                 zmin_repo.path(),
-                ["config", "get", "--value=a.c", "--fixed-value", "demo.multi"]
+                [
+                    "config",
+                    "get",
+                    "--value=a.c",
+                    "--fixed-value",
+                    "demo.multi"
+                ]
             ),
             git(
                 git_repo.path(),
-                ["config", "get", "--value=a.c", "--fixed-value", "demo.multi"]
+                [
+                    "config",
+                    "get",
+                    "--value=a.c",
+                    "--fixed-value",
+                    "demo.multi"
+                ]
             )
         );
     }
@@ -2322,11 +2381,25 @@ fn config_write_value_pattern_and_replace_all_match_stock_git() {
         assert_eq!(
             run_zmin(
                 zmin_repo.path(),
-                ["config", "unset", "--all", "--value=two", "--fixed-value", "demo.multi"],
+                [
+                    "config",
+                    "unset",
+                    "--all",
+                    "--value=two",
+                    "--fixed-value",
+                    "demo.multi"
+                ],
             ),
             git(
                 git_repo.path(),
-                ["config", "unset", "--all", "--value=two", "--fixed-value", "demo.multi"],
+                [
+                    "config",
+                    "unset",
+                    "--all",
+                    "--value=two",
+                    "--fixed-value",
+                    "demo.multi"
+                ],
             )
         );
         assert_local_config_matches(git_repo.path(), zmin_repo.path());
@@ -2338,8 +2411,14 @@ fn config_write_value_pattern_and_replace_all_match_stock_git() {
         seed_multi(git_repo.path(), &["one", "two", "three"]);
         seed_multi(zmin_repo.path(), &["one", "two", "three"]);
         assert_eq!(
-            run_zmin(zmin_repo.path(), ["config", "--replace-all", "demo.multi", "keep"]),
-            git(git_repo.path(), ["config", "--replace-all", "demo.multi", "keep"])
+            run_zmin(
+                zmin_repo.path(),
+                ["config", "--replace-all", "demo.multi", "keep"]
+            ),
+            git(
+                git_repo.path(),
+                ["config", "--replace-all", "demo.multi", "keep"]
+            )
         );
         assert_local_config_matches(git_repo.path(), zmin_repo.path());
     }
@@ -2355,7 +2434,10 @@ fn config_comment_and_get_colorbool_match_stock_git() {
                 zmin_repo.path(),
                 ["config", "--comment=note", "demo.single", "val"]
             ),
-            git(git_repo.path(), ["config", "--comment=note", "demo.single", "val"])
+            git(
+                git_repo.path(),
+                ["config", "--comment=note", "demo.single", "val"]
+            )
         );
         assert_eq!(
             fs::read_to_string(git_repo.path().join(".git/config")).expect("read stock config"),
@@ -2369,12 +2451,32 @@ fn config_comment_and_get_colorbool_match_stock_git() {
         git(git_repo.path(), ["config", "color.ui", "always"]);
         run_zmin(zmin_repo.path(), ["config", "color.ui", "always"]);
         assert_eq!(
-            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "zmin"),
-            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "git")
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["config", "--get-colorbool", "color.ui", "true"],
+                "zmin"
+            ),
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["config", "--get-colorbool", "color.ui", "true"],
+                "git"
+            )
         );
         assert_eq!(
-            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui"], "zmin"),
-            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui"], "git")
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["config", "--get-colorbool", "color.ui"],
+                "zmin"
+            ),
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["config", "--get-colorbool", "color.ui"],
+                "git"
+            )
         );
     }
 
@@ -2384,16 +2486,46 @@ fn config_comment_and_get_colorbool_match_stock_git() {
         git(git_repo.path(), ["config", "color.ui", "never"]);
         run_zmin(zmin_repo.path(), ["config", "color.ui", "never"]);
         assert_eq!(
-            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "zmin"),
-            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui", "true"], "git")
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["config", "--get-colorbool", "color.ui", "true"],
+                "zmin"
+            ),
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["config", "--get-colorbool", "color.ui", "true"],
+                "git"
+            )
         );
         assert_eq!(
-            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "color.ui"], "zmin"),
-            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "color.ui"], "git")
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["config", "--get-colorbool", "color.ui"],
+                "zmin"
+            ),
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["config", "--get-colorbool", "color.ui"],
+                "git"
+            )
         );
         assert_eq!(
-            command_any_output(zmin_bin(), zmin_repo.path(), &["config", "--get-colorbool", "missing.key", "true"], "zmin"),
-            command_any_output("git", git_repo.path(), &["config", "--get-colorbool", "missing.key", "true"], "git")
+            command_any_output(
+                zmin_bin(),
+                zmin_repo.path(),
+                &["config", "--get-colorbool", "missing.key", "true"],
+                "zmin"
+            ),
+            command_any_output(
+                "git",
+                git_repo.path(),
+                &["config", "--get-colorbool", "missing.key", "true"],
+                "git"
+            )
         );
     }
 }
@@ -2406,7 +2538,12 @@ fn config_urlmatch_get_family_matches_stock_git() {
     for repo in [git_repo.path(), zmin_repo.path()] {
         git(
             repo,
-            ["config", "--add", "url.https://example.com/.insteadOf", "ex:"],
+            [
+                "config",
+                "--add",
+                "url.https://example.com/.insteadOf",
+                "ex:",
+            ],
         );
         git(
             repo,
@@ -2419,18 +2556,41 @@ fn config_urlmatch_get_family_matches_stock_git() {
         );
         git(
             repo,
-            ["config", "--add", "url.https://example.com/.pushInsteadOf", "push:"],
+            [
+                "config",
+                "--add",
+                "url.https://example.com/.pushInsteadOf",
+                "push:",
+            ],
         );
         git(
             repo,
-            ["config", "--add", "http.https://example.com.sslVerify", "false"],
+            [
+                "config",
+                "--add",
+                "http.https://example.com.sslVerify",
+                "false",
+            ],
         );
-        git(repo, ["config", "--add", "http.cookieFile", "/tmp/cookie.txt"]);
+        git(
+            repo,
+            ["config", "--add", "http.cookieFile", "/tmp/cookie.txt"],
+        );
     }
 
     for args in [
-        &["config", "get", "--url=https://example.com/repo.git", "url.insteadOf"][..],
-        &["config", "get", "--url=https://example.com/repo.git", "url.pushInsteadOf"],
+        &[
+            "config",
+            "get",
+            "--url=https://example.com/repo.git",
+            "url.insteadOf",
+        ][..],
+        &[
+            "config",
+            "get",
+            "--url=https://example.com/repo.git",
+            "url.pushInsteadOf",
+        ],
         &["config", "get", "--url=https://example.com/repo.git", "url"],
         &[
             "config",
@@ -2446,7 +2606,12 @@ fn config_urlmatch_get_family_matches_stock_git() {
             "--show-origin",
             "url.insteadOf",
         ],
-        &["config", "get", "--url=https://example.com/repo", "http.sslverify"],
+        &[
+            "config",
+            "get",
+            "--url=https://example.com/repo",
+            "http.sslverify",
+        ],
         &["config", "get", "--url=https://example.com/repo", "http"],
     ] {
         assert_eq!(
@@ -2457,7 +2622,12 @@ fn config_urlmatch_get_family_matches_stock_git() {
     }
 
     for args in [
-        &["config", "get", "--url=https://unknown.test/repo.git", "url.insteadOf"][..],
+        &[
+            "config",
+            "get",
+            "--url=https://unknown.test/repo.git",
+            "url.insteadOf",
+        ][..],
         &[
             "config",
             "get",
@@ -2844,7 +3014,10 @@ fn instaweb_lighttpd_start_stop_matches_stock_shape() {
     .expect("write fake lighttpd");
     fs::write(
         &browser,
-        format!("#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n", browser_log.display()),
+        format!(
+            "#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n",
+            browser_log.display()
+        ),
     )
     .expect("write fake browser");
     use std::os::unix::fs::PermissionsExt;
@@ -2882,7 +3055,10 @@ fn instaweb_lighttpd_start_stop_matches_stock_shape() {
     assert!(repo.path().join(".git/pid").exists());
     assert!(logged.contains(&format!("port={port}")));
     assert!(logged.contains("bind=127.0.0.1"));
-    assert!(!browser_log.exists(), "browser should be ignored for --start");
+    assert!(
+        !browser_log.exists(),
+        "browser should be ignored for --start"
+    );
 
     let stop = command_output_with_env_overrides(
         zmin_bin(),
@@ -2919,7 +3095,10 @@ fn instaweb_restart_matches_stock_shape() {
     .expect("write fake lighttpd");
     fs::write(
         &browser,
-        format!("#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n", browser_log.display()),
+        format!(
+            "#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n",
+            browser_log.display()
+        ),
     )
     .expect("write fake browser");
     use std::os::unix::fs::PermissionsExt;
@@ -2935,7 +3114,14 @@ fn instaweb_restart_matches_stock_shape() {
     let initial = command_output_with_env_overrides(
         zmin_bin(),
         repo.path(),
-        &["instaweb", "--start", "--httpd", "lighttpd", "--port", &initial_port],
+        &[
+            "instaweb",
+            "--start",
+            "--httpd",
+            "lighttpd",
+            "--port",
+            &initial_port,
+        ],
         &[("PATH", &path_env)],
     );
     assert_eq!(initial.0, 0, "initial stderr={}", initial.2);
@@ -2957,7 +3143,10 @@ fn instaweb_restart_matches_stock_shape() {
     assert_eq!(restart.1, "");
     assert_eq!(restart.2, "");
     assert!(repo.path().join(".git/pid").exists());
-    assert!(!browser_log.exists(), "browser should be ignored for --restart");
+    assert!(
+        !browser_log.exists(),
+        "browser should be ignored for --restart"
+    );
 }
 
 #[cfg(unix)]
@@ -2983,7 +3172,10 @@ fn instaweb_short_aliases_match_stock_start_shape() {
     .expect("write fake lighttpd");
     fs::write(
         &browser,
-        format!("#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n", browser_log.display()),
+        format!(
+            "#!/bin/sh\nprintf 'browser %s\\n' \"$*\" > '{}'\n",
+            browser_log.display()
+        ),
     )
     .expect("write fake browser");
     use std::os::unix::fs::PermissionsExt;
@@ -3019,7 +3211,10 @@ fn instaweb_short_aliases_match_stock_start_shape() {
     assert!(repo.path().join(".git/pid").exists());
     assert!(logged.contains(&format!("port={port}")));
     assert!(logged.contains("bind=127.0.0.1"));
-    assert!(!browser_log.exists(), "browser should be ignored for --start");
+    assert!(
+        !browser_log.exists(),
+        "browser should be ignored for --start"
+    );
 }
 
 #[cfg(unix)]
@@ -3075,7 +3270,12 @@ fn instaweb_module_path_spellings_match_stock_start_shape() {
         ]
         .as_slice(),
     ] {
-        let start = command_output_with_env_overrides(zmin_bin(), repo.path(), args, &[("PATH", &path_env)]);
+        let start = command_output_with_env_overrides(
+            zmin_bin(),
+            repo.path(),
+            args,
+            &[("PATH", &path_env)],
+        );
         assert_eq!(start.0, 0, "{args:?} stderr={}", start.2);
         assert_eq!(start.1, "");
         assert_eq!(start.2, "");

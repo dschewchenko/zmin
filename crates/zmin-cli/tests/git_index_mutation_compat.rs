@@ -144,8 +144,14 @@ fn resolved_conflict_repos() -> (TempDir, TempDir) {
 fn missing_skip_worktree_repos() -> (TempDir, TempDir) {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();
-    git(git_repo.path(), ["update-index", "--skip-worktree", "a.txt"]);
-    run_zmin(zmin_repo.path(), ["update-index", "--skip-worktree", "a.txt"]);
+    git(
+        git_repo.path(),
+        ["update-index", "--skip-worktree", "a.txt"],
+    );
+    run_zmin(
+        zmin_repo.path(),
+        ["update-index", "--skip-worktree", "a.txt"],
+    );
     fs::remove_file(git_repo.path().join("a.txt")).expect("remove git skip-worktree file");
     fs::remove_file(zmin_repo.path().join("a.txt")).expect("remove zmin skip-worktree file");
     (git_repo, zmin_repo)
@@ -244,7 +250,8 @@ fn normalized_index_extensions(repo: &std::path::Path) -> Vec<(String, Vec<u8>)>
     let mut extensions = Vec::new();
     while cursor < checksum_offset {
         let signature = &data[cursor..cursor + 4];
-        let len = u32::from_be_bytes(data[cursor + 4..cursor + 8].try_into().expect("len")) as usize;
+        let len =
+            u32::from_be_bytes(data[cursor + 4..cursor + 8].try_into().expect("len")) as usize;
         let body = &data[cursor + 8..cursor + 8 + len];
         let mut normalized = body.to_vec();
         if signature == b"FSMN" && normalized.len() >= 23 {
@@ -253,7 +260,10 @@ fn normalized_index_extensions(repo: &std::path::Path) -> Vec<(String, Vec<u8>)>
             normalized.clear();
         } else if signature == b"UNTR" {
             normalized[0] = 0;
-            if let Some(prefix_end) = normalized.windows(9).position(|window| window == b"Location ") {
+            if let Some(prefix_end) = normalized
+                .windows(9)
+                .position(|window| window == b"Location ")
+            {
                 let path_start = prefix_end + 9;
                 if let Some(marker) = normalized[path_start..]
                     .windows(9)
@@ -277,10 +287,7 @@ fn normalized_index_extensions(repo: &std::path::Path) -> Vec<(String, Vec<u8>)>
                 }
             }
         }
-        extensions.push((
-            String::from_utf8_lossy(signature).into_owned(),
-            normalized,
-        ));
+        extensions.push((String::from_utf8_lossy(signature).into_owned(), normalized));
         cursor += 8 + len;
     }
     extensions
@@ -1712,7 +1719,12 @@ fn update_index_refresh_family_matches_stock_git() {
     }
 
     assert_eq!(
-        command_any_output(zmin_bin(), zmin_repo.path(), &["update-index", "-g"], "zmin"),
+        command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["update-index", "-g"],
+            "zmin"
+        ),
         command_any_output("git", git_repo.path(), &["update-index", "-g"], "git")
     );
     assert_eq!(
@@ -1834,10 +1846,7 @@ fn update_index_reporting_and_info_only_match_stock_git() {
     );
 
     assert_eq!(
-        run_zmin_failure_output(
-            zmin_repo.path(),
-            &["update-index", "--index-version", "5"],
-        ),
+        run_zmin_failure_output(zmin_repo.path(), &["update-index", "--index-version", "5"],),
         git_failure_output(git_repo.path(), &["update-index", "--index-version", "5"])
     );
 }
@@ -1921,13 +1930,23 @@ fn update_index_ignore_submodules_and_skip_worktree_remove_match_stock_git() {
         command_any_output(
             zmin_bin(),
             zmin_repo.path(),
-            &["update-index", "--remove", "--ignore-skip-worktree-entries", "a.txt"],
+            &[
+                "update-index",
+                "--remove",
+                "--ignore-skip-worktree-entries",
+                "a.txt"
+            ],
             "zmin",
         ),
         command_any_output(
             "git",
             git_repo.path(),
-            &["update-index", "--remove", "--ignore-skip-worktree-entries", "a.txt"],
+            &[
+                "update-index",
+                "--remove",
+                "--ignore-skip-worktree-entries",
+                "a.txt"
+            ],
             "git",
         )
     );
@@ -2034,8 +2053,14 @@ fn update_index_helper_extensions_match_stock_git_on_extensionless_index() {
     ] {
         let git_repo = committed_repo();
         let zmin_repo = committed_repo();
-        assert_eq!(normalized_index_extensions(git_repo.path()), Vec::<(String, Vec<u8>)>::new());
-        assert_eq!(normalized_index_extensions(zmin_repo.path()), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(
+            normalized_index_extensions(git_repo.path()),
+            Vec::<(String, Vec<u8>)>::new()
+        );
+        assert_eq!(
+            normalized_index_extensions(zmin_repo.path()),
+            Vec::<(String, Vec<u8>)>::new()
+        );
         assert_eq!(
             command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
             command_any_output("git", git_repo.path(), args, "git")
@@ -2057,8 +2082,14 @@ fn update_index_helper_extensions_match_stock_git_on_extensionless_index() {
     ] {
         let git_repo = committed_repo();
         let zmin_repo = committed_repo();
-        assert_eq!(normalized_index_extensions(git_repo.path()), Vec::<(String, Vec<u8>)>::new());
-        assert_eq!(normalized_index_extensions(zmin_repo.path()), Vec::<(String, Vec<u8>)>::new());
+        assert_eq!(
+            normalized_index_extensions(git_repo.path()),
+            Vec::<(String, Vec<u8>)>::new()
+        );
+        assert_eq!(
+            normalized_index_extensions(zmin_repo.path()),
+            Vec::<(String, Vec<u8>)>::new()
+        );
         assert_eq!(
             command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin"),
             command_any_output("git", git_repo.path(), args, "git")

@@ -189,44 +189,166 @@ fn symbolic_ref_option_combinations_match_stock_git() {
         ["symbolic-ref", "--short", "--no-short", "HEAD"].as_slice(),
         ["symbolic-ref", "--no-short", "--short", "HEAD"].as_slice(),
         ["symbolic-ref", "--quiet", "--quiet", "HEAD"].as_slice(),
-        ["symbolic-ref", "--no-recurse", "--short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--short", "--no-recurse", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-recurse",
+            "--short",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--short",
+            "--no-recurse",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "--recurse", "--short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--recurse", "--no-recurse", "--short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-recurse", "--recurse", "--short", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--recurse",
+            "--no-recurse",
+            "--short",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-recurse",
+            "--recurse",
+            "--short",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "-q", "--no-quiet", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--no-quiet", "-q", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--no-quiet", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--no-quiet", "--short", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--short", "--no-quiet", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-short", "--no-quiet", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-quiet", "--no-short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-delete", "--no-quiet", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-quiet", "--no-delete", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-short",
+            "--no-quiet",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-quiet",
+            "--no-short",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-delete",
+            "--no-quiet",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-quiet",
+            "--no-delete",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "--quiet", "--no-recurse", "HEAD"].as_slice(),
         ["symbolic-ref", "--no-recurse", "--quiet", "HEAD"].as_slice(),
         ["symbolic-ref", "--short", "--short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-recurse", "--no-recurse", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-recurse",
+            "--no-recurse",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "--no-short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-short", "--no-recurse", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-recurse", "--no-short", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-short",
+            "--no-recurse",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-recurse",
+            "--no-short",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "--short", "--no-short", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--no-short", "--short", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--delete", "--delete", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--no-delete", "HEAD"].as_slice(),
         ["symbolic-ref", "--no-delete", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-delete", "--no-short", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-short", "--no-delete", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-delete",
+            "--no-short",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-short",
+            "--no-delete",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "--no-delete", "--short", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--short", "--no-delete", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-delete", "--no-recurse", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-recurse", "--no-delete", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-delete",
+            "--no-recurse",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-recurse",
+            "--no-delete",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "--no-delete", "refs/heads/inner"].as_slice(),
-        ["symbolic-ref", "--no-delete", "--no-quiet", "refs/heads/inner"].as_slice(),
-        ["symbolic-ref", "--no-quiet", "--no-delete", "refs/heads/inner"].as_slice(),
-        ["symbolic-ref", "--no-delete", "--no-delete", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--delete", "--no-delete", "refs/heads/outer"].as_slice(),
-        ["symbolic-ref", "--no-delete", "--delete", "refs/heads/outer"].as_slice(),
+        [
+            "symbolic-ref",
+            "--no-delete",
+            "--no-quiet",
+            "refs/heads/inner",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-quiet",
+            "--no-delete",
+            "refs/heads/inner",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-delete",
+            "--no-delete",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--delete",
+            "--no-delete",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
+        [
+            "symbolic-ref",
+            "--no-delete",
+            "--delete",
+            "refs/heads/outer",
+        ]
+        .as_slice(),
         ["symbolic-ref", "-d", "--no-delete", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "--no-delete", "-d", "refs/heads/outer"].as_slice(),
         ["symbolic-ref", "-d", "-d", "refs/heads/outer"].as_slice(),
@@ -338,19 +460,85 @@ fn show_ref_option_combinations_match_stock_git() {
         ["show-ref", "--head", "--heads", "--tags", "--hash"].as_slice(),
         ["show-ref", "--hash", "--head", "--heads", "--tags"].as_slice(),
         ["show-ref", "--head", "--heads", "--tags", "--hash=12"].as_slice(),
-        ["show-ref", "--verify", "--head", "--hash", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--head", "--hash=12", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--tags", "--hash=12", "refs/tags/v1"].as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--head",
+            "--hash",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--head",
+            "--hash=12",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--tags",
+            "--hash=12",
+            "refs/tags/v1",
+        ]
+        .as_slice(),
         ["show-ref", "--head", "--branches", "--tags", "--hash"].as_slice(),
         ["show-ref", "--hash", "--head", "--branches", "--tags"].as_slice(),
         ["show-ref", "--head", "--branches", "--tags", "--hash=12"].as_slice(),
         ["show-ref", "--hash=12", "--head", "--branches", "--tags"].as_slice(),
-        ["show-ref", "--verify", "--heads", "--hash", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--heads", "--hash=12", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--branches", "--hash=12", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--head", "--heads", "--hash", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--head", "--heads", "--hash=12", "refs/heads/main"].as_slice(),
-        ["show-ref", "--verify", "--head", "--tags", "--hash=12", "refs/tags/v1"].as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--heads",
+            "--hash",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--heads",
+            "--hash=12",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--branches",
+            "--hash=12",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--head",
+            "--heads",
+            "--hash",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--head",
+            "--heads",
+            "--hash=12",
+            "refs/heads/main",
+        ]
+        .as_slice(),
+        [
+            "show-ref",
+            "--verify",
+            "--head",
+            "--tags",
+            "--hash=12",
+            "refs/tags/v1",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin show-ref"),
@@ -377,7 +565,13 @@ fn show_ref_exclude_existing_matches_stock_git() {
         ["show-ref", "--exclude-existing=refs/tags/"].as_slice(),
     ] {
         assert_eq!(
-            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, stdin, "zmin show-ref"),
+            command_any_output_with_stdin(
+                zmin_bin(),
+                zmin_repo.path(),
+                args,
+                stdin,
+                "zmin show-ref"
+            ),
             command_any_output_with_stdin("git", git_repo.path(), args, stdin, "git show-ref"),
             "args: {args:?}"
         );
@@ -1920,10 +2114,27 @@ fn tag_documented_creation_flags_match_stock_git() {
 
         let git_output = command_any_output("git", git_repo.path(), args, "git tag");
         let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin tag");
-        assert_eq!(zmin_output, git_output, "tag args should match for {args:?}");
         assert_eq!(
-            git(zmin_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
-            git(git_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
+            zmin_output, git_output,
+            "tag args should match for {args:?}"
+        );
+        assert_eq!(
+            git(
+                zmin_repo.path(),
+                [
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname) %(objecttype)",
+                    "refs/tags"
+                ]
+            ),
+            git(
+                git_repo.path(),
+                [
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname) %(objecttype)",
+                    "refs/tags"
+                ]
+            ),
             "tag refs should match for {args:?}"
         );
         assert_eq!(
@@ -1962,8 +2173,22 @@ fn tag_documented_listing_flags_match_stock_git() {
             "tag listing output should match for {args:?}"
         );
         assert_eq!(
-            git(zmin_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
-            git(git_repo.path(), ["for-each-ref", "--format=%(refname) %(objectname) %(objecttype)", "refs/tags"]),
+            git(
+                zmin_repo.path(),
+                [
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname) %(objecttype)",
+                    "refs/tags"
+                ]
+            ),
+            git(
+                git_repo.path(),
+                [
+                    "for-each-ref",
+                    "--format=%(refname) %(objectname) %(objecttype)",
+                    "refs/tags"
+                ]
+            ),
             "tag refs should remain unchanged for {args:?}"
         );
     }

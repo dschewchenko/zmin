@@ -729,7 +729,8 @@ fn commit_pathspec_indexes(
 }
 
 fn commit_pathspecs(repo: &GitRepo, paths: &[PathBuf]) -> Result<Vec<Vec<u8>>> {
-    paths.iter()
+    paths
+        .iter()
         .map(|path| path_arg_to_repo_relative_allow_root(repo, path))
         .collect()
 }
@@ -1286,7 +1287,11 @@ fn resolve_stock_git_binary() -> PathBuf {
     for path in std::env::var_os("PATH")
         .into_iter()
         .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+        .flat_map(|dir| {
+            stock_git_names()
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
     {
         if is_stock_git_binary(&path) {
             return path;
@@ -1953,7 +1958,10 @@ pub(crate) fn commit_tree_gpg_signature(
     Ok(Some(output.stdout))
 }
 
-fn commit_tree_signing_key(repo: &GitRepo, gpg_sign: Option<&str>) -> Result<Option<Option<String>>> {
+fn commit_tree_signing_key(
+    repo: &GitRepo,
+    gpg_sign: Option<&str>,
+) -> Result<Option<Option<String>>> {
     if let Some(key) = gpg_sign {
         return Ok(Some((!key.is_empty()).then(|| key.to_owned())));
     }

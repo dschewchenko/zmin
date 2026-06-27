@@ -237,14 +237,23 @@ fn p4_clone_imports_head_revision_into_git_refs_and_worktree() {
         git(&stock_target, ["rev-parse", "--abbrev-ref", "HEAD"]),
         git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"])
     );
-    assert_eq!(git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"]), "main");
+    assert_eq!(
+        git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"]),
+        "main"
+    );
     assert_eq!(
         git(&zmin_target, ["rev-parse", "refs/remotes/p4/master"]),
         git(&zmin_target, ["rev-parse", "refs/heads/main"])
     );
     assert_eq!(
-        git(&stock_target, ["log", "-1", "--format=%B", "refs/remotes/p4/master"]),
-        git(&zmin_target, ["log", "-1", "--format=%B", "refs/remotes/p4/master"])
+        git(
+            &stock_target,
+            ["log", "-1", "--format=%B", "refs/remotes/p4/master"]
+        ),
+        git(
+            &zmin_target,
+            ["log", "-1", "--format=%B", "refs/remotes/p4/master"]
+        )
     );
     let log = fs::read_to_string(dir.path().join("p4.log")).expect("read p4 log");
     assert!(log.contains("-G files //depot/project/...#head"));
@@ -272,7 +281,10 @@ fn p4_submit_opens_changed_files_and_submits_head() {
         zmin_bin(),
         dir.path(),
         &bin,
-        &[("P4_LOG_PATH", zmin_log_path.to_str().expect("zmin log path"))],
+        &[(
+            "P4_LOG_PATH",
+            zmin_log_path.to_str().expect("zmin log path"),
+        )],
         &[
             "p4",
             "clone",
@@ -300,7 +312,10 @@ fn p4_submit_opens_changed_files_and_submits_head() {
         stock_git_bin().to_str().expect("stock git path"),
         &stock_target,
         &bin,
-        &[("P4_LOG_PATH", stock_log_path.to_str().expect("stock log path"))],
+        &[(
+            "P4_LOG_PATH",
+            stock_log_path.to_str().expect("stock log path"),
+        )],
         &["p4", "submit"],
     );
     assert_eq!(stock.0, 0, "stock submit stderr: {}", stock.2);
@@ -308,7 +323,10 @@ fn p4_submit_opens_changed_files_and_submits_head() {
         zmin_bin(),
         &zmin_target,
         &bin,
-        &[("P4_LOG_PATH", zmin_log_path.to_str().expect("zmin log path"))],
+        &[(
+            "P4_LOG_PATH",
+            zmin_log_path.to_str().expect("zmin log path"),
+        )],
         &["p4", "submit"],
     );
     assert_eq!(zmin.0, 0, "zmin submit stderr: {}", zmin.2);
@@ -683,7 +701,13 @@ fn run_command_with_path_and_env(
         .current_dir(cwd)
         .envs(envs.iter().copied());
     if program == stock_git_bin().to_str().expect("stock git path") {
-        command.env("GIT_EXEC_PATH", git(stock_git_bin().parent().expect("stock git dir"), ["--exec-path"]));
+        command.env(
+            "GIT_EXEC_PATH",
+            git(
+                stock_git_bin().parent().expect("stock git dir"),
+                ["--exec-path"],
+            ),
+        );
     }
     let output = command.output().expect("run command");
     (
@@ -730,8 +754,7 @@ fn normalize_p4_submit_stdout(stdout: &str) -> String {
         .lines()
         .map(|line| {
             let line = line.trim_start_matches('\r');
-            if let Some((prefix, _)) = line.split_once(" located at ")
-            {
+            if let Some((prefix, _)) = line.split_once(" located at ") {
                 if prefix.starts_with("Perforce checkout for depot path ") {
                     return format!("{prefix} located at <target>");
                 }

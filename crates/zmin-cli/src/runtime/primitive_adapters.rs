@@ -17,11 +17,10 @@ use zmin_primitives::git_runtime::{
 use zmin_primitives::{Error as PrimitiveError, Result as PrimitiveResult};
 
 use super::{
-    CliError, FormatPatchBlobCache, FormatPatchContext, FormatPatchEntry,
-    FormatPatchPreludeMode, GitRepo, SubmoduleDiffFormat, WordDiffMode,
-    default_abbrev_len, local_clone_source, local_repository_path_from_location,
-    normalize_git_path, read_common_git_dir, read_config_file, run_receive_pack_request_service,
-    run_upload_pack_request_service, signature_from_commit_bytes,
+    CliError, FormatPatchBlobCache, FormatPatchContext, FormatPatchEntry, FormatPatchPreludeMode,
+    GitRepo, SubmoduleDiffFormat, WordDiffMode, default_abbrev_len, local_clone_source,
+    local_repository_path_from_location, normalize_git_path, read_common_git_dir, read_config_file,
+    run_receive_pack_request_service, run_upload_pack_request_service, signature_from_commit_bytes,
     write_format_patch_with_tree_diff_cached,
 };
 

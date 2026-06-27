@@ -2570,7 +2570,10 @@ fn fsck_message_config(repo: Option<&GitRepo>) -> Result<FsckMessageConfig> {
         missing_email: severity("missingemail", FsckMessageSeverity::Error)?,
         missing_name_before_email: severity("missingnamebeforeemail", FsckMessageSeverity::Error)?,
         missing_space_before_date: severity("missingspacebeforedate", FsckMessageSeverity::Error)?,
-        missing_space_before_email: severity("missingspacebeforeemail", FsckMessageSeverity::Error)?,
+        missing_space_before_email: severity(
+            "missingspacebeforeemail",
+            FsckMessageSeverity::Error,
+        )?,
         missing_tagger_entry: severity("missingtaggerentry", FsckMessageSeverity::Warn)?,
         null_sha1: severity("nullsha1", FsckMessageSeverity::Warn)?,
         tree_not_sorted: severity("treenotsorted", FsckMessageSeverity::Error)?,

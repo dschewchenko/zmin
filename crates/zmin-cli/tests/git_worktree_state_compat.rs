@@ -78,7 +78,10 @@ fn parse_checkout_index_temp_row(stdout: &str) -> (Vec<String>, String) {
     )
 }
 
-fn read_checkout_index_temp_files(repo: &std::path::Path, names: &[String]) -> Vec<Option<Vec<u8>>> {
+fn read_checkout_index_temp_files(
+    repo: &std::path::Path,
+    names: &[String],
+) -> Vec<Option<Vec<u8>>> {
     names
         .iter()
         .map(|name| {
@@ -92,7 +95,11 @@ fn read_checkout_index_temp_files(repo: &std::path::Path, names: &[String]) -> V
 }
 
 fn checkout_index_debug_metadata_populated(debug: &str) -> bool {
-    debug.lines().skip(1).take(2).all(|line| !line.ends_with(": 0:0"))
+    debug
+        .lines()
+        .skip(1)
+        .take(2)
+        .all(|line| !line.ends_with(": 0:0"))
 }
 
 fn switch_branch_fixture_repos() -> (TempDir, TempDir) {
@@ -1166,10 +1173,8 @@ fn checkout_index_documented_option_combinations_match_stock_git() {
             fs::read(git_repo.path().join("out/README.md")).expect("read git prefixed readme")
         );
         assert_eq!(
-            fs::read(zmin_repo.path().join("out/docs/guide.md"))
-                .expect("read zmin prefixed guide"),
-            fs::read(git_repo.path().join("out/docs/guide.md"))
-                .expect("read git prefixed guide")
+            fs::read(zmin_repo.path().join("out/docs/guide.md")).expect("read zmin prefixed guide"),
+            fs::read(git_repo.path().join("out/docs/guide.md")).expect("read git prefixed guide")
         );
     }
 
@@ -1344,8 +1349,7 @@ fn checkout_index_missing_documented_options_match_stock_git() {
         assert_eq!(
             fs::read(zmin_repo.path().join("out/docs/guide.md"))
                 .expect("read zmin nul-prefix guide"),
-            fs::read(git_repo.path().join("out/docs/guide.md"))
-                .expect("read git nul-prefix guide")
+            fs::read(git_repo.path().join("out/docs/guide.md")).expect("read git nul-prefix guide")
         );
     }
 }
@@ -1605,7 +1609,12 @@ fn switch_track_flags_require_branch_creation_like_stock_git() {
 #[test]
 fn switch_detach_short_matches_stock_git_for_branch_targets() {
     let (git_repo, zmin_repo) = switch_branch_fixture_repos();
-    let git_run = command_any_output("git", git_repo.path(), &["switch", "-d", "feature"], "git switch");
+    let git_run = command_any_output(
+        "git",
+        git_repo.path(),
+        &["switch", "-d", "feature"],
+        "git switch",
+    );
     let zmin_run = command_any_output(
         zmin_bin(),
         zmin_repo.path(),

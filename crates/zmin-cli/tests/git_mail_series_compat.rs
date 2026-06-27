@@ -646,7 +646,8 @@ fn format_patch_invalid_surface_and_output_file_match_stock_git() {
     let git_result = command_any_output("git", git_repo.path(), &git_args, "git");
     let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &git_args, "zmin");
     assert_eq!(zmin_result, git_result);
-    let git_mail = fs::read_to_string(git_repo.path().join("mail.patch")).expect("read git output mail");
+    let git_mail =
+        fs::read_to_string(git_repo.path().join("mail.patch")).expect("read git output mail");
     let zmin_mail =
         fs::read_to_string(zmin_repo.path().join("mail.patch")).expect("read zmin output mail");
     assert_eq!(
@@ -778,7 +779,11 @@ fn format_patch_word_diff_order_and_reverse_family_matches_stock_git() {
         vec!["--skip-to=beta.txt".into()],
         vec!["--rotate-to=beta.txt".into()],
         vec!["-O".into(), "order.txt".into(), "--skip-to=beta.txt".into()],
-        vec!["-O".into(), "order.txt".into(), "--rotate-to=beta.txt".into()],
+        vec![
+            "-O".into(),
+            "order.txt".into(),
+            "--rotate-to=beta.txt".into(),
+        ],
         vec!["-R".into()],
     ];
 
@@ -896,7 +901,10 @@ fn format_patch_word_diff_color_and_regex_family_matches_stock_git() {
         vec!["--word-diff=color".into()],
         vec!["--color-words".into()],
         vec!["--color-words=[a-z]+".into()],
-        vec!["--word-diff-regex=[a-z]+".into(), "--word-diff=plain".into()],
+        vec![
+            "--word-diff-regex=[a-z]+".into(),
+            "--word-diff=plain".into(),
+        ],
         vec![
             "--word-diff-regex=[a-z]+".into(),
             "--word-diff=porcelain".into(),
@@ -946,10 +954,7 @@ fn format_patch_prefix_null_and_dirstat_family_matches_stock_git() {
     let multi_file_repo = format_patch_multi_file_fixture_repo();
     let nested_repo = format_patch_nested_dir_fixture_repo();
 
-    let multi_file_cases: Vec<Vec<String>> = vec![
-        vec!["--no-prefix".into()],
-        vec!["-z".into()],
-    ];
+    let multi_file_cases: Vec<Vec<String>> = vec![vec!["--no-prefix".into()], vec!["-z".into()]];
     for extra in multi_file_cases {
         let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
         args.extend(extra);

@@ -450,12 +450,12 @@ fn apply_command_alias(command_args: Vec<String>) -> Result<Vec<String>> {
     let Some(command) = command_args.first().map(String::as_str) else {
         return Ok(command_args);
     };
-    if is_known_command(command) {
-        return Ok(command_args);
-    }
     let Some(alias) = read_alias_value(command)? else {
         return Ok(command_args);
     };
+    if is_known_command(command) {
+        return Ok(command_args);
+    }
     if let Some(shell_command) = alias.strip_prefix('!') {
         let mut process = std::process::Command::new(git_shell_command_path());
         process

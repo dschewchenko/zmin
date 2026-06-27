@@ -9,7 +9,7 @@ use zmin_git_core::{GitHashAlgorithm, GitObjectHash};
 use common::{
     assert_repository_state_matches, command_any_output, command_any_output_with_stdin,
     command_failure_output_with_env, command_output_with_env, command_stdout_bytes,
-    configure_identity, git, git_failure_output, git_init, git_status, git_args, git_with_env,
+    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
     git_with_stdin, git_with_stdin_args, run_zmin, run_zmin_args, run_zmin_failure_output,
     write_file, zmin_bin,
 };
@@ -402,10 +402,7 @@ fn repack_shared_clone_fixture() -> (TempDir, std::path::PathBuf, std::path::Pat
     (dir, source, shared)
 }
 
-fn root_artifact_names_with_prefix(
-    repo: &std::path::Path,
-    prefix: &str,
-) -> BTreeSet<String> {
+fn root_artifact_names_with_prefix(repo: &std::path::Path, prefix: &str) -> BTreeSet<String> {
     fs::read_dir(repo)
         .expect("read repo root")
         .map(|entry| entry.expect("repo root entry").file_name())
@@ -414,10 +411,7 @@ fn root_artifact_names_with_prefix(
         .collect()
 }
 
-fn root_artifact_extensions_with_prefix(
-    repo: &std::path::Path,
-    prefix: &str,
-) -> BTreeSet<String> {
+fn root_artifact_extensions_with_prefix(repo: &std::path::Path, prefix: &str) -> BTreeSet<String> {
     root_artifact_names_with_prefix(repo, prefix)
         .into_iter()
         .filter_map(|name| name.rsplit_once('.').map(|(_, ext)| ext.to_owned()))
@@ -438,8 +432,7 @@ fn normalize_filter_to_status_line(line: &str) -> String {
             if let Some(rest) = last.strip_prefix(prefix)
                 && let Some((_, ext)) = rest.rsplit_once('.')
             {
-                let mut normalized = parts[..parts.len().saturating_sub(1)]
-                    .join(" ");
+                let mut normalized = parts[..parts.len().saturating_sub(1)].join(" ");
                 if !normalized.is_empty() {
                     normalized.push(' ');
                 }
@@ -486,14 +479,26 @@ fn assert_repack_observables_match(left: &std::path::Path, right: &std::path::Pa
         ),
         "object inventories diverged"
     );
-    assert_eq!(pack_file_count(left), pack_file_count(right), "pack counts diverged");
+    assert_eq!(
+        pack_file_count(left),
+        pack_file_count(right),
+        "pack counts diverged"
+    );
     assert_eq!(
         left.join(".git/objects/pack/multi-pack-index").exists(),
         right.join(".git/objects/pack/multi-pack-index").exists(),
         "multi-pack-index presence diverged"
     );
-    assert_eq!(git_status(left, ["fsck", "--strict"]), 0, "left repo fsck failed");
-    assert_eq!(git_status(right, ["fsck", "--strict"]), 0, "right repo fsck failed");
+    assert_eq!(
+        git_status(left, ["fsck", "--strict"]),
+        0,
+        "left repo fsck failed"
+    );
+    assert_eq!(
+        git_status(right, ["fsck", "--strict"]),
+        0,
+        "right repo fsck failed"
+    );
 }
 
 fn assert_gc_observables_match(left: &std::path::Path, right: &std::path::Path) {
@@ -540,14 +545,26 @@ fn assert_repack_filter_to_observables_match(left: &std::path::Path, right: &std
         ),
         "object inventories diverged"
     );
-    assert_eq!(pack_file_count(left), pack_file_count(right), "pack counts diverged");
+    assert_eq!(
+        pack_file_count(left),
+        pack_file_count(right),
+        "pack counts diverged"
+    );
     assert_eq!(
         left.join(".git/objects/pack/multi-pack-index").exists(),
         right.join(".git/objects/pack/multi-pack-index").exists(),
         "multi-pack-index presence diverged"
     );
-    assert_eq!(git_status(left, ["fsck", "--strict"]), 0, "left repo fsck failed");
-    assert_eq!(git_status(right, ["fsck", "--strict"]), 0, "right repo fsck failed");
+    assert_eq!(
+        git_status(left, ["fsck", "--strict"]),
+        0,
+        "left repo fsck failed"
+    );
+    assert_eq!(
+        git_status(right, ["fsck", "--strict"]),
+        0,
+        "right repo fsck failed"
+    );
 }
 
 fn two_pack_midx_fixture() -> TempDir {
@@ -614,9 +631,7 @@ fn multi_pack_index_bitmap_name(repo: &std::path::Path) -> Option<String> {
         .ok()?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| {
-            name.starts_with("multi-pack-index-") && name.ends_with(".bitmap")
-        })
+        .filter(|name| name.starts_with("multi-pack-index-") && name.ends_with(".bitmap"))
         .collect::<Vec<_>>();
     names.sort();
     names.into_iter().next()
@@ -713,9 +728,26 @@ fn commit_graph_option_combinations_match_stock_git() {
     for args in [
         &["commit-graph", "write", "--reachable", "--progress"][..],
         &["commit-graph", "write", "--reachable", "--no-progress"],
-        &["commit-graph", "write", "--object-dir=.git/objects", "--reachable"],
-        &["commit-graph", "write", "--reachable", "--progress", "--no-progress"],
-        &["commit-graph", "write", "--reachable", "--no-progress", "--progress"],
+        &[
+            "commit-graph",
+            "write",
+            "--object-dir=.git/objects",
+            "--reachable",
+        ],
+        &[
+            "commit-graph",
+            "write",
+            "--reachable",
+            "--progress",
+            "--no-progress",
+        ],
+        &[
+            "commit-graph",
+            "write",
+            "--reachable",
+            "--no-progress",
+            "--progress",
+        ],
     ] {
         let git_repo = commit_graph_fixture_repo();
         let zmin_repo = commit_graph_fixture_repo();
@@ -933,13 +965,7 @@ fn multi_pack_index_progress_flags_match_stock_git() {
         ),
         (
             "repack --progress --batch-size=1",
-            [
-                "multi-pack-index",
-                "repack",
-                "--progress",
-                "--batch-size=1",
-            ]
-            .as_slice(),
+            ["multi-pack-index", "repack", "--progress", "--batch-size=1"].as_slice(),
             true,
         ),
         (
@@ -1017,7 +1043,12 @@ fn multi_pack_index_write_option_family_matches_stock_git() {
                     &["multi-pack-index", "verify"],
                     "zmin verify",
                 ),
-                command_any_output("git", git_repo.path(), &["multi-pack-index", "verify"], "git verify"),
+                command_any_output(
+                    "git",
+                    git_repo.path(),
+                    &["multi-pack-index", "verify"],
+                    "git verify"
+                ),
                 "{args:?} verify output"
             );
             assert_eq!(
@@ -1038,7 +1069,10 @@ fn multi_pack_index_write_option_family_matches_stock_git() {
         assert_eq!(git_pack_names, zmin_pack_names, "{label} pack names");
         let preferred_arg = match label {
             "preferred-pack recognized" => {
-                format!("--preferred-pack={}", git_pack_names[1].replace(".idx", ".pack"))
+                format!(
+                    "--preferred-pack={}",
+                    git_pack_names[1].replace(".idx", ".pack")
+                )
             }
             "preferred-pack missing" => "--preferred-pack=missing.pack".to_owned(),
             _ => unreachable!(),
@@ -1058,7 +1092,11 @@ fn multi_pack_index_write_option_family_matches_stock_git() {
         assert_repository_state_matches(zmin_repo.path(), git_repo.path());
     }
 
-    for label in ["stdin-packs subset", "stdin-packs all", "stdin-packs missing"] {
+    for label in [
+        "stdin-packs subset",
+        "stdin-packs all",
+        "stdin-packs missing",
+    ] {
         let git_repo = two_pack_midx_fixture();
         let zmin_repo = two_pack_midx_fixture();
         let git_pack_names = pack_index_names(git_repo.path());
@@ -1073,13 +1111,7 @@ fn multi_pack_index_write_option_family_matches_stock_git() {
         let args = ["multi-pack-index", "write", "--stdin-packs"];
 
         assert_eq!(
-            command_any_output_with_stdin(
-                zmin_bin(),
-                zmin_repo.path(),
-                &args,
-                &stdin_data,
-                "zmin"
-            ),
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), &args, &stdin_data, "zmin"),
             command_any_output_with_stdin("git", git_repo.path(), &args, &stdin_data, "git"),
             "{label}"
         );
@@ -1204,8 +1236,18 @@ fn multi_pack_index_incremental_and_refs_snapshot_match_stock_git() {
     let missing_dir = TempDir::new().expect("temp missing snapshot dir");
     let missing_snapshot = missing_dir.path().join("missing.snapshot");
     let missing_arg = format!("--refs-snapshot={}", missing_snapshot.display());
-    let git_args = ["multi-pack-index", "write", "--bitmap", missing_arg.as_str()];
-    let zmin_args = ["multi-pack-index", "write", "--bitmap", missing_arg.as_str()];
+    let git_args = [
+        "multi-pack-index",
+        "write",
+        "--bitmap",
+        missing_arg.as_str(),
+    ];
+    let zmin_args = [
+        "multi-pack-index",
+        "write",
+        "--bitmap",
+        missing_arg.as_str(),
+    ];
     assert_eq!(
         command_any_output(zmin_bin(), zmin_repo.path(), &zmin_args, "zmin"),
         command_any_output("git", git_repo.path(), &git_args, "git"),
@@ -1372,7 +1414,10 @@ fn pack_refs_matches_stock_git_for_auto_include_and_exclude() {
         let zmin_repo = pack_refs_fixture_repo();
         git_args(git_repo.path(), args);
         run_zmin_args(zmin_repo.path(), args);
-        assert_eq!(packed_refs_file(zmin_repo.path()), packed_refs_file(git_repo.path()));
+        assert_eq!(
+            packed_refs_file(zmin_repo.path()),
+            packed_refs_file(git_repo.path())
+        );
         assert_eq!(
             ref_file_list(zmin_repo.path()),
             ref_file_list(git_repo.path())
@@ -1933,7 +1978,13 @@ fn repack_filter_variants_match_stock_git() {
         ["repack", "--filter=tree:2", "-d", "-q"].as_slice(),
         ["repack", "--filter=sparse:oid=HEAD:sparse.txt", "-d", "-q"].as_slice(),
         ["repack", "--filter=combine:blob:none+tree:1", "-d", "-q"].as_slice(),
-        ["repack", "--filter=combine:tree%3A1+blob%3Anone", "-d", "-q"].as_slice(),
+        [
+            "repack",
+            "--filter=combine:tree%3A1+blob%3Anone",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
         [
             "repack",
             "--filter=blob:none",
@@ -1966,7 +2017,14 @@ fn repack_filter_variants_match_stock_git() {
 fn repack_filter_to_variants_match_stock_git() {
     for (args, expected_prefix) in [
         (
-            ["repack", "--filter=blob:none", "--filter-to=filtered", "-d", "-q"].as_slice(),
+            [
+                "repack",
+                "--filter=blob:none",
+                "--filter-to=filtered",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
             "filtered-",
         ),
         (
@@ -2009,8 +2067,22 @@ fn repack_unpack_unreachable_value_forms_match_stock_git() {
         ["repack", "--unpack-unreachable=now", "-a", "-d", "-q"].as_slice(),
         ["repack", "--unpack-unreachable=tomorrow", "-A", "-d", "-q"].as_slice(),
         ["repack", "--unpack-unreachable=yesterday", "-A", "-d", "-q"].as_slice(),
-        ["repack", "--unpack-unreachable=1970-01-01", "-A", "-d", "-q"].as_slice(),
-        ["repack", "--unpack-unreachable=2 weeks ago", "-a", "-d", "-q"].as_slice(),
+        [
+            "repack",
+            "--unpack-unreachable=1970-01-01",
+            "-A",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
+        [
+            "repack",
+            "--unpack-unreachable=2 weeks ago",
+            "-a",
+            "-d",
+            "-q",
+        ]
+        .as_slice(),
         ["repack", "--unpack-unreachable=bogus", "-A", "-d", "-q"].as_slice(),
         [
             "repack",
@@ -2194,11 +2266,7 @@ fn repack_keep_unreachable_variants_match_stock_git() {
 #[test]
 fn repack_cruft_variants_match_stock_git() {
     for (args, expected_pack_count, expect_loose_dangling) in [
-        (
-            ["repack", "--cruft", "-d", "-q"].as_slice(),
-            2usize,
-            false,
-        ),
+        (["repack", "--cruft", "-d", "-q"].as_slice(), 2usize, false),
         (
             ["repack", "--cruft", "--cruft", "-d", "-q"].as_slice(),
             2usize,
@@ -2225,22 +2293,50 @@ fn repack_cruft_variants_match_stock_git() {
             true,
         ),
         (
-            ["repack", "--cruft", "--cruft-expiration=tomorrow", "-d", "-q"].as_slice(),
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=tomorrow",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
             1usize,
             true,
         ),
         (
-            ["repack", "--cruft", "--cruft-expiration=yesterday", "-d", "-q"].as_slice(),
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=yesterday",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
             2usize,
             false,
         ),
         (
-            ["repack", "--cruft", "--cruft-expiration=1970-01-01", "-d", "-q"].as_slice(),
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=1970-01-01",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
             2usize,
             false,
         ),
         (
-            ["repack", "--cruft", "--cruft-expiration=2 weeks ago", "-d", "-q"].as_slice(),
+            [
+                "repack",
+                "--cruft",
+                "--cruft-expiration=2 weeks ago",
+                "-d",
+                "-q",
+            ]
+            .as_slice(),
             2usize,
             false,
         ),
@@ -2379,7 +2475,11 @@ fn repack_cruft_expire_to_now_matches_stock_git() {
             command_any_output("git", git_repo.path(), args, "git"),
             "args: {args:?}"
         );
-        assert_eq!(pack_file_count(zmin_repo.path()), expected_pack_count, "args: {args:?}");
+        assert_eq!(
+            pack_file_count(zmin_repo.path()),
+            expected_pack_count,
+            "args: {args:?}"
+        );
         assert_eq!(
             loose_object_exists(zmin_repo.path(), &zmin_dangling),
             expected_loose_dangling,
@@ -3677,8 +3777,22 @@ fn maintenance_no_schedule_failures_match_stock_git() {
         ["maintenance", "run", "--no-schedule"].as_slice(),
         ["maintenance", "run", "--schedule=daily", "--no-schedule"].as_slice(),
         ["maintenance", "run", "--task=gc", "--no-schedule"].as_slice(),
-        ["maintenance", "run", "--schedule=hourly", "--no-schedule", "--task=gc"].as_slice(),
-        ["maintenance", "run", "--no-schedule", "--schedule=hourly", "--task=gc"].as_slice(),
+        [
+            "maintenance",
+            "run",
+            "--schedule=hourly",
+            "--no-schedule",
+            "--task=gc",
+        ]
+        .as_slice(),
+        [
+            "maintenance",
+            "run",
+            "--no-schedule",
+            "--schedule=hourly",
+            "--task=gc",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_failure_output(zmin_repo.path(), args),
@@ -3702,7 +3816,10 @@ fn maintenance_run_no_auto_and_no_quiet_match_stock_git() {
             command_any_output("git", git_repo.path(), args, "git"),
             "args: {args:?}"
         );
-        assert_eq!(pack_file_count(zmin_repo.path()), pack_file_count(git_repo.path()));
+        assert_eq!(
+            pack_file_count(zmin_repo.path()),
+            pack_file_count(git_repo.path())
+        );
         assert_eq!(git_status(zmin_repo.path(), ["fsck", "--strict"]), 0);
     }
 
@@ -3718,7 +3835,10 @@ fn maintenance_run_no_auto_and_no_quiet_match_stock_git() {
             command_any_output("git", git_repo.path(), args, "git"),
             "args: {args:?}"
         );
-        assert_eq!(pack_file_count(zmin_repo.path()), pack_file_count(git_repo.path()));
+        assert_eq!(
+            pack_file_count(zmin_repo.path()),
+            pack_file_count(git_repo.path())
+        );
         assert_eq!(git_status(zmin_repo.path(), ["fsck", "--strict"]), 0);
     }
 }
@@ -4004,7 +4124,10 @@ fn prune_matches_stock_git_for_documented_progress_and_verbose_flags() {
             run_zmin_args(zmin_repo.path(), &zmin_args),
             git_args(git_repo.path(), &stock_args)
         );
-        assert_eq!(loose_object_exists(zmin_repo.path(), &zmin_pruned), keeps_object);
+        assert_eq!(
+            loose_object_exists(zmin_repo.path(), &zmin_pruned),
+            keeps_object
+        );
         assert_eq!(
             loose_object_exists(zmin_repo.path(), &zmin_pruned),
             loose_object_exists(git_repo.path(), &git_pruned)

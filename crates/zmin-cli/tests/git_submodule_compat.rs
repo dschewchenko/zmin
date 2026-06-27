@@ -1720,8 +1720,14 @@ fn submodule_update_merge_rebase_and_dissociate_match_stock_git() {
             0,
             "zmin submodule init failed for {mode}"
         );
-        git(&git_clone.join("deps/sub"), ["checkout", "-b", "topic", &first]);
-        git(&zmin_clone.join("deps/sub"), ["checkout", "-b", "topic", &first]);
+        git(
+            &git_clone.join("deps/sub"),
+            ["checkout", "-b", "topic", &first],
+        );
+        git(
+            &zmin_clone.join("deps/sub"),
+            ["checkout", "-b", "topic", &first],
+        );
 
         assert_eq!(
             command_any_output(
@@ -1756,8 +1762,14 @@ fn submodule_update_merge_rebase_and_dissociate_match_stock_git() {
             "submodule HEAD parity mismatch for {mode}"
         );
         assert_eq!(
-            git(&zmin_clone.join("deps/sub"), ["rev-parse", "--abbrev-ref", "HEAD"]),
-            git(&git_clone.join("deps/sub"), ["rev-parse", "--abbrev-ref", "HEAD"]),
+            git(
+                &zmin_clone.join("deps/sub"),
+                ["rev-parse", "--abbrev-ref", "HEAD"]
+            ),
+            git(
+                &git_clone.join("deps/sub"),
+                ["rev-parse", "--abbrev-ref", "HEAD"]
+            ),
             "submodule branch attachment mismatch for {mode}"
         );
         assert_eq!(
@@ -1774,7 +1786,11 @@ fn submodule_update_merge_rebase_and_dissociate_match_stock_git() {
 
     git(
         dir.path(),
-        ["clone", source.to_str().expect("source path"), "git-submodule-dissociate"],
+        [
+            "clone",
+            source.to_str().expect("source path"),
+            "git-submodule-dissociate",
+        ],
     );
     run_zmin(
         dir.path(),
@@ -1786,11 +1802,23 @@ fn submodule_update_merge_rebase_and_dissociate_match_stock_git() {
     );
     let git_clone = dir.path().join("git-submodule-dissociate");
     let zmin_clone = dir.path().join("zmin-submodule-dissociate");
-    let mut git_args = vec!["-c", "protocol.file.allow=always", "submodule", "update", "--init"];
+    let mut git_args = vec![
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "update",
+        "--init",
+    ];
     git_args.extend(["--reference", reference.to_str().expect("reference path")]);
     git_args.extend(["--dissociate", "deps/sub"]);
     assert_eq!(
-        command_any_output("git", &git_clone, &git_args, "git submodule update dissociate").0,
+        command_any_output(
+            "git",
+            &git_clone,
+            &git_args,
+            "git submodule update dissociate"
+        )
+        .0,
         0,
         "git submodule update --dissociate failed"
     );

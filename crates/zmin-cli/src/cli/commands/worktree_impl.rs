@@ -3171,14 +3171,7 @@ pub(crate) fn add_with_embedded_repo_warning(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let mut index = read_repo_index(&repo)?;
     if interactive || patch {
-        if all
-            || force
-            || update
-            || intent_to_add
-            || refresh
-            || edit
-            || chmod.is_some()
-            || dry_run
+        if all || force || update || intent_to_add || refresh || edit || chmod.is_some() || dry_run
         {
             return Err(CliError::Fatal {
                 code: 129,
@@ -3487,9 +3480,16 @@ fn add_interactive_quit_lane(
 
     println!("           staged     unstaged path");
     for (row, path) in paths.iter().enumerate() {
-        let staged_text =
-            add_interactive_diff_stat(&head_index, index, repo, store, &staged, path, DiffSideSource::Index)?
-                .unwrap_or_else(|| "unchanged".to_owned());
+        let staged_text = add_interactive_diff_stat(
+            &head_index,
+            index,
+            repo,
+            store,
+            &staged,
+            path,
+            DiffSideSource::Index,
+        )?
+        .unwrap_or_else(|| "unchanged".to_owned());
         let unstaged_text = add_interactive_diff_stat(
             index,
             &worktree_index,
@@ -3525,7 +3525,8 @@ fn add_interactive_quit_lane(
         }
         _ => Err(CliError::Fatal {
             code: 129,
-            message: "interactive add only supports the quit lane in this compatibility batch".into(),
+            message: "interactive add only supports the quit lane in this compatibility batch"
+                .into(),
         }),
     }
 }
@@ -3550,8 +3551,13 @@ fn add_interactive_diff_stat(
         .map(|entry| read_diff_side_content(repo, store, entry, new_source))
         .transpose()?
         .unwrap_or_default();
-    let (insertions, deletions) =
-        diff_line_counts_with_options(&old_content, &new_content, DiffWhitespaceMode::None, &[], false);
+    let (insertions, deletions) = diff_line_counts_with_options(
+        &old_content,
+        &new_content,
+        DiffWhitespaceMode::None,
+        &[],
+        false,
+    );
     Ok(Some(format!("+{insertions}/-{deletions}")))
 }
 
@@ -3994,7 +4000,11 @@ pub(crate) fn mv(
             );
         }
         if dry_run || verbose {
-            println!("Renaming {} to {}", source.display(), target_display.display());
+            println!(
+                "Renaming {} to {}",
+                source.display(),
+                target_display.display()
+            );
         }
         if !dry_run {
             rename_worktree_path(&source_absolute, &target_absolute, force)?;
@@ -4122,7 +4132,13 @@ pub(crate) fn read_tree_command(options: ReadTreeCommandOptions) -> Result<()> {
     if !dry_run {
         result_index.write_to_path(&output_path)?;
         if update_worktree {
-            read_tree_update_worktree(&repo, &store, &original_index, &result_index, prefix.is_some())?;
+            read_tree_update_worktree(
+                &repo,
+                &store,
+                &original_index,
+                &result_index,
+                prefix.is_some(),
+            )?;
         }
     }
     Ok(())
@@ -4142,7 +4158,11 @@ fn read_tree_update_worktree(
         .map(|entry| entry.path.as_slice())
         .collect::<HashSet<_>>();
     if !keep_existing_paths {
-        for entry in original_index.entries().iter().filter(|entry| entry.stage == 0) {
+        for entry in original_index
+            .entries()
+            .iter()
+            .filter(|entry| entry.stage == 0)
+        {
             if !target_paths.contains(entry.path.as_slice()) {
                 remove_worktree_path(repo, &entry.path)?;
             }
@@ -4203,15 +4223,17 @@ fn prefix_index(index: GitIndex, prefix: &str) -> Result<GitIndex> {
     Ok(GitIndex::from_entries(entries)?)
 }
 
-fn prefix_index_onto_existing(existing: GitIndex, imported: GitIndex, prefix: &str) -> Result<GitIndex> {
+fn prefix_index_onto_existing(
+    existing: GitIndex,
+    imported: GitIndex,
+    prefix: &str,
+) -> Result<GitIndex> {
     let mut entries = existing.entries().to_vec();
     entries.extend(prefix_index(imported, prefix)?.entries().iter().cloned());
     Ok(GitIndex::from_entries(entries)?)
 }
 
-pub(crate) fn checkout_index_command(
-    options: CheckoutIndexCommandOptions,
-) -> Result<()> {
+pub(crate) fn checkout_index_command(options: CheckoutIndexCommandOptions) -> Result<()> {
     let CheckoutIndexCommandOptions {
         all,
         force,
@@ -4314,14 +4336,7 @@ pub(crate) fn checkout_index_command(
         selected
     };
     if use_temp_output {
-        return checkout_index_temp_output(
-            &repo,
-            &store,
-            &selected,
-            stage_mode,
-            quiet,
-            nul,
-        );
+        return checkout_index_temp_output(&repo, &store, &selected, stage_mode, quiet, nul);
     }
     let original_selected = selected;
     let prefix_is_none = prefix.is_none();
@@ -4440,7 +4455,9 @@ fn checkout_index_stage_mode(stage: Option<&str>) -> Result<CheckoutIndexStageMo
         Ok(stage @ 1..=3) => Ok(CheckoutIndexStageMode::Stage(stage)),
         _ => Err(CliError::Fatal {
             code: 128,
-            message: format!("git checkout-index: stage should be between 1 and 3 or all, not {stage}"),
+            message: format!(
+                "git checkout-index: stage should be between 1 and 3 or all, not {stage}"
+            ),
         }),
     }
 }
@@ -4530,11 +4547,7 @@ fn checkout_index_temp_file(
 }
 
 fn checkout_index_record_separator(nul: bool) -> &'static str {
-    if nul {
-        "\0"
-    } else {
-        "\n"
-    }
+    if nul { "\0" } else { "\n" }
 }
 
 fn checkout_index_prefix_bytes(prefix: &Path) -> Vec<u8> {
@@ -5226,11 +5239,12 @@ fn worktree_add(args: &[String]) -> Result<()> {
             code: 128,
             message: format!("cannot derive branch name from '{}'", target_root.display()),
         })?;
-    let inferred_upstream = if guess_remote && branch_option.is_none() && values.len() == 1 && !orphan {
-        find_unique_remote_tracking_branch(&refs, path_branch_name)?
-    } else {
-        None
-    };
+    let inferred_upstream =
+        if guess_remote && branch_option.is_none() && values.len() == 1 && !orphan {
+            find_unique_remote_tracking_branch(&refs, path_branch_name)?
+        } else {
+            None
+        };
     let default_commitish = inferred_upstream
         .as_ref()
         .map(|upstream| upstream.ref_name.as_str())
@@ -5240,10 +5254,12 @@ fn worktree_add(args: &[String]) -> Result<()> {
     let mut id = if orphan {
         None
     } else {
-        Some(resolve_commitish(&repo, &store, commitish).map_err(|_| CliError::Fatal {
-            code: 128,
-            message: format!("invalid reference: {commitish}"),
-        })?)
+        Some(
+            resolve_commitish(&repo, &store, commitish).map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid reference: {commitish}"),
+            })?,
+        )
     };
     let mut tracking_upstream = None;
     let mut created_new_branch = false;
@@ -5391,7 +5407,8 @@ fn worktree_add(args: &[String]) -> Result<()> {
     if orphan {
         GitIndex::new().write_to_path(&linked_repo.index_path)?;
     } else if checkout {
-        let new_index = tree_cache.read_tree_to_index(&commit.as_ref().expect("worktree commit").tree)?;
+        let new_index =
+            tree_cache.read_tree_to_index(&commit.as_ref().expect("worktree commit").tree)?;
         new_index.write_to_path(&linked_repo.index_path)?;
         checkout_index(
             &store,
@@ -5401,7 +5418,10 @@ fn worktree_add(args: &[String]) -> Result<()> {
         )?;
     }
     if lock {
-        fs::write(linked_repo.git_dir.join("locked"), format!("{lock_reason}\n"))?;
+        fs::write(
+            linked_repo.git_dir.join("locked"),
+            format!("{lock_reason}\n"),
+        )?;
     }
     if let (Some(branch_ref), Some(upstream)) = (branch_ref.as_ref(), tracking_upstream.as_ref()) {
         let branch_name = branch_display_name(branch_ref);
@@ -10619,8 +10639,10 @@ pub(crate) fn checkout(
         });
     }
     let path_mode = checkout_path_mode(&args)?;
-    let implicit_path_checkout =
-        path_mode.is_none() && args.first().is_some_and(|target| !checkout_target_exists(target).unwrap_or(false));
+    let implicit_path_checkout = path_mode.is_none()
+        && args
+            .first()
+            .is_some_and(|target| !checkout_target_exists(target).unwrap_or(false));
     if detach
         && args.len() == 1
         && args
@@ -10790,13 +10812,14 @@ fn checkout_patch(paths: &[PathBuf]) -> Result<()> {
                 code: 128,
                 message: "patch has no target path".into(),
             })?;
-        let base_entry = find_index_entry(&head_index, target_path).ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: format!(
-                "cannot restore untracked path '{}' in checkout --patch",
-                String::from_utf8_lossy(target_path)
-            ),
-        })?;
+        let base_entry =
+            find_index_entry(&head_index, target_path).ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "cannot restore untracked path '{}' in checkout --patch",
+                    String::from_utf8_lossy(target_path)
+                ),
+            })?;
         let base = read_index_entry_content(&store, base_entry)?;
         write_patch_worktree_update(
             &repo,
@@ -10924,53 +10947,13 @@ fn checkout_paths(
     let report_from_index = source.is_none();
     let updated_paths = if source.is_some() {
         worktree_commands::restore(
-            source,
-            false,
-            false,
-            false,
-            true,
-            false,
-            true,
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            false,
-            paths,
+            source, false, false, false, true, false, true, false, false, None, false, false,
+            false, false, false, false, false, false, false, None, false, paths,
         )?
     } else {
         worktree_commands::restore(
-            source,
-            false,
-            false,
-            false,
-            false,
-            false,
-            true,
-            false,
-            false,
-            None,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            None,
-            false,
-            paths,
+            source, false, false, false, false, false, true, false, false, None, false, false,
+            false, false, false, false, false, false, false, None, false, paths,
         )?
     };
     if report_updated_paths && report_from_index && updated_paths > 0 {
@@ -11042,18 +11025,12 @@ fn checkout_new_branch(
             CheckoutBranchMessage::SwitchResetBranch,
             true,
         ),
-        (true, false) => checkout_existing_with_message(
-            force,
-            branch,
-            CheckoutBranchMessage::ResetBranch,
-            true,
-        ),
-        (false, _) => checkout_existing_with_message(
-            force,
-            branch,
-            CheckoutBranchMessage::NewBranch,
-            true,
-        ),
+        (true, false) => {
+            checkout_existing_with_message(force, branch, CheckoutBranchMessage::ResetBranch, true)
+        }
+        (false, _) => {
+            checkout_existing_with_message(force, branch, CheckoutBranchMessage::NewBranch, true)
+        }
     }
 }
 
@@ -11241,7 +11218,12 @@ fn checkout_existing_with_message(
     Ok(())
 }
 
-fn checkout_detached(force: bool, target: &str, operation: &str, print_messages: bool) -> Result<()> {
+fn checkout_detached(
+    force: bool,
+    target: &str,
+    operation: &str,
+    print_messages: bool,
+) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let _ = operation;

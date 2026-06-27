@@ -122,7 +122,10 @@ fn cherry_pick_initially_empty_fixture_repo() -> TempDir {
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "base"]);
     git(repo.path(), ["checkout", "-b", "feature"]);
-    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "empty-feature"]);
+    git_with_env(
+        repo.path(),
+        ["commit", "--allow-empty", "-m", "empty-feature"],
+    );
     git(repo.path(), ["checkout", "main"]);
     repo
 }
@@ -268,7 +271,11 @@ fn cherry_pick_and_revert_documented_surface_batch_matches_stock_git() {
             git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     for args in [
@@ -293,7 +300,11 @@ fn cherry_pick_and_revert_documented_surface_batch_matches_stock_git() {
             git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     {
@@ -353,7 +364,11 @@ fn cherry_pick_and_revert_documented_surface_batch_matches_stock_git() {
             git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     for args in [
@@ -378,7 +393,11 @@ fn cherry_pick_and_revert_documented_surface_batch_matches_stock_git() {
             git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 }
 
@@ -409,8 +428,16 @@ fn cherry_pick_and_revert_followup_documented_surface_batch_matches_stock_git() 
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     let source = cherry_pick_initially_empty_fixture_repo();
@@ -435,8 +462,16 @@ fn cherry_pick_and_revert_followup_documented_surface_batch_matches_stock_git() 
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     let source = cherry_pick_becomes_empty_fixture_repo();
@@ -467,9 +502,23 @@ fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
 
     for args in [
         ["cherry-pick", "--signoff", "-s", &feature_commit].as_slice(),
-        ["cherry-pick", "--rerere-autoupdate", "--no-rerere-autoupdate", &feature_commit].as_slice(),
+        [
+            "cherry-pick",
+            "--rerere-autoupdate",
+            "--no-rerere-autoupdate",
+            &feature_commit,
+        ]
+        .as_slice(),
         ["cherry-pick", "-x", "-r", &feature_commit].as_slice(),
-        ["cherry-pick", "--strategy", "ort", "--strategy-option", "patience", &feature_commit].as_slice(),
+        [
+            "cherry-pick",
+            "--strategy",
+            "ort",
+            "--strategy-option",
+            "patience",
+            &feature_commit,
+        ]
+        .as_slice(),
         ["cherry-pick", "-X", "patience", &feature_commit].as_slice(),
     ] {
         let git_repo = clone_repo_fixture(source.path());
@@ -488,13 +537,19 @@ fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
-    for args in [
-        ["cherry-pick", "--edit", "-e", &feature_commit].as_slice(),
-    ] {
+    for args in [["cherry-pick", "--edit", "-e", &feature_commit].as_slice()] {
         let git_repo = clone_repo_fixture(source.path());
         let zmin_repo = clone_repo_fixture(source.path());
         configure_identity(git_repo.path());
@@ -513,13 +568,26 @@ fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     let source = cherry_pick_initially_empty_fixture_repo();
     let empty_commit = git(source.path(), ["rev-parse", "feature"]);
-    let args = ["cherry-pick", "--allow-empty", "--keep-redundant-commits", &empty_commit];
+    let args = [
+        "cherry-pick",
+        "--allow-empty",
+        "--keep-redundant-commits",
+        &empty_commit,
+    ];
     let git_repo = clone_repo_fixture(source.path());
     let zmin_repo = clone_repo_fixture(source.path());
     configure_identity(git_repo.path());
@@ -540,8 +608,22 @@ fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
     let source = sequencer_fixture_repo();
     for args in [
         ["revert", "--signoff", "-s", "HEAD"].as_slice(),
-        ["revert", "--rerere-autoupdate", "--no-rerere-autoupdate", "HEAD"].as_slice(),
-        ["revert", "--strategy", "ort", "--strategy-option", "patience", "HEAD"].as_slice(),
+        [
+            "revert",
+            "--rerere-autoupdate",
+            "--no-rerere-autoupdate",
+            "HEAD",
+        ]
+        .as_slice(),
+        [
+            "revert",
+            "--strategy",
+            "ort",
+            "--strategy-option",
+            "patience",
+            "HEAD",
+        ]
+        .as_slice(),
         ["revert", "-X", "patience", "HEAD"].as_slice(),
     ] {
         let git_repo = clone_repo_fixture(source.path());
@@ -560,8 +642,16 @@ fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 
     for args in [
@@ -587,8 +677,16 @@ fn cherry_pick_and_revert_expansion_batch_matches_stock_git() {
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
             "args: {args:?}"
         );
-        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            "",
+            "args: {args:?}"
+        );
     }
 }
 

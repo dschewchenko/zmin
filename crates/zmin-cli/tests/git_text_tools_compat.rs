@@ -230,12 +230,24 @@ fn check_mailmap_matches_stock_git_for_common_entries() {
     assert_eq!(
         run_zmin_with_stdin_args(
             repo.path(),
-            &["check-mailmap", "--stdin", "--stdin", "--no-stdin", "--stdin"],
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--stdin",
+                "--no-stdin",
+                "--stdin"
+            ],
             "Alias Name <alias@example.com>\n",
         ),
         git_with_stdin_args(
             repo.path(),
-            &["check-mailmap", "--stdin", "--stdin", "--no-stdin", "--stdin"],
+            &[
+                "check-mailmap",
+                "--stdin",
+                "--stdin",
+                "--no-stdin",
+                "--stdin"
+            ],
             "Alias Name <alias@example.com>\n",
         )
     );
@@ -442,12 +454,46 @@ fn check_attr_matches_stock_git_for_common_attributes() {
 
     for args in [
         ["check-attr", "--cached", "text", "diff", "--", "main.rs"].as_slice(),
-        ["check-attr", "--source=HEAD", "text", "diff", "--", "main.rs"].as_slice(),
-        ["check-attr", "--source", "HEAD", "text", "diff", "--", "main.rs"].as_slice(),
+        [
+            "check-attr",
+            "--source=HEAD",
+            "text",
+            "diff",
+            "--",
+            "main.rs",
+        ]
+        .as_slice(),
+        [
+            "check-attr",
+            "--source",
+            "HEAD",
+            "text",
+            "diff",
+            "--",
+            "main.rs",
+        ]
+        .as_slice(),
         ["check-attr", "-z", "text", "diff", "--", "main.rs"].as_slice(),
         ["check-attr", "--all", "-z", "--", "main.rs"].as_slice(),
-        ["check-attr", "--source=HEAD", "--all", "-z", "--", "main.rs"].as_slice(),
-        ["check-attr", "--cached", "-z", "text", "diff", "--", "main.rs"].as_slice(),
+        [
+            "check-attr",
+            "--source=HEAD",
+            "--all",
+            "-z",
+            "--",
+            "main.rs",
+        ]
+        .as_slice(),
+        [
+            "check-attr",
+            "--cached",
+            "-z",
+            "text",
+            "diff",
+            "--",
+            "main.rs",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             command_stdout_bytes(zmin_bin(), repo.path(), args),
@@ -494,32 +540,50 @@ fn column_matches_stock_git_for_common_modes() {
         );
     }
 
-    git(repo.path(), ["config", "--replace-all", "column.status", "column,dense"]);
+    git(
+        repo.path(),
+        ["config", "--replace-all", "column.status", "column,dense"],
+    );
     assert_eq!(
         run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
         git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
     );
-    git(repo.path(), ["config", "--replace-all", "column.status", "column,nodense"]);
+    git(
+        repo.path(),
+        ["config", "--replace-all", "column.status", "column,nodense"],
+    );
     assert_eq!(
         run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
         git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
     );
-    git(repo.path(), ["config", "--replace-all", "column.status", "row,dense"]);
+    git(
+        repo.path(),
+        ["config", "--replace-all", "column.status", "row,dense"],
+    );
     assert_eq!(
         run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
         git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
     );
-    git(repo.path(), ["config", "--replace-all", "column.status", "dense"]);
+    git(
+        repo.path(),
+        ["config", "--replace-all", "column.status", "dense"],
+    );
     assert_eq!(
         run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
         git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
     );
-    git(repo.path(), ["config", "--replace-all", "column.status", "nodense"]);
+    git(
+        repo.path(),
+        ["config", "--replace-all", "column.status", "nodense"],
+    );
     assert_eq!(
         run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
         git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
     );
-    git(repo.path(), ["config", "--replace-all", "column.status", "row,nodense"]);
+    git(
+        repo.path(),
+        ["config", "--replace-all", "column.status", "row,nodense"],
+    );
     assert_eq!(
         run_zmin_with_stdin_args(repo.path(), &["column", "--command=status"], input),
         git_with_stdin_args(repo.path(), &["column", "--command=status"], input)
@@ -638,24 +702,48 @@ fn column_matches_stock_git_for_common_modes() {
     assert_eq!(
         run_zmin_with_stdin_args(
             repo.path(),
-            &["column", "--indent=>>", "--no-indent", "--mode=column", "--width=20"],
+            &[
+                "column",
+                "--indent=>>",
+                "--no-indent",
+                "--mode=column",
+                "--width=20"
+            ],
             input,
         ),
         git_with_stdin_args(
             repo.path(),
-            &["column", "--indent=>>", "--no-indent", "--mode=column", "--width=20"],
+            &[
+                "column",
+                "--indent=>>",
+                "--no-indent",
+                "--mode=column",
+                "--width=20"
+            ],
             input,
         )
     );
     assert_eq!(
         run_zmin_with_stdin_args(
             repo.path(),
-            &["column", "--nl=ZZ", "--no-nl", "--mode=column", "--width=20"],
+            &[
+                "column",
+                "--nl=ZZ",
+                "--no-nl",
+                "--mode=column",
+                "--width=20"
+            ],
             input,
         ),
         git_with_stdin_args(
             repo.path(),
-            &["column", "--nl=ZZ", "--no-nl", "--mode=column", "--width=20"],
+            &[
+                "column",
+                "--nl=ZZ",
+                "--no-nl",
+                "--mode=column",
+                "--width=20"
+            ],
             input,
         )
     );
@@ -713,8 +801,14 @@ fn column_matches_stock_git_for_common_modes() {
         git_failure_output(repo.path(), &["column", "--command=status", "--no-command"])
     );
     assert_eq!(
-        run_zmin_failure_output(repo.path(), &["column", "--command=", "--no-command", "--width=20"]),
-        git_failure_output(repo.path(), &["column", "--command=", "--no-command", "--width=20"])
+        run_zmin_failure_output(
+            repo.path(),
+            &["column", "--command=", "--no-command", "--width=20"]
+        ),
+        git_failure_output(
+            repo.path(),
+            &["column", "--command=", "--no-command", "--width=20"]
+        )
     );
 }
 
@@ -791,32 +885,142 @@ fn stripspace_matches_stock_git_for_common_modes() {
         ["stripspace", "--strip-comments", "--strip-comments", "-s"].as_slice(),
         ["stripspace", "-c", "-c", "--comment-lines"].as_slice(),
         ["stripspace", "--comment-lines", "--comment-lines", "-c"].as_slice(),
-        ["stripspace", "-s", "--strip-comments", "--strip-comments", "-s"].as_slice(),
-        ["stripspace", "-c", "--comment-lines", "--comment-lines", "-c"].as_slice(),
+        [
+            "stripspace",
+            "-s",
+            "--strip-comments",
+            "--strip-comments",
+            "-s",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "-c",
+            "--comment-lines",
+            "--comment-lines",
+            "-c",
+        ]
+        .as_slice(),
         ["stripspace", "--strip-comments", "-s", "-s"].as_slice(),
         ["stripspace", "--comment-lines", "-c", "-c"].as_slice(),
-        ["stripspace", "--strip-comments", "--strip-comments", "--strip-comments"].as_slice(),
-        ["stripspace", "--comment-lines", "--comment-lines", "--comment-lines"].as_slice(),
+        [
+            "stripspace",
+            "--strip-comments",
+            "--strip-comments",
+            "--strip-comments",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "--comment-lines",
+            "--comment-lines",
+            "--comment-lines",
+        ]
+        .as_slice(),
         ["stripspace", "-s", "-s", "-s"].as_slice(),
         ["stripspace", "-c", "-c", "-c"].as_slice(),
         ["stripspace", "-s", "-s", "--strip-comments", "-s"].as_slice(),
         ["stripspace", "-c", "-c", "--comment-lines", "-c"].as_slice(),
-        ["stripspace", "--strip-comments", "-s", "--strip-comments", "-s"].as_slice(),
-        ["stripspace", "--comment-lines", "-c", "--comment-lines", "-c"].as_slice(),
-        ["stripspace", "-s", "--strip-comments", "-s", "--strip-comments"].as_slice(),
-        ["stripspace", "-c", "--comment-lines", "-c", "--comment-lines"].as_slice(),
-        ["stripspace", "--strip-comments", "--strip-comments", "-s", "-s"].as_slice(),
-        ["stripspace", "--comment-lines", "--comment-lines", "-c", "-c"].as_slice(),
+        [
+            "stripspace",
+            "--strip-comments",
+            "-s",
+            "--strip-comments",
+            "-s",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "--comment-lines",
+            "-c",
+            "--comment-lines",
+            "-c",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "-s",
+            "--strip-comments",
+            "-s",
+            "--strip-comments",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "-c",
+            "--comment-lines",
+            "-c",
+            "--comment-lines",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "--strip-comments",
+            "--strip-comments",
+            "-s",
+            "-s",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "--comment-lines",
+            "--comment-lines",
+            "-c",
+            "-c",
+        ]
+        .as_slice(),
         ["stripspace", "-s", "-s", "-s", "-s"].as_slice(),
         ["stripspace", "-c", "-c", "-c", "-c"].as_slice(),
-        ["stripspace", "--strip-comments", "--strip-comments", "--strip-comments", "--strip-comments"].as_slice(),
-        ["stripspace", "--comment-lines", "--comment-lines", "--comment-lines", "--comment-lines"].as_slice(),
-        ["stripspace", "-s", "--strip-comments", "--strip-comments", "--strip-comments"].as_slice(),
-        ["stripspace", "-c", "--comment-lines", "--comment-lines", "--comment-lines"].as_slice(),
+        [
+            "stripspace",
+            "--strip-comments",
+            "--strip-comments",
+            "--strip-comments",
+            "--strip-comments",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "--comment-lines",
+            "--comment-lines",
+            "--comment-lines",
+            "--comment-lines",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "-s",
+            "--strip-comments",
+            "--strip-comments",
+            "--strip-comments",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "-c",
+            "--comment-lines",
+            "--comment-lines",
+            "--comment-lines",
+        ]
+        .as_slice(),
         ["stripspace", "--strip-comments", "-s", "-s", "-s"].as_slice(),
         ["stripspace", "--comment-lines", "-c", "-c", "-c"].as_slice(),
-        ["stripspace", "-s", "-s", "--strip-comments", "--strip-comments"].as_slice(),
-        ["stripspace", "-c", "-c", "--comment-lines", "--comment-lines"].as_slice(),
+        [
+            "stripspace",
+            "-s",
+            "-s",
+            "--strip-comments",
+            "--strip-comments",
+        ]
+        .as_slice(),
+        [
+            "stripspace",
+            "-c",
+            "-c",
+            "--comment-lines",
+            "--comment-lines",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_with_stdin_args(repo.path(), args, comment_fixture),

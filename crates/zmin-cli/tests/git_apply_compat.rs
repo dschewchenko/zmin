@@ -7,7 +7,8 @@ use tempfile::TempDir;
 use common::{
     command_any_output_with_stdin, command_stdout_bytes, configure_identity, git, git_init,
     git_status_with_stdin, git_with_env, git_with_stdin, git_with_stdin_args,
-    run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file, zmin_bin,
+    run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file,
+    zmin_bin,
 };
 
 fn apply_base_repo() -> TempDir {
@@ -188,7 +189,11 @@ fn apply_proof_only_option_surface_batch_matches_stock_git() {
             command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, &patch, "zmin apply"),
             "args: {args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["diff"]), "", "worktree args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["diff"]),
+            "",
+            "worktree args: {args:?}"
+        );
         assert_eq!(
             git(zmin_repo.path(), ["diff", "--cached"]),
             "",
@@ -208,7 +213,11 @@ fn apply_proof_only_option_surface_batch_matches_stock_git() {
             command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, &patch, "zmin apply"),
             "args: {args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["diff"]), "", "worktree args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["diff"]),
+            "",
+            "worktree args: {args:?}"
+        );
         assert_eq!(
             git(zmin_repo.path(), ["diff", "--cached"]),
             "",
@@ -222,8 +231,12 @@ fn apply_documented_open_option_batch_matches_stock_git() {
     let multi_patch_repo = apply_base_repo();
     write_file(multi_patch_repo.path(), "a.txt", "one\ntwo\n");
     write_file(multi_patch_repo.path(), "b.txt", "bee\nboop\n");
-    let multi_patch = String::from_utf8(command_stdout_bytes("git", multi_patch_repo.path(), &["diff"]))
-        .expect("multi patch utf8");
+    let multi_patch = String::from_utf8(command_stdout_bytes(
+        "git",
+        multi_patch_repo.path(),
+        &["diff"],
+    ))
+    .expect("multi patch utf8");
 
     for args in [
         ["apply", "--include=a.txt"].as_slice(),
@@ -238,7 +251,11 @@ fn apply_documented_open_option_batch_matches_stock_git() {
         let zmin_repo = apply_base_repo();
         git_with_stdin_args(git_repo.path(), args, &multi_patch);
         run_zmin_with_stdin_args(zmin_repo.path(), args, &multi_patch);
-        assert_eq!(git(zmin_repo.path(), ["diff"]), git(git_repo.path(), ["diff"]), "worktree args: {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["diff"]),
+            git(git_repo.path(), ["diff"]),
+            "worktree args: {args:?}"
+        );
         assert_eq!(
             git(zmin_repo.path(), ["diff", "--cached"]),
             git(git_repo.path(), ["diff", "--cached"]),
@@ -283,21 +300,29 @@ fn apply_documented_open_option_batch_matches_stock_git() {
         }
         git_with_stdin_args(git_repo.path(), directory_args, &directory_patch);
         run_zmin_with_stdin_args(zmin_repo.path(), directory_args, &directory_patch);
-        let expected_path = if directory_args.iter().any(|arg| *arg == "--directory=subdir" || *arg == "subdir") {
+        let expected_path = if directory_args
+            .iter()
+            .any(|arg| *arg == "--directory=subdir" || *arg == "subdir")
+        {
             "subdir/alpha.txt"
         } else {
             "second/alpha.txt"
         };
         assert_eq!(
-            fs::read_to_string(zmin_repo.path().join(expected_path)).expect("read zmin directory file"),
-            fs::read_to_string(git_repo.path().join(expected_path)).expect("read git directory file")
+            fs::read_to_string(zmin_repo.path().join(expected_path))
+                .expect("read zmin directory file"),
+            fs::read_to_string(git_repo.path().join(expected_path))
+                .expect("read git directory file")
         );
         assert_eq!(
             zmin_repo.path().join("first/alpha.txt").exists(),
             git_repo.path().join("first/alpha.txt").exists(),
             "directory args: {directory_args:?}"
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), git(git_repo.path(), ["status", "--short"]));
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"])
+        );
     }
 
     let add_mix_repo = apply_single_file_repo();
@@ -319,12 +344,18 @@ fn apply_documented_open_option_batch_matches_stock_git() {
         let zmin_repo = apply_single_file_repo();
         git_with_stdin_args(git_repo.path(), no_add_args, &add_mix_patch);
         run_zmin_with_stdin_args(zmin_repo.path(), no_add_args, &add_mix_patch);
-        assert_eq!(git(zmin_repo.path(), ["diff"]), git(git_repo.path(), ["diff"]));
+        assert_eq!(
+            git(zmin_repo.path(), ["diff"]),
+            git(git_repo.path(), ["diff"])
+        );
         assert_eq!(
             git(zmin_repo.path(), ["diff", "--cached"]),
             git(git_repo.path(), ["diff", "--cached"])
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), git(git_repo.path(), ["status", "--short"]));
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"])
+        );
         assert_eq!(
             fs::read_to_string(zmin_repo.path().join("b.txt")).expect("read zmin no-add b"),
             fs::read_to_string(git_repo.path().join("b.txt")).expect("read git no-add b")
@@ -339,14 +370,23 @@ fn apply_documented_open_option_batch_matches_stock_git() {
         let zmin_repo = apply_single_file_repo();
         git_with_stdin_args(git_repo.path(), intent_args, &add_mix_patch);
         run_zmin_with_stdin_args(zmin_repo.path(), intent_args, &add_mix_patch);
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), git(git_repo.path(), ["status", "--short"]));
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"])
+        );
         assert_eq!(
             git(zmin_repo.path(), ["diff", "--cached"]),
             git(git_repo.path(), ["diff", "--cached"])
         );
         assert_eq!(
-            git(zmin_repo.path(), ["ls-files", "--stage", "--debug", "--", "b.txt"]),
-            git(git_repo.path(), ["ls-files", "--stage", "--debug", "--", "b.txt"])
+            git(
+                zmin_repo.path(),
+                ["ls-files", "--stage", "--debug", "--", "b.txt"]
+            ),
+            git(
+                git_repo.path(),
+                ["ls-files", "--stage", "--debug", "--", "b.txt"]
+            )
         );
         assert_eq!(
             fs::read_to_string(zmin_repo.path().join("a.txt")).expect("read zmin intent a"),
@@ -360,8 +400,12 @@ fn apply_documented_open_option_batch_matches_stock_git() {
 
     let inaccurate_repo = apply_single_file_repo();
     write_file(inaccurate_repo.path(), "a.txt", "one\ntwo\n");
-    let inaccurate_patch = String::from_utf8(command_stdout_bytes("git", inaccurate_repo.path(), &["diff"]))
-        .expect("inaccurate patch utf8");
+    let inaccurate_patch = String::from_utf8(command_stdout_bytes(
+        "git",
+        inaccurate_repo.path(),
+        &["diff"],
+    ))
+    .expect("inaccurate patch utf8");
     for inaccurate_args in [
         ["apply", "--inaccurate-eof"].as_slice(),
         ["apply", "--inaccurate-eof", "--inaccurate-eof"].as_slice(),
@@ -369,10 +413,25 @@ fn apply_documented_open_option_batch_matches_stock_git() {
         let git_repo = apply_single_file_repo();
         let zmin_repo = apply_single_file_repo();
         assert_eq!(
-            command_any_output_with_stdin("git", git_repo.path(), inaccurate_args, &inaccurate_patch, "git apply"),
-            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), inaccurate_args, &inaccurate_patch, "zmin apply")
+            command_any_output_with_stdin(
+                "git",
+                git_repo.path(),
+                inaccurate_args,
+                &inaccurate_patch,
+                "git apply"
+            ),
+            command_any_output_with_stdin(
+                zmin_bin(),
+                zmin_repo.path(),
+                inaccurate_args,
+                &inaccurate_patch,
+                "zmin apply"
+            )
         );
-        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), git(git_repo.path(), ["status", "--short"]));
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"])
+        );
     }
 }
 

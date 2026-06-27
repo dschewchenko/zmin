@@ -337,7 +337,8 @@ pub(crate) fn explicit_system_config_path() -> PathBuf {
 }
 
 fn explicit_system_config_path_from_env() -> Option<PathBuf> {
-    std::env::var_os("GIT_CONFIG_SYSTEM").map(|path| normalize_windows_input_path(PathBuf::from(path)))
+    std::env::var_os("GIT_CONFIG_SYSTEM")
+        .map(|path| normalize_windows_input_path(PathBuf::from(path)))
 }
 
 pub(crate) fn read_local_config_entries(repo: &GitRepo) -> io::Result<Vec<ConfigEntry>> {
@@ -1342,7 +1343,11 @@ pub(crate) fn write_config_entries(
         if entry.implicit_bool {
             out.push_str(&format!("\t{}", entry.key));
         } else {
-            out.push_str(&format!("\t{} = {}", entry.key, encode_config_value(&entry.value)));
+            out.push_str(&format!(
+                "\t{} = {}",
+                entry.key,
+                encode_config_value(&entry.value)
+            ));
         }
         if let Some(comment) = entry.comment.as_deref() {
             out.push_str(comment);

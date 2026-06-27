@@ -444,7 +444,14 @@ fn mergetool_tool_help_matches_stock_git_with_user_defined_tools() {
     let zmin_repo = mergetool_conflict_fixture();
 
     for repo in [git_repo.path(), zmin_repo.path()] {
-        git(repo, ["config", "mergetool.zmintest.cmd", "printf 'resolved\\n' > \"$MERGED\""]);
+        git(
+            repo,
+            [
+                "config",
+                "mergetool.zmintest.cmd",
+                "printf 'resolved\\n' > \"$MERGED\"",
+            ],
+        );
     }
 
     assert_eq!(

@@ -413,8 +413,8 @@ pub(crate) fn stripspace(
     raw_args: &[String],
 ) -> Result<()> {
     if strip_comments && comment_lines {
-        let (current, previous) = stripspace_conflicting_options(raw_args)
-            .unwrap_or(("-c".to_owned(), "-s".to_owned()));
+        let (current, previous) =
+            stripspace_conflicting_options(raw_args).unwrap_or(("-c".to_owned(), "-s".to_owned()));
         return Err(CliError::Stderr {
             code: 129,
             text: format!("error: options '{current}' and '{previous}' cannot be used together\n"),

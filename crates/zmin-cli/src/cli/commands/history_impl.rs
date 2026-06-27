@@ -2175,9 +2175,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         return Err(shortlog_unknown_option("--single-worktree"));
     }
     if let Some(filter_value) = filter {
-        return Err(shortlog_unknown_option(&format!(
-            "--filter={filter_value}"
-        )));
+        return Err(shortlog_unknown_option(&format!("--filter={filter_value}")));
     }
     if filter_print_omitted {
         return Err(shortlog_unknown_option("--filter-print-omitted"));
@@ -2309,12 +2307,8 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let date_arg = history_raw_date_arg(raw_args, date, relative_date);
     let date_mode = parse_log_date_mode(date_arg.as_deref())?;
     let wrap = parse_shortlog_wrap(wrap.as_deref())?;
-    let grep_mode = parse_shortlog_pattern_mode(
-        basic_regexp,
-        extended_regexp,
-        fixed_strings,
-        perl_regexp,
-    );
+    let grep_mode =
+        parse_shortlog_pattern_mode(basic_regexp, extended_regexp, fixed_strings, perl_regexp);
     let _ = reflog;
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
     let decorations = LogDecorations::empty();
@@ -7662,9 +7656,7 @@ fn log_reflog(
         .or(parsed_pretty)
         .or(options.pretty);
     let embedded_format = log_reflog_embedded_format(&revs);
-    let format = explicit_format
-        .or(embedded_format)
-        .unwrap_or("%gd %H %gs");
+    let format = explicit_format.or(embedded_format).unwrap_or("%gd %H %gs");
     let format = format.strip_prefix("format:").unwrap_or(format);
     let date_arg = history_raw_date_arg(options.raw_args, options.date, options.relative_date)
         .or_else(|| log_reflog_embedded_date(&revs).map(str::to_owned));
@@ -7970,7 +7962,11 @@ fn raw_arg_last_value<'a>(raw_args: &'a [String], names: &[&str]) -> Option<&'a 
     last
 }
 
-fn raw_arg_last_toggle(raw_args: &[String], enabled_name: &str, disabled_name: &str) -> Option<bool> {
+fn raw_arg_last_toggle(
+    raw_args: &[String],
+    enabled_name: &str,
+    disabled_name: &str,
+) -> Option<bool> {
     let mut last = None;
     for arg in raw_args {
         match arg.as_str() {
@@ -10712,13 +10708,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     if objects && no_object_names && object_filter.is_some() {
         let filter = object_filter.expect("checked filter");
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
-        let mut commit_trees =
-            collect_commit_trees_with_exclusions_uncached(
-                &repo,
-                &store,
-                &revs,
-                expand_history_max_count(max_count, skip),
-            )?;
+        let mut commit_trees = collect_commit_trees_with_exclusions_uncached(
+            &repo,
+            &store,
+            &revs,
+            expand_history_max_count(max_count, skip),
+        )?;
         if let Some(skip) = skip {
             commit_trees = commit_trees.into_iter().skip(skip).collect();
         }
@@ -10762,13 +10757,12 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     }
     if objects && (no_object_names || count) {
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
-        let mut commit_trees =
-            collect_commit_trees_with_exclusions_uncached(
-                &repo,
-                &store,
-                &revs,
-                expand_history_max_count(max_count, skip),
-            )?;
+        let mut commit_trees = collect_commit_trees_with_exclusions_uncached(
+            &repo,
+            &store,
+            &revs,
+            expand_history_max_count(max_count, skip),
+        )?;
         if let Some(skip) = skip {
             commit_trees = commit_trees.into_iter().skip(skip).collect();
         }
@@ -10804,21 +10798,24 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         return Ok(());
     }
     if count && !objects && !post_collection_filters {
-        let count_value =
-            count_commits_with_exclusions(&repo, &store, &revs, expand_history_max_count(max_count, skip))?;
+        let count_value = count_commits_with_exclusions(
+            &repo,
+            &store,
+            &revs,
+            expand_history_max_count(max_count, skip),
+        )?;
         println!("{}", count_value.saturating_sub(skip.unwrap_or(0)));
         return Ok(());
     }
 
     if objects && !parents && !children {
         let excluded_commits = collect_rev_list_excluded_commits_uncached(&repo, &store, &revs)?;
-        let mut commit_trees =
-            collect_commit_trees_with_exclusions_uncached(
-                &repo,
-                &store,
-                &revs,
-                expand_history_max_count(max_count, skip),
-            )?;
+        let mut commit_trees = collect_commit_trees_with_exclusions_uncached(
+            &repo,
+            &store,
+            &revs,
+            expand_history_max_count(max_count, skip),
+        )?;
         if let Some(skip) = skip {
             commit_trees = commit_trees.into_iter().skip(skip).collect();
         }
@@ -11243,7 +11240,10 @@ fn collect_rev_list_reflog_commit_ids(
         let path = reflog_path(repo, target)?;
         let file = match fs::File::open(&path) {
             Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound && resolve_objectish(repo, target).is_ok() => {
+            Err(error)
+                if error.kind() == io::ErrorKind::NotFound
+                    && resolve_objectish(repo, target).is_ok() =>
+            {
                 continue;
             }
             Err(error) => return Err(CliError::Io(error)),

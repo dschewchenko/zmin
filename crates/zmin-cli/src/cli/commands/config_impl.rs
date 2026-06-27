@@ -18,7 +18,8 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
             message: "--regexp requires `git config get`".into(),
         });
     }
-    if args.blob.is_some() && (args.unset || args.unset_all || args.value.is_some() || args.append) {
+    if args.blob.is_some() && (args.unset || args.unset_all || args.value.is_some() || args.append)
+    {
         return Err(CliError::Fatal {
             code: 129,
             message: "--blob cannot be combined with config writes".into(),
@@ -141,7 +142,11 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         } else {
             matching_config_entries(&args, scoped_file.as_ref(), &name)?
         };
-        entries = filter_entries_by_value_pattern(entries, args.value_pattern.as_deref(), args.fixed_value)?;
+        entries = filter_entries_by_value_pattern(
+            entries,
+            args.value_pattern.as_deref(),
+            args.fixed_value,
+        )?;
         if entries.is_empty() {
             let Some(default) = args.default.as_deref() else {
                 return Err(CliError::Exit(1));
@@ -234,8 +239,8 @@ pub(crate) fn config(mut args: ConfigArgs) -> Result<()> {
         args.value_pattern.as_deref(),
         args.fixed_value,
     )?
-        .into_iter()
-        .last();
+    .into_iter()
+    .last();
     match entry {
         Some(entry) => {
             let value = if let Some(value_type) = value_type {
@@ -385,9 +390,9 @@ fn config_file_scope_path(args: &ConfigArgs) -> Result<Option<PathBuf>> {
         args.system,
         args.worktree,
     ]
-        .into_iter()
-        .filter(|present| *present)
-        .count();
+    .into_iter()
+    .filter(|present| *present)
+    .count();
     if scope_count > 1 {
         return Err(CliError::Fatal {
             code: 129,
@@ -448,7 +453,13 @@ fn config_get_urlmatch(
                 } else {
                     format!("{display_name} {}", entry.value)
                 };
-                print_config_output_line(entry, &value, args.show_origin, args.show_scope, args.null)?;
+                print_config_output_line(
+                    entry,
+                    &value,
+                    args.show_origin,
+                    args.show_scope,
+                    args.null,
+                )?;
                 emitted = true;
             }
         }
@@ -466,7 +477,13 @@ fn config_get_urlmatch(
     if args.name_only {
         return Ok(());
     }
-    print_config_output_line(entry, &entry.value, args.show_origin, args.show_scope, args.null)
+    print_config_output_line(
+        entry,
+        &entry.value,
+        args.show_origin,
+        args.show_scope,
+        args.null,
+    )
 }
 
 fn best_urlmatch_entry<'a>(
@@ -487,7 +504,9 @@ fn best_urlmatch_entry<'a>(
             }
             continue;
         }
-        if url_matches_config_subsection(url, &entry.subsection) && entry.subsection.len() >= best_len {
+        if url_matches_config_subsection(url, &entry.subsection)
+            && entry.subsection.len() >= best_len
+        {
             best = Some(entry);
             best_len = entry.subsection.len();
         }
@@ -497,16 +516,17 @@ fn best_urlmatch_entry<'a>(
 
 fn url_matches_config_subsection(url: &str, subsection: &str) -> bool {
     url == subsection
-        || url
-            .strip_prefix(subsection)
-            .is_some_and(|tail| {
-                tail.is_empty()
-                    || subsection.ends_with('/')
-                    || matches!(tail.as_bytes()[0], b'/' | b'?' | b'#')
-            })
+        || url.strip_prefix(subsection).is_some_and(|tail| {
+            tail.is_empty()
+                || subsection.ends_with('/')
+                || matches!(tail.as_bytes()[0], b'/' | b'?' | b'#')
+        })
 }
 
-fn config_target_path_for_write(args: &ConfigArgs, scoped_file: Option<&PathBuf>) -> Result<PathBuf> {
+fn config_target_path_for_write(
+    args: &ConfigArgs,
+    scoped_file: Option<&PathBuf>,
+) -> Result<PathBuf> {
     if let Some(path) = scoped_file {
         return Ok(path.clone());
     }
@@ -527,7 +547,9 @@ fn config_get_colorbool(args: &ConfigArgs, scoped_file: Option<&PathBuf>) -> Res
         .as_deref()
         .and_then(parse_git_bool)
         .unwrap_or(false);
-    let entry = matching_config_entries(args, scoped_file, name)?.into_iter().last();
+    let entry = matching_config_entries(args, scoped_file, name)?
+        .into_iter()
+        .last();
     let Some(entry) = entry else {
         if tty {
             println!("false");
@@ -590,7 +612,8 @@ fn config_set_value_in_file(
     new_entry.comment = comment.map(format_config_comment).transpose()?;
     let mut entries = read_config_file(path)?;
     let key_indices = matching_key_indices(&entries, &new_entry);
-    let matched_indices = matching_value_indices(&entries, &key_indices, value_pattern, fixed_value)?;
+    let matched_indices =
+        matching_value_indices(&entries, &key_indices, value_pattern, fixed_value)?;
 
     if replace_all {
         if let Some((&first, rest)) = matched_indices.split_first() {
@@ -644,7 +667,8 @@ fn config_unset_value_in_file(
     let target = parse_config_entry(name, "")?;
     let mut entries = read_config_file(path)?;
     let key_indices = matching_key_indices(&entries, &target);
-    let matched_indices = matching_value_indices(&entries, &key_indices, value_pattern, fixed_value)?;
+    let matched_indices =
+        matching_value_indices(&entries, &key_indices, value_pattern, fixed_value)?;
 
     if remove_all {
         if matched_indices.is_empty() {

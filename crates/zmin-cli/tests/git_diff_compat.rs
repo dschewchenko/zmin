@@ -105,6 +105,47 @@ fn diff_dirstat_matches_stock_git_for_treeish_pairs() {
 }
 
 #[test]
+fn diff_dirstat_family_matches_stock_git_for_porcelain_and_plumbing() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "root.txt", "1\n2\n3\n");
+    write_file(repo.path(), "dir/sub.txt", "a\nb\n");
+    write_file(repo.path(), "dir/nested/deep.txt", "x\ny\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    write_file(repo.path(), "root.txt", "1\n2\n3\n4\n5\n");
+    write_file(repo.path(), "dir/sub.txt", "a\nb\nc\nd\n");
+    write_file(repo.path(), "dir/nested/deep.txt", "x\ny\nz\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "update"]);
+
+    write_file(repo.path(), "dir/sub.txt", "a\nb\nc\nd\ne\nf\n");
+    write_file(repo.path(), "dir/nested/deep.txt", "x\ny\nz\nq\nr\n");
+
+    for args in [
+        ["diff", "-X", "HEAD~1", "HEAD"].as_slice(),
+        ["diff", "--dirstat", "--cumulative", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-files", "-X"].as_slice(),
+        ["diff-files", "--dirstat", "--cumulative"].as_slice(),
+        ["diff-files", "--dirstat-by-file"].as_slice(),
+        ["diff-index", "-X", "HEAD"].as_slice(),
+        ["diff-index", "--dirstat", "--cumulative", "HEAD"].as_slice(),
+        ["diff-index", "--dirstat-by-file", "HEAD"].as_slice(),
+        ["diff-tree", "--dirstat", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "--dirstat-by-file", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "-X", "HEAD~1", "HEAD"].as_slice(),
+        ["diff-tree", "--dirstat", "--cumulative", "HEAD~1", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}",
+        );
+    }
+}
+
+#[test]
 fn diff_blob_to_blob_operands_match_stock_git() {
     let repo = git_init();
     configure_identity(repo.path());
@@ -1240,7 +1281,15 @@ fn diff_output_and_plumbing_line_prefix_match_stock_git() {
             "zmin-diff-index.patch",
         ),
         (
-            ["diff-tree", "--output", "git-diff-tree.patch", "-p", "HEAD~1", "HEAD"].as_slice(),
+            [
+                "diff-tree",
+                "--output",
+                "git-diff-tree.patch",
+                "-p",
+                "HEAD~1",
+                "HEAD",
+            ]
+            .as_slice(),
             [
                 "diff-tree",
                 "--output",
@@ -2358,11 +2407,22 @@ fn difftool_additional_documented_options_match_stock_git() {
         );
     }
 
-    git(repo.path(), ["config", "difftool.fail.cmd", "printf fail; exit 7"]);
+    git(
+        repo.path(),
+        ["config", "difftool.fail.cmd", "printf fail; exit 7"],
+    );
     for args in [
         ["difftool", "-y", "-t", "fail", "a.txt"].as_slice(),
         ["difftool", "-y", "-t", "fail", "--trust-exit-code", "a.txt"].as_slice(),
-        ["difftool", "-y", "-t", "fail", "--no-trust-exit-code", "a.txt"].as_slice(),
+        [
+            "difftool",
+            "-y",
+            "-t",
+            "fail",
+            "--no-trust-exit-code",
+            "a.txt",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             command_output(zmin_bin(), repo.path(), args),
@@ -2392,8 +2452,24 @@ fn difftool_dir_diff_and_symlink_modes_match_stock_git() {
     for args in [
         ["difftool", "--dir-diff", "-y", "-t", "zmintest"].as_slice(),
         ["difftool", "-d", "-y", "-t", "zmintest"].as_slice(),
-        ["difftool", "--symlinks", "--dir-diff", "-y", "-t", "zmintest"].as_slice(),
-        ["difftool", "--no-symlinks", "--dir-diff", "-y", "-t", "zmintest"].as_slice(),
+        [
+            "difftool",
+            "--symlinks",
+            "--dir-diff",
+            "-y",
+            "-t",
+            "zmintest",
+        ]
+        .as_slice(),
+        [
+            "difftool",
+            "--no-symlinks",
+            "--dir-diff",
+            "-y",
+            "-t",
+            "zmintest",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             normalize_difftool_dir_output(command_output(zmin_bin(), zmin_repo.path(), args)),

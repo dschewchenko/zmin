@@ -5,8 +5,8 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_output_with_env, configure_identity, git, git_args, git_init, git_status_args,
-    git_failure_output, git_with_env, git_with_stdin, run_zmin_args, run_zmin_failure_output,
+    command_output_with_env, configure_identity, git, git_args, git_failure_output, git_init,
+    git_status_args, git_with_env, git_with_stdin, run_zmin_args, run_zmin_failure_output,
     run_zmin_status_args, run_zmin_with_stdin, write_file, zmin_bin,
 };
 

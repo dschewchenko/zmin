@@ -371,7 +371,13 @@ fn ls_files_no_empty_directory_matches_stock_git() {
     fs::write(repo.path().join("nonempty/file.txt"), b"payload\n").expect("write payload");
 
     for args in [
-        ["ls-files", "--others", "--directory", "--no-empty-directory"].as_slice(),
+        [
+            "ls-files",
+            "--others",
+            "--directory",
+            "--no-empty-directory",
+        ]
+        .as_slice(),
         [
             "ls-files",
             "--others",

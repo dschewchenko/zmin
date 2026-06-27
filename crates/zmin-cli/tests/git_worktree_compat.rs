@@ -26,7 +26,10 @@ fn remote_tracking_worktree_fixture_repo() -> TempDir {
     let root = TempDir::new().expect("temp remote root");
     let source = root.path().join("remote-src");
     fs::create_dir_all(&source).expect("create source repo dir");
-    git(root.path(), ["init", source.to_str().expect("source repo path")]);
+    git(
+        root.path(),
+        ["init", source.to_str().expect("source repo path")],
+    );
     configure_identity(&source);
     git(&source, ["checkout", "-b", "main"]);
     write_file(&source, "a.txt", "one\n");
@@ -1756,8 +1759,16 @@ fn worktree_add_checkout_quiet_lock_and_list_porcelain_match_stock_git() {
     assert!(!git_no_checkout.join("a.txt").exists());
     let zmin_no_checkout_admin = gitdir_file_target(&zmin_no_checkout);
     let git_no_checkout_admin = gitdir_file_target(&git_no_checkout);
-    assert!(!std::path::Path::new(&zmin_no_checkout_admin).join("index").exists());
-    assert!(!std::path::Path::new(&git_no_checkout_admin).join("index").exists());
+    assert!(
+        !std::path::Path::new(&zmin_no_checkout_admin)
+            .join("index")
+            .exists()
+    );
+    assert!(
+        !std::path::Path::new(&git_no_checkout_admin)
+            .join("index")
+            .exists()
+    );
 
     let git_quiet = git_repo.path().with_file_name(format!(
         "{}-git-quiet",
@@ -2084,12 +2095,21 @@ fn worktree_add_short_aliases_and_list_flags_match_stock_git() {
         (git_feature_forced.as_path(), zmin_feature_forced.as_path()),
         (git_repo.path(), zmin_repo.path()),
     ];
-    let zmin_list_verbose = command_output(zmin_bin(), zmin_repo.path(), &["worktree", "list", "-v"], "zmin");
-    let git_list_verbose = command_output("git", git_repo.path(), &["worktree", "list", "-v"], "git");
+    let zmin_list_verbose = command_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["worktree", "list", "-v"],
+        "zmin",
+    );
+    let git_list_verbose =
+        command_output("git", git_repo.path(), &["worktree", "list", "-v"], "git");
     assert_eq!(zmin_list_verbose.0, git_list_verbose.0);
     assert_eq!(
         normalize_worktree_human_list(&normalize_worktree_output(&zmin_list_verbose.1, &[])),
-        normalize_worktree_human_list(&normalize_worktree_output(&git_list_verbose.1, &replacements))
+        normalize_worktree_human_list(&normalize_worktree_output(
+            &git_list_verbose.1,
+            &replacements
+        ))
     );
     assert_eq!(zmin_list_verbose.2, git_list_verbose.2);
 
@@ -2153,7 +2173,12 @@ fn worktree_add_short_aliases_and_list_flags_match_stock_git() {
     fs::remove_dir_all(&git_prune_worktree).expect("remove git prune worktree");
     fs::remove_dir_all(&zmin_prune_worktree).expect("remove zmin prune worktree");
 
-    let zmin_prune = command_output(zmin_bin(), zmin_repo.path(), &["worktree", "prune", "-n"], "zmin");
+    let zmin_prune = command_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["worktree", "prune", "-n"],
+        "zmin",
+    );
     let git_prune = command_output("git", git_repo.path(), &["worktree", "prune", "-n"], "git");
     assert_eq!(zmin_prune.0, git_prune.0);
     assert_eq!(
@@ -2212,19 +2237,35 @@ fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
     assert_eq!(zmin_orphan_output.0, git_orphan_output.0);
     assert_eq!(
         normalize_worktree_output(&zmin_orphan_output.1, &[]),
-        normalize_worktree_output(&git_orphan_output.1, &[(git_orphan.as_path(), zmin_orphan.as_path())])
+        normalize_worktree_output(
+            &git_orphan_output.1,
+            &[(git_orphan.as_path(), zmin_orphan.as_path())]
+        )
     );
     assert_eq!(
         normalize_worktree_output(&zmin_orphan_output.2, &[]),
-        normalize_worktree_output(&git_orphan_output.2, &[(git_orphan.as_path(), zmin_orphan.as_path())])
+        normalize_worktree_output(
+            &git_orphan_output.2,
+            &[(git_orphan.as_path(), zmin_orphan.as_path())]
+        )
     );
     assert_eq!(
         git(&zmin_orphan, ["symbolic-ref", "HEAD"]),
         git(&git_orphan, ["symbolic-ref", "HEAD"])
     );
     assert_eq!(
-        command_failure_output("git", &zmin_orphan, &["rev-parse", "--verify", "HEAD"], "git"),
-        command_failure_output("git", &git_orphan, &["rev-parse", "--verify", "HEAD"], "git")
+        command_failure_output(
+            "git",
+            &zmin_orphan,
+            &["rev-parse", "--verify", "HEAD"],
+            "git"
+        ),
+        command_failure_output(
+            "git",
+            &git_orphan,
+            &["rev-parse", "--verify", "HEAD"],
+            "git"
+        )
     );
     assert_eq!(
         fs::read_dir(&zmin_orphan)
@@ -2268,8 +2309,24 @@ fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
         )
     );
     assert_eq!(
-        git(&zmin_track, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
-        git(&git_track, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+        git(
+            &zmin_track,
+            [
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ]
+        ),
+        git(
+            &git_track,
+            [
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ]
+        )
     );
 
     let git_no_track = git_root.path().join("wt-no-track");
@@ -2308,13 +2365,23 @@ fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
         command_failure_output(
             "git",
             &zmin_no_track,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ],
             "git",
         ),
         command_failure_output(
             "git",
             &git_no_track,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ],
             "git",
         )
     );
@@ -2346,15 +2413,37 @@ fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
     assert_eq!(zmin_guess_output.0, git_guess_output.0);
     assert_eq!(
         normalize_worktree_tracking_output(&normalize_worktree_output(&zmin_guess_output.1, &[])),
-        normalize_worktree_tracking_output(&normalize_worktree_output(&git_guess_output.1, &[(git_guess.as_path(), zmin_guess.as_path())]))
+        normalize_worktree_tracking_output(&normalize_worktree_output(
+            &git_guess_output.1,
+            &[(git_guess.as_path(), zmin_guess.as_path())]
+        ))
     );
     assert_eq!(
         normalize_worktree_output(&zmin_guess_output.2, &[]),
-        normalize_worktree_output(&git_guess_output.2, &[(git_guess.as_path(), zmin_guess.as_path())])
+        normalize_worktree_output(
+            &git_guess_output.2,
+            &[(git_guess.as_path(), zmin_guess.as_path())]
+        )
     );
     assert_eq!(
-        git(&zmin_guess, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]),
-        git(&git_guess, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+        git(
+            &zmin_guess,
+            [
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ]
+        ),
+        git(
+            &git_guess,
+            [
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ]
+        )
     );
     assert_eq!(
         git(&zmin_guess, ["rev-parse", "HEAD"]),
@@ -2387,12 +2476,21 @@ fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
     );
     assert_eq!(zmin_no_guess_output.0, git_no_guess_output.0);
     assert_eq!(
-        normalize_worktree_tracking_output(&normalize_worktree_output(&zmin_no_guess_output.1, &[])),
-        normalize_worktree_tracking_output(&normalize_worktree_output(&git_no_guess_output.1, &[(git_no_guess.as_path(), zmin_no_guess.as_path())]))
+        normalize_worktree_tracking_output(&normalize_worktree_output(
+            &zmin_no_guess_output.1,
+            &[]
+        )),
+        normalize_worktree_tracking_output(&normalize_worktree_output(
+            &git_no_guess_output.1,
+            &[(git_no_guess.as_path(), zmin_no_guess.as_path())]
+        ))
     );
     assert_eq!(
         normalize_worktree_output(&zmin_no_guess_output.2, &[]),
-        normalize_worktree_output(&git_no_guess_output.2, &[(git_no_guess.as_path(), zmin_no_guess.as_path())])
+        normalize_worktree_output(
+            &git_no_guess_output.2,
+            &[(git_no_guess.as_path(), zmin_no_guess.as_path())]
+        )
     );
     assert_eq!(
         git(&zmin_no_guess, ["rev-parse", "HEAD"]),
@@ -2402,13 +2500,23 @@ fn worktree_add_orphan_track_and_remote_guess_flags_match_stock_git() {
         command_failure_output(
             "git",
             &zmin_no_guess,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ],
             "git",
         ),
         command_failure_output(
             "git",
             &git_no_guess,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}"
+            ],
             "git",
         )
     );

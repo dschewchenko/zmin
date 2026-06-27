@@ -9,28 +9,24 @@ const LINK_EXTENSION_SIGNATURE: [u8; 4] = *b"link";
 const FS_MONITOR_EXTENSION_SIGNATURE: [u8; 4] = *b"FSMN";
 const UNTRACKED_CACHE_EXTENSION_SIGNATURE: [u8; 4] = *b"UNTR";
 const SPLIT_INDEX_SINGLE_ENTRY_TAIL: &[u8] = &[
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
 ];
 const FS_MONITOR_BODY_SUFFIX: &[u8] = &[
-    0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
-    0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+    0x00,
 ];
 const UNTRACKED_CACHE_BODY_TAIL: &[u8] = &[
-    0x2c, 0x20, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x20, 0x44, 0x61, 0x72,
-    0x77, 0x69, 0x6e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x2e, 0x67, 0x69, 0x74, 0x69, 0x67, 0x6e, 0x6f, 0x72,
-    0x65, 0x00, 0x00,
+    0x2c, 0x20, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x20, 0x44, 0x61, 0x72, 0x77, 0x69, 0x6e, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2e,
+    0x67, 0x69, 0x74, 0x69, 0x67, 0x6e, 0x6f, 0x72, 0x65, 0x00, 0x00,
 ];
 
 #[derive(Clone)]
@@ -624,7 +620,9 @@ fn update_index(mut options: UpdateIndexCommandOptions) -> Result<()> {
         eprintln!("Testing mtime in '{}' ...... OK", repo.root.display());
     }
     if options.fsmonitor && read_config_value(&repo, "core.fsmonitor")?.is_none() {
-        eprintln!("warning: core.fsmonitor is unset; set it if you really want to enable fsmonitor");
+        eprintln!(
+            "warning: core.fsmonitor is unset; set it if you really want to enable fsmonitor"
+        );
     }
 
     for cacheinfo in &options.cacheinfo {
@@ -684,10 +682,14 @@ fn update_index_disk_version(repo: &GitRepo) -> Result<u32> {
             message: "invalid index header".into(),
         });
     }
-    Ok(u32::from_be_bytes(bytes[4..8].try_into().expect("slice length checked")))
+    Ok(u32::from_be_bytes(
+        bytes[4..8].try_into().expect("slice length checked"),
+    ))
 }
 
-fn parse_update_index_version(value: Option<&str>) -> Result<Option<zmin_git_core::GitIndexVersion>> {
+fn parse_update_index_version(
+    value: Option<&str>,
+) -> Result<Option<zmin_git_core::GitIndexVersion>> {
     let Some(value) = value else {
         return Ok(None);
     };
@@ -802,10 +804,7 @@ fn apply_update_index_helper_extensions(
     if options.untracked_cache || options.force_untracked_cache {
         extensions.push(SyntheticIndexExtension {
             signature: UNTRACKED_CACHE_EXTENSION_SIGNATURE,
-            body: synthetic_untracked_cache_extension_body(
-                repo,
-                options.force_untracked_cache,
-            ),
+            body: synthetic_untracked_cache_extension_body(repo, options.force_untracked_cache),
         });
     }
     if extensions.is_empty() {
@@ -838,8 +837,9 @@ fn enable_synthetic_split_index(index_path: &Path) -> Result<()> {
     if entry_count != 1 {
         return Err(CliError::Stderr {
             code: 128,
-            text: "fatal: split-index is currently only modeled for a single-entry local index lane\n"
-                .into(),
+            text:
+                "fatal: split-index is currently only modeled for a single-entry local index lane\n"
+                    .into(),
         });
     }
     let version = u32::from_be_bytes(data[4..8].try_into().expect("length checked"));
@@ -915,11 +915,7 @@ fn synthetic_split_index_entry(data: &[u8], checksum_offset: usize) -> Result<Ve
             message: "truncated index entry".into(),
         });
     }
-    let flags = u16::from_be_bytes(
-        data[12 + 60..12 + 62]
-            .try_into()
-            .expect("length checked"),
-    );
+    let flags = u16::from_be_bytes(data[12 + 60..12 + 62].try_into().expect("length checked"));
     let path_start = fixed_end + usize::from(flags & INDEX_ENTRY_EXTENDED_FLAG != 0) * 2;
     if path_start > checksum_offset {
         return Err(CliError::Fatal {
@@ -1011,7 +1007,10 @@ fn patch_index_extensions(path: &Path, replacements: &[SyntheticIndexExtension])
                 message: "truncated index extension body".into(),
             });
         }
-        if !replacements.iter().any(|replacement| replacement.signature == signature) {
+        if !replacements
+            .iter()
+            .any(|replacement| replacement.signature == signature)
+        {
             rewritten.extend_from_slice(&data[cursor..extension_end]);
         }
         cursor = extension_end;
@@ -1214,11 +1213,7 @@ fn update_index_path(
     })
 }
 
-fn update_index_stage_info_only(
-    repo: &GitRepo,
-    index: &mut GitIndex,
-    path: &Path,
-) -> Result<()> {
+fn update_index_stage_info_only(repo: &GitRepo, index: &mut GitIndex, path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     let relative = repo_relative_path(&repo.root, path)?;
     let stage_options = WorktreeStageOptions::load(repo)?;
@@ -1228,7 +1223,10 @@ fn update_index_stage_info_only(
     } else if metadata.is_file() {
         stage_options.index_mode_for_metadata(&metadata)
     } else {
-        return Err(CliError::Message(format!("{} is not a file", path.display())));
+        return Err(CliError::Message(format!(
+            "{} is not a file",
+            path.display()
+        )));
     };
     let unmerged_mode = index
         .entry(&relative, 2)
@@ -1258,7 +1256,13 @@ fn update_index_stage_info_only(
         read_symlink_content(path)?
     } else if stage_options.needs_content_conversion(&relative) {
         let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-        stage_options.clean_staged_worktree_content(repo, &store, index, &relative, fs::read(path)?)?
+        stage_options.clean_staged_worktree_content(
+            repo,
+            &store,
+            index,
+            &relative,
+            fs::read(path)?,
+        )?
     } else {
         fs::read(path)?
     };
@@ -1522,11 +1526,7 @@ fn update_index_flag_conflict_error(left: &str, right: &str) -> CliError {
     }
 }
 
-fn update_index_refresh_tracked(
-    repo: &GitRepo,
-    index: &GitIndex,
-    paths: &[PathBuf],
-) -> Result<()> {
+fn update_index_refresh_tracked(repo: &GitRepo, index: &GitIndex, paths: &[PathBuf]) -> Result<()> {
     let mut failed = false;
     let unmerged = merge_index_unmerged_paths(index)
         .into_iter()
@@ -1541,7 +1541,8 @@ fn update_index_refresh_tracked(
         all.extend(unmerged.iter().cloned());
         all.into_iter().collect::<Vec<_>>()
     } else {
-        paths.iter()
+        paths
+            .iter()
             .map(|path| path_arg_to_repo_relative(repo, path))
             .collect::<Result<Vec<_>>>()?
     };
@@ -3535,9 +3536,8 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     )?;
     refs.write_ref(&options.branch, &id)?;
     if options.local_master {
-        let local_head = symbolic_head_target(&repo.git_dir)?.unwrap_or_else(|| {
-            format!("refs/heads/{initial_branch}")
-        });
+        let local_head = symbolic_head_target(&repo.git_dir)?
+            .unwrap_or_else(|| format!("refs/heads/{initial_branch}"));
         refs.write_ref(&local_head, &id)?;
         refs.write_symbolic_ref("HEAD", &local_head)?;
     } else {
@@ -3555,7 +3555,11 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
 fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     let repo = find_repo()?;
     let depot_path = read_config_value(&repo, "git-p4.depotpath")?
-        .or_else(|| p4_depot_path_from_repo(&repo, &options.branch).ok().flatten())
+        .or_else(|| {
+            p4_depot_path_from_repo(&repo, &options.branch)
+                .ok()
+                .flatten()
+        })
         .ok_or_else(|| CliError::Fatal {
             code: 129,
             message: "git p4 submit requires git-p4.depotpath config or imported git-p4 metadata"
@@ -3638,8 +3642,7 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     refs.write_ref(&options.branch, &head_id)?;
 
     let latest_change = latest_p4_change(&p4_list_files(&depot_path)?);
-    let current_branch =
-        current_local_branch_name(&repo.git_dir).unwrap_or("HEAD".to_owned());
+    let current_branch = current_local_branch_name(&repo.git_dir).unwrap_or("HEAD".to_owned());
     let rebase_target = short_ref_display(&options.branch);
     println!("All commits applied!");
     println!(
@@ -3688,15 +3691,12 @@ fn abbreviated_hex(id: &ObjectId, len: usize) -> String {
 }
 
 fn current_local_branch_name(git_dir: &Path) -> Option<String> {
-    symbolic_head_target(git_dir)
-        .ok()
-        .flatten()
-        .map(|target| {
-            target
-                .strip_prefix("refs/heads/")
-                .unwrap_or(&target)
-                .to_owned()
-        })
+    symbolic_head_target(git_dir).ok().flatten().map(|target| {
+        target
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&target)
+            .to_owned()
+    })
 }
 
 fn short_ref_display(ref_name: &str) -> &str {
@@ -4197,12 +4197,7 @@ fn instaweb_start(repo: &GitRepo, options: &InstawebCommandOptions) -> Result<()
     let gitweb_dir = repo.git_dir.join("gitweb");
     fs::create_dir_all(&gitweb_dir)?;
     instaweb_stop(repo)?;
-    match options
-        .httpd
-        .as_deref()
-        .unwrap_or("lighttpd -f")
-        .trim()
-    {
+    match options.httpd.as_deref().unwrap_or("lighttpd -f").trim() {
         "zmin" | "builtin" => {
             let child = instaweb_spawn_builtin(repo, options)?;
             fs::write(instaweb_pid_path(repo), format!("{}\n", child.id()))?;
@@ -4236,11 +4231,14 @@ fn instaweb_spawn_builtin(
         .spawn()?)
 }
 
-fn instaweb_spawn_external(repo: &GitRepo, options: &InstawebCommandOptions, httpd: &str) -> Result<()> {
-    let words =
-        normalize_instaweb_httpd_words(crate::cli::commands::transport_commands::split_shell_words(
-            httpd,
-        )?);
+fn instaweb_spawn_external(
+    repo: &GitRepo,
+    options: &InstawebCommandOptions,
+    httpd: &str,
+) -> Result<()> {
+    let words = normalize_instaweb_httpd_words(
+        crate::cli::commands::transport_commands::split_shell_words(httpd)?,
+    );
     let Some(program) = words.first() else {
         return Err(CliError::Fatal {
             code: 1,
@@ -4255,7 +4253,10 @@ fn instaweb_spawn_external(repo: &GitRepo, options: &InstawebCommandOptions, htt
         .args(&words[1..])
         .arg(&config_path)
         .env("GIT_DIR", &repo.git_dir)
-        .env("GITWEB_CONFIG", repo.git_dir.join("gitweb").join("gitweb_config.perl"))
+        .env(
+            "GITWEB_CONFIG",
+            repo.git_dir.join("gitweb").join("gitweb_config.perl"),
+        )
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -4317,7 +4318,10 @@ fn instaweb_prepare_external_httpd(
     httpd: &str,
 ) -> Result<PathBuf> {
     let httpd_only = httpd.split_ascii_whitespace().next().unwrap_or_default();
-    let conf = repo.git_dir.join("gitweb").join(format!("{httpd_only}.conf"));
+    let conf = repo
+        .git_dir
+        .join("gitweb")
+        .join(format!("{httpd_only}.conf"));
     let content = if matches_httpd(httpd_only, &["lighttpd"]) {
         instaweb_lighttpd_conf(repo, options, httpd_only)
     } else {
@@ -4334,13 +4338,22 @@ fn matches_httpd(httpd: &str, names: &[&str]) -> bool {
     names.iter().any(|name| httpd.contains(name))
 }
 
-fn instaweb_lighttpd_conf(repo: &GitRepo, options: &InstawebCommandOptions, httpd_only: &str) -> String {
+fn instaweb_lighttpd_conf(
+    repo: &GitRepo,
+    options: &InstawebCommandOptions,
+    httpd_only: &str,
+) -> String {
     let mut conf = format!(
         "server.document-root = \"{root}\"\nserver.port = {port}\nserver.modules = ( \"mod_setenv\", \"mod_cgi\" )\nserver.indexfiles = ( \"gitweb.cgi\" )\nserver.pid-file = \"{pid}\"\nserver.errorlog = \"{error_log}\"\nsetenv.add-environment = ( \"PATH\" => env.PATH, \"GITWEB_CONFIG\" => env.GITWEB_CONFIG )\ncgi.assign = ( \".cgi\" => \"\" )\n",
         root = repo.git_dir.join("gitweb").display(),
         port = options.port,
         pid = instaweb_pid_path(repo).display(),
-        error_log = repo.git_dir.join("gitweb").join(httpd_only).join("error.log").display(),
+        error_log = repo
+            .git_dir
+            .join("gitweb")
+            .join(httpd_only)
+            .join("error.log")
+            .display(),
     );
     if options.local {
         conf.push_str("server.bind = \"127.0.0.1\"\n");

@@ -1809,8 +1809,14 @@ fn stash_push_short_staged_alias_matches_stock_git() {
     }
 
     assert_eq!(
-        run_zmin_with_env(zmin_repo.path(), ["stash", "push", "-S", "-m", "staged-short"]),
-        git_with_env(git_repo.path(), ["stash", "push", "-S", "-m", "staged-short"])
+        run_zmin_with_env(
+            zmin_repo.path(),
+            ["stash", "push", "-S", "-m", "staged-short"]
+        ),
+        git_with_env(
+            git_repo.path(),
+            ["stash", "push", "-S", "-m", "staged-short"]
+        )
     );
     assert_eq!(
         git(zmin_repo.path(), ["status", "--short"]),
@@ -3124,7 +3130,11 @@ fn stash_push_short_patch_alias_matches_stock_git() {
     write_file(git_repo.path(), "a.txt", &changed);
     write_file(zmin_repo.path(), "a.txt", &changed);
 
-    git_with_stdin(git_repo.path(), ["stash", "push", "-p", "-m", "patchy-short"], "y\nn\n");
+    git_with_stdin(
+        git_repo.path(),
+        ["stash", "push", "-p", "-m", "patchy-short"],
+        "y\nn\n",
+    );
     run_zmin_with_stdin(
         zmin_repo.path(),
         ["stash", "push", "-p", "-m", "patchy-short"],
