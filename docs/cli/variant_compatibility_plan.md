@@ -22,16 +22,16 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`grep` short-alias reviewed-complete promotion batch across the existing
-represented helper-free local surface. This batch again changed no Rust
-behavior and added no new matrix rows; it promoted the remaining nineteen
-represented short spellings into
+`format-patch` reviewed-complete promotion batch across the existing
+represented helper-free local surface. This batch changed no Rust behavior and
+added no new matrix rows; it promoted the remaining thirty-one represented
+documented spellings into
 `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`, finishing the
-currently modeled `grep` documented surface. The promoted short layer covers
-context aliases, regexp-mode aliases, boolean-expression pattern spellings,
-local traversal toggles, output-shape aliases, function-context aliases,
-NUL-delimited filename output, and the bounded binary/pager aliases already
-proven in earlier `grep` runtime slices.
+currently modeled `format-patch` documented surface. The promoted tail closes
+the already represented merge-diff and dirstat spellings, cover/base metadata
+controls, range-diff and interdiff selectors, word-diff spellings, and the
+remaining short aliases already proven in earlier `format-patch` runtime
+slices.
 
 Focused verification was
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
@@ -42,7 +42,7 @@ and `git diff --check`.
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `148 / 151`
-- complete documented command-option pairs: `2349 / 3212`
+- complete documented command-option pairs: `2380 / 3212`
 - represented documented command-option pairs: `2380 / 3212`
 - matrix rows: `6581`
 - verified rows: `5769`
@@ -51,16 +51,18 @@ Actual durable readiness/status after this batch:
 
 Per-command position on the touched surface:
 
-- `grep`: `73 / 73` reviewed-complete documented option pairs,
-  `73 / 73` represented documented option pairs, `112` written rows, `112`
-  classified rows, `112` stock-matching rows, `0` invalid-input rows, and `0`
+- `format-patch`: `162 / 162` reviewed-complete documented option pairs,
+  `162 / 162` represented documented option pairs, `201` written rows, `201`
+  classified rows, `201` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
 
-The next best high-throughput follow-up should now move off `grep`, because
-its represented helper-free local documented surface is fully reviewed
-complete. The largest remaining helper-free documented queues are now led by
-`send-email` (`62`), `pull` (`62`), `rebase` (`54`), `log` (`47`), and
-`diff-tree` (`45`).
+The next best high-throughput follow-up should stay off docs-only promotion
+batches whose represented tails are now exhausted at the top of the queue.
+The largest remaining helper-free documented queues are led by `replay`
+(`117`), `send-email` (`62`), `pull` (`62`), `rebase` (`54`), and `log`
+(`47`); unlike `format-patch`, these remaining tails are almost entirely still
+unrepresented and therefore require new matrix/runtime work rather than a pure
+reviewed-complete promotion.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `grep` long-form reviewed-complete promotion batch across the existing
