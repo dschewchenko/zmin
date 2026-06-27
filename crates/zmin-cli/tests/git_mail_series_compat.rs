@@ -335,6 +335,37 @@ fn am_conflict_patch_fixture() -> (TempDir, String, String) {
     (repo, base, patch_path.to_string_lossy().into_owned())
 }
 
+fn am_directory_patch_fixture() -> (TempDir, String, String) {
+    let source = git_init();
+    configure_identity(source.path());
+    git(source.path(), ["checkout", "-b", "main"]);
+    write_file(source.path(), "base.txt", "base\n");
+    git(source.path(), ["add", "base.txt"]);
+    git_with_env(source.path(), ["commit", "-m", "base"]);
+    write_file(source.path(), "alpha.txt", "alpha\n");
+    git(source.path(), ["add", "alpha.txt"]);
+    git_with_env(source.path(), ["commit", "-m", "add alpha"]);
+    git(source.path(), ["format-patch", "-o", "stock-patches", "HEAD~1"]);
+    let patch_name = read_named_files(&source.path().join("stock-patches"))
+        .into_iter()
+        .map(|(name, _)| name)
+        .next()
+        .expect("directory patch");
+    let source_patch_path = source.path().join("stock-patches").join(patch_name);
+
+    let target = git_init();
+    configure_identity(target.path());
+    git(target.path(), ["checkout", "-b", "main"]);
+    write_file(target.path(), "base.txt", "base\n");
+    fs::create_dir_all(target.path().join("subdir")).expect("create subdir");
+    git(target.path(), ["add", "base.txt"]);
+    git_with_env(target.path(), ["commit", "-m", "base"]);
+    let patch_path = target.path().join("directory.patch");
+    fs::copy(&source_patch_path, &patch_path).expect("copy directory patch");
+
+    (target, patch_path.to_string_lossy().into_owned(), "subdir".into())
+}
+
 fn am_empty_mail_fixture() -> (TempDir, String) {
     let repo = git_init();
     configure_identity(repo.path());
@@ -493,6 +524,92 @@ fn am_option_surface_batch_matches_stock_git() {
         git(git_apply.path(), ["status", "--short"]),
         "status args: {:?}",
         ["am", "--patch-format=stgit-series"]
+    );
+}
+
+#[test]
+fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
+    let (repo, patch_path, directory) = am_directory_patch_fixture();
+    let patch = patch_path.as_str();
+    let dir_args = ["am", &format!("--directory={directory}"), patch];
+
+    let git_repo = clone_repo_fixture(repo.path());
+    let zmin_repo = clone_repo_fixture(repo.path());
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    let git_result = command_any_output("git", git_repo.path(), &dir_args, "git");
+    let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &dir_args, "zmin");
+    assert_eq!(zmin_result, git_result, "directory args: {dir_args:?}");
+    assert_eq!(
+        git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+        git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+        "directory tree"
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--short"]),
+        git(git_repo.path(), ["status", "--short"]),
+        "directory status"
+    );
+
+    let (source, base, patch_path) = am_single_patch_fixture();
+    let patch = patch_path.as_str();
+    let envs = [
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1900000000 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1800000000 +0000"),
+    ];
+    let git_repo = clone_repo_fixture(source.path());
+    let zmin_repo = clone_repo_fixture(source.path());
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    git(git_repo.path(), ["reset", "--hard", &base]);
+    git(zmin_repo.path(), ["reset", "--hard", &base]);
+    let git_result =
+        command_output_with_env("git", git_repo.path(), &["am", "--ignore-date", patch], &envs, "git");
+    let zmin_result = command_output_with_env(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["am", "--ignore-date", patch],
+        &envs,
+        "zmin",
+    );
+    assert_eq!(zmin_result.0, git_result.0);
+    assert_eq!(zmin_result.1, git_result.1);
+    assert_eq!(
+        git(zmin_repo.path(), ["log", "-1", "--format=%an <%ae>%n%cn <%ce>%n%cd%n%B", "--date=raw"]),
+        git(git_repo.path(), ["log", "-1", "--format=%an <%ae>%n%cn <%ce>%n%cd%n%B", "--date=raw"])
+    );
+    let zmin_author = git(zmin_repo.path(), ["log", "-1", "--format=%ad", "--date=raw"]);
+    let git_author = git(git_repo.path(), ["log", "-1", "--format=%ad", "--date=raw"]);
+    assert_eq!(zmin_author, git_author);
+
+    let (source, base, patch_path) = am_conflict_patch_fixture();
+    let patch = patch_path.as_str();
+    let git_repo = clone_repo_fixture(source.path());
+    let zmin_repo = clone_repo_fixture(source.path());
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    git(git_repo.path(), ["reset", "--hard", &base]);
+    git(zmin_repo.path(), ["reset", "--hard", &base]);
+    write_file(git_repo.path(), "a.txt", "one\nlocal\n");
+    write_file(zmin_repo.path(), "a.txt", "one\nlocal\n");
+    git(git_repo.path(), ["add", "a.txt"]);
+    git(zmin_repo.path(), ["add", "a.txt"]);
+    git_with_env(git_repo.path(), ["commit", "-m", "local"]);
+    git_with_env(zmin_repo.path(), ["commit", "-m", "local"]);
+    let git_result = command_any_output("git", git_repo.path(), &["am", "--reject", patch], "git");
+    let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &["am", "--reject", patch], "zmin");
+    assert_eq!(zmin_result, git_result);
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join("a.txt.rej")).expect("zmin reject file"),
+        fs::read_to_string(git_repo.path().join("a.txt.rej")).expect("git reject file")
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["status", "--short"]),
+        git(git_repo.path(), ["status", "--short"])
     );
 }
 

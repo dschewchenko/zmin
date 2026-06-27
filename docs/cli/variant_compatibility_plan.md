@@ -22,6 +22,51 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`am` represented-tail closure on the modeled add-file, fixed-date, and
+conflict lanes. This batch finished representation for all documented `am`
+option pairs by adding exact stock-Git matrix evidence for
+`--directory=subdir`, `--ignore-date`, and the conflicting `--reject` lane.
+
+The batch fixed one cohesive matrix-evidence gap on the `am` path:
+
+- Zmin already matched the stock helper-free behavior for the remaining narrow
+  `am` tail, and the missing work was to record those lanes in the `am`
+  behavior matrix so the census could promote `--directory` and
+  `--ignore-date` from implemented-but-unverified to represented and count the
+  `--reject` conflict lane alongside the earlier clean-lane proof
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(am|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2100 / 3212`
+- represented documented command-option pairs: `2103 / 3212`
+- matrix rows: `6192`
+- verified rows: `5383`
+- invalid-input rows: `784`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `am`: `51 / 54` reviewed-complete documented option pairs, `54 / 54`
+  represented documented option pairs, `86` written rows, `86` classified
+  rows, `63` stock-matching rows, `23` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move off `am`. The remaining
+`am` documented-option seeds are now narrow expansion tails for
+`--directory`, `--ignore-date`, and `--reject`, while the refreshed backlog
+head shifts to denser non-`am` families such as the open `apply` seeds.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `am` parser and passthrough closure on the modeled single-mail lane. This
 batch added eleven reviewed-complete documented option pairs by proving
 stock-Git parity for `--include`, `--exclude`, the full modeled

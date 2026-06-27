@@ -22,10 +22,12 @@ pub(crate) struct AmOptions {
     pub(crate) whitespace: Option<String>,
     pub(crate) context: Option<String>,
     pub(crate) strip: Option<String>,
+    pub(crate) directory: Option<String>,
     pub(crate) include: Vec<String>,
     pub(crate) exclude: Vec<String>,
     pub(crate) patch_format: Option<String>,
     pub(crate) interactive: bool,
+    pub(crate) ignore_date: bool,
     pub(crate) empty: Option<String>,
     pub(crate) reject: bool,
     pub(crate) gpg_sign: Option<String>,
@@ -141,10 +143,29 @@ fn apply_mail_patch(
             parsed.author.timezone.clone(),
         )?;
     }
+    let author = if am_options.ignore_date {
+        Signature::new(
+            parsed.author.name.clone(),
+            parsed.author.email.clone(),
+            current_unix_timestamp()?,
+            chrono::Local::now().format("%z").to_string(),
+        )?
+    } else {
+        parsed.author.clone()
+    };
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
     if parsed.patch_text.trim().is_empty() {
-        return handle_empty_am_mail(repo, store, mail, &head_id, &parsed, &committer, am_options);
+        return handle_empty_am_mail(
+            repo,
+            store,
+            mail,
+            &head_id,
+            &parsed,
+            &author,
+            &committer,
+            am_options,
+        );
     }
     let mut index = read_repo_index(repo)?;
     let options = patch_commands::ApplyOptions {
@@ -188,10 +209,12 @@ fn apply_mail_patch(
         am_options.scissors,
         am_options.no_scissors,
         am_options.quoted_cr.as_deref(),
+        am_options.directory.as_deref(),
         am_options.include.as_slice(),
         am_options.exclude.as_slice(),
         am_options.patch_format.as_deref(),
         am_options.interactive,
+        am_options.ignore_date,
         am_options.empty.as_deref(),
         am_options.gpg_sign.as_deref(),
         am_options.no_gpg_sign,
@@ -206,13 +229,14 @@ fn apply_mail_patch(
     let patch_text = parsed.patch_text.as_str();
     let subject = parsed.subject.as_str();
     let mut patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
+    apply_am_directory_prefix(&mut patches, am_options.directory.as_deref());
     patches.retain(|patch| am_patch_selected(patch, &am_options.include, &am_options.exclude));
     if patches.is_empty() {
         create_am_commit(
             repo,
             store,
             &head_id,
-            &parsed.author,
+            &author,
             &committer,
             subject,
             &parsed.message_body,
@@ -223,15 +247,13 @@ fn apply_mail_patch(
         }
         return Ok(());
     }
-    if am_options.reject {
-        for patch in &patches {
+    for patch in patches {
+        if am_options.reject {
             eprintln!(
                 "Checking patch {}...",
-                String::from_utf8_lossy(am_patch_display_path(patch))
+                String::from_utf8_lossy(am_patch_display_path(&patch))
             );
         }
-    }
-    for patch in patches {
         let update = match patch_commands::apply_file_patch(repo, store, &index, &patch, &options) {
             Ok(update) => update,
             Err(error) if am_patch_conflict_error(&error) => {
@@ -240,9 +262,16 @@ fn apply_mail_patch(
                     println!("Applying: {subject}");
                     println!("Patch failed at 0001 {subject}");
                 }
+                if am_options.reject {
+                    write_am_reject_file(repo, &patch)?;
+                }
                 return Err(CliError::Stderr {
                     code: 128,
-                    text: am_patch_conflict_stderr(&patch),
+                    text: if am_options.reject {
+                        am_reject_conflict_stderr(&patch)
+                    } else {
+                        am_patch_conflict_stderr(&patch)
+                    },
                 });
             }
             Err(error) => return Err(error),
@@ -260,7 +289,7 @@ fn apply_mail_patch(
         repo,
         store,
         &head_id,
-        &parsed.author,
+        &author,
         &committer,
         subject,
         &parsed.message_body,
@@ -339,6 +368,7 @@ fn handle_empty_am_mail(
     mail: &str,
     head_id: &ObjectId,
     parsed: &ParsedAmMail,
+    author: &Signature,
     committer: &Signature,
     am_options: &AmOptions,
 ) -> Result<()> {
@@ -348,7 +378,7 @@ fn handle_empty_am_mail(
                 repo,
                 store,
                 head_id,
-                &parsed.author,
+                author,
                 committer,
                 &parsed.subject,
                 &parsed.message_body,
@@ -524,6 +554,33 @@ fn am_patch_selected(
     !exclude.iter().any(|candidate| candidate == path.as_ref())
 }
 
+fn apply_am_directory_prefix(
+    patches: &mut [patch_commands::ApplyFilePatch],
+    directory: Option<&str>,
+) {
+    let Some(directory) = directory.filter(|value| !value.is_empty()) else {
+        return;
+    };
+    for patch in patches {
+        if let Some(old_path) = patch.old_path.as_mut() {
+            *old_path = prefixed_am_path(directory, old_path);
+        }
+        if let Some(new_path) = patch.new_path.as_mut() {
+            *new_path = prefixed_am_path(directory, new_path);
+        }
+    }
+}
+
+fn prefixed_am_path(directory: &str, path: &[u8]) -> Vec<u8> {
+    let mut prefixed = Vec::with_capacity(directory.len() + 1 + path.len());
+    prefixed.extend_from_slice(directory.as_bytes());
+    if !directory.ends_with('/') {
+        prefixed.push(b'/');
+    }
+    prefixed.extend_from_slice(path);
+    prefixed
+}
+
 fn am_patch_format_stgit_series_error(mail: &str) -> CliError {
     CliError::Stderr {
         code: 128,
@@ -562,6 +619,55 @@ fn am_patch_conflict_stderr_for_path(path: &str, line: usize) -> String {
     format!(
         "error: patch failed: {path}:{line}\nerror: {path}: patch does not apply\nhint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n"
     )
+}
+
+fn am_reject_conflict_stderr(patch: &patch_commands::ApplyFilePatch) -> String {
+    let path = String::from_utf8_lossy(am_patch_display_path(patch)).to_string();
+    let mut text = String::new();
+    if let Some(hunk) = patch.hunks.first() {
+        text.push_str("error: while searching for:\n");
+        for line in &hunk.lines {
+            match line {
+                patch_commands::ApplyHunkLine::Context(bytes)
+                | patch_commands::ApplyHunkLine::Delete(bytes) => {
+                    text.push_str(String::from_utf8_lossy(bytes).as_ref());
+                }
+                patch_commands::ApplyHunkLine::Insert(_) => {}
+            }
+        }
+        text.push('\n');
+        text.push_str(&format!("error: patch failed: {path}:{}\n", hunk.old_start));
+    }
+    text.push_str(&format!(
+        "Applying patch {path} with {} reject...\nRejected hunk #1.\n",
+        patch.hunks.len()
+    ));
+    text.push_str(
+        "hint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n",
+    );
+    text
+}
+
+fn write_am_reject_file(repo: &GitRepo, patch: &patch_commands::ApplyFilePatch) -> Result<()> {
+    let path = String::from_utf8_lossy(am_patch_display_path(patch)).to_string();
+    let mut text = format!("diff a/{path} b/{path}\t(rejected hunks)\n");
+    for hunk in &patch.hunks {
+        text.push_str(&format!(
+            "@@ -{},{} +{},{} @@\n",
+            hunk.old_start, hunk.old_count, hunk.new_start, hunk.new_count
+        ));
+        for line in &hunk.lines {
+            let (prefix, bytes) = match line {
+                patch_commands::ApplyHunkLine::Context(bytes) => (' ', bytes.as_slice()),
+                patch_commands::ApplyHunkLine::Delete(bytes) => ('-', bytes.as_slice()),
+                patch_commands::ApplyHunkLine::Insert(bytes) => ('+', bytes.as_slice()),
+            };
+            text.push(prefix);
+            text.push_str(String::from_utf8_lossy(bytes).as_ref());
+        }
+    }
+    fs::write(repo.root.join(format!("{path}.rej")), text)?;
+    Ok(())
 }
 
 fn am_empty_patch_hint_stderr() -> String {

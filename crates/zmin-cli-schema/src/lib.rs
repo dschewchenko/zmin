@@ -3316,6 +3316,8 @@ pub enum Command {
         context: Option<String>,
         #[arg(short = 'p')]
         strip: Option<String>,
+        #[arg(long = "directory")]
+        directory: Option<String>,
         #[arg(long = "include")]
         include: Vec<String>,
         #[arg(long = "exclude")]
@@ -3324,6 +3326,8 @@ pub enum Command {
         patch_format: Option<String>,
         #[arg(long = "interactive", short = 'i', action = ArgAction::SetTrue)]
         interactive: bool,
+        #[arg(long = "ignore-date", action = ArgAction::SetTrue)]
+        ignore_date: bool,
         #[arg(long = "empty")]
         empty: Option<String>,
         #[arg(long = "reject", action = ArgAction::SetTrue)]
