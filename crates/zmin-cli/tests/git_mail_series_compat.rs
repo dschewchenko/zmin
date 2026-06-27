@@ -335,11 +335,34 @@ fn am_conflict_patch_fixture() -> (TempDir, String, String) {
     (repo, base, patch_path.to_string_lossy().into_owned())
 }
 
+fn am_empty_mail_fixture() -> (TempDir, String) {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "base.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    let mail = repo.path().join("empty-mail.txt");
+    fs::write(
+        &mail,
+        concat!(
+            "From nobody Mon Sep 17 00:00:00 2001\n",
+            "From: Bench <bench@example.test>\n",
+            "Date: Mon, 1 Jan 2024 00:00:00 +0000\n",
+            "Subject: [PATCH] empty message\n",
+            "\n",
+            "This mail has no diff.\n",
+        ),
+    )
+    .expect("write empty am mail");
+    (repo, mail.to_string_lossy().into_owned())
+}
+
 #[test]
 fn am_option_surface_batch_matches_stock_git() {
     let (source, base, patch_path) = am_single_patch_fixture();
     let patch = patch_path.as_str();
-    let success_cases: [(&str, &[&str]); 33] = [
+    let success_cases: [(&str, &[&str]); 37] = [
         ("--quiet", &["am", "--quiet", patch]),
         ("-q", &["am", "-q", patch]),
         ("--utf8", &["am", "--utf8", patch]),
@@ -358,6 +381,8 @@ fn am_option_surface_batch_matches_stock_git() {
         ("--scissors", &["am", "--scissors", patch]),
         ("-c", &["am", "-c", patch]),
         ("--no-scissors", &["am", "--no-scissors", patch]),
+        ("--quoted-cr=warn", &["am", "--quoted-cr=warn", patch]),
+        ("--quoted-cr=nowarn", &["am", "--quoted-cr=nowarn", patch]),
         ("--quoted-cr=strip", &["am", "--quoted-cr=strip", patch]),
         ("--3way", &["am", "--3way", patch]),
         ("-3", &["am", "-3", patch]),
@@ -368,6 +393,8 @@ fn am_option_surface_batch_matches_stock_git() {
         ("-C1", &["am", "-C1", patch]),
         ("-p1", &["am", "-p1", patch]),
         ("--patch-format=mboxrd", &["am", "--patch-format=mboxrd", patch]),
+        ("--patch-format=mbox", &["am", "--patch-format=mbox", patch]),
+        ("--patch-format=hg", &["am", "--patch-format=hg", patch]),
         ("--empty=stop", &["am", "--empty=stop", patch]),
         ("--empty=drop", &["am", "--empty=drop", patch]),
         ("--reject", &["am", "--reject", patch]),
@@ -402,6 +429,70 @@ fn am_option_surface_batch_matches_stock_git() {
             "status args: {args:?}"
         );
         assert!(!label.is_empty());
+    }
+}
+
+#[test]
+fn am_empty_mail_family_matches_stock_git() {
+    let (source, mail_path) = am_empty_mail_fixture();
+    let mail = mail_path.as_str();
+
+    for (label, args) in [
+        ("empty-keep", ["am", "--empty=keep", mail].as_slice()),
+        ("empty-drop", ["am", "--empty=drop", mail].as_slice()),
+        ("empty-stop", ["am", "--empty=stop", mail].as_slice()),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+
+        let git_result = command_any_output("git", git_repo.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin");
+
+        assert_eq!(zmin_result, git_result, "case {label}: args {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "status case {label}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s%n%B", "-1"]),
+            git(git_repo.path(), ["log", "--format=%s%n%B", "-1"]),
+            "log case {label}"
+        );
+    }
+
+    let session_cases: [(&str, &[&str]); 10] = [
+        ("show-raw", &["am", "--show-current-patch=raw"]),
+        ("show-diff", &["am", "--show-current-patch=diff"]),
+        ("allow-empty", &["am", "--allow-empty"]),
+        ("continue", &["am", "--continue"]),
+        ("resolved", &["am", "--resolved"]),
+        ("-r", &["am", "-r"]),
+        ("retry", &["am", "--retry"]),
+        ("skip", &["am", "--skip"]),
+        ("abort", &["am", "--abort"]),
+        ("quit", &["am", "--quit"]),
+    ];
+
+    for (label, args) in session_cases {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        let _ = command_any_output("git", git_repo.path(), &["am", "--empty=stop", mail], "git");
+        let _ = command_any_output(zmin_bin(), zmin_repo.path(), &["am", "--empty=stop", mail], "zmin");
+
+        let git_result = command_any_output("git", git_repo.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin");
+
+        assert_eq!(zmin_result, git_result, "case {label}: args {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "status case {label}"
+        );
     }
 }
 

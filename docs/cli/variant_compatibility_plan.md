@@ -22,6 +22,55 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`am` empty-mail and value-family closure. This batch added three
+reviewed-complete documented option pairs by proving stock-Git parity for the
+full modeled `--quoted-cr` family, the modeled `--empty` family, and the
+stateful `--allow-empty` resume path, while also adding represented
+proof-only rows for `--patch-format=mbox` and `--patch-format=hg`.
+
+The batch fixed one cohesive parser/runtime gap on the `am` path:
+
+- Zmin now handles the modeled empty-mail lane end to end: `--empty=keep`
+  creates the stock empty commit, `--empty=drop` skips the message,
+  `--empty=stop` stops in `rebase-apply` with stock stdout and stderr,
+  `--allow-empty` resumes that session into the stock empty commit, and the
+  stopped empty-mail session now matches stock `show-current-patch`,
+  `continue`/`resolved`/`retry`, and cleanup behavior
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(am|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2089 / 3212`
+- represented documented command-option pairs: `2091 / 3212`
+- matrix rows: `6177`
+- verified rows: `5372`
+- invalid-input rows: `780`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `am`: `40 / 54` reviewed-complete documented option pairs, `42 / 54`
+  represented documented option pairs, `71` written rows, `71` classified
+  rows, `52` stock-matching rows, `19` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `am`, but move off
+this empty-mail closure into the still-open documented-option head:
+remaining `--patch-format` value expansion, then the still-unrepresented
+`--directory`, `--include`, `--exclude`, `--ignore-date`, `--gpg-sign`,
+`--no-gpg-sign`, `--rerere-autoupdate`, `--no-rerere-autoupdate`,
+`--resolvemsg`, `--interactive`/`-i`, and `-S` families.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `am` active-session closure on the modeled single conflicting mail lane. This
 batch added two represented documented option pairs and promoted both to
 reviewed-complete by proving stock-Git parity for accepted `am -s` and `-r`,

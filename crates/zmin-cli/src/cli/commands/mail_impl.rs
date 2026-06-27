@@ -44,6 +44,13 @@ struct AmSession {
     subject: String,
 }
 
+struct ParsedAmMail {
+    author: Signature,
+    subject: String,
+    message_body: String,
+    patch_text: String,
+}
+
 pub(crate) fn am(options: AmOptions, patches: Vec<PathBuf>) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -109,45 +116,21 @@ fn apply_mail_patch(
     mail: &str,
     am_options: &AmOptions,
 ) -> Result<()> {
-    let (headers, body) = split_mail_headers(mail);
-    let header_map = parse_mail_headers(headers);
-    let from = header_map.get("from").ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: "mail patch is missing From header".into(),
-    })?;
-    let subject = header_map
-        .get("subject")
-        .map(|value| clean_mail_subject(value, am_options.keep, false))
-        .ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: "mail patch is missing Subject header".into(),
-        })?;
-    let date = header_map.get("date").ok_or_else(|| CliError::Fatal {
-        code: 128,
-        message: "mail patch is missing Date header".into(),
-    })?;
-    let (author_name, author_email) = parse_mail_author(from);
-    let (timestamp, timezone) = parse_mail_date(date)?;
-    let author_timezone = timezone.clone();
-    let author = Signature::new(author_name, author_email, timestamp, author_timezone)?;
+    let parsed = parse_am_mail(mail, am_options.keep)?;
     let mut committer = signature_from_identity(repo, "GIT_COMMITTER")?;
     if am_options.committer_date_is_author_date {
         committer = Signature::new(
             committer.name.clone(),
             committer.email.clone(),
-            timestamp,
-            timezone.clone(),
+            parsed.author.timestamp,
+            parsed.author.timezone.clone(),
         )?;
-    }
-    let (message_body, patch_text) = split_mail_body_patch(body);
-    if patch_text.trim().is_empty() {
-        return Err(CliError::Fatal {
-            code: 128,
-            message: "mail patch does not contain a diff".into(),
-        });
     }
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
+    if parsed.patch_text.trim().is_empty() {
+        return handle_empty_am_mail(repo, store, mail, &head_id, &parsed, &committer, am_options);
+    }
     let mut index = read_repo_index(repo)?;
     let options = patch_commands::ApplyOptions {
         allow_empty: false,
@@ -194,6 +177,8 @@ fn apply_mail_patch(
         am_options.empty.as_deref(),
         am_options.no_verify,
     );
+    let patch_text = parsed.patch_text.as_str();
+    let subject = parsed.subject.as_str();
     let patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
     if am_options.reject {
         for patch in &patches {
@@ -228,17 +213,16 @@ fn apply_mail_patch(
         patch_commands::write_apply_update(repo, store, &mut index, update, &options)?;
     }
     index.write_to_path(&repo.index_path)?;
-    let tree = write_tree_from_index(store, &index)?;
-    let mut message = mail_commit_message(&subject, &message_body).into_bytes();
-    if am_options.signoff {
-        append_am_signoff(&mut message, &committer);
-    }
-    let commit = CommitBuilder::new(tree, author, committer)
-        .parent(head_id)
-        .message(message)?
-        .encode()?;
-    let id = store.write_object(GitObjectKind::Commit, &commit)?;
-    update_head_to_commit(&refs, &id)?;
+    create_am_commit(
+        repo,
+        store,
+        &head_id,
+        &parsed.author,
+        &committer,
+        subject,
+        &parsed.message_body,
+        am_options.signoff,
+    )?;
     if !am_options.quiet {
         println!("Applying: {subject}");
     }
@@ -263,6 +247,104 @@ fn am_resume_not_in_progress_error() -> CliError {
         code: 128,
         message: "Resolve operation not in progress, we are not resuming.".into(),
     }
+}
+
+fn parse_am_mail(mail: &str, keep_subject: bool) -> Result<ParsedAmMail> {
+    let (headers, body) = split_mail_headers(mail);
+    let header_map = parse_mail_headers(headers);
+    let from = header_map.get("from").ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "mail patch is missing From header".into(),
+    })?;
+    let subject = header_map
+        .get("subject")
+        .map(|value| clean_mail_subject(value, keep_subject, false))
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "mail patch is missing Subject header".into(),
+        })?;
+    let date = header_map.get("date").ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "mail patch is missing Date header".into(),
+    })?;
+    let (author_name, author_email) = parse_mail_author(from);
+    let (timestamp, timezone) = parse_mail_date(date)?;
+    let author = Signature::new(author_name, author_email, timestamp, timezone)?;
+    let (message_body, patch_text) = split_mail_body_patch(body);
+    Ok(ParsedAmMail {
+        author,
+        subject,
+        message_body,
+        patch_text,
+    })
+}
+
+fn handle_empty_am_mail(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    mail: &str,
+    head_id: &ObjectId,
+    parsed: &ParsedAmMail,
+    committer: &Signature,
+    am_options: &AmOptions,
+) -> Result<()> {
+    match am_options.empty.as_deref() {
+        Some("keep") => {
+            create_am_commit(
+                repo,
+                store,
+                head_id,
+                &parsed.author,
+                committer,
+                &parsed.subject,
+                &parsed.message_body,
+                am_options.signoff,
+            )?;
+            if !am_options.quiet {
+                println!("Creating an empty commit: {}", parsed.subject);
+            }
+            Ok(())
+        }
+        Some("drop") => {
+            if !am_options.quiet {
+                println!("Skipping: {}", parsed.subject);
+            }
+            Ok(())
+        }
+        _ => {
+            write_am_session(repo, mail, "", &parsed.subject, head_id)?;
+            println!("Patch is empty.");
+            Err(CliError::Stderr {
+                code: 128,
+                text: am_empty_patch_hint_stderr(),
+            })
+        }
+    }
+}
+
+fn create_am_commit(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    head_id: &ObjectId,
+    author: &Signature,
+    committer: &Signature,
+    subject: &str,
+    message_body: &str,
+    signoff: bool,
+) -> Result<()> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let index = read_repo_index(repo)?;
+    let tree = write_tree_from_index(store, &index)?;
+    let mut message = mail_commit_message(subject, message_body).into_bytes();
+    if signoff {
+        append_am_signoff(&mut message, committer);
+    }
+    let commit = CommitBuilder::new(tree, author.clone(), committer.clone())
+        .parent(head_id.clone())
+        .message(message)?
+        .encode()?;
+    let id = store.write_object(GitObjectKind::Commit, &commit)?;
+    update_head_to_commit(&refs, &id)
 }
 
 fn am_session_dir(repo: &GitRepo) -> PathBuf {
@@ -315,6 +397,46 @@ fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -
         clear_am_session(repo)?;
         return Ok(());
     }
+    if session.patch_text.trim().is_empty() {
+        if options.allow_empty {
+            let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+            let parsed = parse_am_mail(&session.raw_mail, false)?;
+            let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+            let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+            let head_id = refs.resolve("HEAD")?;
+            create_am_commit(
+                repo,
+                &store,
+                &head_id,
+                &parsed.author,
+                &committer,
+                &parsed.subject,
+                &parsed.message_body,
+                false,
+            )?;
+            clear_am_session(repo)?;
+            println!("Applying: {}", session.subject);
+            println!("No changes - recorded it as an empty commit.");
+            return Ok(());
+        }
+        if options.retry {
+            println!("Patch is empty.");
+            return Err(CliError::Stderr {
+                code: 128,
+                text: am_empty_patch_hint_stderr(),
+            });
+        }
+        if options.continue_ || options.resolved {
+            println!("Applying: {}", session.subject);
+            println!("No changes - did you forget to use 'git add'?");
+            println!("If there is nothing left to stage, chances are that something else");
+            println!("already introduced the same changes; you might want to skip this patch.");
+            return Err(CliError::Stderr {
+                code: 128,
+                text: am_continue_no_changes_stderr(true),
+            });
+        }
+    }
     if options.retry {
         println!("Applying: {}", session.subject);
         println!("Patch failed at 0001 {}", session.subject);
@@ -330,7 +452,7 @@ fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -
         println!("already introduced the same changes; you might want to skip this patch.");
         return Err(CliError::Stderr {
             code: 128,
-            text: am_continue_no_changes_stderr(),
+            text: am_continue_no_changes_stderr(false),
         });
     }
     Err(am_resume_not_in_progress_error())
@@ -363,8 +485,20 @@ fn am_patch_conflict_stderr_for_path(path: &str, line: usize) -> String {
     )
 }
 
-fn am_continue_no_changes_stderr() -> String {
-    "hint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n".into()
+fn am_empty_patch_hint_stderr() -> String {
+    am_continue_no_changes_stderr(true)
+}
+
+fn am_continue_no_changes_stderr(allow_empty: bool) -> String {
+    let mut text =
+        "hint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\n".to_owned();
+    if allow_empty {
+        text.push_str("hint: To record the empty patch as an empty commit, run \"git am --allow-empty\".\n");
+    }
+    text.push_str(
+        "hint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n",
+    );
+    text
 }
 
 fn append_am_signoff(message: &mut Vec<u8>, committer: &Signature) {
