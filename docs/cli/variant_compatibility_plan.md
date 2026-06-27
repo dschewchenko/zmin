@@ -21,29 +21,28 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-27 the latest completed batch is a helper-free proof-only `am`
-tail completion closure on the modeled add-file, fixed-date, and conflict
-lanes. This batch finished reviewed-complete coverage for all documented `am`
-option pairs by adding broader stock-Git matrix evidence for repeated and
-separate `--directory` forms, `--ignore-date` combined with
-`--committer-date-is-author-date`, and repeated `--reject` on the modeled
-conflict lane.
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`apply` parser-and-expansion batch on the tracked-patch and add-file lanes.
+This batch added broader stock-Git matrix evidence for separate and repeated
+`--include` and `--exclude` forms, separate and repeated `--directory` forms,
+the short `-N` alias, repeated `--no-add`, repeated `--inaccurate-eof`, and
+repeated `--3way` / `-3` spellings.
 
-The batch fixed one cohesive parser-plus-runtime gap on the helper-free `am`
-path:
+The batch fixed one cohesive parser-plus-runtime gap on the helper-free
+`apply` path:
 
-- Zmin now accepts repeated `am --directory` and repeated `am --reject` like
-  stock Git with last-one-wins or repeated-acceptance parser behavior, and it
-  now matches stock Git for the combined `--ignore-date
-  --committer-date-is-author-date` lane where both rewritten timestamps follow
-  the current local wall clock time on the created commit
+- Zmin now accepts repeated `apply --directory` with stock last-one-wins
+  routing, repeated `--3way` spellings, repeated `--no-add`, repeated
+  `--inaccurate-eof`, and the short `apply -N` alias, while matching the local
+  stock Git oracle on the newly added helper-free matrix rows
 
 Focused verification was `cargo check -p zmin-cli`,
-`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo test -p zmin-cli --test git_apply_compat -- --nocapture`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(am|apply|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(apply|summary)\t'`,
 and `git diff --check`.
 
 Actual durable census after this batch:
@@ -51,21 +50,23 @@ Actual durable census after this batch:
 - complete command matrices: `146 / 151`
 - complete documented command-option pairs: `2103 / 3212`
 - represented documented command-option pairs: `2157 / 3212`
-- matrix rows: `6253`
-- verified rows: `5442`
-- invalid-input rows: `786`
+- matrix rows: `6263`
+- verified rows: `5451`
+- invalid-input rows: `787`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
-- `am`: `54 / 54` reviewed-complete documented option pairs, `54 / 54`
-  represented documented option pairs, `90` written rows, `90` classified
-  rows, `66` stock-matching rows, `24` invalid-input rows, and `0`
+- `apply`: `30 / 38` reviewed-complete documented option pairs, `37 / 38`
+  represented documented option pairs, `64` written rows, `64` classified
+  rows, `58` stock-matching rows, `6` invalid-input rows, and `0`
   exact-open rows
 
-The next best high-throughput follow-up should move off `am`. Its documented
-surface is now both fully represented and fully reviewed complete, so the next
-dense helper-free batch should come from the refreshed non-`am` backlog head.
+The next best high-throughput follow-up should reselect from the refreshed
+backlog head instead of staying on `apply`. This batch materially expanded the
+exact evidence layer and closed the repeated-form parser gaps, but `apply`
+still has one unrepresented documented option family (`--build-fake-ancestor`)
+plus expansion-only tails that did not move the reviewed-complete numerator.
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `cherry-pick` and `revert` follow-up schema-tail closure on the modeled clean,
