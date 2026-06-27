@@ -1864,6 +1864,10 @@ pub enum Command {
         verify: u8,
         #[arg(long = "no-verify", action = ArgAction::Count)]
         no_verify: u8,
+        #[arg(long = "verify-signatures", action = ArgAction::Count)]
+        verify_signatures: u8,
+        #[arg(long = "no-verify-signatures", action = ArgAction::Count)]
+        no_verify_signatures: u8,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "progress", action = ArgAction::Count)]

@@ -11,6 +11,24 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local `pull`
+signature-verification closure across the explicit local no-rebase merge lane.
+The selected change added three exact stock-Git rows for
+`pull --verify-signatures` on both the signed-remote-tip success lane and the
+unsigned-target rejection lane, plus `pull --no-verify-signatures` on the
+signed bypass lane. Actual delta is `+3` matrix rows, `+2` complete
+documented option pairs, `+2` represented documented option pairs, `+2`
+verified rows, `+1` invalid-input row, and `+0` complete command matrices.
+Current census counts are `6705` matrix rows, `5891` verified rows, `789`
+invalid-input rows, `0` exact-open rows, `146/151` complete command matrices,
+`2493/3212` complete documented option pairs, and `2493/3212` represented
+documented option pairs. `pull` now sits at `69/99` reviewed-complete
+documented option pairs with `94/97` stock-matching rows and `3`
+invalid-input rows. The next default follow-up should reselect from the
+refreshed backlog head rather than linger on pull micro-tails, because this
+batch closed the cohesive signature-verification family without opening a new
+shared runtime lane.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `merge`
 signature-verification closure across the shared non-fast-forward clean merge
 lane. The selected change added three exact stock-Git rows for

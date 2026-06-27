@@ -66,11 +66,22 @@ struct CompatibilityReport {
 }
 
 pub fn run(profile: CompatProfile, format: CompatFormat) -> Result<(), CliError> {
-    let report = collect_report(profile);
-    match format {
-        CompatFormat::Text => print!("{}", render_text_report(&report)),
-        CompatFormat::Json => print!("{}", render_json_report(&report)),
-    }
+    let renderer = std::thread::Builder::new()
+        .name("zmin-compat-report".to_owned())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let report = collect_report(profile);
+            match format {
+                CompatFormat::Text => render_text_report(&report),
+                CompatFormat::Json => render_json_report(&report),
+            }
+        })
+        .map_err(CliError::Io)?;
+    let output = renderer.join().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: "failed to render compatibility report".into(),
+    })?;
+    print!("{output}");
     Ok(())
 }
 

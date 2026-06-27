@@ -11334,6 +11334,8 @@ pub(crate) fn run_pull(
     no_gpg_sign: u8,
     verify: u8,
     no_verify: u8,
+    verify_signatures: u8,
+    no_verify_signatures: u8,
     quiet: bool,
     progress: u8,
     no_progress: u8,
@@ -11381,6 +11383,13 @@ pub(crate) fn run_pull(
         "--no-verify",
         verify,
         no_verify,
+    );
+    let verify_signatures = super::merge::resolve_merge_count_mode(
+        raw_args,
+        "--verify-signatures",
+        "--no-verify-signatures",
+        verify_signatures,
+        no_verify_signatures,
     );
     let quiet = quiet || super::merge::resolve_merge_short_flag(raw_args, "-q");
     let _ = super::merge::resolve_merge_count_mode(
@@ -11645,6 +11654,8 @@ fatal: the remote end hung up unexpectedly\n"
             || no_gpg_sign > 0
             || verify > 0
             || no_verify > 0
+            || verify_signatures
+            || no_verify_signatures > 0
             || quiet
             || progress > 0
             || no_progress > 0
@@ -11668,7 +11679,7 @@ fatal: the remote end hung up unexpectedly\n"
             signoff,
             gpg_sign,
             no_gpg_sign: no_gpg_sign > 0,
-            verify_signatures: false,
+            verify_signatures,
             quiet,
             allow_unrelated_histories,
             strategies,

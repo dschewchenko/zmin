@@ -42,7 +42,7 @@ fn compatibility_profile_v2_47_keeps_current_acceptance_gate() {
     assert!(stderr.trim().is_empty());
     assert!(
         stdout.contains(
-            r#""counts": {"implemented": 203, "matching_baseline": 151, "missing": 0, "extra": 52}"#
+            r#""counts": {"implemented": 206, "matching_baseline": 151, "missing": 0, "extra": 55}"#
         ),
         "compatibility counts changed; update the acceptance docs with the new live report: {stdout}"
     );

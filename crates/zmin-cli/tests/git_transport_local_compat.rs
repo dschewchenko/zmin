@@ -1323,6 +1323,27 @@ fn pull_merge_gpg_sign_family_matches_stock_git_for_explicit_local_branch() {
 }
 
 #[test]
+fn pull_merge_verify_signatures_family_matches_stock_git_for_explicit_local_branch() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let script = workspace_root.join("tools/git-pull-verify-signatures-oracle-smoke.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .env("ZMIN_BIN", zmin_bin())
+        .current_dir(workspace_root)
+        .output()
+        .expect("run pull verify-signatures oracle smoke");
+    assert!(
+        output.status.success(),
+        "pull verify-signatures oracle smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn pull_merge_allow_unrelated_histories_matches_stock_git_for_explicit_local_branch() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("two");
