@@ -21,6 +21,59 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local
+`cherry-pick` and `revert` reviewed-complete closure on the already represented
+clean, fast-forward, editor, merge-mainline, no-commit, empty-policy,
+reference-message, signed-commit, rerere-toggle, and invalid-input no-sequence
+lanes. This batch promoted the existing exact stock-Git matrix evidence for the
+remaining represented `cherry-pick` and `revert` option families into the
+reviewed-complete layer, finishing both represented sequencer surfaces without
+adding new runtime behavior.
+
+The batch closed one cohesive census/evidence gap rather than adding new
+sequencer implementation:
+
+- Zmin already matched stock Git on the covered helper-free sequencer lanes,
+  and the remaining work here was to lift the existing matrix rows plus oracle
+  tests and smoke traces into reviewed-complete doc-option pairs and reviewed
+  complete command matrices so the represented `cherry-pick` and `revert`
+  surfaces are counted correctly
+
+Focused verification was
+`cargo test -p zmin-cli --test git_sequencer_compat cherry_pick_and_revert_documented_surface_batch_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_sequencer_compat cherry_pick_and_revert_followup_documented_surface_batch_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_sequencer_compat cherry_pick_and_revert_expansion_batch_matches_stock_git -- --exact --nocapture`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(cherry-pick|revert|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2159 / 3212`
+- represented documented command-option pairs: `2178 / 3212`
+- matrix rows: `6319`
+- verified rows: `5507`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `cherry-pick`: `24 / 24` reviewed-complete documented option pairs,
+  `24 / 24` represented documented option pairs, `35` written rows, `35`
+  classified rows, `33` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+- `revert`: `19 / 19` reviewed-complete documented option pairs, `19 / 19`
+  represented documented option pairs, `31` written rows, `31` classified
+  rows, `29` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move to the fully represented
+`commit` head instead of staying on the sequencer family, because `commit` now
+has the largest remaining reviewed-complete gap among represented helper-free
+surfaces at `46 / 58` complete versus `58 / 58` represented.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `apply`
 reviewed-complete closure on the tracked patch, add-file redirect, tracked-plus-added,
 and invalid-input inaccurate-eof lanes. This batch promoted the existing exact
