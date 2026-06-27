@@ -1843,6 +1843,17 @@ pub enum Command {
         signoff: u8,
         #[arg(long = "no-signoff", action = ArgAction::Count)]
         no_signoff: u8,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::Count, overrides_with = "gpg_sign")]
+        no_gpg_sign: u8,
         #[arg(long = "verify", action = ArgAction::Count)]
         verify: u8,
         #[arg(long = "no-verify", action = ArgAction::Count)]
@@ -4926,6 +4937,17 @@ pub enum Command {
         signoff: u8,
         #[arg(long = "no-signoff", action = ArgAction::Count)]
         no_signoff: u8,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::Count, overrides_with = "gpg_sign")]
+        no_gpg_sign: u8,
         #[arg(long = "verify", action = ArgAction::Count)]
         verify: u8,
         #[arg(long = "no-verify", action = ArgAction::Count)]

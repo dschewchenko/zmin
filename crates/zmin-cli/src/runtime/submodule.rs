@@ -1,11 +1,11 @@
 use super::*;
-use crate::cli::commands::{
-    merge_commands::{MergeOptions, merge},
-    sequencer_commands::rebase,
-};
 use crate::cli::commands::transport_commands::{
     fetch_with_repo_and_remote, is_git_daemon_transport_url, is_http_transport_url,
     is_ssh_transport_url,
+};
+use crate::cli::commands::{
+    merge_commands::{MergeOptions, merge},
+    sequencer_commands::rebase,
 };
 
 #[derive(Clone, Debug)]
@@ -976,6 +976,8 @@ fn merge_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> 
             log_limit: None,
             squash: false,
             signoff: false,
+            gpg_sign: None,
+            no_gpg_sign: false,
             quiet: false,
             allow_unrelated_histories: false,
             strategies: Vec::new(),

@@ -12,6 +12,27 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`pull`/`merge` gpg-sign closure across the explicit local no-rebase merge
+lane and the shared merge default-commit lane. The selected change added six
+exact stock-Git rows for `merge --gpg-sign`, `merge --no-gpg-sign`,
+`merge -S`, `pull --gpg-sign`, `pull --no-gpg-sign`, and `pull -S`, plus the
+shared parser/runtime closure needed to thread merge-commit signing through
+porcelain merge dispatch and explicit local pull merges with stock-like
+last-one-wins raw-argv resolution. Actual delta is `+6` matrix rows, `+6`
+complete documented option pairs, `+6` represented documented option pairs,
+`+6` verified rows, `+0` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `6680` matrix rows, `5868` verified rows,
+`787` invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2471/3212` complete documented option pairs, and
+`2471/3212` represented documented option pairs. The touched commands now sit
+at `pull 64/99` reviewed-complete documented option pairs with `89/91`
+stock-matching rows and `merge 34/51` reviewed-complete documented option
+pairs with `42/50` stock-matching rows. The next default follow-up should
+stay on the refreshed shared `pull`/`merge` backlog rather than drop into a
+one-row tail, because this batch closes another dense shared merge-engine
+family and leaves only broader documented-option expansion work behind it.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` commit-flag closure across the explicit local no-rebase merge
 lane and the shared merge default-commit lane. The selected change added
 twenty-one exact stock-Git rows for merge and explicit-local pull

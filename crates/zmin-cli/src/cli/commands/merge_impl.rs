@@ -10,6 +10,8 @@ pub(crate) struct MergeOptions {
     pub(crate) log_limit: Option<usize>,
     pub(crate) squash: bool,
     pub(crate) signoff: bool,
+    pub(crate) gpg_sign: Option<String>,
+    pub(crate) no_gpg_sign: bool,
     pub(crate) quiet: bool,
     pub(crate) allow_unrelated_histories: bool,
     pub(crate) strategies: Vec<String>,
@@ -30,6 +32,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         log_limit,
         squash,
         signoff,
+        gpg_sign,
+        no_gpg_sign,
         quiet,
         allow_unrelated_histories,
         strategies,
@@ -91,6 +95,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             log_limit,
             mode,
             signoff,
+            gpg_sign.as_deref(),
+            no_gpg_sign,
             quiet,
             commit_source.as_deref(),
         );
@@ -109,6 +115,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         log_limit,
         mode,
         signoff,
+        gpg_sign.as_deref(),
+        no_gpg_sign,
         quiet,
         commit_source.as_deref(),
     )
@@ -262,11 +270,23 @@ fn merge_with_strategy(
     log_limit: Option<usize>,
     mode: MergeCommitMode,
     signoff: bool,
+    gpg_sign: Option<&str>,
+    no_gpg_sign: bool,
     quiet: bool,
     commit_source: Option<&str>,
 ) -> Result<()> {
     if strategies.len() == 1 && strategies[0] == "ours" {
-        return merge_ours_strategy(repo, store, commit_cache, target, target_label, signoff, quiet);
+        return merge_ours_strategy(
+            repo,
+            store,
+            commit_cache,
+            target,
+            target_label,
+            signoff,
+            gpg_sign,
+            no_gpg_sign,
+            quiet,
+        );
     }
     if strategies.len() == 1 && matches!(strategies[0].as_str(), "ort" | "recursive") {
         return merge_commit(
@@ -283,6 +303,8 @@ fn merge_with_strategy(
             log_limit,
             mode,
             signoff,
+            gpg_sign,
+            no_gpg_sign,
             quiet,
             commit_source,
         );
@@ -303,6 +325,8 @@ fn merge_ours_strategy(
     target: &str,
     target_label: Option<&str>,
     signoff: bool,
+    gpg_sign: Option<&str>,
+    no_gpg_sign: bool,
     quiet: bool,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -327,11 +351,18 @@ fn merge_ours_strategy(
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
     }
-    let commit = CommitBuilder::new(head_commit.tree.clone(), author, committer.clone())
+    let mut builder = CommitBuilder::new(head_commit.tree.clone(), author, committer.clone())
         .parent(head_id)
         .parent(target_id)
-        .message(message)?
-        .encode()?;
+        .message(message)?;
+    if !no_gpg_sign {
+        if let Some(signature) =
+            super::commit_commands::commit_tree_gpg_signature(repo, &builder, gpg_sign)?
+        {
+            builder = builder.gpg_signature(signature)?;
+        }
+    }
+    let commit = builder.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     if !quiet {
@@ -360,6 +391,8 @@ fn merge_commit(
     log_limit: Option<usize>,
     mode: MergeCommitMode,
     signoff: bool,
+    gpg_sign: Option<&str>,
+    no_gpg_sign: bool,
     quiet: bool,
     commit_source: Option<&str>,
 ) -> Result<()> {
@@ -417,50 +450,50 @@ fn merge_commit(
                 }
                 resolved.index
             } else {
-            remove_tracked_paths_missing_from_target(repo, &ours, &index)?;
-            checkout_merged_stage_zero(repo, store, &index)?;
-            for file in files {
-                write_worktree_file(repo, &file.path, &file.content)?;
-                match &file.kind {
-                    MergeConflictKind::Binary => {
-                        if !quiet {
-                            println!(
-                                "warning: Cannot merge binary files: {} (HEAD vs. {})",
-                                String::from_utf8_lossy(&file.path),
-                                merge_display_name(repo, target)
+                remove_tracked_paths_missing_from_target(repo, &ours, &index)?;
+                checkout_merged_stage_zero(repo, store, &index)?;
+                for file in files {
+                    write_worktree_file(repo, &file.path, &file.content)?;
+                    match &file.kind {
+                        MergeConflictKind::Binary => {
+                            if !quiet {
+                                println!(
+                                    "warning: Cannot merge binary files: {} (HEAD vs. {})",
+                                    String::from_utf8_lossy(&file.path),
+                                    merge_display_name(repo, target)
+                                );
+                                println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                            }
+                            eprintln!(
+                                "CONFLICT (content): Merge conflict in {}",
+                                String::from_utf8_lossy(&file.path)
                             );
-                            println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
                         }
-                        eprintln!(
-                            "CONFLICT (content): Merge conflict in {}",
-                            String::from_utf8_lossy(&file.path)
-                        );
-                    }
-                    MergeConflictKind::Content => {
-                        if !quiet {
-                            println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                        MergeConflictKind::Content => {
+                            if !quiet {
+                                println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                            }
+                            eprintln!(
+                                "CONFLICT (content): Merge conflict in {}",
+                                String::from_utf8_lossy(&file.path)
+                            );
                         }
-                        eprintln!(
-                            "CONFLICT (content): Merge conflict in {}",
-                            String::from_utf8_lossy(&file.path)
-                        );
-                    }
-                    MergeConflictKind::ModifyDelete { message } => {
-                        if !quiet {
-                            println!("{message}");
+                        MergeConflictKind::ModifyDelete { message } => {
+                            if !quiet {
+                                println!("{message}");
+                            }
                         }
-                    }
-                    MergeConflictKind::RenameDelete { message } => {
-                        if !quiet {
-                            println!("{message}");
+                        MergeConflictKind::RenameDelete { message } => {
+                            if !quiet {
+                                println!("{message}");
+                            }
                         }
                     }
                 }
-            }
-            index.write_to_path(&repo.index_path)?;
-            write_merge_state(repo, &target_id, &merge_display_name(repo, target), true)?;
-            eprintln!("Automatic merge failed; fix conflicts and then commit the result.");
-            return Err(CliError::Exit(1));
+                index.write_to_path(&repo.index_path)?;
+                write_merge_state(repo, &target_id, &merge_display_name(repo, target), true)?;
+                eprintln!("Automatic merge failed; fix conflicts and then commit the result.");
+                return Err(CliError::Exit(1));
             }
         }
     };
@@ -504,11 +537,18 @@ fn merge_commit(
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
     }
-    let commit = CommitBuilder::new(tree, author, committer)
+    let mut builder = CommitBuilder::new(tree, author, committer)
         .parent(head_id.clone())
         .parent(target_id.clone())
-        .message(message)?
-        .encode()?;
+        .message(message)?;
+    if !no_gpg_sign {
+        if let Some(signature) =
+            super::commit_commands::commit_tree_gpg_signature(repo, &builder, gpg_sign)?
+        {
+            builder = builder.gpg_signature(signature)?;
+        }
+    }
+    let commit = builder.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     if !quiet {
@@ -625,13 +665,15 @@ fn resolve_strategy_option_conflicts(
         if !matches!(file.kind, MergeConflictKind::Content) {
             return Ok(None);
         }
-        let chosen = index.entry(&file.path, prefer_stage).ok_or_else(|| CliError::Fatal {
-            code: 128,
-            message: format!(
-                "missing stage {prefer_stage} entry for {}",
-                String::from_utf8_lossy(&file.path)
-            ),
-        })?;
+        let chosen = index
+            .entry(&file.path, prefer_stage)
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: format!(
+                    "missing stage {prefer_stage} entry for {}",
+                    String::from_utf8_lossy(&file.path)
+                ),
+            })?;
         let _ = read_index_entry_content(store, chosen)?;
         let mut merged = chosen.clone();
         merged.stage = 0;
@@ -937,7 +979,9 @@ fn parse_merge_file_marker_size(value: &str) -> Result<usize> {
 }
 
 fn effective_merge_file_marker_size(parsed: Option<String>) -> Result<Option<usize>> {
-    let raw_args: Vec<String> = std::env::args().skip_while(|arg| arg != "merge-file").collect();
+    let raw_args: Vec<String> = std::env::args()
+        .skip_while(|arg| arg != "merge-file")
+        .collect();
     let mut effective = parsed;
     let mut index = 0usize;
     while index < raw_args.len() {
@@ -971,7 +1015,10 @@ fn parse_scaled_usize(value: &str) -> Option<usize> {
     let (digits, multiplier) = match value.as_bytes().last().copied() {
         Some(b'k' | b'K') => (&value[..value.len() - 1], 1024usize),
         Some(b'm' | b'M') => (&value[..value.len() - 1], 1024usize.checked_mul(1024)?),
-        Some(b'g' | b'G') => (&value[..value.len() - 1], 1024usize.checked_mul(1024)?.checked_mul(1024)?),
+        Some(b'g' | b'G') => (
+            &value[..value.len() - 1],
+            1024usize.checked_mul(1024)?.checked_mul(1024)?,
+        ),
         _ => (value, 1usize),
     };
     if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -1434,7 +1481,11 @@ fn resolve_stock_git_binary() -> PathBuf {
     for path in std::env::var_os("PATH")
         .into_iter()
         .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+        .flat_map(|dir| {
+            stock_git_names()
+                .into_iter()
+                .map(move |name| dir.join(name))
+        })
     {
         if is_stock_git_binary(&path) {
             return path;
@@ -1920,7 +1971,8 @@ fn merge_tree_automerge_index(
             .or_else(|| index.entry(&file.path, 1))
             .map(|entry| entry.mode)
             .unwrap_or(IndexMode::File);
-        let content = merge_tree_automerge_file_content(store, index, file, ours_label, theirs_label)?;
+        let content =
+            merge_tree_automerge_file_content(store, index, file, ours_label, theirs_label)?;
         let id = store.write_object(GitObjectKind::Blob, &content)?;
         entries.push(IndexEntry::new(
             file.path.clone(),
@@ -2049,7 +2101,11 @@ fn merge_tree_write_result_to<W: Write>(
                     out.write_all(message.text.as_bytes())?;
                     out.write_all(b"\0")?;
                 } else {
-                    writeln!(out, "Auto-merging {}", String::from_utf8_lossy(&message.path))?;
+                    writeln!(
+                        out,
+                        "Auto-merging {}",
+                        String::from_utf8_lossy(&message.path)
+                    )?;
                     write!(out, "{}", message.text)?;
                 }
             }

@@ -6012,18 +6012,18 @@ pub(crate) fn fetch_pack(options: FetchPackOptions) -> Result<()> {
     }
     if upload_pack_command.is_none() {
         if let Some(depth) = options.depth {
-        let shallow_root_capacity = transport_ref_collection_capacity(shallow_roots.len());
-        let mut unique_roots = HashSet::with_capacity(shallow_root_capacity);
-        let mut roots = Vec::with_capacity(shallow_root_capacity);
-        for id in shallow_roots {
-            if unique_roots.insert(id.clone()) {
-                roots.push(id);
+            let shallow_root_capacity = transport_ref_collection_capacity(shallow_roots.len());
+            let mut unique_roots = HashSet::with_capacity(shallow_root_capacity);
+            let mut roots = Vec::with_capacity(shallow_root_capacity);
+            for id in shallow_roots {
+                if unique_roots.insert(id.clone()) {
+                    roots.push(id);
+                }
             }
-        }
-        write_shallow_file(
-            &destination,
-            shallow_boundaries(&source_store, &roots, depth)?,
-        )?;
+            write_shallow_file(
+                &destination,
+                shallow_boundaries(&source_store, &roots, depth)?,
+            )?;
         }
     }
     if options.include_tag {
@@ -6915,12 +6915,15 @@ fn send_pack_current_ref_id(refs: &RefStore, ref_name: &str) -> Result<Option<Ob
 
 fn send_pack_write_status_report(remote: &str, statuses: &[SendPackStatus]) -> Result<()> {
     let mut stderr = io::stderr().lock();
-    let has_effective_update = statuses.iter().any(|status| match (&status.old_id, &status.push_ref.id) {
-        (None, Some(_)) => true,
-        (Some(old), Some(new)) => old != new,
-        (Some(_), None) => true,
-        (None, None) => false,
-    });
+    let has_effective_update =
+        statuses
+            .iter()
+            .any(|status| match (&status.old_id, &status.push_ref.id) {
+                (None, Some(_)) => true,
+                (Some(old), Some(new)) => old != new,
+                (Some(_), None) => true,
+                (None, None) => false,
+            });
     if !has_effective_update {
         writeln!(stderr, "Everything up-to-date")?;
         return Ok(());
@@ -11324,6 +11327,8 @@ pub(crate) fn run_pull(
     no_edit: u8,
     signoff: u8,
     no_signoff: u8,
+    gpg_sign: Option<String>,
+    no_gpg_sign: u8,
     verify: u8,
     no_verify: u8,
     quiet: bool,
@@ -11366,6 +11371,7 @@ pub(crate) fn run_pull(
         signoff,
         no_signoff,
     );
+    let gpg_sign = super::merge::resolve_merge_gpg_sign(raw_args, gpg_sign, no_gpg_sign > 0);
     let _ = super::merge::resolve_merge_count_mode(
         raw_args,
         "--verify",
@@ -11629,6 +11635,8 @@ fatal: the remote end hung up unexpectedly\n"
             || no_edit > 0
             || signoff
             || no_signoff > 0
+            || gpg_sign.is_some()
+            || no_gpg_sign > 0
             || verify > 0
             || no_verify > 0
             || quiet
@@ -11649,6 +11657,8 @@ fatal: the remote end hung up unexpectedly\n"
             log_limit,
             squash,
             signoff,
+            gpg_sign,
+            no_gpg_sign: no_gpg_sign > 0,
             quiet,
             allow_unrelated_histories,
             strategies,
@@ -11906,7 +11916,10 @@ fn write_local_push_status_report(
     for branch in upstream_branches {
         println!("branch '{branch}' set up to track '{remote_name}/{branch}'.");
     }
-    if statuses.iter().all(|status| status.old_id == status.push_ref.id) {
+    if statuses
+        .iter()
+        .all(|status| status.old_id == status.push_ref.id)
+    {
         eprintln!("Everything up-to-date");
         return Ok(());
     }
@@ -13215,7 +13228,12 @@ pub(crate) fn fetch_with_repo_and_remote(
                     if old_id != id {
                         eprintln!(
                             "{}",
-                            fetch_fast_forward_update_row(&ref_name, &destination_ref, &old_id, &id)
+                            fetch_fast_forward_update_row(
+                                &ref_name,
+                                &destination_ref,
+                                &old_id,
+                                &id
+                            )
                         );
                     }
                 } else {
@@ -15775,7 +15793,11 @@ fn collect_configured_fetch_porcelain_rows(
                 if old_id.as_ref() == Some(source_id) {
                     return Ok(());
                 }
-                rows.push(fetch_porcelain_row(old_id.as_ref(), source_id, &destination_ref));
+                rows.push(fetch_porcelain_row(
+                    old_id.as_ref(),
+                    source_id,
+                    &destination_ref,
+                ));
                 Ok::<(), CliError>(())
             })?;
             continue;
@@ -15791,7 +15813,11 @@ fn collect_configured_fetch_porcelain_rows(
         if old_id.as_ref() == Some(&source_id) {
             continue;
         }
-        rows.push(fetch_porcelain_row(old_id.as_ref(), &source_id, &destination_ref));
+        rows.push(fetch_porcelain_row(
+            old_id.as_ref(),
+            &source_id,
+            &destination_ref,
+        ));
     }
     Ok(rows)
 }
@@ -22730,8 +22756,7 @@ fn upload_pack_request_capabilities(
                 .as_slice()
         }
         (true, false, true, true) => {
-            b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative"
-                .as_slice()
+            b" side-band-64k thin-pack ofs-delta no-progress include-tag deepen-relative".as_slice()
         }
         (false, true, true, true) => {
             b" side-band-64k thin-pack ofs-delta no-progress include-tag filter".as_slice()
@@ -24409,7 +24434,11 @@ struct ReceivePackUpdate {
     ref_name: String,
 }
 
-pub(crate) fn receive_pack(http_backend_info_refs: bool, _quiet: bool, directory: PathBuf) -> Result<()> {
+pub(crate) fn receive_pack(
+    http_backend_info_refs: bool,
+    _quiet: bool,
+    directory: PathBuf,
+) -> Result<()> {
     let repo = upload_pack_repo_from_path(&directory, true)?;
     let runtime = primitive_runtime_for_repo(&repo);
     let refs = runtime.refs_store_adapter();
@@ -24630,8 +24659,7 @@ pub(crate) fn split_shell_words(input: &str) -> Result<Vec<String>> {
 
 #[cfg(test)]
 fn write_receive_pack_advertisement<W: Write>(refs: &RefStore, out: &mut W) -> Result<()> {
-    let capabilities =
-        "report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=zmin/0.1.0";
+    let capabilities = "report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=zmin/0.1.0";
     let mut wrote = false;
     refs.for_each_server_info_ref(|id, name| {
         write_ref_advertisement_pkt_line(out, Some(id), name, (!wrote).then_some(capabilities))?;
@@ -24809,8 +24837,7 @@ fn write_receive_pack_advertisement_from_adapter_impl<W: Write>(
     refs: &OwnedCliRefsStoreAdapter,
     out: &mut W,
 ) -> Result<()> {
-    let capabilities =
-        "report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=zmin/0.1.0";
+    let capabilities = "report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=zmin/0.1.0";
     let mut wrote = false;
     refs.for_each_server_info_ref(|id, name| {
         write_ref_advertisement_pkt_line(out, Some(id), name, (!wrote).then_some(capabilities))?;

@@ -22,6 +22,58 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`pull`/`merge` gpg-sign closure across the explicit local no-rebase merge lane
+and the shared merge default-commit lane. This batch added six exact
+stock-Git rows for `merge --gpg-sign`, `merge --no-gpg-sign`, `merge -S`,
+`pull --gpg-sign`, `pull --no-gpg-sign`, and `pull -S`, plus the shared
+parser/runtime closure needed to thread merge-commit signing through both
+porcelain merge dispatch and explicit local pull merges with stock-like
+last-one-wins raw-argv resolution. The real runtime fixes were cohesive:
+merge commits and explicit local pull merges now attach stock `gpgsig`
+payloads when signing is requested, honor `--no-gpg-sign` against configured
+`commit.gpgsign=true`, and preserve matching signed or unsigned merge commit
+objects on the modeled fixture-key lanes.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_merge_compat merge_gpg_sign_family_matches_stock_git_with_fixture_key -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_gpg_sign_family_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(pull|merge|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2471 / 3212`
+- represented documented command-option pairs: `2471 / 3212`
+- matrix rows: `6680`
+- verified rows: `5868`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `741`
+
+Per-command position on the touched surface:
+
+- `pull`: `64 / 99` reviewed-complete documented option pairs,
+  `64 / 99` represented documented option pairs, `91` written rows, `91`
+  classified rows, `89` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+- `merge`: `34 / 51` reviewed-complete documented option pairs,
+  `34 / 51` represented documented option pairs, `50` written rows, `50`
+  classified rows, `42` stock-matching rows, `8` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should still stay on the shared
+`pull`/`merge` backlog rather than drop into unrelated one-row work, because
+the merge engine lane is still active and now leaves only the broader
+documented-option tails behind it. The largest remaining documented queues are
+now `replay` (`117`), `send-email` (`62`), `rebase` (`54`), `log` (`47`),
+`pull` (`35`), `rev-list` (`36`), `diff-tree` (`35`), and `merge` (`17`).
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` commit-flag closure across the explicit local no-rebase merge
 lane and the shared merge default-commit lane. This batch added twenty-one
 exact stock-Git rows for `merge --edit`, `merge --no-edit`,

@@ -1,14 +1,14 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2465	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2471	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	2465	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	6674	6674	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	5862	6674	closed written rows only
-behavior_rows_classified	6649	6674	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	6674	written rows with incomplete parity
-behavior_rows_open	0	6674	written rows not implemented or not matching yet
-invalid_input_rows	787	6674	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	2471	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	6680	6680	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	5868	6680	closed written rows only
+behavior_rows_classified	6655	6680	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	6680	written rows with incomplete parity
+behavior_rows_open	0	6680	written rows not implemented or not matching yet
+invalid_input_rows	787	6680	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -86,7 +86,7 @@ ls-tree	13	13	13	100.0	18	18	100.0	17	94.4	0	0	1	yes
 mailinfo	10	10	10	100.0	13	13	100.0	13	100.0	0	0	0	yes
 mailsplit	6	6	6	100.0	11	11	100.0	9	81.8	0	0	2	yes
 maintenance	5	5	5	100.0	49	49	100.0	32	65.3	0	0	17	yes
-merge	51	31	31	60.8	47	47	100.0	39	83.0	0	0	8	yes
+merge	51	34	34	66.7	50	50	100.0	42	84.0	0	0	8	yes
 merge-base	2	2	2	100.0	19	19	100.0	17	89.5	0	0	2	yes
 merge-file	10	10	10	100.0	50	50	100.0	36	72.0	0	0	14	yes
 merge-index	3	3	3	100.0	8	8	100.0	8	100.0	0	0	0	yes
@@ -106,7 +106,7 @@ pack-refs	5	5	5	100.0	8	8	100.0	8	100.0	0	0	0	yes
 patch-id	3	3	3	100.0	17	17	100.0	9	52.9	0	0	8	yes
 prune	6	6	6	100.0	13	13	100.0	12	92.3	0	0	1	yes
 prune-packed	4	4	4	100.0	13	13	100.0	9	69.2	0	0	4	yes
-pull	99	61	61	61.6	88	88	100.0	86	97.7	0	0	2	yes
+pull	99	64	64	64.6	91	91	100.0	89	97.8	0	0	2	yes
 push	0	0	0	0.0	16	16	100.0	15	93.8	0	0	1	yes
 quiltimport	6	6	6	100.0	5	5	100.0	5	100.0	0	0	0	yes
 range-diff	6	1	1	16.7	8	8	100.0	6	75.0	0	0	2	yes

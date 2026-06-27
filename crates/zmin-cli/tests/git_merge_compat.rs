@@ -1,13 +1,16 @@
 mod common;
 
 use std::fs;
+use std::path::Path;
+use std::process::Command;
 
 use tempfile::TempDir;
 
 use common::{
     command_any_output, command_output_with_env, configure_identity, git, git_args,
     git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
-    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, write_file, zmin_bin,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, stock_git_bin, write_file,
+    zmin_bin,
 };
 
 fn two_commit_repo() -> TempDir {
@@ -171,7 +174,10 @@ fn merge_base_multi_commit_modes_match_stock_git() {
         ["merge-base", "-a", "a", "b"].as_slice(),
         ["merge-base", "--all", "HEAD", "HEAD"].as_slice(),
     ] {
-        assert_eq!(run_zmin_args(repo.path(), args), git_args(repo.path(), args));
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args)
+        );
     }
 }
 
@@ -439,7 +445,11 @@ fn merge_commit_and_no_squash_match_stock_git_merge_commit_state() {
 
         let git_out = git_args(git_repo.path(), &["merge", option, "feature"]);
         let zmin_out = run_zmin_args(zmin_repo.path(), &["merge", option, "feature"]);
-        assert_eq!(zmin_out.lines().next(), git_out.lines().next(), "{option} stdout");
+        assert_eq!(
+            zmin_out.lines().next(),
+            git_out.lines().next(),
+            "{option} stdout"
+        );
         assert_eq!(
             git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
             git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
@@ -482,7 +492,10 @@ fn merge_stat_toggle_family_matches_stock_git_output_and_state() {
             git_with_env(repo, ["commit", "-m", "main"]);
         }
 
-        assert_eq!(run_zmin_args(zmin_repo.path(), args), git_args(git_repo.path(), args));
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args)
+        );
         assert_eq!(
             git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
             git(git_repo.path(), ["rev-parse", "HEAD^{tree}"])
@@ -527,7 +540,10 @@ fn merge_log_family_matches_stock_git_output_state_and_message() {
             git_with_env(repo, ["commit", "-m", "main"]);
         }
 
-        assert_eq!(run_zmin_args(zmin_repo.path(), args), git_args(git_repo.path(), args));
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args)
+        );
         assert_eq!(
             git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
             git(git_repo.path(), ["rev-parse", "HEAD^{tree}"])
@@ -608,6 +624,29 @@ fn merge_commit_flag_family_matches_stock_git_output_state_and_message() {
             "{args:?} status"
         );
     }
+}
+
+#[test]
+fn merge_gpg_sign_family_matches_stock_git_with_fixture_key() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let script = workspace_root.join("tools/git-merge-pull-gpg-oracle-smoke.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("merge")
+        .env("ZMIN_BIN", zmin_bin())
+        .env("GIT_BIN", stock_git_bin())
+        .current_dir(workspace_root)
+        .output()
+        .expect("run merge gpg oracle smoke");
+    assert!(
+        output.status.success(),
+        "merge gpg oracle smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
@@ -1036,7 +1075,12 @@ fn merge_allow_unrelated_histories_matches_stock_git_output_state_and_message() 
         git_with_env(repo, ["commit", "-m", "local"]);
         git(
             repo,
-            ["remote", "add", "other", remote.to_str().expect("remote path")],
+            [
+                "remote",
+                "add",
+                "other",
+                remote.to_str().expect("remote path"),
+            ],
         );
         git(repo, ["fetch", "other", "main"]);
     }

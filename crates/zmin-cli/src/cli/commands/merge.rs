@@ -24,6 +24,8 @@ pub(crate) fn dispatch(
             no_edit,
             signoff,
             no_signoff,
+            gpg_sign,
+            no_gpg_sign,
             verify,
             no_verify,
             quiet,
@@ -40,10 +42,24 @@ pub(crate) fn dispatch(
                 resolve_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
             let log_limit = resolve_merge_log_mode(raw_args, log.as_deref(), no_log)?;
             let _ = resolve_merge_edit_mode(raw_args, edit, no_edit);
-            let signoff = resolve_merge_count_mode(raw_args, "--signoff", "--no-signoff", signoff, no_signoff);
-            let _ = resolve_merge_count_mode(raw_args, "--verify", "--no-verify", verify, no_verify);
+            let signoff = resolve_merge_count_mode(
+                raw_args,
+                "--signoff",
+                "--no-signoff",
+                signoff,
+                no_signoff,
+            );
+            let gpg_sign = resolve_merge_gpg_sign(raw_args, gpg_sign, no_gpg_sign > 0);
+            let _ =
+                resolve_merge_count_mode(raw_args, "--verify", "--no-verify", verify, no_verify);
             let quiet = quiet || resolve_merge_short_flag(raw_args, "-q");
-            let _ = resolve_merge_count_mode(raw_args, "--progress", "--no-progress", progress, no_progress);
+            let _ = resolve_merge_count_mode(
+                raw_args,
+                "--progress",
+                "--no-progress",
+                progress,
+                no_progress,
+            );
             super::merge_commands::merge(super::merge_commands::MergeOptions {
                 abort,
                 continue_,
@@ -54,6 +70,8 @@ pub(crate) fn dispatch(
                 log_limit,
                 squash,
                 signoff,
+                gpg_sign,
+                no_gpg_sign: no_gpg_sign > 0,
                 quiet,
                 allow_unrelated_histories,
                 strategies,
@@ -138,7 +156,11 @@ pub(crate) fn dispatch(
                 union > 0 && no_union == 0,
             ),
             (diff3 > 0 || zdiff3 > 0) && no_diff3 == 0,
-            if no_marker_size == 0 { marker_size } else { None },
+            if no_marker_size == 0 {
+                marker_size
+            } else {
+                None
+            },
             diff_algorithm,
             object_id > 0 && no_object_id == 0,
             labels,
@@ -266,6 +288,31 @@ pub(crate) fn resolve_merge_count_mode(
     enabled
 }
 
+pub(crate) fn resolve_merge_gpg_sign(
+    raw_args: &[String],
+    gpg_sign: Option<String>,
+    no_gpg_sign: bool,
+) -> Option<String> {
+    let mut effective = (!no_gpg_sign).then_some(gpg_sign).flatten();
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--no-gpg-sign" => effective = None,
+            "--gpg-sign" | "-S" => effective = Some(String::new()),
+            _ if arg.starts_with("--gpg-sign=") => {
+                effective = Some(arg.trim_start_matches("--gpg-sign=").to_owned());
+            }
+            _ if arg.starts_with("-S") && arg.len() > 2 => {
+                effective = Some(arg[2..].to_owned());
+            }
+            _ => {}
+        }
+    }
+    effective
+}
+
 pub(crate) fn resolve_merge_short_flag(raw_args: &[String], flag: &str) -> bool {
     raw_args
         .iter()
@@ -313,10 +360,12 @@ fn parse_merge_log_limit(
     if value.is_empty() {
         return Ok(Some(default_limit));
     }
-    let parsed = value.parse::<usize>().map_err(|_| runtime::CliError::Fatal {
-        code: 129,
-        message: format!("option `--log` expects a non-negative integer, got `{value}`"),
-    })?;
+    let parsed = value
+        .parse::<usize>()
+        .map_err(|_| runtime::CliError::Fatal {
+            code: 129,
+            message: format!("option `--log` expects a non-negative integer, got `{value}`"),
+        })?;
     if parsed == 0 {
         return Ok(None);
     }

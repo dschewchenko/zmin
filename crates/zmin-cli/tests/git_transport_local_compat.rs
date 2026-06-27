@@ -258,7 +258,10 @@ fn assert_named_local_pull_matches_stock_git(label: &str, args: &[&str]) {
         normalize_remote_output(&git_output.2, &source_path),
         "{label} stderr"
     );
-    assert_eq!(git(&zmin_client, ["rev-parse", "HEAD"]), git(&git_client, ["rev-parse", "HEAD"]));
+    assert_eq!(
+        git(&zmin_client, ["rev-parse", "HEAD"]),
+        git(&git_client, ["rev-parse", "HEAD"])
+    );
     assert_eq!(
         git(&zmin_client, ["cat-file", "-p", "HEAD^{tree}"]),
         git(&git_client, ["cat-file", "-p", "HEAD^{tree}"])
@@ -570,21 +573,37 @@ fn pull_all_fetches_all_remotes_then_reports_missing_tracking_like_stock_git() {
             dir.path(),
             ["init", "-b", "main", client.to_str().expect("client path")],
         );
-        git(client, ["remote", "add", "one", one.to_str().expect("one path")]);
-        git(client, ["remote", "add", "two", two.to_str().expect("two path")]);
+        git(
+            client,
+            ["remote", "add", "one", one.to_str().expect("one path")],
+        );
+        git(
+            client,
+            ["remote", "add", "two", two.to_str().expect("two path")],
+        );
     }
 
     let git_output = command_any_output("git", &git_client, &["pull", "--all"], "git pull --all");
-    let zmin_output =
-        command_any_output(zmin_bin(), &zmin_client, &["pull", "--all"], "zmin pull --all");
+    let zmin_output = command_any_output(
+        zmin_bin(),
+        &zmin_client,
+        &["pull", "--all"],
+        "zmin pull --all",
+    );
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
     let one_path = one.to_string_lossy();
     let two_path = two.to_string_lossy();
     assert_eq!(
-        normalize_remote_output(&normalize_remote_output(&zmin_output.2, &one_path), &two_path),
-        normalize_remote_output(&normalize_remote_output(&git_output.2, &one_path), &two_path)
+        normalize_remote_output(
+            &normalize_remote_output(&zmin_output.2, &one_path),
+            &two_path
+        ),
+        normalize_remote_output(
+            &normalize_remote_output(&git_output.2, &one_path),
+            &two_path
+        )
     );
     assert_eq!(
         git(&zmin_client, ["show-ref"]),
@@ -605,35 +624,96 @@ fn pull_fetch_inherited_option_family_matches_stock_git() {
     let cases: [(&str, &[&str]); 20] = [
         (
             "pull --show-forced-updates",
-            &["pull", "--ff-only", "--show-forced-updates", "origin", "main"],
+            &[
+                "pull",
+                "--ff-only",
+                "--show-forced-updates",
+                "origin",
+                "main",
+            ],
         ),
         (
             "pull --no-show-forced-updates",
-            &["pull", "--ff-only", "--no-show-forced-updates", "origin", "main"],
+            &[
+                "pull",
+                "--ff-only",
+                "--no-show-forced-updates",
+                "origin",
+                "main",
+            ],
         ),
-        ("pull --ipv4", &["pull", "--ff-only", "--ipv4", "origin", "main"]),
-        ("pull --ipv6", &["pull", "--ff-only", "--ipv6", "origin", "main"]),
-        ("pull --keep", &["pull", "--ff-only", "--keep", "origin", "main"]),
-        ("pull --no-all", &["pull", "--ff-only", "--no-all", "origin", "main"]),
-        ("pull --prune", &["pull", "--ff-only", "--prune", "origin", "main"]),
-        ("pull --tags", &["pull", "--ff-only", "--tags", "origin", "main"]),
-        ("pull --no-tags", &["pull", "--ff-only", "--no-tags", "origin", "main"]),
-        ("pull --verbose", &["pull", "--ff-only", "--verbose", "origin", "main"]),
+        (
+            "pull --ipv4",
+            &["pull", "--ff-only", "--ipv4", "origin", "main"],
+        ),
+        (
+            "pull --ipv6",
+            &["pull", "--ff-only", "--ipv6", "origin", "main"],
+        ),
+        (
+            "pull --keep",
+            &["pull", "--ff-only", "--keep", "origin", "main"],
+        ),
+        (
+            "pull --no-all",
+            &["pull", "--ff-only", "--no-all", "origin", "main"],
+        ),
+        (
+            "pull --prune",
+            &["pull", "--ff-only", "--prune", "origin", "main"],
+        ),
+        (
+            "pull --tags",
+            &["pull", "--ff-only", "--tags", "origin", "main"],
+        ),
+        (
+            "pull --no-tags",
+            &["pull", "--ff-only", "--no-tags", "origin", "main"],
+        ),
+        (
+            "pull --verbose",
+            &["pull", "--ff-only", "--verbose", "origin", "main"],
+        ),
         (
             "pull --recurse-submodules",
-            &["pull", "--ff-only", "--recurse-submodules", "origin", "main"],
+            &[
+                "pull",
+                "--ff-only",
+                "--recurse-submodules",
+                "origin",
+                "main",
+            ],
         ),
         (
             "pull --no-recurse-submodules",
-            &["pull", "--ff-only", "--no-recurse-submodules", "origin", "main"],
+            &[
+                "pull",
+                "--ff-only",
+                "--no-recurse-submodules",
+                "origin",
+                "main",
+            ],
         ),
         (
             "pull --server-option equals",
-            &["pull", "--ff-only", "--server-option=trace", "origin", "main"],
+            &[
+                "pull",
+                "--ff-only",
+                "--server-option=trace",
+                "origin",
+                "main",
+            ],
         ),
         (
             "pull --server-option separate",
-            &["pull", "--ff-only", "--server-option", "trace", "origin", "main"],
+            &[
+                "pull",
+                "--ff-only",
+                "--server-option",
+                "trace",
+                "origin",
+                "main",
+            ],
         ),
         (
             "pull --jobs",
@@ -649,7 +729,10 @@ fn pull_fetch_inherited_option_family_matches_stock_git() {
         ("pull -4", &["pull", "--ff-only", "-4", "origin", "main"]),
         ("pull -6", &["pull", "--ff-only", "-6", "origin", "main"]),
         ("pull -k", &["pull", "--ff-only", "-k", "origin", "main"]),
-        ("pull -o", &["pull", "--ff-only", "-o", "trace", "origin", "main"]),
+        (
+            "pull -o",
+            &["pull", "--ff-only", "-o", "trace", "origin", "main"],
+        ),
         ("pull -p", &["pull", "--ff-only", "-p", "origin", "main"]),
     ];
 
@@ -807,14 +890,22 @@ fn pull_merge_commit_mode_flags_match_stock_git_for_explicit_local_branch() {
         assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
 
         if expect_head_stable {
-            assert_eq!(git(&git_repo, ["rev-parse", "HEAD"]), git_head_before, "{label} git HEAD");
+            assert_eq!(
+                git(&git_repo, ["rev-parse", "HEAD"]),
+                git_head_before,
+                "{label} git HEAD"
+            );
             assert_eq!(
                 git(&zmin_repo, ["rev-parse", "HEAD"]),
                 zmin_head_before,
                 "{label} zmin HEAD"
             );
         } else {
-            assert_ne!(git(&git_repo, ["rev-parse", "HEAD"]), git_head_before, "{label} git HEAD");
+            assert_ne!(
+                git(&git_repo, ["rev-parse", "HEAD"]),
+                git_head_before,
+                "{label} git HEAD"
+            );
             assert_ne!(
                 git(&zmin_repo, ["rev-parse", "HEAD"]),
                 zmin_head_before,
@@ -1139,6 +1230,28 @@ fn pull_merge_commit_flag_family_matches_stock_git_for_explicit_local_branch() {
 }
 
 #[test]
+fn pull_merge_gpg_sign_family_matches_stock_git_for_explicit_local_branch() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let script = workspace_root.join("tools/git-merge-pull-gpg-oracle-smoke.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("pull")
+        .env("ZMIN_BIN", zmin_bin())
+        .current_dir(workspace_root)
+        .output()
+        .expect("run pull gpg oracle smoke");
+    assert!(
+        output.status.success(),
+        "pull gpg oracle smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn pull_merge_allow_unrelated_histories_matches_stock_git_for_explicit_local_branch() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("two");
@@ -1163,7 +1276,13 @@ fn pull_merge_allow_unrelated_histories_matches_stock_git_for_explicit_local_bra
         git_with_env(repo, ["commit", "-m", "local"]);
     }
 
-    let args = ["pull", "--allow-unrelated-histories", "--no-rebase", "../two", "main"];
+    let args = [
+        "pull",
+        "--allow-unrelated-histories",
+        "--no-rebase",
+        "../two",
+        "main",
+    ];
     let git_output = command_any_output("git", &git_repo, &args, "pull unrelated git");
     let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, "pull unrelated zmin");
     assert_eq!(zmin_output, git_output);
@@ -10223,11 +10342,21 @@ fn fetch_pack_exec_matches_stock_git() {
     chmod_executable(&wrapper);
     git(
         dir.path(),
-        ["init", "-b", "main", git_client.to_str().expect("git client")],
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client"),
+        ],
     );
     git(
         dir.path(),
-        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client"),
+        ],
     );
 
     let wrapper_command = shell_command_path(wrapper.to_str().expect("wrapper path"));
@@ -10239,8 +10368,7 @@ fn fetch_pack_exec_matches_stock_git() {
         "refs/heads/main",
     ];
     let git_output = command_any_output("git", &git_client, &args, "git fetch-pack exec");
-    let zmin_output =
-        command_any_output(zmin_bin(), &zmin_client, &args, "zmin fetch-pack exec");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_client, &args, "zmin fetch-pack exec");
 
     assert_eq!(zmin_output.0, git_output.0);
     assert_eq!(zmin_output.1, git_output.1);
@@ -10288,11 +10416,21 @@ fn fetch_pack_shallow_since_matches_stock_git() {
     }
     git(
         dir.path(),
-        ["init", "-b", "main", git_client.to_str().expect("git client")],
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client"),
+        ],
     );
     git(
         dir.path(),
-        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client"),
+        ],
     );
 
     let source_path = source.to_str().expect("source path");
@@ -10302,8 +10440,7 @@ fn fetch_pack_shallow_since_matches_stock_git() {
         source_path,
         "refs/heads/main",
     ];
-    let git_output =
-        command_any_output("git", &git_client, &args, "git fetch-pack shallow-since");
+    let git_output = command_any_output("git", &git_client, &args, "git fetch-pack shallow-since");
     let zmin_output = command_any_output(
         zmin_bin(),
         &zmin_client,
@@ -10357,11 +10494,21 @@ fn fetch_pack_shallow_exclude_matches_stock_git() {
     let tip = git(&source, ["rev-parse", "HEAD"]);
     git(
         dir.path(),
-        ["init", "-b", "main", git_client.to_str().expect("git client")],
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client"),
+        ],
     );
     git(
         dir.path(),
-        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client"),
+        ],
     );
 
     let source_path = source.to_str().expect("source path");
@@ -10420,11 +10567,21 @@ fn fetch_pack_deepen_relative_matches_stock_git() {
     }
     git(
         dir.path(),
-        ["init", "-b", "main", git_client.to_str().expect("git client")],
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client"),
+        ],
     );
     git(
         dir.path(),
-        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client"),
+        ],
     );
 
     let source_path = source.to_str().expect("source path");
@@ -10490,11 +10647,21 @@ fn fetch_pack_check_self_contained_and_connected_matches_stock_git() {
     git_with_env(&source, ["commit", "-m", "initial"]);
     git(
         dir.path(),
-        ["init", "-b", "main", git_client.to_str().expect("git client")],
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client"),
+        ],
     );
     git(
         dir.path(),
-        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client"),
+        ],
     );
 
     let source_path = source.to_str().expect("source path");
@@ -10545,11 +10712,21 @@ fn fetch_pack_refetch_matches_stock_git_on_prefetched_client() {
     }
     git(
         dir.path(),
-        ["init", "-b", "main", git_client.to_str().expect("git client")],
+        [
+            "init",
+            "-b",
+            "main",
+            git_client.to_str().expect("git client"),
+        ],
     );
     git(
         dir.path(),
-        ["init", "-b", "main", zmin_client.to_str().expect("zmin client")],
+        [
+            "init",
+            "-b",
+            "main",
+            zmin_client.to_str().expect("zmin client"),
+        ],
     );
 
     let source_path = source.to_str().expect("source path");
@@ -11175,14 +11352,40 @@ fn send_pack_signed_and_push_option_modes_match_stock_git() {
     let git_remote_path = git_remote.to_str().expect("git remote");
     let zmin_remote_path = zmin_remote.to_str().expect("zmin remote");
     for args in [
-        &["send-pack", "--no-signed", zmin_remote_path, "refs/heads/main"][..],
-        &["send-pack", "--signed=false", zmin_remote_path, "refs/heads/main"][..],
-        &["send-pack", "--signed=if-asked", zmin_remote_path, "refs/heads/main"][..],
-        &["send-pack", "--exec=git-receive-pack", zmin_remote_path, "refs/heads/main"][..],
+        &[
+            "send-pack",
+            "--no-signed",
+            zmin_remote_path,
+            "refs/heads/main",
+        ][..],
+        &[
+            "send-pack",
+            "--signed=false",
+            zmin_remote_path,
+            "refs/heads/main",
+        ][..],
+        &[
+            "send-pack",
+            "--signed=if-asked",
+            zmin_remote_path,
+            "refs/heads/main",
+        ][..],
+        &[
+            "send-pack",
+            "--exec=git-receive-pack",
+            zmin_remote_path,
+            "refs/heads/main",
+        ][..],
     ] {
         let git_args = args
             .iter()
-            .map(|value| if *value == zmin_remote_path { git_remote_path } else { *value })
+            .map(|value| {
+                if *value == zmin_remote_path {
+                    git_remote_path
+                } else {
+                    *value
+                }
+            })
             .collect::<Vec<_>>();
         let zmin = command_any_output(zmin_bin(), &zmin_work, args, "zmin");
         let git = command_any_output("git", &git_work, &git_args, "git");
@@ -11197,11 +11400,21 @@ fn send_pack_signed_and_push_option_modes_match_stock_git() {
 
     let git_push_option = git_failure_output(
         &git_work,
-        &["send-pack", "--push-option=abc", git_remote_path, "refs/heads/main"],
+        &[
+            "send-pack",
+            "--push-option=abc",
+            git_remote_path,
+            "refs/heads/main",
+        ],
     );
     let zmin_push_option = run_zmin_failure_output(
         &zmin_work,
-        &["send-pack", "--push-option=abc", zmin_remote_path, "refs/heads/main"],
+        &[
+            "send-pack",
+            "--push-option=abc",
+            zmin_remote_path,
+            "refs/heads/main",
+        ],
     );
     assert_eq!(zmin_push_option, git_push_option);
 
