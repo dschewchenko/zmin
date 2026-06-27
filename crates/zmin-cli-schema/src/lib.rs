@@ -4479,6 +4479,8 @@ pub enum Command {
         files_without_match: bool,
         #[arg(short = 'c', long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(long = "all-match", action = ArgAction::SetTrue)]
+        all_match: bool,
         #[arg(short = 'm', long = "max-count")]
         max_count: Option<usize>,
         #[arg(short = 'A', long = "after-context")]
@@ -4509,6 +4511,10 @@ pub enum Command {
         heading: bool,
         #[arg(long = "break", action = ArgAction::SetTrue)]
         break_: bool,
+        #[arg(short = 'p', long = "show-function", action = ArgAction::SetTrue)]
+        show_function: bool,
+        #[arg(short = 'W', long = "function-context", action = ArgAction::SetTrue)]
+        function_context: bool,
         #[arg(short = 'G', long = "basic-regexp", action = ArgAction::SetTrue)]
         basic_regexp: bool,
         #[arg(short = 'E', long = "extended-regexp", action = ArgAction::SetTrue)]
@@ -4519,6 +4525,10 @@ pub enum Command {
         text: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
+        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
+        color: Option<String>,
+        #[arg(long = "no-color", action = ArgAction::SetTrue)]
+        no_color: bool,
         #[arg(short = 'w', long = "word-regexp", action = ArgAction::SetTrue)]
         word_regexp: bool,
         #[arg(long = "column", action = ArgAction::SetTrue)]

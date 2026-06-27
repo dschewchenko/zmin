@@ -10,6 +10,7 @@ pub(crate) fn grep(
     name_only: bool,
     files_without_match: bool,
     count: bool,
+    all_match: bool,
     max_count: Option<usize>,
     after_context: Option<usize>,
     before_context: Option<usize>,
@@ -25,11 +26,15 @@ pub(crate) fn grep(
     full_name: bool,
     heading: bool,
     break_groups: bool,
+    show_function: bool,
+    function_context: bool,
     basic_regexp: bool,
     extended_regexp: bool,
     fixed_strings: bool,
     text: bool,
     no_textconv: bool,
+    color: Option<String>,
+    no_color: bool,
     word_regexp: bool,
     column: bool,
     only_matching: bool,
@@ -64,6 +69,7 @@ pub(crate) fn grep(
     let context = context.unwrap_or(0);
     let before_context = before_context.unwrap_or(context);
     let after_context = after_context.unwrap_or(context);
+    let color_mode = grep_color_mode(color.as_deref(), no_color)?;
     let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv);
     let mut selected_any = false;
     let mut printed_group = false;
@@ -101,6 +107,7 @@ pub(crate) fn grep(
             files_with_matches,
             files_without_match,
             count,
+            all_match,
             max_count,
             before_context,
             after_context,
@@ -110,7 +117,10 @@ pub(crate) fn grep(
             full_name,
             heading,
             break_groups,
+            show_function,
+            function_context,
             quiet,
+            color_mode,
             word_regexp,
             column,
             only_matching,
@@ -273,6 +283,11 @@ impl GrepMatcher {
             }
         }
     }
+
+    fn matches_anywhere(&self, lines: &[&[u8]], word_regexp: bool) -> bool {
+        lines.iter()
+            .any(|line| !self.match_ranges(line, word_regexp).is_empty())
+    }
 }
 
 enum GrepExpressionMode {
@@ -379,11 +394,23 @@ impl GrepExpression {
             }
         }
     }
+
+    fn file_matches_all(&self, lines: &[&[u8]], word_regexp: bool) -> bool {
+        self.matchers
+            .iter()
+            .all(|matcher| matcher.matches_anywhere(lines, word_regexp))
+    }
 }
 
 struct GrepFileOutcome {
     matched: bool,
     printed: bool,
+}
+
+#[derive(Clone, Copy)]
+enum GrepColorMode {
+    Never,
+    Always,
 }
 
 fn grep_cwd_prefix(repo: &GitRepo) -> Result<Vec<u8>> {
@@ -405,6 +432,7 @@ fn grep_file(
     files_with_matches: bool,
     files_without_match: bool,
     count: bool,
+    all_match: bool,
     max_count: Option<usize>,
     before_context: usize,
     after_context: usize,
@@ -414,7 +442,10 @@ fn grep_file(
     full_name: bool,
     heading: bool,
     break_groups: bool,
+    show_function: bool,
+    function_context: bool,
     quiet: bool,
+    color_mode: GrepColorMode,
     word_regexp: bool,
     column: bool,
     only_matching: bool,
@@ -434,6 +465,9 @@ fn grep_file(
         if is_match != invert_match {
             matching_lines.push(idx);
         }
+    }
+    if all_match && !expression.file_matches_all(&lines, word_regexp) {
+        matching_lines.clear();
     }
     if let Some(limit) = max_count {
         matching_lines.truncate(limit);
@@ -503,6 +537,87 @@ fn grep_file(
             printed: matched,
         });
     }
+    if function_context {
+        let spans = grep_function_spans(&lines);
+        let groups = build_function_groups(&matching_lines, &spans);
+        for (group_idx, group) in groups.iter().enumerate() {
+            if printed_group || group_idx > 0 {
+                println!("--");
+            }
+            for line_idx in group.start..=group.end {
+                let line = lines[line_idx];
+                let ranges = &line_ranges[line_idx];
+                let is_match = group.matching_lines.binary_search(&line_idx).is_ok();
+                let is_header = group.header == Some(line_idx) && !is_match;
+                let separator = if is_match {
+                    ':'
+                } else if is_header {
+                    '='
+                } else if group.header.is_some() {
+                    '-'
+                } else {
+                    ':'
+                };
+                print_grep_line(
+                    output_prefix,
+                    filename_prefix,
+                    &display_path,
+                    line_number,
+                    line_idx + 1,
+                    if is_match && column {
+                        ranges.first().map(|(start, _)| start + 1)
+                    } else {
+                        None
+                    },
+                    separator,
+                    line,
+                    if is_match { ranges } else { &[] },
+                    color_mode,
+                )?;
+                emitted = true;
+            }
+        }
+        return Ok(GrepFileOutcome { matched, printed: emitted });
+    }
+    if show_function {
+        let spans = grep_function_spans(&lines);
+        let mut emitted_headers = Vec::new();
+        for idx in matching_lines {
+            let line = lines[idx];
+            let ranges = &line_ranges[idx];
+            if let Some(span) = spans.iter().find(|span| span.start <= idx && idx <= span.end) {
+                if !emitted_headers.contains(&span.start) {
+                    print_grep_line(
+                        output_prefix,
+                        filename_prefix,
+                        &display_path,
+                        false,
+                        0,
+                        None,
+                        '=',
+                        lines[span.start],
+                        &[],
+                        color_mode,
+                    )?;
+                    emitted_headers.push(span.start);
+                }
+            }
+            print_grep_line(
+                output_prefix,
+                filename_prefix,
+                &display_path,
+                line_number,
+                idx + 1,
+                if column { ranges.first().map(|(start, _)| start + 1) } else { None },
+                ':',
+                line,
+                ranges,
+                color_mode,
+            )?;
+            emitted = true;
+        }
+        return Ok(GrepFileOutcome { matched, printed: emitted });
+    }
     if before_context > 0 || after_context > 0 {
         let groups = build_context_groups(lines.len(), &matching_lines, before_context, after_context);
         for (group_idx, (start, end)) in groups.iter().enumerate() {
@@ -513,25 +628,22 @@ fn grep_file(
                 let is_match = matching_lines.binary_search(&line_idx).is_ok();
                 let line = lines[line_idx];
                 let ranges = &line_ranges[line_idx];
-                if let Some(prefix) = output_prefix {
-                    let separator = if is_match { ':' } else { '-' };
-                    print!("{prefix}{separator}");
-                }
-                if filename_prefix {
-                    let separator = if is_match { ':' } else { '-' };
-                    print!("{display_path}{separator}");
-                    if line_number {
-                        print!("{}{separator}", line_idx + 1);
-                    }
-                } else if line_number {
-                    let separator = if is_match { ':' } else { '-' };
-                    print!("{}{separator}", line_idx + 1);
-                }
-                if is_match && column {
-                    print!("{}:", ranges[0].0 + 1);
-                }
-                io::stdout().write_all(line)?;
-                println!();
+                print_grep_line(
+                    output_prefix,
+                    filename_prefix,
+                    &display_path,
+                    line_number,
+                    line_idx + 1,
+                    if is_match && column {
+                        ranges.first().map(|(start, _)| start + 1)
+                    } else {
+                        None
+                    },
+                    if is_match { ':' } else { '-' },
+                    line,
+                    if is_match { ranges } else { &[] },
+                    color_mode,
+                )?;
                 emitted = true;
             }
         }
@@ -553,40 +665,34 @@ fn grep_file(
         }
         if only_matching {
             for &(start, end) in ranges {
-                if let Some(prefix) = output_prefix {
-                    print!("{prefix}:");
-                }
-                if filename_prefix {
-                    print!("{display_path}:");
-                }
-                if line_number {
-                    print!("{}:", idx + 1);
-                }
-                if column {
-                    print!("{}:", start + 1);
-                }
-                println!("{}", String::from_utf8_lossy(&line[start..end]));
+                print_grep_line(
+                    output_prefix,
+                    filename_prefix,
+                    &display_path,
+                    line_number,
+                    idx + 1,
+                    if column { Some(start + 1) } else { None },
+                    ':',
+                    &line[start..end],
+                    &[(0, end - start)],
+                    color_mode,
+                )?;
                 emitted = true;
             }
             continue;
         }
-        if let Some(prefix) = output_prefix {
-            print!("{prefix}:");
-        }
-        if filename_prefix {
-            if line_number {
-                print!("{display_path}:{}:", idx + 1);
-            } else {
-                print!("{display_path}:");
-            }
-        } else if line_number {
-            print!("{}:", idx + 1);
-        }
-        if column {
-            print!("{}:", ranges[0].0 + 1);
-        }
-        io::stdout().write_all(line)?;
-        println!();
+        print_grep_line(
+            output_prefix,
+            filename_prefix,
+            &display_path,
+            line_number,
+            idx + 1,
+            if column { ranges.first().map(|(start, _)| start + 1) } else { None },
+            ':',
+            line,
+            ranges,
+            color_mode,
+        )?;
         emitted = true;
     }
     Ok(GrepFileOutcome {
@@ -629,6 +735,168 @@ fn build_context_groups(
         groups.push((start, end));
     }
     groups
+}
+
+struct GrepFunctionSpan {
+    start: usize,
+    end: usize,
+}
+
+struct GrepFunctionGroup {
+    start: usize,
+    end: usize,
+    header: Option<usize>,
+    matching_lines: Vec<usize>,
+}
+
+fn grep_function_spans(lines: &[&[u8]]) -> Vec<GrepFunctionSpan> {
+    let mut spans = Vec::new();
+    let mut idx = 0usize;
+    while idx < lines.len() {
+        if !is_function_header_line(lines[idx]) {
+            idx += 1;
+            continue;
+        }
+        let start = idx;
+        let mut balance = brace_delta(lines[idx]);
+        let mut end = idx;
+        while end + 1 < lines.len() && balance > 0 {
+            end += 1;
+            balance += brace_delta(lines[end]);
+        }
+        spans.push(GrepFunctionSpan { start, end });
+        idx = end + 1;
+    }
+    spans
+}
+
+fn build_function_groups(matching_lines: &[usize], spans: &[GrepFunctionSpan]) -> Vec<GrepFunctionGroup> {
+    let mut groups = Vec::new();
+    for &line_idx in matching_lines {
+        if let Some(span) = spans.iter().find(|span| span.start <= line_idx && line_idx <= span.end) {
+            if let Some(group) = groups
+                .iter_mut()
+                .find(|group: &&mut GrepFunctionGroup| group.start == span.start && group.end == span.end)
+            {
+                group.matching_lines.push(line_idx);
+            } else {
+                groups.push(GrepFunctionGroup {
+                    start: span.start,
+                    end: span.end,
+                    header: Some(span.start),
+                    matching_lines: vec![line_idx],
+                });
+            }
+        } else {
+            groups.push(GrepFunctionGroup {
+                start: line_idx,
+                end: line_idx,
+                header: None,
+                matching_lines: vec![line_idx],
+            });
+        }
+    }
+    groups
+}
+
+fn is_function_header_line(line: &[u8]) -> bool {
+    let trimmed = String::from_utf8_lossy(line);
+    let trimmed = trimmed.trim();
+    !trimmed.is_empty()
+        && !trimmed.starts_with('{')
+        && trimmed.ends_with('{')
+        && trimmed.contains('(')
+        && trimmed.contains(')')
+}
+
+fn brace_delta(line: &[u8]) -> i32 {
+    line.iter().fold(0i32, |acc, byte| match byte {
+        b'{' => acc + 1,
+        b'}' => acc - 1,
+        _ => acc,
+    })
+}
+
+fn grep_color_mode(color: Option<&str>, no_color: bool) -> Result<GrepColorMode> {
+    if no_color {
+        return Ok(GrepColorMode::Never);
+    }
+    match color {
+        None => Ok(GrepColorMode::Never),
+        Some("") | Some("always") => Ok(GrepColorMode::Always),
+        Some("never") => Ok(GrepColorMode::Never),
+        Some(value) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("grep color mode not yet modeled on this lane: {value}"),
+        }),
+    }
+}
+
+fn print_grep_line(
+    output_prefix: Option<&str>,
+    filename_prefix: bool,
+    display_path: &str,
+    line_number: bool,
+    line_no: usize,
+    column_value: Option<usize>,
+    separator: char,
+    line: &[u8],
+    ranges: &[(usize, usize)],
+    color_mode: GrepColorMode,
+) -> Result<()> {
+    if let Some(prefix) = output_prefix {
+        print_grep_prefix(prefix, separator, false, color_mode);
+    }
+    if filename_prefix {
+        print_grep_prefix(display_path, separator, true, color_mode);
+        if line_number {
+            print!("{}{}", line_no, separator);
+        }
+    } else if line_number {
+        print!("{}{}", line_no, separator);
+    }
+    if let Some(column_value) = column_value {
+        print!("{column_value}:");
+    }
+    print_grep_payload(line, ranges, color_mode)?;
+    println!();
+    Ok(())
+}
+
+fn print_grep_prefix(value: &str, separator: char, color_name: bool, color_mode: GrepColorMode) {
+    match color_mode {
+        GrepColorMode::Never => print!("{value}{separator}"),
+        GrepColorMode::Always => {
+            if color_name {
+                print!("\u{1b}[35m{value}\u{1b}[m");
+            } else {
+                print!("{value}");
+            }
+            print!("\u{1b}[36m{separator}\u{1b}[m");
+        }
+    }
+}
+
+fn print_grep_payload(line: &[u8], ranges: &[(usize, usize)], color_mode: GrepColorMode) -> Result<()> {
+    match color_mode {
+        GrepColorMode::Never => io::stdout().write_all(line)?,
+        GrepColorMode::Always => {
+            let mut cursor = 0usize;
+            for &(start, end) in ranges {
+                if cursor < start {
+                    io::stdout().write_all(&line[cursor..start])?;
+                }
+                print!("\u{1b}[1;31m");
+                io::stdout().write_all(&line[start..end])?;
+                print!("\u{1b}[m");
+                cursor = end;
+            }
+            if cursor < line.len() {
+                io::stdout().write_all(&line[cursor..])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn grep_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {

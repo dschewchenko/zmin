@@ -230,3 +230,51 @@ fn grep_context_expression_and_pattern_source_family_matches_stock_git() {
         );
     }
 }
+
+#[test]
+fn grep_color_all_match_and_function_context_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(
+        repo.path().join("sample.c"),
+        b"static int alpha(void) {\n    int hello = 1;\n    return hello;\n}\n\nstatic int beta(void) {\n    int zeta = 2;\n    int hello_beta = zeta;\n    return hello_beta;\n}\n",
+    )
+    .expect("write c sample");
+    fs::write(repo.path().join("notes.txt"), b"hello\nzeta\n").expect("write notes");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    for args in [
+        ["grep", "--color=always", "hello"].as_slice(),
+        ["grep", "--color", "hello"].as_slice(),
+        ["grep", "--color=always", "--no-color", "hello"].as_slice(),
+        ["grep", "--all-match", "-e", "hello", "--or", "-e", "zeta"].as_slice(),
+        ["grep", "-p", "hello"].as_slice(),
+        ["grep", "--show-function", "hello"].as_slice(),
+        ["grep", "-W", "hello"].as_slice(),
+        ["grep", "--function-context", "hello"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status args: {args:?}"
+        );
+    }
+
+    let repo_no_all_match = git_init();
+    configure_identity(repo_no_all_match.path());
+    fs::write(repo_no_all_match.path().join("a.txt"), b"hello\n").expect("write a");
+    fs::write(repo_no_all_match.path().join("b.txt"), b"zeta\n").expect("write b");
+    git(repo_no_all_match.path(), ["add", "-A"]);
+    git_with_env(repo_no_all_match.path(), ["commit", "-m", "initial"]);
+    let args = ["grep", "--all-match", "-e", "hello", "--or", "-e", "zeta"];
+    assert_eq!(
+        run_zmin_status(repo_no_all_match.path(), args),
+        git_status(repo_no_all_match.path(), args)
+    );
+}
