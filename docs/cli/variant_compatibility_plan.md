@@ -21,6 +21,71 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free shared `diff*`
+reviewed-complete closure on the already represented porcelain `--output` plus
+plumbing `--output` and `--line-prefix` lanes. This batch promoted the
+existing exact stock-Git matrix evidence for `diff --output`,
+`diff-files --output`, `diff-files --line-prefix`, `diff-index --output`,
+`diff-index --line-prefix`, `diff-tree --output`, and
+`diff-tree --line-prefix` into the reviewed-complete layer, finishing the full
+represented `diff`, `diff-files`, `diff-index`, and `diff-tree` surfaces
+without adding new runtime behavior.
+
+The batch closed one cohesive census/evidence gap rather than adding new diff
+implementation:
+
+- Zmin already matched stock Git on the covered helper-free `diff*` lanes, and
+  the remaining work here was to lift the existing matrix rows plus the shared
+  `git_diff_compat::diff_output_and_plumbing_line_prefix_match_stock_git`
+  stock-oracle evidence into reviewed-complete doc-option pairs and the
+  reviewed-complete command matrices so the represented `diff*` surfaces are
+  counted correctly
+
+Focused verification was
+`cargo test -p zmin-cli --test git_diff_compat diff_output_and_plumbing_line_prefix_match_stock_git -- --exact --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2178 / 3212`
+- represented documented command-option pairs: `2178 / 3212`
+- matrix rows: `6319`
+- verified rows: `5507`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `diff`: `84 / 84` reviewed-complete documented option pairs,
+  `84 / 84` represented documented option pairs, `251` written rows, `251`
+  classified rows, `247` stock-matching rows, `4` invalid-input rows, and `0`
+  exact-open rows
+- `diff-files`: `81 / 81` reviewed-complete documented option pairs,
+  `81 / 81` represented documented option pairs, `100` written rows, `100`
+  classified rows, `100` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+- `diff-index`: `80 / 80` reviewed-complete documented option pairs,
+  `80 / 80` represented documented option pairs, `107` written rows, `107`
+  classified rows, `107` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+- `diff-tree`: `87 / 87` reviewed-complete documented option pairs,
+  `87 / 87` represented documented option pairs, `119` written rows, `119`
+  classified rows, `119` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move to the `format-patch`
+schema/documented-option expansion head instead of staying on `diff*`, because
+represented-versus-reviewed gaps are now closed and the largest remaining safe
+helper-free backlog is `format-patch` with `150`
+`doc_option_not_in_zmin_schema` rows in
+`docs/cli/census/remaining_to_fix_or_verify.tsv` and only `12 / 162`
+documented option pairs currently represented.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `commit`
 reviewed-complete closure on the already represented verify, include,
 pathspec-file, no-signoff, no-post-rewrite, patch, and fixture-key gpg-sign
