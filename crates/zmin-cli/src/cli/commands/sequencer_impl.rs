@@ -1386,42 +1386,119 @@ fn bisect_clear_refs(repo: &GitRepo) -> Result<()> {
     }
 }
 
-pub(crate) fn sequencer_command(
-    command: &str,
-    abort: bool,
-    continue_: bool,
-    no_commit: bool,
-    mainline: Option<usize>,
-    commits: Vec<String>,
-) -> Result<()> {
-    if abort && continue_ {
+pub(crate) struct SequencerCommandOptions<'a> {
+    pub(crate) command: &'a str,
+    pub(crate) abort: bool,
+    pub(crate) continue_: bool,
+    pub(crate) ff: bool,
+    pub(crate) no_commit: bool,
+    pub(crate) mainline: Option<usize>,
+    pub(crate) record_origin: bool,
+    pub(crate) no_record_origin: bool,
+    pub(crate) signoff: bool,
+    pub(crate) edit: bool,
+    pub(crate) no_edit: bool,
+    pub(crate) cleanup: Option<&'a str>,
+    pub(crate) rerere_autoupdate: bool,
+    pub(crate) no_rerere_autoupdate: bool,
+    pub(crate) strategy: Option<&'a str>,
+    pub(crate) strategy_option: Vec<String>,
+    pub(crate) gpg_sign: Option<String>,
+    pub(crate) no_gpg_sign: bool,
+    pub(crate) commits: Vec<String>,
+}
+
+pub(crate) fn sequencer_command(options: SequencerCommandOptions<'_>) -> Result<()> {
+    let command = options.command;
+    if options.abort && options.continue_ {
         return Err(CliError::Fatal {
             code: 129,
             message: format!("cannot use --abort and --continue with {command}"),
         });
     }
-    if abort {
+    if options.abort {
         return Err(CliError::Stderr {
             code: 128,
             text: format!("error: no cherry-pick or revert in progress\nfatal: {command} failed\n"),
         });
     }
-    if continue_ {
+    if options.continue_ {
         return Err(CliError::Stderr {
             code: 128,
             text: format!("error: no cherry-pick or revert in progress\nfatal: {command} failed\n"),
         });
     }
-    sequencer_pick(command == "revert", no_commit, mainline, commits)
+    sequencer_pick(SequencerPickOptions {
+        revert: command == "revert",
+        ff: options.ff,
+        no_commit: options.no_commit,
+        mainline: options.mainline,
+        record_origin: options.record_origin,
+        no_record_origin: options.no_record_origin,
+        signoff: options.signoff,
+        edit: options.edit,
+        no_edit: options.no_edit,
+        cleanup: options.cleanup.map(str::to_owned),
+        rerere_autoupdate: options.rerere_autoupdate,
+        no_rerere_autoupdate: options.no_rerere_autoupdate,
+        strategy: options.strategy.map(str::to_owned),
+        strategy_option: options.strategy_option,
+        gpg_sign: options.gpg_sign,
+        no_gpg_sign: options.no_gpg_sign,
+        commits: options.commits,
+    })
+}
+
+pub(crate) struct SequencerPickOptions {
+    pub(crate) revert: bool,
+    pub(crate) ff: bool,
+    pub(crate) no_commit: bool,
+    pub(crate) mainline: Option<usize>,
+    pub(crate) record_origin: bool,
+    pub(crate) no_record_origin: bool,
+    pub(crate) signoff: bool,
+    pub(crate) edit: bool,
+    pub(crate) no_edit: bool,
+    pub(crate) cleanup: Option<String>,
+    pub(crate) rerere_autoupdate: bool,
+    pub(crate) no_rerere_autoupdate: bool,
+    pub(crate) strategy: Option<String>,
+    pub(crate) strategy_option: Vec<String>,
+    pub(crate) gpg_sign: Option<String>,
+    pub(crate) no_gpg_sign: bool,
+    pub(crate) commits: Vec<String>,
+}
+
+fn default_sequencer_pick_options(commits: Vec<String>) -> SequencerPickOptions {
+    SequencerPickOptions {
+        revert: false,
+        ff: false,
+        no_commit: false,
+        mainline: None,
+        record_origin: false,
+        no_record_origin: false,
+        signoff: false,
+        edit: false,
+        no_edit: false,
+        cleanup: None,
+        rerere_autoupdate: false,
+        no_rerere_autoupdate: false,
+        strategy: None,
+        strategy_option: Vec::new(),
+        gpg_sign: None,
+        no_gpg_sign: false,
+        commits,
+    }
 }
 
 pub(crate) fn sequencer_pick(
-    revert: bool,
-    no_commit: bool,
-    mainline: Option<usize>,
-    commits: Vec<String>,
+    options: SequencerPickOptions,
 ) -> Result<()> {
-    if commits.len() != 1 {
+    let _rerere_autoupdate = options.rerere_autoupdate;
+    let _no_rerere_autoupdate = options.no_rerere_autoupdate;
+    let _strategy = options.strategy.as_deref();
+    let _strategy_option = &options.strategy_option;
+    if options.commits.len() != 1 {
         return Err(CliError::Fatal {
             code: 129,
             message: "currently exactly one commit is supported".into(),
@@ -1437,21 +1514,33 @@ pub(crate) fn sequencer_pick(
             message: "local changes would be overwritten".into(),
         });
     }
-    let picked_id = resolve_commitish_or_bad_revision(&repo, &store, &commits[0])?;
+    let picked_id = resolve_commitish_or_bad_revision(&repo, &store, &options.commits[0])?;
     let picked = commit_cache.read_commit(&picked_id)?;
-    let parent_id = sequencer_parent_for_pick(&picked, mainline)?;
-    let base_index = if revert {
+    let parent_id = sequencer_parent_for_pick(&picked, options.mainline)?;
+    let base_index = if options.revert {
         tree_cache.read_tree_to_index(&picked.tree)?
     } else {
         read_treeish_index_cached(&repo, &store, &tree_cache, &parent_id.to_hex())?
     };
-    let patch_index = if revert {
+    let patch_index = if options.revert {
         read_treeish_index_cached(&repo, &store, &tree_cache, &parent_id.to_hex())?
     } else {
         tree_cache.read_tree_to_index(&picked.tree)?
     };
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
+    if !options.revert && options.ff && head_id == parent_id {
+        update_head_to_commit(&refs, &picked_id)?;
+        let fast_forward_index = tree_cache.read_tree_to_index(&picked.tree)?;
+        fast_forward_index.write_to_path(&repo.index_path)?;
+        checkout_index(
+            &store,
+            &fast_forward_index,
+            &repo.root,
+            CheckoutIndexOptions { force: true },
+        )?;
+        return Ok(());
+    }
     let current_index = read_head_index_with_caches(&repo, &commit_cache, &tree_cache)?;
     let new_index = apply_tree_delta(&base_index, &patch_index, &current_index)?;
     remove_tracked_paths_missing_from_target(&repo, &current_index, &new_index)?;
@@ -1462,19 +1551,32 @@ pub(crate) fn sequencer_pick(
         &repo.root,
         CheckoutIndexOptions { force: true },
     )?;
-    let message = if revert {
+    let mut message = if options.revert {
         revert_message(&picked_id, &picked, &parent_id)
     } else {
         picked.message.clone()
     };
-    if no_commit {
+    if !options.revert && options.record_origin && !options.no_record_origin {
+        append_cherry_pick_origin(&mut message, &picked_id);
+    }
+    if options.signoff {
+        let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
+        super::commit_commands::append_commit_signoff(&mut message, &committer)?;
+    }
+    let cleanup_mode = sequencer_cleanup_mode(options.cleanup.as_deref())?;
+    if options.edit && !options.no_edit {
+        message = edit_sequencer_message(&repo, &message, cleanup_mode)?;
+    } else {
+        message = cleanup_commit_message(message, cleanup_mode);
+    }
+    if options.no_commit {
         let auto_merge_tree = write_tree_from_index(&store, &new_index)?;
         fs::write(
             repo.git_dir.join("AUTO_MERGE"),
             auto_merge_tree.to_hex() + "\n",
         )?;
         fs::write(repo.git_dir.join("MERGE_MSG"), &message)?;
-        if revert {
+        if options.revert {
             fs::write(repo.git_dir.join("COMMIT_EDITMSG"), &picked.message)?;
             fs::write(repo.git_dir.join("REVERT_HEAD"), picked_id.to_hex() + "\n")?;
         } else {
@@ -1487,16 +1589,20 @@ pub(crate) fn sequencer_pick(
     if current_head.tree == tree {
         return Err(CliError::Message("nothing to commit".into()));
     }
-    let author = if revert {
+    let author = if options.revert {
         signature_from_identity(&repo, "GIT_AUTHOR")?
     } else {
         signature_from_commit_bytes(&picked.author)?
     };
     let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
-    let commit = CommitBuilder::new(tree.clone(), author.clone(), committer)
-        .parent(head_id)
-        .message(message.clone())?
-        .encode()?;
+    let mut builder = CommitBuilder::new(tree.clone(), author.clone(), committer).parent(head_id);
+    let mut builder = builder.message(message.clone())?;
+    if !options.no_gpg_sign {
+        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(&repo, &builder, options.gpg_sign.as_deref())? {
+            builder = builder.gpg_signature(signature)?;
+        }
+    }
+    let commit = builder.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     fs::write(repo.git_dir.join("AUTO_MERGE"), tree.to_hex() + "\n")?;
@@ -1508,9 +1614,50 @@ pub(crate) fn sequencer_pick(
         &author,
         &current_head.tree,
         &tree,
+        !options.revert || !options.edit || options.no_edit,
     )?;
     Ok(())
 }
+
+fn append_cherry_pick_origin(message: &mut Vec<u8>, picked_id: &ObjectId) {
+    if !message.ends_with(b"\n") {
+        message.push(b'\n');
+    }
+    message.extend_from_slice(
+        format!("\n(cherry picked from commit {})\n", picked_id.to_hex()).as_bytes(),
+    );
+}
+
+fn sequencer_cleanup_mode(value: Option<&str>) -> Result<CommitCleanupMode> {
+    match value {
+        None => Ok(CommitCleanupMode::Default),
+        Some("strip") => Ok(CommitCleanupMode::Strip),
+        Some("whitespace") => Ok(CommitCleanupMode::Whitespace),
+        Some("verbatim") => Ok(CommitCleanupMode::Verbatim),
+        Some("scissors") => Ok(CommitCleanupMode::Scissors),
+        Some("default") => Ok(CommitCleanupMode::Default),
+        Some(other) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("Invalid cleanup mode {other}"),
+        }),
+    }
+}
+
+fn edit_sequencer_message(
+    repo: &GitRepo,
+    message: &[u8],
+    cleanup_mode: CommitCleanupMode,
+) -> Result<Vec<u8>> {
+    let path = repo.git_dir.join("COMMIT_EDITMSG");
+    fs::write(&path, message)?;
+    run_commit_editor(repo, &path)?;
+    let mut edited = fs::read(&path)?;
+    if !edited.ends_with(b"\n") {
+        edited.push(b'\n');
+    }
+    Ok(cleanup_commit_message(edited, cleanup_mode))
+}
+
 
 fn print_sequencer_commit_summary(
     repo: &GitRepo,
@@ -1520,6 +1667,7 @@ fn print_sequencer_commit_summary(
     author: &Signature,
     parent_tree: &ObjectId,
     tree: &ObjectId,
+    show_date: bool,
 ) -> Result<()> {
     let branch = sequencer_summary_branch(repo)?;
     println!(
@@ -1527,7 +1675,9 @@ fn print_sequencer_commit_summary(
         short_object_id(id),
         commit_subject(message)
     );
-    println!(" Date: {}", sequencer_signature_summary_date(author)?);
+    if show_date {
+        println!(" Date: {}", sequencer_signature_summary_date(author)?);
+    }
     let tree_cache = TreeObjectCache::new(store);
     let old_index = tree_cache.read_tree_to_index(parent_tree)?;
     let new_index = tree_cache.read_tree_to_index(tree)?;
@@ -1772,7 +1922,7 @@ pub(crate) fn rebase(
         for (index, item) in todo.iter().enumerate() {
             match item.command {
                 RebaseTodoCommand::Pick => {
-                    sequencer_pick(false, false, None, vec![item.commit.to_hex()])?
+                    sequencer_pick(default_sequencer_pick_options(vec![item.commit.to_hex()]))?
                 }
                 RebaseTodoCommand::Reword => {
                     let message = edit_rebase_commit_message(&repo, &commit_cache, &item.commit)?;
@@ -2036,7 +2186,7 @@ fn rebase_continue() -> Result<()> {
     for item in items {
         match item.command {
             RebaseTodoCommand::Pick | RebaseTodoCommand::Edit => {
-                sequencer_pick(false, false, None, vec![item.commit.to_hex()])?;
+                sequencer_pick(default_sequencer_pick_options(vec![item.commit.to_hex()]))?;
             }
             RebaseTodoCommand::Reword => {
                 let message = edit_rebase_commit_message(&repo, &commit_cache, &item.commit)?;
@@ -2272,7 +2422,7 @@ fn rebase_commits_preserving_merges(
     for commit_id in commits {
         let commit = commit_cache.read_commit(&commit_id)?;
         if commit.parents.len() <= 1 {
-            sequencer_pick(false, false, None, vec![commit_id.to_hex()])?;
+            sequencer_pick(default_sequencer_pick_options(vec![commit_id.to_hex()]))?;
             rewritten.insert(commit_id.to_hex(), refs.resolve("HEAD")?);
             continue;
         }

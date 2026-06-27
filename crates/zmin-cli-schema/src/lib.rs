@@ -976,10 +976,41 @@ pub enum Command {
         abort: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
         continue_: bool,
+        #[arg(long = "ff", action = ArgAction::SetTrue)]
+        ff: bool,
         #[arg(short = 'n', long = "no-commit", action = ArgAction::SetTrue)]
         no_commit: bool,
         #[arg(short = 'm', long = "mainline")]
         mainline: Option<usize>,
+        #[arg(short = 'x', action = ArgAction::SetTrue)]
+        record_origin: bool,
+        #[arg(short = 'r', action = ArgAction::SetTrue)]
+        no_record_origin: bool,
+        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
+        signoff: bool,
+        #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue)]
+        edit: bool,
+        #[arg(long = "cleanup")]
+        cleanup: Option<String>,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
+        rerere_autoupdate: bool,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
+        no_rerere_autoupdate: bool,
+        #[arg(long = "strategy")]
+        strategy: Option<String>,
+        #[arg(short = 'X')]
+        strategy_option: Vec<String>,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue)]
+        no_gpg_sign: bool,
         commits: Vec<String>,
     },
     Revert {
@@ -991,6 +1022,35 @@ pub enum Command {
         no_commit: bool,
         #[arg(short = 'm', long = "mainline")]
         mainline: Option<usize>,
+        #[arg(short = 'r', action = ArgAction::SetTrue)]
+        no_record_origin: bool,
+        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
+        signoff: bool,
+        #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue, overrides_with = "no_edit")]
+        edit: bool,
+        #[arg(long = "no-edit", action = ArgAction::SetTrue)]
+        no_edit: bool,
+        #[arg(long = "cleanup")]
+        cleanup: Option<String>,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
+        rerere_autoupdate: bool,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
+        no_rerere_autoupdate: bool,
+        #[arg(long = "strategy")]
+        strategy: Option<String>,
+        #[arg(short = 'X')]
+        strategy_option: Vec<String>,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue)]
+        no_gpg_sign: bool,
         commits: Vec<String>,
     },
     RequestPull {

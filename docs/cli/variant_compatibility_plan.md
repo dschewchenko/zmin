@@ -22,6 +22,63 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`cherry-pick` and `revert` documented-option surface closure on the modeled
+clean commit, editor, and signed-commit lanes. This batch added exact
+stock-Git matrix evidence for `cherry-pick --ff`, `-x`, `-r`, `--signoff`,
+`-s`, `--edit`, `-e`, `--cleanup=strip|scissors`,
+`--rerere-autoupdate`, `--no-rerere-autoupdate`, `--strategy=ort`,
+`-Xpatience`, `--gpg-sign`, `-S`, and `--no-gpg-sign`, plus `revert -r`,
+`--signoff`, `-s`, `--no-edit`, `--edit`, `-e`,
+`--cleanup=strip|scissors`, `--rerere-autoupdate`,
+`--no-rerere-autoupdate`, `--strategy=ort`, `-Xpatience`, `--gpg-sign`,
+`-S`, and `--no-gpg-sign`.
+
+The batch fixed one cohesive parser-plus-runtime gap on the sequencer path:
+
+- Zmin now exposes the remaining modeled `cherry-pick` and `revert` surface
+  for fast-forward picks, record-origin trailers, signoff, editor-backed
+  messages, cleanup modes, rerere toggles, strategy passthrough, and explicit
+  GPG signing or signing suppression, while reusing the existing
+  `commit-tree` signing implementation for the signed-commit family and
+  matching the local stock-Git `revert --edit` summary nuance where the
+  editor-backed lane omits the `Date:` line
+
+Focused verification was `cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_sequencer_compat -- --nocapture`,
+`tools/git-sequencer-gpg-oracle-smoke.sh`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(cherry-pick|revert|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2100 / 3212`
+- represented documented command-option pairs: `2150 / 3212`
+- matrix rows: `6242`
+- verified rows: `5432`
+- invalid-input rows: `785`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `cherry-pick`: `19 / 24` reviewed-complete documented option pairs, `23 / 24`
+  represented documented option pairs, `23` written rows, `23` classified
+  rows, `21` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+- `revert`: `17 / 19` reviewed-complete documented option pairs, `19 / 19`
+  represented documented option pairs, `22` written rows, `22` classified
+  rows, `20` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should reselect from the refreshed
+backlog head rather than stay on this parser closure. Both commands now have
+only narrow schema tails or expansion-only work at the head, not another
+similarly dense safe closure batch.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `commit` documented-option surface closure on the tracked-path, hook, patch,
 and signed-commit lanes. This batch finished representation for all documented
 `commit` option pairs by adding exact stock-Git matrix evidence for

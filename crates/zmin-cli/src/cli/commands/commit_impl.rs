@@ -1166,7 +1166,7 @@ fn commit_cleanup_mode(cleanup: Option<&str>, no_cleanup: bool) -> Result<Commit
     Ok(mode)
 }
 
-fn append_commit_signoff(message: &mut Vec<u8>, committer: &Signature) -> Result<()> {
+pub(crate) fn append_commit_signoff(message: &mut Vec<u8>, committer: &Signature) -> Result<()> {
     if message.iter().all(|byte| byte.is_ascii_whitespace()) {
         message.extend_from_slice(
             format!("Signed-off-by: {} <{}>", committer.name, committer.email).as_bytes(),
@@ -1916,7 +1916,7 @@ fn commit_tree(
     Ok(())
 }
 
-fn commit_tree_gpg_signature(
+pub(crate) fn commit_tree_gpg_signature(
     repo: &GitRepo,
     builder: &CommitBuilder,
     gpg_sign: Option<&str>,
