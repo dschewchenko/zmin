@@ -969,6 +969,8 @@ fn merge_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> 
         merge(MergeOptions {
             abort: false,
             continue_: false,
+            quit: false,
+            ff: true,
             ff_only: false,
             no_ff: false,
             show_diffstat: true,
@@ -983,6 +985,9 @@ fn merge_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> 
             allow_unrelated_histories: false,
             strategies: Vec::new(),
             strategy_options: Vec::new(),
+            message: None,
+            into_name: None,
+            message_file: None,
             commits: vec![id.to_hex()],
             commit_label: None,
             commit_source: None,

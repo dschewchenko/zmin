@@ -8,6 +8,8 @@ pub(crate) fn dispatch(
         runtime::Command::Merge {
             abort,
             continue_,
+            quit,
+            ff,
             ff_only,
             no_ff,
             stat,
@@ -42,8 +44,12 @@ pub(crate) fn dispatch(
             allow_unrelated_histories,
             strategies,
             strategy_options,
+            message,
+            into_name,
+            message_file,
             commits,
         } => {
+            let (ff, no_ff) = resolve_merge_fast_forward_mode(raw_args, ff, ff_only, no_ff);
             let (no_commit, squash) =
                 resolve_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
             let show_diffstat =
@@ -71,6 +77,8 @@ pub(crate) fn dispatch(
             super::merge_commands::merge(super::merge_commands::MergeOptions {
                 abort,
                 continue_,
+                quit,
+                ff,
                 ff_only,
                 no_ff,
                 show_diffstat,
@@ -85,6 +93,9 @@ pub(crate) fn dispatch(
                 allow_unrelated_histories,
                 strategies,
                 strategy_options,
+                message,
+                into_name,
+                message_file,
                 commits,
                 commit_label: None,
                 commit_source: None,
@@ -259,6 +270,41 @@ fn resolve_merge_commit_mode(
         }
     }
     (effective_no_commit, effective_squash)
+}
+
+fn resolve_merge_fast_forward_mode(
+    raw_args: &[String],
+    ff: bool,
+    ff_only: bool,
+    no_ff: bool,
+) -> (bool, bool) {
+    let mut effective_ff = ff;
+    let mut effective_ff_only = ff_only;
+    let mut effective_no_ff = no_ff;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--ff" => {
+                effective_ff = true;
+                effective_ff_only = false;
+                effective_no_ff = false;
+            }
+            "--ff-only" => {
+                effective_ff = false;
+                effective_ff_only = true;
+                effective_no_ff = false;
+            }
+            "--no-ff" => {
+                effective_ff = false;
+                effective_ff_only = false;
+                effective_no_ff = true;
+            }
+            _ => {}
+        }
+    }
+    (effective_ff || (!effective_ff_only && !effective_no_ff), effective_no_ff)
 }
 
 pub(crate) fn resolve_merge_edit_mode(raw_args: &[String], edit: u8, no_edit: u8) -> bool {

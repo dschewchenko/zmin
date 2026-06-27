@@ -11656,6 +11656,8 @@ fatal: the remote end hung up unexpectedly\n"
         return merge_commands::merge(merge_commands::MergeOptions {
             abort: false,
             continue_: false,
+            quit: false,
+            ff,
             ff_only,
             no_ff,
             show_diffstat,
@@ -11670,6 +11672,9 @@ fatal: the remote end hung up unexpectedly\n"
             allow_unrelated_histories,
             strategies,
             strategy_options,
+            message: None,
+            into_name: None,
+            message_file: None,
             commits: vec![target],
             commit_label: explicit_local_remote.then_some(branch),
             commit_source: explicit_local_remote.then_some(remote),

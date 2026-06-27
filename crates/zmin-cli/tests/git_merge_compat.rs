@@ -665,6 +665,73 @@ fn merge_acceptance_option_family_matches_stock_git_output_state_and_message() {
             "{args:?} tree"
         );
         assert_eq!(
+            git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .skip(1)
+                .collect::<Vec<_>>(),
+            git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .skip(1)
+                .collect::<Vec<_>>(),
+            "{args:?} parents"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--pretty=%B"]),
+            git(git_repo.path(), ["log", "-1", "--pretty=%B"]),
+            "{args:?} message"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "{args:?} status"
+        );
+    }
+}
+
+#[test]
+fn merge_ff_and_message_family_matches_stock_git_output_state_and_message() {
+    let envs = [("GIT_EDITOR", ":"), ("VISUAL", ":"), ("EDITOR", ":")];
+    for (args, setup_message_file) in [
+        (vec!["merge", "--ff", "feature"], false),
+        (vec!["merge", "-m", "Custom merge title", "feature"], false),
+        (vec!["merge", "--file", "msg.txt", "feature"], true),
+        (vec!["merge", "-F", "msg.txt", "feature"], true),
+        (vec!["merge", "--into-name", "trunk", "feature"], false),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            git(repo, ["switch", "-c", "feature"]);
+            write_file(repo, "feature.txt", "feature\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "feature"]);
+            git(repo, ["switch", &default_branch]);
+            write_file(repo, "main.txt", "main\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+            if setup_message_file {
+                write_file(repo, "msg.txt", "custom message from file\n");
+            }
+        }
+
+        let git_output =
+            command_output_with_env("git", git_repo.path(), &args, &envs, "merge family git");
+        let zmin_output = command_output_with_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            &args,
+            &envs,
+            "merge family zmin",
+        );
+        assert_eq!(zmin_output, git_output, "{args:?} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{args:?} tree"
+        );
+        assert_eq!(
             git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
             git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
             "{args:?} parents"
@@ -678,6 +745,56 @@ fn merge_acceptance_option_family_matches_stock_git_output_state_and_message() {
             git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
             git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
             "{args:?} status"
+        );
+    }
+}
+
+#[test]
+fn merge_quit_matches_stock_git_with_and_without_in_progress_merge() {
+    for with_conflict in [false, true] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        if with_conflict {
+            for repo in [git_repo.path(), zmin_repo.path()] {
+                git(repo, ["switch", "-c", "feature"]);
+                write_file(repo, "a.txt", "feature\n");
+                git(repo, ["add", "-A"]);
+                git_with_env(repo, ["commit", "-m", "feature"]);
+                git(repo, ["switch", &default_branch]);
+                write_file(repo, "a.txt", "main\n");
+                git(repo, ["add", "-A"]);
+                git_with_env(repo, ["commit", "-m", "main"]);
+            }
+            let _ = git_failure_output(git_repo.path(), &["merge", "feature"]);
+            let _ = run_zmin_failure_output(zmin_repo.path(), &["merge", "feature"]);
+        }
+
+        assert_eq!(
+            run_zmin(zmin_repo.path(), ["merge", "--quit"]),
+            git(git_repo.path(), ["merge", "--quit"]),
+            "with_conflict={with_conflict} output"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "with_conflict={with_conflict} status"
+        );
+        assert_eq!(
+            zmin_repo.path().join(".git/MERGE_HEAD").exists(),
+            git_repo.path().join(".git/MERGE_HEAD").exists(),
+            "with_conflict={with_conflict} merge head"
+        );
+        assert_eq!(
+            zmin_repo.path().join(".git/MERGE_MSG").exists(),
+            git_repo.path().join(".git/MERGE_MSG").exists(),
+            "with_conflict={with_conflict} merge msg"
+        );
+        assert_eq!(
+            fs::read(zmin_repo.path().join("a.txt")).expect("read zmin a"),
+            fs::read(git_repo.path().join("a.txt")).expect("read git a"),
+            "with_conflict={with_conflict} worktree"
         );
     }
 }

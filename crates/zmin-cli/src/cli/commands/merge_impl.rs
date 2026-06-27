@@ -3,6 +3,8 @@ use super::*;
 pub(crate) struct MergeOptions {
     pub(crate) abort: bool,
     pub(crate) continue_: bool,
+    pub(crate) quit: bool,
+    pub(crate) ff: bool,
     pub(crate) ff_only: bool,
     pub(crate) no_ff: bool,
     pub(crate) show_diffstat: bool,
@@ -17,6 +19,9 @@ pub(crate) struct MergeOptions {
     pub(crate) allow_unrelated_histories: bool,
     pub(crate) strategies: Vec<String>,
     pub(crate) strategy_options: Vec<String>,
+    pub(crate) message: Option<String>,
+    pub(crate) into_name: Option<String>,
+    pub(crate) message_file: Option<std::path::PathBuf>,
     pub(crate) commits: Vec<String>,
     pub(crate) commit_label: Option<String>,
     pub(crate) commit_source: Option<String>,
@@ -26,6 +31,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
     let MergeOptions {
         abort,
         continue_,
+        quit,
+        ff,
         ff_only,
         no_ff,
         show_diffstat,
@@ -40,14 +47,17 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         allow_unrelated_histories,
         strategies,
         strategy_options,
+        message,
+        into_name,
+        message_file,
         commits,
         commit_label,
         commit_source,
     } = options;
-    if abort && continue_ {
+    if [abort, continue_, quit].into_iter().filter(|flag| *flag).count() > 1 {
         return Err(CliError::Fatal {
             code: 129,
-            message: "cannot use --abort and --continue with merge".into(),
+            message: "cannot combine --abort, --continue, or --quit".into(),
         });
     }
     if abort {
@@ -55,6 +65,9 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
     }
     if continue_ {
         return merge_continue();
+    }
+    if quit {
+        return merge_quit();
     }
     if commits.len() != 1 {
         return Err(CliError::Fatal {
@@ -81,6 +94,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
     if ff_only && !no_ff {
         return merge_ff_only(&repo, &store, &commit_cache, &commits[0]);
     }
+    let message_override = resolve_merge_message_override(message, message_file.as_deref())?;
     let mode = MergeCommitMode { no_commit, squash };
     if !strategies.is_empty() {
         return merge_with_strategy(
@@ -89,10 +103,11 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             &commit_cache,
             &commits[0],
             commit_label.as_deref(),
+            into_name.as_deref(),
             &strategies,
             &strategy_options,
             allow_unrelated_histories,
-            !no_ff && !squash,
+            ff && !no_ff && !squash,
             show_diffstat,
             log_limit,
             mode,
@@ -100,6 +115,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             gpg_sign.as_deref(),
             no_gpg_sign,
             quiet,
+            message_override.as_deref(),
             commit_source.as_deref(),
         );
     }
@@ -109,10 +125,11 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         &commit_cache,
         &commits[0],
         commit_label.as_deref(),
+        into_name.as_deref(),
         "ort",
         &strategy_options,
         allow_unrelated_histories,
-        !no_ff && !squash,
+        ff && !no_ff && !squash,
         show_diffstat,
         log_limit,
         mode,
@@ -120,6 +137,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         gpg_sign.as_deref(),
         no_gpg_sign,
         quiet,
+        message_override.as_deref(),
         commit_source.as_deref(),
     )
 }
@@ -180,6 +198,15 @@ fn merge_abort() -> Result<()> {
         CheckoutIndexOptions { force: true },
     )?;
     remove_file_if_exists(&merge_head_path)?;
+    remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
+    remove_file_if_exists(&repo.git_dir.join("MERGE_MODE"))?;
+    remove_file_if_exists(&repo.git_dir.join("AUTO_MERGE"))?;
+    Ok(())
+}
+
+fn merge_quit() -> Result<()> {
+    let repo = find_repo()?;
+    remove_file_if_exists(&repo.git_dir.join("MERGE_HEAD"))?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_MSG"))?;
     remove_file_if_exists(&repo.git_dir.join("MERGE_MODE"))?;
     remove_file_if_exists(&repo.git_dir.join("AUTO_MERGE"))?;
@@ -258,12 +285,26 @@ fn clean_merge_message(message: &str) -> Result<String> {
     Ok(cleaned)
 }
 
+fn resolve_merge_message_override(
+    message: Option<String>,
+    message_file: Option<&std::path::Path>,
+) -> Result<Option<String>> {
+    if let Some(path) = message_file {
+        return Ok(Some(clean_merge_message(&fs::read_to_string(path)?)?));
+    }
+    if let Some(message) = message {
+        return Ok(Some(clean_merge_message(&message)?));
+    }
+    Ok(None)
+}
+
 fn merge_with_strategy(
     repo: &GitRepo,
     store: &LooseObjectStore,
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     target: &str,
     target_label: Option<&str>,
+    into_name: Option<&str>,
     strategies: &[String],
     strategy_options: &[String],
     allow_unrelated_histories: bool,
@@ -275,6 +316,7 @@ fn merge_with_strategy(
     gpg_sign: Option<&str>,
     no_gpg_sign: bool,
     quiet: bool,
+    message_override: Option<&str>,
     commit_source: Option<&str>,
 ) -> Result<()> {
     if strategies.len() == 1 && strategies[0] == "ours" {
@@ -284,10 +326,12 @@ fn merge_with_strategy(
             commit_cache,
             target,
             target_label,
+            into_name,
             signoff,
             gpg_sign,
             no_gpg_sign,
             quiet,
+            message_override,
         );
     }
     if strategies.len() == 1 && matches!(strategies[0].as_str(), "ort" | "recursive") {
@@ -297,6 +341,7 @@ fn merge_with_strategy(
             commit_cache,
             target,
             target_label,
+            into_name,
             &strategies[0],
             strategy_options,
             allow_unrelated_histories,
@@ -308,6 +353,7 @@ fn merge_with_strategy(
             gpg_sign,
             no_gpg_sign,
             quiet,
+            message_override,
             commit_source,
         );
     }
@@ -326,10 +372,12 @@ fn merge_ours_strategy(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     target: &str,
     target_label: Option<&str>,
+    into_name: Option<&str>,
     signoff: bool,
     gpg_sign: Option<&str>,
     no_gpg_sign: bool,
     quiet: bool,
+    message_override: Option<&str>,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
@@ -345,11 +393,18 @@ fn merge_ours_strategy(
     let head_commit = commit_cache.read_commit(&head_id)?;
     let author = signature_from_identity(repo, "GIT_AUTHOR")?;
     let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
-    let message = format!(
-        "Merge branch '{}'\n",
-        merge_display_name_or_label(repo, target, target_label)
-    );
-    let mut message = message.into_bytes();
+    let mut message = if let Some(message_override) = message_override {
+        message_override.as_bytes().to_vec()
+    } else {
+        build_merge_commit_subject(
+            repo,
+            target,
+            &merge_display_name_or_label(repo, target, target_label),
+            None,
+            into_name,
+        )?
+        .into_bytes()
+    };
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
     }
@@ -385,6 +440,7 @@ fn merge_commit(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     target: &str,
     target_label: Option<&str>,
+    into_name: Option<&str>,
     strategy_label: &str,
     strategy_options: &[String],
     allow_unrelated_histories: bool,
@@ -396,6 +452,7 @@ fn merge_commit(
     gpg_sign: Option<&str>,
     no_gpg_sign: bool,
     quiet: bool,
+    message_override: Option<&str>,
     commit_source: Option<&str>,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -529,12 +586,14 @@ fn merge_commit(
         commit_cache,
         &head_id,
         &target_id,
-        base_id.as_ref(),
-        target,
-        target_label,
-        commit_source,
-        log_limit,
-    )?;
+            base_id.as_ref(),
+            target,
+            target_label,
+            into_name,
+            commit_source,
+            log_limit,
+            message_override,
+        )?;
     let mut message = message.into_bytes();
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
@@ -580,11 +639,17 @@ fn build_merge_commit_message(
     base_id: Option<&ObjectId>,
     target: &str,
     target_label: Option<&str>,
+    into_name: Option<&str>,
     commit_source: Option<&str>,
     log_limit: Option<usize>,
+    message_override: Option<&str>,
 ) -> Result<String> {
+    if let Some(message_override) = message_override {
+        return clean_merge_message(message_override);
+    }
     let label = merge_display_name_or_label(repo, target, target_label);
-    let mut message = build_merge_commit_subject(repo, target, &label, commit_source)?;
+    let mut message =
+        build_merge_commit_subject(repo, target, &label, commit_source, into_name)?;
     let Some(log_limit) = log_limit else {
         return Ok(message);
     };
@@ -620,6 +685,7 @@ fn build_merge_commit_subject(
     target: &str,
     label: &str,
     commit_source: Option<&str>,
+    into_name: Option<&str>,
 ) -> Result<String> {
     if let Some(source) = commit_source
         && source != "."
@@ -631,6 +697,9 @@ fn build_merge_commit_subject(
         .is_some_and(|name| name.starts_with("refs/remotes/"))
     {
         return Ok(format!("Merge remote-tracking branch '{label}'\n"));
+    }
+    if let Some(into_name) = into_name {
+        return Ok(format!("Merge branch '{label}' into {into_name}\n"));
     }
     Ok(format!("Merge branch '{label}'\n"))
 }

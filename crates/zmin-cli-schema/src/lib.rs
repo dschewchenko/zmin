@@ -4906,6 +4906,10 @@ pub enum Command {
         abort: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
         continue_: bool,
+        #[arg(long = "quit", action = ArgAction::SetTrue)]
+        quit: bool,
+        #[arg(long = "ff", action = ArgAction::SetTrue)]
+        ff: bool,
         #[arg(long = "ff-only", action = ArgAction::SetTrue)]
         ff_only: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
@@ -4986,6 +4990,12 @@ pub enum Command {
         strategies: Vec<String>,
         #[arg(short = 'X', long = "strategy-option")]
         strategy_options: Vec<String>,
+        #[arg(short = 'm', long = "message")]
+        message: Option<String>,
+        #[arg(long = "into-name")]
+        into_name: Option<String>,
+        #[arg(short = 'F', long = "file", value_hint = ValueHint::FilePath)]
+        message_file: Option<PathBuf>,
         commits: Vec<String>,
     },
     Mergetool {

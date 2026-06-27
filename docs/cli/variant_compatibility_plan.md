@@ -21,6 +21,53 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `merge`
+ff plus message-family and quit closure across the modeled fast-forward branch
+lane, the shared non-fast-forward clean merge lane, and the conflicted
+content-merge state cleanup lane. This batch added seven exact stock-Git rows
+for `merge --ff`, `merge -m`, `merge --file`, `merge -F`,
+`merge --into-name`, and `merge --quit` on both the no-merge and conflicted
+state lanes, plus the parser/runtime closure needed to accept these documented
+spellings without widening unrelated merge behavior. The real runtime changes
+stay intentionally narrow: explicit `--ff` now resolves against `--ff-only`
+and `--no-ff` with stock-like raw-argv precedence, merge commits can source
+the final message from `-m` or `--file`/`-F`, generated subjects can target a
+custom destination label via `--into-name`, and `--quit` now clears `MERGE_*`
+state without touching the conflicted worktree contents.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_merge_compat merge_ff_and_message_family_matches_stock_git_output_state_and_message -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_merge_compat merge_quit_matches_stock_git_with_and_without_in_progress_merge -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(merge|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2489 / 3212`
+- represented documented command-option pairs: `2489 / 3212`
+- matrix rows: `6699`
+- verified rows: `5887`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `723`
+
+Per-command position on the touched surface:
+
+- `merge`: `49 / 51` reviewed-complete documented option pairs,
+  `49 / 51` represented documented option pairs, `66` written rows, `66`
+  classified rows, `58` stock-matching rows, `8` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up can still stay on the refreshed
+`merge` tail before moving off-lane, because the documented queue is now down
+to a single cohesive signature-verification family:
+`--verify-signatures` and `--no-verify-signatures`.
+
 As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` acceptance-family closure across the explicit local no-rebase
 merge lane and the shared merge default-commit lane. This batch added twelve

@@ -11,6 +11,25 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local `merge`
+ff plus message-family and quit closure across the modeled fast-forward branch
+lane, the shared non-fast-forward clean merge lane, and the conflicted
+content-merge state cleanup lane. The selected change added seven exact
+stock-Git rows for `merge --ff`, `merge -m`, `merge --file`, `merge -F`,
+`merge --into-name`, and `merge --quit` on both the no-merge and conflicted
+state lanes, plus the parser/runtime closure needed to accept these documented
+spellings without widening unrelated merge behavior. Actual delta is `+7`
+matrix rows, `+6` complete documented option pairs, `+6` represented
+documented option pairs, `+7` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `6699` matrix rows,
+`5887` verified rows, `787` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2489/3212` complete documented option
+pairs, and `2489/3212` represented documented option pairs. `merge` now sits
+at `49/51` reviewed-complete documented option pairs with `58/66`
+stock-matching rows. The only remaining documented `merge` queue is the
+signature-verification tail: `--verify-signatures` and
+`--no-verify-signatures`.
+
 As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` acceptance-family closure across the explicit local no-rebase
 merge lane and the shared merge default-commit lane. The selected change added
