@@ -68,6 +68,21 @@ fn format_patch_keep_subject_fixture_repo() -> TempDir {
     repo
 }
 
+fn format_patch_multi_file_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "alpha.txt", "alpha beta\n");
+    write_file(repo.path(), "beta.txt", "one two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "alpha.txt", "alpha gamma beta\n");
+    write_file(repo.path(), "beta.txt", "one changed two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "change"]);
+    repo
+}
+
 fn normalize_format_patch_version(output: &str) -> String {
     let mut normalized = Vec::new();
     let mut version_line = false;
@@ -685,6 +700,42 @@ fn format_patch_mail_header_family_matches_stock_git() {
         vec!["--signature-file=custom-signature.txt".into()],
         vec!["--encode-email-headers".into()],
         vec!["--no-encode-email-headers".into()],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
+fn format_patch_word_diff_order_and_reverse_family_matches_stock_git() {
+    let repo = format_patch_multi_file_fixture_repo();
+    write_file(repo.path(), "order.txt", "beta.txt\nalpha.txt\n");
+    let cases: Vec<Vec<String>> = vec![
+        vec!["--word-diff=plain".into()],
+        vec!["--word-diff=porcelain".into()],
+        vec!["--submodule=log".into()],
+        vec!["-O".into(), "order.txt".into()],
+        vec!["--skip-to=beta.txt".into()],
+        vec!["--rotate-to=beta.txt".into()],
+        vec!["-R".into()],
     ];
 
     for extra in cases {

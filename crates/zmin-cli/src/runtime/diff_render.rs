@@ -1951,6 +1951,19 @@ pub(crate) fn reverse_root_tree_diff_entries(entries: &mut [RootTreeDiffEntry]) 
     }
 }
 
+pub(crate) fn reverse_index_diff_entries(entries: &mut [zmin_git_core::IndexDiffEntry]) {
+    for entry in entries {
+        entry.status = match entry.status {
+            IndexDiffStatus::Added => IndexDiffStatus::Deleted,
+            IndexDiffStatus::Deleted => IndexDiffStatus::Added,
+            status => status,
+        };
+        if let Some(old_path) = entry.old_path.as_mut() {
+            std::mem::swap(&mut entry.path, old_path);
+        }
+    }
+}
+
 pub(crate) fn diff_tree_root_entry_lists(
     old: &[TreeEntry],
     new: &[TreeEntry],
@@ -3262,6 +3275,18 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
     blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
     let FormatPatchEntry { id, commit, number } = entry;
+    let mut old_index = old_tree
+        .map(|tree| tree_cache.read_tree_to_index(tree))
+        .transpose()?
+        .unwrap_or_else(GitIndex::new);
+    let mut new_index = tree_cache.read_tree_to_index(new_tree)?;
+    let mut entries = diff_indexes(&old_index, &new_index)?;
+    entries = apply_diff_order_file(entries, context.order_file)?;
+    entries = apply_diff_skip_rotate(entries, context.skip_to, context.rotate_to);
+    if context.reverse {
+        reverse_index_diff_entries(&mut entries);
+        std::mem::swap(&mut old_index, &mut new_index);
+    }
     {
         let _trace = phase_trace("format_patch.write_header");
         write_format_patch_header(out, context, id, commit, number)?;
@@ -3269,24 +3294,28 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
     if context.attach || context.inline {
         let _trace = phase_trace("format_patch.write_attach_body");
         write_format_patch_attach_body(
-            out, context, entry, tree_cache, old_tree, new_tree, blob_cache,
+            out,
+            context,
+            entry,
+            &old_index,
+            &new_index,
+            &entries,
+            blob_cache,
         )?;
         return Ok(());
     }
     {
         let _trace = phase_trace("format_patch.write_prelude");
-        write_format_patch_prelude(out, context, tree_cache, old_tree, new_tree)?;
+        write_format_patch_prelude(out, context, &old_index, &new_index, &entries)?;
     }
     {
         let _trace = phase_trace("format_patch.write_tree_diff");
-        write_commit_patch_entries_tree_diff_cached(
+        write_format_patch_entries(
             out,
-            context.repo,
-            context.store,
-            tree_cache,
-            old_tree,
-            new_tree,
-            context.patch_abbrev_len,
+            context,
+            &old_index,
+            &new_index,
+            &entries,
             blob_cache,
         )?;
     }
@@ -3294,13 +3323,13 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
     Ok(())
 }
 
-fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
+fn write_format_patch_attach_body<W: Write>(
     out: &mut W,
     context: &FormatPatchContext<'_>,
     entry: FormatPatchEntry<'_>,
-    tree_cache: &TreeObjectCache<'_, S>,
-    old_tree: Option<&ObjectId>,
-    new_tree: &ObjectId,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    entries: &[zmin_git_core::IndexDiffEntry],
     blob_cache: &mut FormatPatchBlobCache<'_>,
 ) -> Result<()> {
     let subject = commit_subject_view(&entry.commit.message);
@@ -3318,7 +3347,7 @@ fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
         writeln!(out)?;
         write_commit_message_body(out, &entry.commit.message)?;
     }
-    write_format_patch_prelude(out, context, tree_cache, old_tree, new_tree)?;
+    write_format_patch_prelude(out, context, old_index, new_index, entries)?;
     writeln!(out, "--------------0.1.0.zmin")?;
     writeln!(out, "Content-Type: text/x-patch; name=\"{filename}\"")?;
     writeln!(out, "Content-Transfer-Encoding: 8bit")?;
@@ -3332,16 +3361,7 @@ fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
         "Content-Disposition: {disposition}; filename=\"{filename}\""
     )?;
     writeln!(out)?;
-    write_commit_patch_entries_tree_diff_cached(
-        out,
-        context.repo,
-        context.store,
-        tree_cache,
-        old_tree,
-        new_tree,
-        context.patch_abbrev_len,
-        blob_cache,
-    )?;
+    write_format_patch_entries(out, context, old_index, new_index, entries, blob_cache)?;
     writeln!(out)?;
     writeln!(out, "--------------0.1.0.zmin--")?;
     writeln!(out)?;
@@ -3349,27 +3369,21 @@ fn write_format_patch_attach_body<W: Write, S: GitObjectStore + ?Sized>(
     Ok(())
 }
 
-fn write_format_patch_prelude<W: Write, S: GitObjectStore + ?Sized>(
+fn write_format_patch_prelude<W: Write>(
     out: &mut W,
     context: &FormatPatchContext<'_>,
-    tree_cache: &TreeObjectCache<'_, S>,
-    old_tree: Option<&ObjectId>,
-    new_tree: &ObjectId,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    entries: &[zmin_git_core::IndexDiffEntry],
 ) -> Result<()> {
-    let old_index = old_tree
-        .map(|tree| tree_cache.read_tree_to_index(tree))
-        .transpose()?
-        .unwrap_or_else(GitIndex::new);
-    let new_index = tree_cache.read_tree_to_index(new_tree)?;
-    let entries = diff_indexes(&old_index, &new_index)?;
     if entries.is_empty() {
         return Ok(());
     }
     let diff_context = DiffIndexContext {
         repo: context.repo,
         store: context.store,
-        old_index: &old_index,
-        new_index: &new_index,
+        old_index,
+        new_index,
         old_source: DiffSideSource::Index,
         new_source: DiffSideSource::Index,
     };
@@ -3383,41 +3397,83 @@ fn write_format_patch_prelude<W: Write, S: GitObjectStore + ?Sized>(
     match context.prelude_mode {
         FormatPatchPreludeMode::Diffstat => {
             writeln!(out, "---")?;
-            write_stat_entries(out, &diff_context, &entries, stat_options)?;
-            write_summary_entries(out, &old_index, &new_index, &entries, None)?;
-            writeln!(out)?;
+            write_stat_entries(out, &diff_context, entries, stat_options)?;
+            write_summary_entries(out, old_index, new_index, entries, None)?;
+            write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
         FormatPatchPreludeMode::None => {}
         FormatPatchPreludeMode::Raw => {
-            write_raw_entries_to(out, &diff_context, &entries, context.abbrev_len, None)?;
-            writeln!(out)?;
+            write_raw_entries_to(out, &diff_context, entries, context.abbrev_len, None)?;
+            write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
         FormatPatchPreludeMode::Numstat => {
             write_numstat_entries_to(
                 out,
                 &diff_context,
-                &entries,
+                entries,
                 NumstatOptions {
                     stat: stat_options,
-                    nul_terminated: false,
+                    nul_terminated: context.nul_terminated,
                 },
             )?;
-            writeln!(out)?;
+            write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
         FormatPatchPreludeMode::Shortstat => {
-            write_shortstat_entries_to(out, &diff_context, &entries, stat_options)?;
-            writeln!(out)?;
+            write_shortstat_entries_to(out, &diff_context, entries, stat_options)?;
+            write_format_patch_prelude_separator(out, context.nul_terminated)?;
         }
         FormatPatchPreludeMode::Summary => {
             let mut summary = Vec::new();
-            write_summary_entries(&mut summary, &old_index, &new_index, &entries, None)?;
+            write_summary_entries(&mut summary, old_index, new_index, entries, None)?;
             if !summary.is_empty() {
                 out.write_all(&summary)?;
-                writeln!(out)?;
+                write_format_patch_prelude_separator(out, context.nul_terminated)?;
             }
         }
     }
     Ok(())
+}
+
+fn write_format_patch_prelude_separator<W: Write>(
+    out: &mut W,
+    nul_terminated: bool,
+) -> Result<()> {
+    if nul_terminated {
+        out.write_all(b"\0")?;
+    } else {
+        writeln!(out)?;
+    }
+    Ok(())
+}
+
+fn write_format_patch_entries<W: Write>(
+    out: &mut W,
+    context: &FormatPatchContext<'_>,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    entries: &[zmin_git_core::IndexDiffEntry],
+    _blob_cache: &mut FormatPatchBlobCache<'_>,
+) -> Result<()> {
+    let (old_prefix, new_prefix) = if context.reverse {
+        ("b/".to_owned(), "a/".to_owned())
+    } else {
+        ("a/".to_owned(), "b/".to_owned())
+    };
+    let mut format = PatchFormatOptions::cached()
+        .with_abbrev_len(Some(context.patch_abbrev_len))
+        .with_prefixes(old_prefix, new_prefix)
+        .with_binary(true)
+        .with_submodule_format(context.submodule_format);
+    format.word_diff = context.word_diff;
+    write_patch_entries(
+        out,
+        context.repo,
+        context.store,
+        old_index,
+        new_index,
+        entries,
+        format,
+    )
 }
 
 pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Sized>(
@@ -3430,6 +3486,18 @@ pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Siz
     old_tree: Option<&ObjectId>,
     new_tree: &ObjectId,
 ) -> Result<()> {
+    let mut old_index = old_tree
+        .map(|tree| tree_cache.read_tree_to_index(tree))
+        .transpose()?
+        .unwrap_or_else(GitIndex::new);
+    let mut new_index = tree_cache.read_tree_to_index(new_tree)?;
+    let mut entries = diff_indexes(&old_index, &new_index)?;
+    entries = apply_diff_order_file(entries, context.order_file)?;
+    entries = apply_diff_skip_rotate(entries, context.skip_to, context.rotate_to);
+    if context.reverse {
+        reverse_index_diff_entries(&mut entries);
+        std::mem::swap(&mut old_index, &mut new_index);
+    }
     write!(out, "From ")?;
     id.write_hex_io(out)?;
     writeln!(out, " Mon Sep 17 00:00:00 2001")?;
@@ -3459,7 +3527,7 @@ pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Siz
     writeln!(out)?;
     write_format_patch_cover_author_summary(out, commits)?;
     writeln!(out)?;
-    write_format_patch_prelude(out, context, tree_cache, old_tree, new_tree)?;
+    write_format_patch_prelude(out, context, &old_index, &new_index, &entries)?;
     write_format_patch_footer(out, context.signature)?;
     Ok(())
 }
@@ -4216,6 +4284,7 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) abbrev_len: usize,
     pub(crate) patch_abbrev_len: usize,
     pub(crate) total: usize,
+    pub(crate) nul_terminated: bool,
     pub(crate) no_numbered: bool,
     pub(crate) numbered: bool,
     pub(crate) numbered_files: bool,
@@ -4224,6 +4293,12 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) suffix: &'a str,
     pub(crate) subject_prefix: &'a str,
     pub(crate) prelude_mode: FormatPatchPreludeMode,
+    pub(crate) reverse: bool,
+    pub(crate) order_file: Option<&'a Path>,
+    pub(crate) skip_to: Option<&'a str>,
+    pub(crate) rotate_to: Option<&'a str>,
+    pub(crate) word_diff: WordDiffMode,
+    pub(crate) submodule_format: SubmoduleDiffFormat,
     pub(crate) thread: bool,
     pub(crate) extra_headers: &'a [String],
     pub(crate) in_reply_to: Option<&'a str>,

@@ -22,6 +22,53 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` diff-order, reverse, and word/submodule closure on a modeled
+single-commit multi-file stdout mail-series lane. This batch added exact
+stock-Git matrix evidence for `--word-diff=plain`, `--word-diff=porcelain`,
+`--submodule=log`, `-O order.txt`, `--skip-to=beta.txt`,
+`--rotate-to=beta.txt`, and `-R`, and widened the shared mail renderer so
+`format-patch` now reuses stock-compatible diff ordering, rotate/skip
+selection, reverse-direction rendering, word diff output, and submodule format
+selection from the existing diff runtime instead of hard-coded default patch
+emission.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_word_diff_order_and_reverse_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2303 / 3212`
+- matrix rows: `6449`
+- verified rows: `5637`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `131 / 162` reviewed-complete documented option pairs,
+  `137 / 162` represented documented option pairs, `145` written rows, `145`
+  classified rows, `145` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, but the
+shape changed: `--word-diff`, `--submodule`, `--rotate-to`, `--skip-to`, `-O`,
+and `-R` are no longer schema holes and now sit in
+`doc_option_expansion_required`, while `--word-diff-regex` and `-z` remain
+implemented without exact matrix evidence and `25` documented `format-patch`
+tails are still `doc_option_not_in_zmin_schema`. The immediate helper-free
+queue is therefore `--word-diff-regex`, `-z`, and the next shared-diff
+documented tails such as `--dirstat`, `--dirstat-by-file`, `--color-words`,
+and merge/diff-merges spellings.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` mail-header closure on the already modeled single-commit stdout
 mail-series lane. This batch added exact stock-Git matrix evidence for
 `--to`, `--cc`, `--add-header`, `--in-reply-to`, `--thread`, `--from`,

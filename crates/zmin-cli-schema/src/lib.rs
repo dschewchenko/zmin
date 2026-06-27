@@ -3851,6 +3851,22 @@ pub enum Command {
         find_object: Option<String>,
         #[arg(short = 'l')]
         rename_limit_short: Option<String>,
+        #[arg(short = 'z', action = ArgAction::SetTrue)]
+        nul_terminated: bool,
+        #[arg(short = 'R', action = ArgAction::SetTrue)]
+        reverse: bool,
+        #[arg(long = "submodule", num_args = 0..=1, require_equals = true, default_missing_value = "log")]
+        submodule: Option<String>,
+        #[arg(short = 'O', value_hint = ValueHint::FilePath)]
+        order_file: Option<PathBuf>,
+        #[arg(long = "skip-to")]
+        skip_to: Option<String>,
+        #[arg(long = "rotate-to")]
+        rotate_to: Option<String>,
+        #[arg(long = "word-diff", num_args = 0..=1, default_missing_value = "plain")]
+        word_diff: Option<String>,
+        #[arg(long = "word-diff-regex")]
+        word_diff_regex: Option<String>,
         #[arg(long = "line-prefix")]
         line_prefix: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]

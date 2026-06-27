@@ -750,6 +750,14 @@ pub(crate) fn format_patch(
     raw: bool,
     summary: bool,
     full_index: bool,
+    nul_terminated: bool,
+    reverse: bool,
+    submodule: Option<&str>,
+    order_file: Option<&Path>,
+    skip_to: Option<&str>,
+    rotate_to: Option<&str>,
+    word_diff: Option<&str>,
+    word_diff_regex: Option<&str>,
     attach: bool,
     inline: bool,
     suffix: Option<&str>,
@@ -845,6 +853,8 @@ pub(crate) fn format_patch(
     } else {
         abbrev_len
     };
+    let word_diff = parse_word_diff_option(word_diff)?;
+    let submodule_format = parse_submodule_diff_format(submodule)?;
     let suffix = suffix.unwrap_or(".patch");
     let configured_subject_prefix = read_config_value(&repo, "format.subjectprefix")?;
     let mut subject_prefix = subject_prefix
@@ -894,6 +904,7 @@ pub(crate) fn format_patch(
         no_force_in_body_from,
         encode_email_headers,
         no_encode_email_headers,
+        word_diff_regex,
     );
     let message_id_timestamp = if thread {
         Some(current_unix_timestamp()?)
@@ -906,6 +917,7 @@ pub(crate) fn format_patch(
         abbrev_len,
         patch_abbrev_len,
         total: commits.len(),
+        nul_terminated,
         no_numbered,
         numbered,
         numbered_files,
@@ -923,6 +935,12 @@ pub(crate) fn format_patch(
             raw,
             summary,
         ),
+        reverse,
+        order_file,
+        skip_to,
+        rotate_to,
+        word_diff,
+        submodule_format,
         thread,
         extra_headers: &extra_headers,
         in_reply_to,
