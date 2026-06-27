@@ -9347,3 +9347,54 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+33` complete documented option pairs, `+0` represented documented
 option pairs, `+0` complete command matrices, `+0`
 implemented-but-unverified schema rows, and `-33` remaining checklist rows.
+
+## 2026-06-27 - grep short-alias reviewed-complete promotion batch
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- complete documented option pairs: `+19`
+- represented documented option pairs: `+0`
+- complete command matrices: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-19`
+- Rust behavior changes: no
+
+Selected promoted options:
+
+- `grep -A`
+- `grep -B`
+- `grep -C`
+- `grep -E`
+- `grep -G`
+- `grep -I`
+- `grep -O`
+- `grep -P`
+- `grep -W`
+- `grep -a`
+- `grep -e`
+- `grep -f`
+- `grep -h`
+- `grep -o`
+- `grep -p`
+- `grep -q`
+- `grep -r`
+- `grep -w`
+- `grep -z`
+
+This batch is the short-alias follow-through to the preceding long-form `grep`
+promotion. It promotes the remaining represented helper-free short spellings
+into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv` because exact
+stock-Git evidence already exists in `docs/cli/matrices/grep_v2_47.tsv`,
+`crates/zmin-cli/tests/git_grep_compat.rs`, and the existing schema-oracle
+smoke coverage for the parser-only long-form lanes. The promoted short surface
+covers context aliases, regexp-mode aliases, boolean-expression pattern
+spellings, local traversal toggles, output-shape aliases, function-context
+aliases, NUL-delimited filename output, and the bounded binary/pager aliases on
+the current modeled helper-free local lanes.
