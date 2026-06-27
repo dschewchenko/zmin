@@ -22,27 +22,23 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`diff` family schema-and-oracle expansion batch across the existing local
-worktree, index, and tree-to-tree lanes. This batch added no reviewed-complete
-promotions yet, but it did add thirty new exact stock-Git matrix rows and the
-matching parser/schema surface across `diff`, `diff-files`, `diff-index`, and
-`diff-tree`. The new represented tail covers the shared no-op spellings
-`--color-moved`, `--color-moved-ws=ignore-space-change`, `--ext-diff`,
+`diff` family reviewed-complete promotion batch across the already represented
+local worktree, index, and tree-to-tree lanes. This batch changed no Rust
+behavior and added no new matrix rows; it harvested the thirty exact
+stock-Git doc-option spellings created by the prior schema-and-oracle pass and
+promoted them into `docs/cli/census/reviewed_complete_doc_option_pairs.tsv`
+across `diff`, `diff-files`, `diff-index`, and `diff-tree`. The promoted
+surface covers the shared no-op spellings `--color-moved`,
+`--color-moved-ws=ignore-space-change`, `--ext-diff`,
 `--indent-heuristic`, `--no-indent-heuristic`, and `--textconv` across all
 four entrypoints, plus `--rename-empty` and `--no-rename-empty` on the exact
 `diff-files`, `diff-index`, and `diff-tree` rename-detection lanes where they
 already match stock Git. Porcelain `diff --rename-empty` and
-`diff --no-rename-empty` were intentionally left out of the batch because the
-current rename path still diverges from stock Git on the modeled cached
-rename lane.
+`diff --no-rename-empty` remain intentionally outside the promoted surface
+because the current rename path still diverges from stock Git on the modeled
+cached rename lane.
 
 Focused verification was
-`cargo check -p zmin-cli-schema -p zmin-cli`,
-`cargo build -p zmin-cli --bin zmin`,
-`ZMIN_BIN=target/debug/zmin tools/git-diff-schema-oracle-smoke.sh`,
-`ZMIN_BIN=target/debug/zmin tools/git-diff-files-schema-oracle-smoke.sh`,
-`ZMIN_BIN=target/debug/zmin tools/git-diff-index-schema-oracle-smoke.sh`,
-`ZMIN_BIN=target/debug/zmin tools/git-diff-tree-schema-oracle-smoke.sh`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
@@ -51,40 +47,40 @@ and `git diff --check`.
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `148 / 151`
-- complete documented command-option pairs: `2380 / 3212`
+- complete documented command-option pairs: `2410 / 3212`
 - represented documented command-option pairs: `2410 / 3212`
 - matrix rows: `6611`
 - verified rows: `5799`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
+- remaining to fix or verify rows: `802`
 
 Per-command position on the touched surface:
 
-- `diff`: `84 / 117` reviewed-complete documented option pairs,
+- `diff`: `90 / 117` reviewed-complete documented option pairs,
   `90 / 117` represented documented option pairs, `257` written rows, `257`
   classified rows, `253` stock-matching rows, `4` invalid-input rows, and `0`
   exact-open rows
-- `diff-files`: `81 / 118` reviewed-complete documented option pairs,
+- `diff-files`: `89 / 118` reviewed-complete documented option pairs,
   `89 / 118` represented documented option pairs, `108` written rows, `108`
   classified rows, `108` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
-- `diff-index`: `80 / 112` reviewed-complete documented option pairs,
+- `diff-index`: `88 / 112` reviewed-complete documented option pairs,
   `88 / 112` represented documented option pairs, `115` written rows, `115`
   classified rows, `115` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
-- `diff-tree`: `87 / 132` reviewed-complete documented option pairs,
+- `diff-tree`: `95 / 132` reviewed-complete documented option pairs,
   `95 / 132` represented documented option pairs, `127` written rows, `127`
   classified rows, `127` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
 
-The next best high-throughput follow-up should now stay on the `diff` family
-for one more docs-first pass, because this batch created a fresh represented
-tail of `30` documented spellings that are exact and helper-free but not yet
-reviewed complete. The immediate represented promotion queue is led by
-`diff-tree` (`8`), `diff-files` (`8`), `diff-index` (`8`), and `diff` (`6`);
-after that promotion tail is harvested, the next large queues revert to the
-mostly unrepresented `replay` (`117`), `send-email` (`62`), `pull` (`62`),
-`rebase` (`54`), and `log` (`47`) families.
+The next best high-throughput follow-up should now move off the `diff`
+promotion tail, because the represented helper-free queue for this family is
+fully harvested. The largest remaining documented queues are now the mostly
+unrepresented `replay` (`117`), `send-email` (`62`), `pull` (`62`),
+`rebase` (`54`), `log` (`47`), `merge` (`43`), and the still partially
+unrepresented `diff-tree` (`37`), `rev-list` (`36`), `diff-files` (`29`),
+and `diff` (`27`) tails.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `grep` long-form reviewed-complete promotion batch across the existing
