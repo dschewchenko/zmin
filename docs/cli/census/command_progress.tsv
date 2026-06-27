@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2537	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2548	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2548	3212	documented command-option pairs with at least one behavior row
 behavior_rows_written	6851	6851	current written command option value combination state transport platform rows
@@ -81,7 +81,7 @@ instaweb	13	13	13	100.0	13	13	100.0	13	100.0	0	0	0	yes
 interpret-trailers	14	14	14	100.0	22	22	100.0	22	100.0	0	0	0	yes
 log	131	84	84	64.1	199	199	100.0	187	94.0	0	0	12	yes
 ls-files	39	39	39	100.0	159	159	100.0	139	87.4	0	0	20	yes
-ls-remote	14	3	14	100.0	115	115	100.0	103	89.6	0	0	12	yes
+ls-remote	14	14	14	100.0	115	115	100.0	103	89.6	0	0	12	yes
 ls-tree	13	13	13	100.0	18	18	100.0	17	94.4	0	0	1	yes
 mailinfo	10	10	10	100.0	13	13	100.0	13	100.0	0	0	0	yes
 mailsplit	6	6	6	100.0	11	11	100.0	9	81.8	0	0	2	yes

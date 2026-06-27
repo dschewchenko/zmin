@@ -11,6 +11,27 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
+option-family review closure across the already represented configured-local,
+file URL, dumb HTTP, smart HTTP, git-daemon, and SSH lanes. The selected
+change added `+0` matrix rows and promoted eleven existing `ls-remote`
+doc-option pairs into the reviewed-complete census set:
+`--branches`, `--exit-code`, `--get-url`, `--quiet`, `--server-option`,
+`--sort`, `--symref`, `-b`, `-o`, `-q`, and `-t`. This was an evidence-only
+closure with no runtime change: the exact stock-Git rows already covered
+successful and invalid-input transport lanes, including `--exit-code` miss
+rejections and SSH protocol-v2-required `server-option` failures. Actual delta
+is `+0` matrix rows, `+11` complete documented option pairs, `+0`
+represented documented option pairs, `+0` verified rows, `+0` invalid-input
+rows, and `+0` complete command matrices. Current census counts are `6851`
+matrix rows, `6006` verified rows, `820` invalid-input rows, `0`
+exact-open rows, `146/151` complete command matrices, `2548/3212` complete
+documented option pairs, and `2548/3212` represented documented option pairs.
+Remaining checklist rows fell from `675` to `664`. This is another
+zero-row-growth closure batch, so the guardrail held exactly: the
+`ls-remote` review promotion changed only reviewed-complete coverage, not the
+evidence-layer denominator.
+
 As of 2026-06-27 the latest completed batch is a helper-free `diff*`
 dirstat-family review closure across the already represented local porcelain
 and plumbing lanes. The selected change added `+0` matrix rows and promoted

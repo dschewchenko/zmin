@@ -21,6 +21,49 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
+option-family review closure across the already represented configured-local,
+file URL, dumb HTTP, smart HTTP, git-daemon, and SSH lanes. This batch did not
+add runtime behavior or matrix rows; it promoted the already verified
+transport-wide option family into the reviewed-complete census set for
+`--branches`, `--exit-code`, `--get-url`, `--quiet`, `--server-option`,
+`--sort`, `--symref`, `-b`, `-o`, `-q`, and `-t`. The closure is
+evidence-only: the existing exact stock-Git rows already cover successful and
+invalid-input cases across the modeled transport surfaces, including stock
+exit-2 empty-output parity for `--exit-code` misses and stock protocol-v2
+rejection parity for SSH `--server-option` / `-o`.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_transport_http_compat ls_remote -- --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat ls_remote -- --nocapture`,
+`python3 tools/git-compat-census.py --root .`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(ls-remote|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2548 / 3212`
+- represented documented command-option pairs: `2548 / 3212`
+- matrix rows: `6851`
+- verified rows: `6006`
+- invalid-input rows: `820`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `664`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `ls-remote`: `14 / 14` reviewed-complete documented option pairs,
+  `14 / 14` represented documented option pairs, `115` written rows, `115`
+  classified rows, `103` stock-matching rows, `12` invalid-input rows, and
+  `0` exact-open rows
+
+This is a reviewed-complete census promotion batch rather than an
+implementation batch: it closes the entire represented `ls-remote`
+documented-option family without changing runtime code or row counts.
+
 As of 2026-06-27 the latest completed batch is a helper-free `diff*`
 dirstat-family review closure across the already represented local porcelain
 and plumbing lanes. This batch did not add runtime behavior or matrix rows; it
