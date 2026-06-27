@@ -114,6 +114,37 @@ fn rebase_onto_fixture_repo() -> TempDir {
     repo
 }
 
+fn cherry_pick_initially_empty_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    git_with_env(repo.path(), ["commit", "--allow-empty", "-m", "empty-feature"]);
+    git(repo.path(), ["checkout", "main"]);
+    repo
+}
+
+fn cherry_pick_becomes_empty_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "base.txt", "feature\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "feature"]);
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "base.txt", "feature\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "main-applied-same-change"]);
+    repo
+}
+
 #[test]
 fn cherry_pick_and_revert_match_stock_git_for_clean_single_commit() {
     let git_repo = sequencer_fixture_repo();
@@ -349,6 +380,84 @@ fn cherry_pick_and_revert_documented_surface_batch_matches_stock_git() {
         );
         assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
     }
+}
+
+#[test]
+fn cherry_pick_and_revert_followup_documented_surface_batch_matches_stock_git() {
+    let source = sequencer_fixture_repo();
+    let feature_commit = git(source.path(), ["rev-parse", "feature"]);
+
+    for args in [
+        ["cherry-pick", "--allow-empty-message", &feature_commit].as_slice(),
+        ["cherry-pick", "--strategy-option=patience", &feature_commit].as_slice(),
+        ["revert", "--reference", "HEAD"].as_slice(),
+        ["revert", "--strategy-option=patience", "HEAD"].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["checkout", "main"]);
+        git(zmin_repo.path(), ["checkout", "main"]);
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            "args: {args:?}"
+        );
+        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+    }
+
+    let source = cherry_pick_initially_empty_fixture_repo();
+    let empty_commit = git(source.path(), ["rev-parse", "feature"]);
+    for args in [
+        ["cherry-pick", "--allow-empty", &empty_commit].as_slice(),
+        ["cherry-pick", "--keep-redundant-commits", &empty_commit].as_slice(),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["checkout", "main"]);
+        git(zmin_repo.path(), ["checkout", "main"]);
+        assert_eq!(
+            command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git"),
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            "args: {args:?}"
+        );
+        assert_eq!(git(git_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+        assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "", "args: {args:?}");
+    }
+
+    let source = cherry_pick_becomes_empty_fixture_repo();
+    let feature_commit = git(source.path(), ["rev-parse", "feature"]);
+    let args = ["cherry-pick", "--empty=keep", &feature_commit];
+    let git_repo = clone_repo_fixture(source.path());
+    let zmin_repo = clone_repo_fixture(source.path());
+    configure_identity(git_repo.path());
+    configure_identity(zmin_repo.path());
+    git(git_repo.path(), ["checkout", "main"]);
+    git(zmin_repo.path(), ["checkout", "main"]);
+    assert_eq!(
+        command_output_with_env("git", git_repo.path(), &args, &SEQUENCER_ENV, "git"),
+        command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &SEQUENCER_ENV, "zmin"),
+    );
+    assert_eq!(
+        git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+        git(zmin_repo.path(), ["cat-file", "-p", "HEAD"])
+    );
+    assert_eq!(git(git_repo.path(), ["status", "--short"]), "");
+    assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "");
 }
 
 #[test]

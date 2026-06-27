@@ -22,6 +22,59 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`cherry-pick` and `revert` follow-up schema-tail closure on the modeled clean,
+initially-empty, becomes-empty, and reference-message lanes. This batch
+finished representation for all documented `cherry-pick` and `revert` option
+pairs by adding exact stock-Git matrix evidence for `cherry-pick
+--allow-empty-message`, `--allow-empty`, `--keep-redundant-commits`,
+`--empty=keep`, and long `--strategy-option=patience`, plus `revert
+--reference` and long `--strategy-option=patience`.
+
+The batch fixed one cohesive parser-plus-runtime gap on the sequencer path:
+
+- Zmin now exposes the remaining documented schema tail for the modeled
+  `cherry-pick` empty-policy family and long strategy-option spelling, plus the
+  `revert --reference` message template and long strategy-option spelling; on
+  the bounded covered lanes it now matches stock Git for committing initially
+  empty cherry-picks, preserving become-empty picks with `--empty=keep`, and
+  formatting `revert --reference` with the stock placeholder title line and
+  reference-style reverted commit body
+
+Focused verification was `cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_sequencer_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(cherry-pick|revert|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2100 / 3212`
+- represented documented command-option pairs: `2157 / 3212`
+- matrix rows: `6249`
+- verified rows: `5439`
+- invalid-input rows: `785`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `cherry-pick`: `4 / 24` reviewed-complete documented option pairs, `24 / 24`
+  represented documented option pairs, `28` written rows, `28` classified
+  rows, `26` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+- `revert`: `4 / 19` reviewed-complete documented option pairs, `19 / 19`
+  represented documented option pairs, `24` written rows, `24` classified
+  rows, `22` stock-matching rows, `2` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should reselect from the refreshed
+backlog head rather than stay on schema closure. `cherry-pick` and `revert`
+now have full documented-option representation, so the remaining work on these
+commands is expansion-only tails inside already represented families.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `cherry-pick` and `revert` documented-option surface closure on the modeled
 clean commit, editor, and signed-commit lanes. This batch added exact
 stock-Git matrix evidence for `cherry-pick --ff`, `-x`, `-r`, `--signoff`,

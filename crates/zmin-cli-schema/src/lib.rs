@@ -986,6 +986,14 @@ pub enum Command {
         record_origin: bool,
         #[arg(short = 'r', action = ArgAction::SetTrue)]
         no_record_origin: bool,
+        #[arg(long = "allow-empty", action = ArgAction::SetTrue)]
+        allow_empty: bool,
+        #[arg(long = "allow-empty-message", action = ArgAction::SetTrue)]
+        allow_empty_message: bool,
+        #[arg(long = "keep-redundant-commits", action = ArgAction::SetTrue)]
+        keep_redundant_commits: bool,
+        #[arg(long = "empty")]
+        empty: Option<String>,
         #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
         #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue)]
@@ -998,7 +1006,7 @@ pub enum Command {
         no_rerere_autoupdate: bool,
         #[arg(long = "strategy")]
         strategy: Option<String>,
-        #[arg(short = 'X')]
+        #[arg(short = 'X', long = "strategy-option")]
         strategy_option: Vec<String>,
         #[arg(
             short = 'S',
@@ -1024,6 +1032,8 @@ pub enum Command {
         mainline: Option<usize>,
         #[arg(short = 'r', action = ArgAction::SetTrue)]
         no_record_origin: bool,
+        #[arg(long = "reference", action = ArgAction::SetTrue)]
+        reference: bool,
         #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
         #[arg(short = 'e', long = "edit", action = ArgAction::SetTrue, overrides_with = "no_edit")]
@@ -1038,7 +1048,7 @@ pub enum Command {
         no_rerere_autoupdate: bool,
         #[arg(long = "strategy")]
         strategy: Option<String>,
-        #[arg(short = 'X')]
+        #[arg(short = 'X', long = "strategy-option")]
         strategy_option: Vec<String>,
         #[arg(
             short = 'S',

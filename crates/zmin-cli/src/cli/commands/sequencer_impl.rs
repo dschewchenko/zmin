@@ -1395,6 +1395,11 @@ pub(crate) struct SequencerCommandOptions<'a> {
     pub(crate) mainline: Option<usize>,
     pub(crate) record_origin: bool,
     pub(crate) no_record_origin: bool,
+    pub(crate) allow_empty: bool,
+    pub(crate) allow_empty_message: bool,
+    pub(crate) keep_redundant_commits: bool,
+    pub(crate) empty: Option<&'a str>,
+    pub(crate) reference: bool,
     pub(crate) signoff: bool,
     pub(crate) edit: bool,
     pub(crate) no_edit: bool,
@@ -1435,6 +1440,11 @@ pub(crate) fn sequencer_command(options: SequencerCommandOptions<'_>) -> Result<
         mainline: options.mainline,
         record_origin: options.record_origin,
         no_record_origin: options.no_record_origin,
+        allow_empty: options.allow_empty,
+        allow_empty_message: options.allow_empty_message,
+        keep_redundant_commits: options.keep_redundant_commits,
+        empty: options.empty.map(str::to_owned),
+        reference: options.reference,
         signoff: options.signoff,
         edit: options.edit,
         no_edit: options.no_edit,
@@ -1456,6 +1466,11 @@ pub(crate) struct SequencerPickOptions {
     pub(crate) mainline: Option<usize>,
     pub(crate) record_origin: bool,
     pub(crate) no_record_origin: bool,
+    pub(crate) allow_empty: bool,
+    pub(crate) allow_empty_message: bool,
+    pub(crate) keep_redundant_commits: bool,
+    pub(crate) empty: Option<String>,
+    pub(crate) reference: bool,
     pub(crate) signoff: bool,
     pub(crate) edit: bool,
     pub(crate) no_edit: bool,
@@ -1477,6 +1492,11 @@ fn default_sequencer_pick_options(commits: Vec<String>) -> SequencerPickOptions 
         mainline: None,
         record_origin: false,
         no_record_origin: false,
+        allow_empty: false,
+        allow_empty_message: false,
+        keep_redundant_commits: false,
+        empty: None,
+        reference: false,
         signoff: false,
         edit: false,
         no_edit: false,
@@ -1498,6 +1518,7 @@ pub(crate) fn sequencer_pick(
     let _no_rerere_autoupdate = options.no_rerere_autoupdate;
     let _strategy = options.strategy.as_deref();
     let _strategy_option = &options.strategy_option;
+    let _allow_empty_message = options.allow_empty_message;
     if options.commits.len() != 1 {
         return Err(CliError::Fatal {
             code: 129,
@@ -1517,6 +1538,7 @@ pub(crate) fn sequencer_pick(
     let picked_id = resolve_commitish_or_bad_revision(&repo, &store, &options.commits[0])?;
     let picked = commit_cache.read_commit(&picked_id)?;
     let parent_id = sequencer_parent_for_pick(&picked, options.mainline)?;
+    let parent_commit = commit_cache.read_commit(&parent_id)?;
     let base_index = if options.revert {
         tree_cache.read_tree_to_index(&picked.tree)?
     } else {
@@ -1552,7 +1574,7 @@ pub(crate) fn sequencer_pick(
         CheckoutIndexOptions { force: true },
     )?;
     let mut message = if options.revert {
-        revert_message(&picked_id, &picked, &parent_id)
+        revert_message(&picked_id, &picked, &parent_id, options.reference)
     } else {
         picked.message.clone()
     };
@@ -1586,7 +1608,13 @@ pub(crate) fn sequencer_pick(
     }
     let tree = write_tree_from_index(&store, &new_index)?;
     let current_head = commit_cache.read_commit(&head_id)?;
-    if current_head.tree == tree {
+    if current_head.tree == tree
+        && !sequencer_should_commit_empty_cherry_pick(
+            &options,
+            &picked,
+            &parent_commit,
+        )
+    {
         return Err(CliError::Message("nothing to commit".into()));
     }
     let author = if options.revert {
@@ -1595,7 +1623,7 @@ pub(crate) fn sequencer_pick(
         signature_from_commit_bytes(&picked.author)?
     };
     let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
-    let mut builder = CommitBuilder::new(tree.clone(), author.clone(), committer).parent(head_id);
+    let builder = CommitBuilder::new(tree.clone(), author.clone(), committer).parent(head_id);
     let mut builder = builder.message(message.clone())?;
     if !options.no_gpg_sign {
         if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(&repo, &builder, options.gpg_sign.as_deref())? {
@@ -1805,9 +1833,18 @@ fn revert_message(
     id: &ObjectId,
     commit: &zmin_git_core::CommitObject,
     mainline_parent: &ObjectId,
+    reference: bool,
 ) -> Vec<u8> {
     let subject = commit_subject(&commit.message);
     if commit.parents.len() > 1 {
+        if reference {
+            let commit_ref = revert_reference_format(id, commit);
+            let mainline_ref = revert_reference_format(mainline_parent, commit);
+            return format!(
+                "# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***\n\nThis reverts commit {commit_ref}, reversing\nchanges made to {mainline_ref}.\n",
+            )
+            .into_bytes();
+        }
         format!(
             "Revert \"{subject}\"\n\nThis reverts commit {}, reversing\nchanges made to {}.\n",
             id.to_hex(),
@@ -1815,12 +1852,68 @@ fn revert_message(
         )
         .into_bytes()
     } else {
+        if reference {
+            return format!(
+                "# *** SAY WHY WE ARE REVERTING ON THE TITLE LINE ***\n\nThis reverts commit {}.\n",
+                revert_reference_format(id, commit)
+            )
+            .into_bytes();
+        }
         format!(
             "Revert \"{subject}\"\n\nThis reverts commit {}.\n",
             id.to_hex()
         )
         .into_bytes()
     }
+}
+
+fn sequencer_should_commit_empty_cherry_pick(
+    options: &SequencerPickOptions,
+    picked: &zmin_git_core::CommitObject,
+    parent_commit: &zmin_git_core::CommitObject,
+) -> bool {
+    if options.revert {
+        return false;
+    }
+    let initially_empty = picked.tree == parent_commit.tree;
+    if options.allow_empty && initially_empty {
+        return true;
+    }
+    if options.keep_redundant_commits {
+        return true;
+    }
+    matches!(options.empty.as_deref(), Some("keep"))
+}
+
+fn revert_reference_format(id: &ObjectId, commit: &zmin_git_core::CommitObject) -> String {
+    let date = signature_reference_date(&commit.author).unwrap_or_else(|| "unknown-date".into());
+    format!(
+        "{} ({}, {})",
+        short_object_id(id),
+        commit_subject(&commit.message),
+        date
+    )
+}
+
+fn signature_reference_date(raw: &[u8]) -> Option<String> {
+    let signature = signature_from_commit_bytes(raw).ok()?;
+    Some(reference_date_string(signature.timestamp, &signature.timezone))
+}
+
+fn reference_date_string(seconds: i64, offset: &str) -> String {
+    let sign = if offset.starts_with('-') { -1 } else { 1 };
+    let digits = offset.trim_start_matches(['+', '-']);
+    if digits.len() != 4 {
+        return "unknown-date".into();
+    }
+    let hours: i32 = digits[..2].parse().unwrap_or(0);
+    let minutes: i32 = digits[2..].parse().unwrap_or(0);
+    let offset_seconds = sign * (hours * 3600 + minutes * 60);
+    if let Some(utc) = chrono::DateTime::<chrono::Utc>::from_timestamp(seconds, 0) {
+        let local = utc + chrono::TimeDelta::seconds(offset_seconds as i64);
+        return local.format("%Y-%m-%d").to_string();
+    }
+    "unknown-date".into()
 }
 
 pub(crate) fn rebase(
