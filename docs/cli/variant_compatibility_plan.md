@@ -21,6 +21,56 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `commit`
+reviewed-complete closure on the already represented verify, include,
+pathspec-file, no-signoff, no-post-rewrite, patch, and fixture-key gpg-sign
+lanes. This batch promoted the existing exact stock-Git matrix evidence for
+`--verify`, `--include`, `--pathspec-from-file`, `--pathspec-file-nul`,
+`--no-signoff`, `--no-post-rewrite`, `--patch`, `--gpg-sign`, `--no-gpg-sign`,
+`-S`, `-i`, and `-p` into the reviewed-complete layer, finishing the full
+represented `commit` surface without adding new runtime behavior.
+
+The batch closed one cohesive census/evidence gap rather than adding new
+commit implementation:
+
+- Zmin already matched stock Git on the covered helper-free `commit` lanes,
+  and the remaining work here was to lift the existing matrix rows plus the
+  focused `git_commit_compat` stock-oracle evidence into reviewed-complete
+  doc-option pairs and the reviewed-complete command matrix so the represented
+  `commit` surface is counted correctly
+
+Focused verification was
+`cargo test -p zmin-cli --test git_commit_compat commit_documented_open_option_batch_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_commit_compat commit_gpg_sign_family_matches_stock_git_with_fixture_key -- --exact --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2171 / 3212`
+- represented documented command-option pairs: `2178 / 3212`
+- matrix rows: `6319`
+- verified rows: `5507`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `commit`: `58 / 58` reviewed-complete documented option pairs,
+  `58 / 58` represented documented option pairs, `120` written rows, `120`
+  classified rows, `115` stock-matching rows, `5` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move to the shared `diff*`
+reviewed-complete tail instead of staying on `commit`, because the remaining
+largest helper-free represented-versus-reviewed gap is now the plumbing diff
+cluster: `diff-files` at `79 / 81`, `diff-index` at `78 / 80`,
+`diff-tree` at `85 / 87`, and `diff` at `83 / 84`.
+
 As of 2026-06-27 the latest completed batch is a helper-free local
 `cherry-pick` and `revert` reviewed-complete closure on the already represented
 clean, fast-forward, editor, merge-mainline, no-commit, empty-policy,

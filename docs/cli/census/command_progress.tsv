@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	148	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2159	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2171	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2178	3212	documented command-option pairs with at least one behavior row
 behavior_rows_written	6319	6319	current written command option value combination state transport platform rows
@@ -35,7 +35,7 @@ citool	0	0	0	0.0	5	5	100.0	5	100.0	0	0	0	no
 clean	13	13	13	100.0	68	68	100.0	62	91.2	0	0	6	yes
 clone	47	36	36	76.6	96	96	100.0	86	89.6	0	0	10	yes
 column	7	7	7	100.0	54	54	100.0	46	85.2	0	0	8	yes
-commit	58	46	58	100.0	120	120	100.0	115	95.8	0	0	5	yes
+commit	58	58	58	100.0	120	120	100.0	115	95.8	0	0	5	yes
 commit-graph	3	3	3	100.0	14	14	100.0	11	78.6	0	0	3	yes
 commit-tree	6	6	6	100.0	62	62	100.0	42	67.7	0	0	20	yes
 config	30	30	30	100.0	160	160	100.0	145	90.6	0	0	15	yes
