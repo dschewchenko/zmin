@@ -22,6 +22,54 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` mail-series tail closure across the modeled two-patch and
+single-commit stdout mail lanes. This batch closed the remaining command-
+specific schema/evidence tails around `--base`, `--no-base`,
+`--cover-from-description`, `--description-file`, `--filename-max-length`,
+`--ignore-if-in-upstream`, `--interdiff`, `--range-diff`, and
+`--creation-factor`. It also surfaced and fixed two older stock drifts in the
+same renderer path while proving the new rows: cover letters now omit the
+non-stock `---` diffstat marker, and inline or attached MIME patch bodies now
+keep the stock blank-line separation before the patch part boundary. One CLI
+parsing detail also needed a precise compatibility split: short `-p` keeps the
+stock no-diffstat lane, while long `--patch` stays on the stock default
+diffstat-plus-patch lane.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_mail_series_tail_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2328 / 3212`
+- matrix rows: `6505`
+- verified rows: `5693`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `131 / 162` reviewed-complete documented option pairs,
+  `162 / 162` represented documented option pairs, `201` written rows, `201`
+  classified rows, `201` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should now move off `format-patch`,
+because the helper-free documented tail is fully represented and exactly
+verified on the current modeled surface. The largest remaining helper-free
+documented queues are now led by `send-email` (`62` remaining documented
+option pairs), `pull` (`62`), `rebase` (`54`), `grep` (`52`), and `log`
+(`47`).
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` merge-diff and dirstat-alias closure across the modeled
 merge-only exclude revision set and nested-directory single-commit stdout
 mail-series lanes. This batch was mostly parser plus stock-guard parity rather

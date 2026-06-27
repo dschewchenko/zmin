@@ -287,6 +287,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             numbered_files: false,
             attach: false,
             inline: false,
+            cover_letter: false,
             suffix: ".patch",
             subject_prefix: "PATCH",
             prelude_mode: FormatPatchPreludeMode::Diffstat,
@@ -308,6 +309,9 @@ impl GitPatchRenderer for CliPatchRenderer {
             signoff_line: None,
             signature: Some("0.1.0.zmin"),
             zero_commit: false,
+            cover_blurb: None,
+            base_information: None,
+            appendix: None,
         };
         let synthetic_signature = b"Zmin Primitive <primitive@example.test> 1 +0000".to_vec();
         let format_entry = FormatPatchEntry {
@@ -366,6 +370,7 @@ impl GitPatchRenderer for CliPatchRenderer {
             numbered_files: false,
             attach: false,
             inline: false,
+            cover_letter: false,
             suffix: ".patch",
             subject_prefix: "PATCH",
             prelude_mode: FormatPatchPreludeMode::Diffstat,
@@ -387,6 +392,9 @@ impl GitPatchRenderer for CliPatchRenderer {
             signoff_line: None,
             signature: Some("0.1.0.zmin"),
             zero_commit: false,
+            cover_blurb: None,
+            base_information: None,
+            appendix: None,
         };
         let mut blob_cache = FormatPatchBlobCache::new(store);
         let mut total_written = 0usize;

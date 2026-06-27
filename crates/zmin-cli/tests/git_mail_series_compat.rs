@@ -805,6 +805,91 @@ fn format_patch_word_diff_order_and_reverse_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_mail_series_tail_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    write_file(
+        repo.path(),
+        "desc.txt",
+        "Desc file title\n\nDesc file body\n",
+    );
+    let base = git(repo.path(), ["rev-parse", "HEAD~2"]);
+    let success_cases: Vec<Vec<String>> = vec![
+        vec!["--base".into(), base.clone(), "HEAD~2..HEAD".into()],
+        vec!["--no-base".into(), "HEAD~2..HEAD".into()],
+        vec![
+            "--cover-letter".into(),
+            "--cover-from-description=message".into(),
+            "HEAD~2..HEAD".into(),
+        ],
+        vec![
+            "--cover-letter".into(),
+            "--cover-from-description=subject".into(),
+            "HEAD~2..HEAD".into(),
+        ],
+        vec![
+            "--cover-letter".into(),
+            "--cover-from-description=auto".into(),
+            "HEAD~2..HEAD".into(),
+        ],
+        vec![
+            "--cover-letter".into(),
+            "--cover-from-description=none".into(),
+            "HEAD~2..HEAD".into(),
+        ],
+        vec![
+            "--cover-letter".into(),
+            "--description-file=desc.txt".into(),
+            "HEAD~2..HEAD".into(),
+        ],
+        vec!["--filename-max-length=40".into(), "HEAD~2..HEAD".into()],
+        vec!["--ignore-if-in-upstream".into(), "HEAD~2..HEAD".into()],
+        vec![
+            "--interdiff".into(),
+            "HEAD~1".into(),
+            "-1".into(),
+            "HEAD".into(),
+        ],
+        vec![
+            "--range-diff".into(),
+            "HEAD~1".into(),
+            "-1".into(),
+            "HEAD".into(),
+        ],
+        vec![
+            "--range-diff".into(),
+            "HEAD~1".into(),
+            "--creation-factor=70".into(),
+            "-1".into(),
+            "HEAD".into(),
+        ],
+    ];
+
+    for extra in success_cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+
+    let invalid_args = ["format-patch", "--stdout", "--base=auto", "HEAD~2..HEAD"];
+    let git_result = git_failure_output(repo.path(), &invalid_args);
+    let zmin_result = run_zmin_failure_output(repo.path(), &invalid_args);
+    assert_eq!(zmin_result, git_result, "args: {invalid_args:?}");
+}
+
+#[test]
 fn format_patch_word_diff_color_and_regex_family_matches_stock_git() {
     let repo = format_patch_multi_file_fixture_repo();
     let success_cases: Vec<Vec<String>> = vec![

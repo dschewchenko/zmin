@@ -3322,6 +3322,16 @@ pub(crate) fn write_format_patch_with_tree_diff_cached<W: Write, S: GitObjectSto
             blob_cache,
         )?;
     }
+    if !context.attach && !context.inline {
+        if let Some(base_information) = context.base_information {
+            if number == 1 && !context.cover_letter_base_emitted(number) {
+                write_format_patch_base_information(out, base_information, true)?;
+            }
+        }
+        if let Some(appendix) = context.appendix {
+            write_format_patch_appendix(out, appendix, true)?;
+        }
+    }
     write_format_patch_footer(out, context.signature)?;
     Ok(())
 }
@@ -3351,6 +3361,7 @@ fn write_format_patch_attach_body<W: Write>(
         write_commit_message_body(out, &entry.commit.message)?;
     }
     write_format_patch_prelude(out, context, old_index, new_index, entries)?;
+    writeln!(out)?;
     writeln!(out, "--------------0.1.0.zmin")?;
     writeln!(out, "Content-Type: text/x-patch; name=\"{filename}\"")?;
     writeln!(out, "Content-Transfer-Encoding: 8bit")?;
@@ -3539,12 +3550,54 @@ pub(crate) fn write_format_patch_cover_letter<W: Write, S: GitObjectStore + ?Siz
         )?;
     }
     writeln!(out)?;
-    writeln!(out, "*** BLURB HERE ***")?;
+    writeln!(
+        out,
+        "{}",
+        context.cover_blurb.unwrap_or("*** BLURB HERE ***")
+    )?;
     writeln!(out)?;
     write_format_patch_cover_author_summary(out, commits)?;
     writeln!(out)?;
-    write_format_patch_prelude(out, context, &old_index, &new_index, &entries)?;
+    write_format_patch_cover_prelude(out, context, &old_index, &new_index, &entries)?;
+    if let Some(base_information) = context.base_information {
+        write_format_patch_base_information(out, base_information, false)?;
+    }
     write_format_patch_footer(out, context.signature)?;
+    Ok(())
+}
+
+fn write_format_patch_cover_prelude<W: Write>(
+    out: &mut W,
+    context: &FormatPatchContext<'_>,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    entries: &[zmin_git_core::IndexDiffEntry],
+) -> Result<()> {
+    if context.prelude_mode != FormatPatchPreludeMode::Diffstat {
+        return write_format_patch_prelude(out, context, old_index, new_index, entries);
+    }
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let diff_context = DiffIndexContext {
+        repo: context.repo,
+        store: context.store,
+        old_index,
+        new_index,
+        old_source: DiffSideSource::Index,
+        new_source: DiffSideSource::Index,
+    };
+    let stat_options = DiffStatOptions {
+        whitespace_mode: DiffWhitespaceMode::None,
+        relative_prefix: None,
+        ignore_matching_lines: &[],
+        ignore_blank_lines: false,
+        compact_summary: false,
+        color: context.word_diff == WordDiffMode::Color,
+    };
+    write_stat_entries(out, &diff_context, entries, stat_options)?;
+    write_summary_entries(out, old_index, new_index, entries, None)?;
+    writeln!(out)?;
     Ok(())
 }
 
@@ -3708,6 +3761,36 @@ fn write_format_patch_footer<W: Write>(out: &mut W, signature: Option<&str>) -> 
     if let Some(signature) = signature {
         writeln!(out, "-- ")?;
         writeln!(out, "{signature}")?;
+        writeln!(out)?;
+    }
+    Ok(())
+}
+
+fn write_format_patch_base_information<W: Write>(
+    out: &mut W,
+    base_information: &str,
+    leading_blank_line: bool,
+) -> Result<()> {
+    if leading_blank_line {
+        writeln!(out)?;
+    }
+    writeln!(out, "{base_information}")?;
+    Ok(())
+}
+
+fn write_format_patch_appendix<W: Write>(
+    out: &mut W,
+    appendix: &str,
+    leading_blank_line: bool,
+) -> Result<()> {
+    if appendix.is_empty() {
+        return Ok(());
+    }
+    if leading_blank_line {
+        writeln!(out)?;
+    }
+    out.write_all(appendix.as_bytes())?;
+    if !appendix.ends_with('\n') {
         writeln!(out)?;
     }
     Ok(())
@@ -4308,6 +4391,7 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) numbered_files: bool,
     pub(crate) attach: bool,
     pub(crate) inline: bool,
+    pub(crate) cover_letter: bool,
     pub(crate) suffix: &'a str,
     pub(crate) subject_prefix: &'a str,
     pub(crate) prelude_mode: FormatPatchPreludeMode,
@@ -4329,6 +4413,15 @@ pub(crate) struct FormatPatchContext<'a> {
     pub(crate) signoff_line: Option<&'a str>,
     pub(crate) signature: Option<&'a str>,
     pub(crate) zero_commit: bool,
+    pub(crate) cover_blurb: Option<&'a str>,
+    pub(crate) base_information: Option<&'a str>,
+    pub(crate) appendix: Option<&'a str>,
+}
+
+impl FormatPatchContext<'_> {
+    fn cover_letter_base_emitted(&self, number: usize) -> bool {
+        self.cover_letter && self.base_information.is_some() && number == 1
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

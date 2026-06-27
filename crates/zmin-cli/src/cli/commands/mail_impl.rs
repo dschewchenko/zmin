@@ -741,7 +741,7 @@ pub(crate) fn format_patch(
     check: bool,
     name_only: bool,
     name_status: bool,
-    patch: bool,
+    patch_short_alias: bool,
     patch_with_raw: bool,
     no_stat: bool,
     no_patch: bool,
@@ -790,6 +790,8 @@ pub(crate) fn format_patch(
     from: Option<&str>,
     force_in_body_from: bool,
     no_force_in_body_from: bool,
+    cover_from_description: Option<&str>,
+    description_file: Option<&Path>,
     signoff: bool,
     signature: Option<&str>,
     signature_file: Option<&Path>,
@@ -798,6 +800,13 @@ pub(crate) fn format_patch(
     no_encode_email_headers: bool,
     reroll_count: Option<&str>,
     rfc: Option<&str>,
+    base: Option<&str>,
+    no_base: bool,
+    filename_max_length: Option<&str>,
+    ignore_if_in_upstream: bool,
+    interdiff: Option<&str>,
+    range_diff: Option<&str>,
+    creation_factor: Option<&str>,
     zero_commit: bool,
     one: bool,
     revs: Vec<String>,
@@ -820,6 +829,17 @@ pub(crate) fn format_patch(
             code: 128,
             message: "--name-status does not make sense".into(),
         });
+    }
+    if let Some(mode) = cover_from_description {
+        match mode {
+            "message" | "subject" | "auto" | "none" => {}
+            _ => {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("invalid cover from description mode: {mode}"),
+                });
+            }
+        }
     }
     if remerge_diff || diff_merges.is_some_and(|value| matches!(value, "remerge" | "r")) {
         return Err(CliError::Fatal {
@@ -868,6 +888,10 @@ pub(crate) fn format_patch(
     };
     let packed_store = store.packed_first();
     let commit_cache = CommitObjectCache::new(&packed_store);
+    let cover_blurb = description_file
+        .map(fs::read_to_string)
+        .transpose()?
+        .map(|value| value.trim_end_matches(['\r', '\n']).to_owned());
     let mut commits = {
         let _trace = phase_trace("format_patch.collect_commits");
         collect_commit_objects_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?
@@ -924,6 +948,34 @@ pub(crate) fn format_patch(
     } else {
         Some(signature.unwrap_or("0.1.0.zmin").to_owned())
     };
+    let base_information = if no_base {
+        None
+    } else if let Some(base) = base {
+        Some(format_patch_base_information(&repo, &store, base)?)
+    } else {
+        None
+    };
+    let appendix = if let Some(previous) = interdiff {
+        let head = commits
+            .last()
+            .map(|entry| entry.id.to_hex())
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "no commits to format".into(),
+            })?;
+        Some(render_format_patch_interdiff(&repo, &store, previous, &head)?)
+    } else if let Some(previous) = range_diff {
+        let head = commits
+            .last()
+            .map(|entry| entry.id.to_hex())
+            .ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "no commits to format".into(),
+            })?;
+        Some(render_format_patch_range_diff(previous, &head)?)
+    } else {
+        None
+    };
     let signoff_line = if signoff {
         let committer = signature_from_identity(&repo, "GIT_COMMITTER")?;
         Some(format!(
@@ -946,6 +998,9 @@ pub(crate) fn format_patch(
         tree_in_diff,
         first_parent_diff,
         no_diff_merges,
+        filename_max_length,
+        ignore_if_in_upstream,
+        creation_factor,
     );
     let message_id_timestamp = if thread {
         Some(current_unix_timestamp()?)
@@ -964,10 +1019,11 @@ pub(crate) fn format_patch(
         numbered_files,
         attach,
         inline,
+        cover_letter,
         suffix,
         subject_prefix: &subject_prefix,
         prelude_mode: format_patch_prelude_mode(
-            patch,
+            patch_short_alias,
             patch_with_raw,
             no_stat,
             no_patch,
@@ -997,6 +1053,9 @@ pub(crate) fn format_patch(
         signoff_line: signoff_line.as_deref(),
         signature: signature_text.as_deref(),
         zero_commit,
+        cover_blurb: cover_blurb.as_deref(),
+        base_information: base_information.as_deref(),
+        appendix: appendix.as_deref(),
     };
     let tree_cache = TreeObjectCache::new(&packed_store);
     let mut blob_cache = FormatPatchBlobCache::new(&store);
@@ -1098,7 +1157,7 @@ pub(crate) fn format_patch(
 }
 
 fn format_patch_prelude_mode(
-    patch: bool,
+    patch_short_alias: bool,
     patch_with_raw: bool,
     no_stat: bool,
     no_patch: bool,
@@ -1121,7 +1180,7 @@ fn format_patch_prelude_mode(
         FormatPatchPreludeMode::Shortstat
     } else if summary {
         FormatPatchPreludeMode::Summary
-    } else if patch || no_stat || no_patch {
+    } else if patch_short_alias || no_stat || no_patch {
         FormatPatchPreludeMode::None
     } else {
         FormatPatchPreludeMode::Diffstat
@@ -1191,6 +1250,67 @@ where
                 .map_err(CliError::from)
         })
         .transpose()
+}
+
+fn format_patch_base_information(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    base: &str,
+) -> Result<String> {
+    if base == "auto" {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "failed to get upstream, if you want to record base commit automatically,\nplease use git branch --set-upstream-to to track a remote branch.\nOr you could specify base commit by --base=<base-commit-id> manually".into(),
+        });
+    }
+    let base_commit = resolve_commitish(repo, store, base)?;
+    Ok(format!("base-commit: {}", base_commit.to_hex()))
+}
+
+fn render_format_patch_interdiff(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    previous: &str,
+    current: &str,
+) -> Result<String> {
+    let packed_store = store.packed_first();
+    let commit_cache = CommitObjectCache::new(&packed_store);
+    let tree_cache = TreeObjectCache::new(&packed_store);
+    let previous_id = resolve_commitish(repo, store, previous)?;
+    let current_id = resolve_commitish(repo, store, current)?;
+    let previous_commit = commit_cache.read_commit_links(&previous_id)?;
+    let current_commit = commit_cache.read_commit_links(&current_id)?;
+    let mut blob_cache = FormatPatchBlobCache::new(store);
+    let mut patch = Vec::new();
+    write_commit_patch_entries_tree_diff_cached(
+        &mut patch,
+        repo,
+        store,
+        &tree_cache,
+        Some(&previous_commit.tree),
+        &current_commit.tree,
+        default_abbrev_len(store)?,
+        &mut blob_cache,
+    )?;
+    let patch = String::from_utf8_lossy(&patch);
+    let mut output = String::from("Interdiff:\n");
+    for line in patch.lines() {
+        output.push_str("  ");
+        output.push_str(line);
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn render_format_patch_range_diff(previous: &str, current: &str) -> Result<String> {
+    let ranges = [
+        format!("{previous}..{previous}"),
+        format!("{previous}..{current}"),
+    ];
+    Ok(format!(
+        "Range-diff:\n{}",
+        super::history_commands::render_range_diff_output(&ranges, false)?
+    ))
 }
 
 pub(crate) fn send_email(

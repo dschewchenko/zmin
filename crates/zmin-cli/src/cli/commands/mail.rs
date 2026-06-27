@@ -238,6 +238,8 @@ pub(crate) fn dispatch(
             no_attach: _,
             no_binary: _,
             no_cover_letter: _,
+            cover_from_description,
+            description_file,
             no_ext_diff: _,
             no_textconv: _,
             no_color: _,
@@ -264,11 +266,13 @@ pub(crate) fn dispatch(
             output_indicator_context: _,
             output_indicator_new: _,
             output_indicator_old: _,
+            base,
+            no_base,
             patience: _,
             text: _,
             textconv: _,
             stat: _,
-            patch,
+            patch: _,
             patch_with_raw,
             patch_with_stat: _,
             no_stat,
@@ -281,6 +285,11 @@ pub(crate) fn dispatch(
             shortstat,
             raw,
             summary,
+            filename_max_length,
+            ignore_if_in_upstream,
+            interdiff,
+            range_diff,
+            creation_factor,
             separate_merges,
             combined_merges,
             tree_in_diff,
@@ -332,7 +341,7 @@ pub(crate) fn dispatch(
             check,
             name_only,
             name_status,
-            patch,
+            format_patch_uses_short_patch_alias(raw_args),
             patch_with_raw,
             no_stat,
             no_patch,
@@ -381,6 +390,8 @@ pub(crate) fn dispatch(
             from.as_deref(),
             force_in_body_from,
             no_force_in_body_from,
+            cover_from_description.as_deref(),
+            description_file.as_deref(),
             signoff,
             signature.as_deref(),
             signature_file.as_deref(),
@@ -389,6 +400,13 @@ pub(crate) fn dispatch(
             no_encode_email_headers,
             reroll_count.as_deref(),
             rfc.as_deref(),
+            base.as_deref(),
+            no_base,
+            filename_max_length.as_deref(),
+            ignore_if_in_upstream,
+            interdiff.as_deref(),
+            range_diff.as_deref(),
+            creation_factor.as_deref(),
             zero_commit,
             one,
             revs,
@@ -457,4 +475,8 @@ fn resolve_fmt_merge_msg_summary_aliases(
         }
     }
     (resolved_log, resolved_no_log)
+}
+
+fn format_patch_uses_short_patch_alias(raw_args: &[String]) -> bool {
+    raw_args.iter().any(|arg| arg == "-p")
 }

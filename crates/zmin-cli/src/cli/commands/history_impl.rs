@@ -6032,21 +6032,18 @@ pub(crate) fn range_diff(
     no_no_dual_color: bool,
     ranges: Vec<String>,
 ) -> Result<()> {
-    let ranges = match ranges.as_slice() {
-        [old, new] => [old.clone(), new.clone()],
-        [base, old, new] => [format!("{base}..{old}"), format!("{base}..{new}")],
-        _ => {
-            return Err(CliError::Fatal {
-                code: 129,
-                message: "`range-diff` requires two commit ranges or <base> <old> <new>".into(),
-            });
-        }
-    };
+    let ranges = parse_range_diff_ranges(&ranges)?;
+    print!("{}", render_range_diff_output(&ranges, no_no_dual_color)?);
+    Ok(())
+}
+
+pub(crate) fn render_range_diff_output(ranges: &[String; 2], color: bool) -> Result<String> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let old = range_diff_commits(&repo, &store, &ranges[0])?;
     let new = range_diff_commits(&repo, &store, &ranges[1])?;
     let abbrev_len = default_abbrev_len(&store)?;
+    let mut output = String::new();
     let mut new_by_patch = HashMap::<String, VecDeque<usize>>::new();
     for (idx, entry) in new.iter().enumerate() {
         if let Some(patch_id) = &entry.patch_id {
@@ -6065,8 +6062,9 @@ pub(crate) fn range_diff(
             .and_then(VecDeque::pop_front);
         if let Some(new_idx) = matched {
             matched_new.insert(new_idx);
-            print_range_diff_line(
-                no_no_dual_color,
+            write_range_diff_line(
+                &mut output,
+                color,
                 "33",
                 &format!(
                     "{}:  {} = {}:  {} {}",
@@ -6076,10 +6074,11 @@ pub(crate) fn range_diff(
                     short_object_id_len(&new[new_idx].id, abbrev_len),
                     old_entry.subject
                 ),
-            );
+            )?;
         } else {
-            print_range_diff_line(
-                no_no_dual_color,
+            write_range_diff_line(
+                &mut output,
+                color,
                 "31",
                 &format!(
                     "{}:  {} < -:  ------- {}",
@@ -6087,15 +6086,16 @@ pub(crate) fn range_diff(
                     short_object_id_len(&old_entry.id, abbrev_len),
                     old_entry.subject
                 ),
-            );
+            )?;
         }
     }
     for (new_idx, new_entry) in new.iter().enumerate() {
         if matched_new.contains(&new_idx) {
             continue;
         }
-        print_range_diff_line(
-            no_no_dual_color,
+        write_range_diff_line(
+            &mut output,
+            color,
             "32",
             &format!(
                 "-:  ------- > {}:  {} {}",
@@ -6103,17 +6103,30 @@ pub(crate) fn range_diff(
                 short_object_id_len(&new_entry.id, abbrev_len),
                 new_entry.subject
             ),
-        );
+        )?;
     }
-    Ok(())
+    Ok(output)
 }
 
-fn print_range_diff_line(color: bool, code: &str, line: &str) {
-    if color {
-        println!("\x1b[{code}m{line}\x1b[m");
-    } else {
-        println!("{line}");
+fn parse_range_diff_ranges(ranges: &[String]) -> Result<[String; 2]> {
+    match ranges {
+        [old, new] => Ok([old.clone(), new.clone()]),
+        [base, old, new] => Ok([format!("{base}..{old}"), format!("{base}..{new}")]),
+        _ => Err(CliError::Fatal {
+            code: 129,
+            message: "`range-diff` requires two commit ranges or <base> <old> <new>".into(),
+        }),
     }
+}
+
+fn write_range_diff_line(out: &mut String, color: bool, code: &str, line: &str) -> Result<()> {
+    if color {
+        out.push_str(&format!("\x1b[{code}m{line}\x1b[m\n"));
+    } else {
+        out.push_str(line);
+        out.push('\n');
+    }
+    Ok(())
 }
 
 fn range_diff_commits(

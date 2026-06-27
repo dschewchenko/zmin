@@ -3885,6 +3885,10 @@ pub enum Command {
         no_binary: bool,
         #[arg(long = "no-cover-letter", action = ArgAction::SetTrue)]
         no_cover_letter: bool,
+        #[arg(long = "cover-from-description")]
+        cover_from_description: Option<String>,
+        #[arg(long = "description-file", value_hint = ValueHint::FilePath)]
+        description_file: Option<PathBuf>,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
         #[arg(long = "no-color", action = ArgAction::SetTrue)]
@@ -3935,6 +3939,10 @@ pub enum Command {
         output_indicator_new: Option<String>,
         #[arg(long = "output-indicator-old")]
         output_indicator_old: Option<String>,
+        #[arg(long = "base")]
+        base: Option<String>,
+        #[arg(long = "no-base", action = ArgAction::SetTrue)]
+        no_base: bool,
         #[arg(long = "patience", action = ArgAction::SetTrue)]
         patience: bool,
         #[arg(long = "text", short = 'a', action = ArgAction::SetTrue)]
@@ -3969,6 +3977,16 @@ pub enum Command {
         raw: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
         summary: bool,
+        #[arg(long = "filename-max-length")]
+        filename_max_length: Option<String>,
+        #[arg(long = "ignore-if-in-upstream", action = ArgAction::SetTrue)]
+        ignore_if_in_upstream: bool,
+        #[arg(long = "interdiff")]
+        interdiff: Option<String>,
+        #[arg(long = "range-diff")]
+        range_diff: Option<String>,
+        #[arg(long = "creation-factor")]
+        creation_factor: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         separate_merges: bool,
         #[arg(short = 'c', action = ArgAction::SetTrue)]
