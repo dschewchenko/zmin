@@ -3775,6 +3775,8 @@ pub enum Command {
     FormatPatch {
         #[arg(short = 'o', long = "output-directory", value_hint = ValueHint::DirPath)]
         output_directory: Option<PathBuf>,
+        #[arg(long = "output", value_hint = ValueHint::FilePath)]
+        output: Option<PathBuf>,
         #[arg(long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
         #[arg(long = "abbrev", action = ArgAction::SetTrue)]
@@ -3855,6 +3857,8 @@ pub enum Command {
         minimal: bool,
         #[arg(long = "compact-summary", action = ArgAction::SetTrue)]
         compact_summary: bool,
+        #[arg(long = "check", action = ArgAction::SetTrue)]
+        check: bool,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
         #[arg(long = "no-attach", action = ArgAction::SetTrue)]
@@ -3883,6 +3887,10 @@ pub enum Command {
         no_renames: bool,
         #[arg(long = "no-thread", action = ArgAction::SetTrue)]
         no_thread: bool,
+        #[arg(long = "name-only", action = ArgAction::SetTrue)]
+        name_only: bool,
+        #[arg(long = "name-status", action = ArgAction::SetTrue)]
+        name_status: bool,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
         #[arg(long = "output-indicator-context")]

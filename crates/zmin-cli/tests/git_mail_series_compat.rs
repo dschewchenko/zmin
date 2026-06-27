@@ -488,6 +488,66 @@ fn format_patch_helper_free_pickaxe_and_short_diff_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_invalid_surface_and_output_file_match_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let invalid_cases: [(&str, &[&str]); 5] = [
+        (
+            "--check",
+            &["format-patch", "--check", "--stdout", "-1", "HEAD"],
+        ),
+        (
+            "--name-only",
+            &["format-patch", "--name-only", "--stdout", "-1", "HEAD"],
+        ),
+        (
+            "--name-status",
+            &["format-patch", "--name-status", "--stdout", "-1", "HEAD"],
+        ),
+        (
+            "--output with stdout",
+            &[
+                "format-patch",
+                "--output=mail.patch",
+                "--stdout",
+                "-1",
+                "HEAD",
+            ],
+        ),
+        (
+            "--output-directory with stdout",
+            &[
+                "format-patch",
+                "--output-directory=patches",
+                "--stdout",
+                "-1",
+                "HEAD",
+            ],
+        ),
+    ];
+
+    for (label, args) in invalid_cases {
+        let git_result = git_failure_output(repo.path(), args);
+        let zmin_result = run_zmin_failure_output(repo.path(), args);
+        assert_eq!(zmin_result, git_result, "args: {args:?}");
+        assert!(!label.is_empty());
+    }
+
+    let git_repo = clone_repo_fixture(repo.path());
+    let zmin_repo = clone_repo_fixture(repo.path());
+    let git_args = ["format-patch", "--output=mail.patch", "-1", "HEAD"];
+    let git_result = command_any_output("git", git_repo.path(), &git_args, "git");
+    let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), &git_args, "zmin");
+    assert_eq!(zmin_result, git_result);
+    let git_mail = fs::read_to_string(git_repo.path().join("mail.patch")).expect("read git output mail");
+    let zmin_mail =
+        fs::read_to_string(zmin_repo.path().join("mail.patch")).expect("read zmin output mail");
+    assert_eq!(
+        normalize_format_patch_version(&zmin_mail),
+        normalize_format_patch_version(&git_mail)
+    );
+}
+
+#[test]
 fn am_applies_stock_format_patch_mail_like_stock_git() {
     let repo = format_patch_fixture_repo();
     let base = git(repo.path(), ["rev-parse", "HEAD~2"]);

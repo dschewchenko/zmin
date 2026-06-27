@@ -735,7 +735,11 @@ fn mail_commit_message(subject: &str, body: &str) -> String {
 
 pub(crate) fn format_patch(
     output_directory: Option<PathBuf>,
+    output: Option<PathBuf>,
     stdout: bool,
+    check: bool,
+    name_only: bool,
+    name_status: bool,
     attach: bool,
     inline: bool,
     suffix: Option<&str>,
@@ -748,10 +752,40 @@ pub(crate) fn format_patch(
     revs: Vec<String>,
 ) -> Result<()> {
     let _trace = phase_trace("format_patch");
+    if check {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--check does not make sense".into(),
+        });
+    }
+    if name_only {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--name-only does not make sense".into(),
+        });
+    }
+    if name_status {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--name-status does not make sense".into(),
+        });
+    }
     if stdout && output_directory.is_some() {
         return Err(CliError::Fatal {
-            code: 129,
-            message: "`format-patch --stdout` cannot be combined with --output-directory".into(),
+            code: 128,
+            message: "options '--stdout' and '--output-directory' cannot be used together".into(),
+        });
+    }
+    if stdout && output.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--stdout' and '--output' cannot be used together".into(),
+        });
+    }
+    if output_directory.is_some() && output.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--output' and '--output-directory' cannot be used together".into(),
         });
     }
     let repo = find_repo()?;
@@ -822,6 +856,30 @@ pub(crate) fn format_patch(
             }
             write_format_patch_with_tree_diff_cached(
                 &mut out,
+                &format_context,
+                FormatPatchEntry {
+                    id: &entry.id,
+                    commit: entry.commit.as_ref(),
+                    number: idx + 1,
+                },
+                &tree_cache,
+                format_patch_old_tree(&commit_cache, entry.commit.as_ref())?.as_ref(),
+                &entry.commit.tree,
+                &mut blob_cache,
+            )?;
+        }
+        return Ok(());
+    }
+
+    if let Some(output) = output {
+        let mut file = io::BufWriter::new(fs::File::create(output)?);
+        for (idx, entry) in commits.iter().enumerate() {
+            let _trace = phase_trace("format_patch.emit_output_file_patch");
+            if idx > 0 {
+                file.write_all(b"\n")?;
+            }
+            write_format_patch_with_tree_diff_cached(
+                &mut file,
                 &format_context,
                 FormatPatchEntry {
                     id: &entry.id,

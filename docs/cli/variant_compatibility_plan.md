@@ -22,6 +22,47 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` invalid-surface and direct-output closure on the already modeled
+single-commit lane. This batch added exact stock-Git matrix evidence for
+`--check`, `--name-only`, `--name-status`, and `--output`, including the
+stable fatal guards for unsupported diff-only spellings on the stdout lane, the
+stock conflict guards for `--output` plus `--stdout`, and direct single-file
+mbox output to a requested path.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_invalid_surface_and_output_file_match_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2266 / 3212`
+- represented documented command-option pairs: `2266 / 3212`
+- matrix rows: `6412`
+- verified rows: `5600`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `100 / 100` reviewed-complete documented option pairs,
+  `100 / 100` represented documented option pairs, `108` written rows, `108`
+  classified rows, `108` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has `62` remaining `doc_option_not_in_zmin_schema` rows, now
+led by helper-free documented tails such as `--add-header`, `--base`, `--cc`,
+`--color-words`, `--cover-from-description`, `--description-file`,
+`--full-index`, `--ignore-if-in-upstream`, `--in-reply-to`, and related mail
+or diff spellings.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` pickaxe and short common-diff parser closure on the already
 modeled single-commit stdout mail-series lane. This batch added exact
 stock-Git matrix evidence for `-q`, `-u`, `-w`, `-b`, `-S`, `-G`,
