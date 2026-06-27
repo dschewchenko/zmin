@@ -11325,6 +11325,9 @@ pub(crate) fn run_pull(
     no_squash: bool,
     edit: u8,
     no_edit: u8,
+    autostash: bool,
+    no_autostash: bool,
+    cleanup: Option<String>,
     signoff: u8,
     no_signoff: u8,
     gpg_sign: Option<String>,
@@ -11633,6 +11636,9 @@ fatal: the remote end hung up unexpectedly\n"
             || no_squash
             || edit > 0
             || no_edit > 0
+            || autostash
+            || no_autostash
+            || cleanup.is_some()
             || signoff
             || no_signoff > 0
             || gpg_sign.is_some()
@@ -11656,6 +11662,7 @@ fatal: the remote end hung up unexpectedly\n"
             no_commit,
             log_limit,
             squash,
+            cleanup,
             signoff,
             gpg_sign,
             no_gpg_sign: no_gpg_sign > 0,

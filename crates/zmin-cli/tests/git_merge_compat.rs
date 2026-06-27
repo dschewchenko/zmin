@@ -627,6 +627,62 @@ fn merge_commit_flag_family_matches_stock_git_output_state_and_message() {
 }
 
 #[test]
+fn merge_acceptance_option_family_matches_stock_git_output_state_and_message() {
+    for args in [
+        ["merge", "--verbose", "feature"].as_slice(),
+        ["merge", "-v", "feature"].as_slice(),
+        ["merge", "--rerere-autoupdate", "feature"].as_slice(),
+        ["merge", "--no-rerere-autoupdate", "feature"].as_slice(),
+        ["merge", "--autostash", "feature"].as_slice(),
+        ["merge", "--no-autostash", "feature"].as_slice(),
+        ["merge", "--cleanup=strip", "feature"].as_slice(),
+        ["merge", "--overwrite-ignore", "feature"].as_slice(),
+        ["merge", "--no-overwrite-ignore", "feature"].as_slice(),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            git(repo, ["switch", "-c", "feature"]);
+            write_file(repo, "feature.txt", "feature\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "feature"]);
+            git(repo, ["switch", &default_branch]);
+            write_file(repo, "main.txt", "main\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        assert_eq!(
+            run_zmin_args(zmin_repo.path(), args),
+            git_args(git_repo.path(), args),
+            "{args:?} output"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{args:?} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
+            git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
+            "{args:?} parents"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--pretty=%B"]),
+            git(git_repo.path(), ["log", "-1", "--pretty=%B"]),
+            "{args:?} message"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "{args:?} status"
+        );
+    }
+}
+
+#[test]
 fn merge_gpg_sign_family_matches_stock_git_with_fixture_key() {
     let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

@@ -1839,6 +1839,12 @@ pub enum Command {
         edit: u8,
         #[arg(long = "no-edit", action = ArgAction::Count)]
         no_edit: u8,
+        #[arg(long = "autostash", action = ArgAction::SetTrue)]
+        autostash: bool,
+        #[arg(long = "no-autostash", action = ArgAction::SetTrue)]
+        no_autostash: bool,
+        #[arg(long = "cleanup")]
+        cleanup: Option<String>,
         #[arg(long = "signoff", action = ArgAction::Count)]
         signoff: u8,
         #[arg(long = "no-signoff", action = ArgAction::Count)]
@@ -4925,6 +4931,8 @@ pub enum Command {
         log: Option<String>,
         #[arg(long = "no-log", action = ArgAction::SetTrue)]
         no_log: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
+        verbose: bool,
         #[arg(long = "squash", action = ArgAction::SetTrue)]
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
@@ -4933,6 +4941,20 @@ pub enum Command {
         edit: u8,
         #[arg(long = "no-edit", action = ArgAction::Count)]
         no_edit: u8,
+        #[arg(long = "autostash", action = ArgAction::SetTrue)]
+        autostash: bool,
+        #[arg(long = "no-autostash", action = ArgAction::SetTrue)]
+        no_autostash: bool,
+        #[arg(long = "cleanup")]
+        cleanup: Option<String>,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
+        rerere_autoupdate: bool,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
+        no_rerere_autoupdate: bool,
+        #[arg(long = "overwrite-ignore", action = ArgAction::SetTrue)]
+        overwrite_ignore: bool,
+        #[arg(long = "no-overwrite-ignore", action = ArgAction::SetTrue)]
+        no_overwrite_ignore: bool,
         #[arg(long = "signoff", action = ArgAction::Count)]
         signoff: u8,
         #[arg(long = "no-signoff", action = ArgAction::Count)]

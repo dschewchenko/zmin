@@ -975,6 +975,7 @@ fn merge_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> 
             no_commit: false,
             log_limit: None,
             squash: false,
+            cleanup: None,
             signoff: false,
             gpg_sign: None,
             no_gpg_sign: false,
