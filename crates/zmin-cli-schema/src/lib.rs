@@ -3276,6 +3276,56 @@ pub enum Command {
         patches: Vec<PathBuf>,
     },
     Am {
+        #[arg(long = "quiet", short = 'q', action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "signoff", action = ArgAction::SetTrue)]
+        signoff: bool,
+        #[arg(long = "utf8", action = ArgAction::SetTrue)]
+        utf8: bool,
+        #[arg(long = "no-utf8", action = ArgAction::SetTrue)]
+        no_utf8: bool,
+        #[arg(long = "keep", short = 'k', action = ArgAction::SetTrue)]
+        keep: bool,
+        #[arg(long = "keep-cr", action = ArgAction::SetTrue)]
+        keep_cr: bool,
+        #[arg(long = "no-keep-cr", action = ArgAction::SetTrue)]
+        no_keep_cr: bool,
+        #[arg(long = "message-id", action = ArgAction::SetTrue)]
+        message_id: bool,
+        #[arg(long = "no-message-id", action = ArgAction::SetTrue)]
+        no_message_id: bool,
+        #[arg(long = "quoted-cr")]
+        quoted_cr: Option<String>,
+        #[arg(long = "3way", short = '3', action = ArgAction::SetTrue)]
+        three_way: bool,
+        #[arg(long = "no-3way", action = ArgAction::SetTrue)]
+        no_three_way: bool,
+        #[arg(long = "ignore-space-change", action = ArgAction::SetTrue)]
+        ignore_space_change: bool,
+        #[arg(long = "ignore-whitespace", action = ArgAction::SetTrue)]
+        ignore_whitespace: bool,
+        #[arg(long = "patch-format")]
+        patch_format: Option<String>,
+        #[arg(long = "empty")]
+        empty: Option<String>,
+        #[arg(long = "reject", action = ArgAction::SetTrue)]
+        reject: bool,
+        #[arg(long = "allow-empty", action = ArgAction::SetTrue)]
+        allow_empty: bool,
+        #[arg(long = "abort", action = ArgAction::SetTrue)]
+        abort: bool,
+        #[arg(long = "quit", action = ArgAction::SetTrue)]
+        quit: bool,
+        #[arg(long = "skip", action = ArgAction::SetTrue)]
+        skip: bool,
+        #[arg(long = "continue", action = ArgAction::SetTrue)]
+        continue_: bool,
+        #[arg(long = "resolved", action = ArgAction::SetTrue)]
+        resolved: bool,
+        #[arg(long = "retry", action = ArgAction::SetTrue)]
+        retry: bool,
+        #[arg(long = "show-current-patch")]
+        show_current_patch: Option<String>,
         #[arg(value_hint = ValueHint::FilePath)]
         patches: Vec<PathBuf>,
     },

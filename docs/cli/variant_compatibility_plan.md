@@ -22,6 +22,59 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`am` option-surface closure on the single-mail stock format-patch lane. This
+batch added twenty-eight represented documented option pairs and promoted
+twenty-three of them to reviewed-complete by proving stock-Git parity for
+accepted `am --quiet`, `-q`, `--utf8`, `--no-utf8`, `--keep`, `-k`,
+`--signoff`, `--keep-cr`, `--no-keep-cr`, `--message-id`,
+`--no-message-id`, `--quoted-cr=strip`, `--3way`, `-3`, `--no-3way`,
+`--ignore-space-change`, `--ignore-whitespace`, `--patch-format=mboxrd`,
+`--empty=stop`, `--empty=drop`, and `--reject`, plus stock-compatible
+no-session rejection for `am --allow-empty`, `--abort`, `--quit`, `--skip`,
+`--continue`, `--resolved`, `--retry`, and `--show-current-patch=raw|diff`.
+
+The batch fixed one cohesive parser/runtime gap on the `am` path:
+
+- Zmin now exposes a broad proof-only `am` surface on the existing clean
+  single-mail lane, including stock quiet suppression, keep-subject handling,
+  signoff trailer emission, reject stderr progress, and the current stock
+  no-session fatal path for resume-only flags when `rebase-apply` state does
+  not exist
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(am|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2072 / 3212`
+- represented documented command-option pairs: `2077 / 3212`
+- matrix rows: `6138`
+- verified rows: `5343`
+- invalid-input rows: `770`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `am`: `23 / 54` reviewed-complete documented option pairs, `28 / 54`
+  represented documented option pairs, `32` written rows, `32` classified
+  rows, `23` stock-matching rows, `9` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `am`, but move off the
+newly closed proof-only parser tail and into the remaining value-bearing and
+stateful semantics: `--quoted-cr`/`--patch-format`/`--empty` tails, active
+session flows such as `--abort`/`--continue` with real `rebase-apply` state,
+and the remaining author-date/directory/scissors families still sitting near
+the head of `remaining_to_fix_or_verify.tsv`.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `apply` option-surface closure. This batch added twenty-five documented option
 closures by proving stock-Git parity for accepted tracked-stdin patch flags
 `apply --allow-empty`, `--allow-binary-replacement`, `--apply`, `--binary`,

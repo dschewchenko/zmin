@@ -5,8 +5,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, configure_identity, git, git_args, git_init, git_status, git_with_env,
-    read_named_files, run_zmin, run_zmin_args, run_zmin_status, run_zmin_with_env, write_file,
+    clone_repo_fixture, command_any_output, configure_identity, git, git_args,
+    git_failure_output, git_init, git_status, git_with_env, read_named_files, run_zmin,
+    run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env, write_file,
+    zmin_bin,
 };
 
 fn format_patch_fixture_repo() -> TempDir {
@@ -297,6 +299,107 @@ fn am_applies_stock_format_patch_mail_like_stock_git() {
         git(git_apply.path(), ["log", "--format=%an <%ae>%n%s", "-2"])
     );
     assert_eq!(git(zmin_apply.path(), ["status", "--short"]), "");
+}
+
+fn am_single_patch_fixture() -> (TempDir, String, String) {
+    let repo = format_patch_fixture_repo();
+    let base = git(repo.path(), ["rev-parse", "HEAD~1"]);
+    git(repo.path(), ["format-patch", "-o", "stock-patches", "HEAD~1"]);
+    let patch_name = read_named_files(&repo.path().join("stock-patches"))
+        .into_iter()
+        .map(|(name, _)| name)
+        .next()
+        .expect("single am patch");
+    let patch_path = repo.path().join("stock-patches").join(patch_name);
+    (repo, base, patch_path.to_string_lossy().into_owned())
+}
+
+#[test]
+fn am_option_surface_batch_matches_stock_git() {
+    let (source, base, patch_path) = am_single_patch_fixture();
+    let patch = patch_path.as_str();
+    let success_cases: [(&str, &[&str]); 21] = [
+        ("--quiet", &["am", "--quiet", patch]),
+        ("-q", &["am", "-q", patch]),
+        ("--utf8", &["am", "--utf8", patch]),
+        ("--no-utf8", &["am", "--no-utf8", patch]),
+        ("--keep", &["am", "--keep", patch]),
+        ("-k", &["am", "-k", patch]),
+        ("--signoff", &["am", "--signoff", patch]),
+        ("--keep-cr", &["am", "--keep-cr", patch]),
+        ("--no-keep-cr", &["am", "--no-keep-cr", patch]),
+        ("--message-id", &["am", "--message-id", patch]),
+        ("--no-message-id", &["am", "--no-message-id", patch]),
+        ("--quoted-cr=strip", &["am", "--quoted-cr=strip", patch]),
+        ("--3way", &["am", "--3way", patch]),
+        ("-3", &["am", "-3", patch]),
+        ("--no-3way", &["am", "--no-3way", patch]),
+        ("--ignore-space-change", &["am", "--ignore-space-change", patch]),
+        ("--ignore-whitespace", &["am", "--ignore-whitespace", patch]),
+        ("--patch-format=mboxrd", &["am", "--patch-format=mboxrd", patch]),
+        ("--empty=stop", &["am", "--empty=stop", patch]),
+        ("--empty=drop", &["am", "--empty=drop", patch]),
+        ("--reject", &["am", "--reject", patch]),
+    ];
+    for (label, args) in success_cases {
+        let git_apply = clone_repo_fixture(source.path());
+        let zmin_apply = clone_repo_fixture(source.path());
+        configure_identity(git_apply.path());
+        configure_identity(zmin_apply.path());
+        git(git_apply.path(), ["reset", "--hard", &base]);
+        git(zmin_apply.path(), ["reset", "--hard", &base]);
+
+        let git_result = command_any_output("git", git_apply.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_apply.path(), args, "zmin");
+
+        assert_eq!(zmin_result, git_result, "args: {args:?}");
+        assert_eq!(
+            git(zmin_apply.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_apply.path(), ["rev-parse", "HEAD^{tree}"]),
+            "tree args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_apply.path(), ["log", "--format=%s%n%B", "-1"]),
+            git(git_apply.path(), ["log", "--format=%s%n%B", "-1"]),
+            "log args: {args:?}"
+        );
+        assert_eq!(
+            git(zmin_apply.path(), ["status", "--short"]),
+            git(git_apply.path(), ["status", "--short"]),
+            "status args: {args:?}"
+        );
+        assert!(!label.is_empty());
+    }
+}
+
+#[test]
+fn am_resume_only_flags_without_session_match_stock_git() {
+    let (_source, _base, patch_path) = am_single_patch_fixture();
+    let patch = patch_path.as_str();
+    let failure_cases: [(&str, &[&str]); 9] = [
+        ("--allow-empty", &["am", "--allow-empty", patch]),
+        ("--abort", &["am", "--abort"]),
+        ("--quit", &["am", "--quit"]),
+        ("--skip", &["am", "--skip"]),
+        ("--continue", &["am", "--continue"]),
+        ("--resolved", &["am", "--resolved"]),
+        ("--retry", &["am", "--retry"]),
+        ("--show-current-patch=raw", &["am", "--show-current-patch=raw"]),
+        ("--show-current-patch=diff", &["am", "--show-current-patch=diff"]),
+    ];
+    for (label, args) in failure_cases {
+        let repo = git_init();
+        configure_identity(repo.path());
+        write_file(repo.path(), "a.txt", "base\n");
+        git(repo.path(), ["add", "a.txt"]);
+        git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+        let git_result = git_failure_output(repo.path(), args);
+        let zmin_result = run_zmin_failure_output(repo.path(), args);
+        assert_eq!(zmin_result, git_result, "args: {args:?}");
+        assert_eq!(git(repo.path(), ["status", "--short"]), "");
+        assert!(!label.is_empty());
+    }
 }
 
 #[test]

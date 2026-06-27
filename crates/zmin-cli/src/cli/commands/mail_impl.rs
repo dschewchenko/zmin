@@ -1,8 +1,40 @@
 use super::*;
 
-pub(crate) fn am(patches: Vec<PathBuf>) -> Result<()> {
+#[derive(Debug, Clone)]
+pub(crate) struct AmOptions {
+    pub(crate) quiet: bool,
+    pub(crate) signoff: bool,
+    pub(crate) utf8: bool,
+    pub(crate) no_utf8: bool,
+    pub(crate) keep: bool,
+    pub(crate) keep_cr: bool,
+    pub(crate) no_keep_cr: bool,
+    pub(crate) message_id: bool,
+    pub(crate) no_message_id: bool,
+    pub(crate) quoted_cr: Option<String>,
+    pub(crate) three_way: bool,
+    pub(crate) no_three_way: bool,
+    pub(crate) ignore_space_change: bool,
+    pub(crate) ignore_whitespace: bool,
+    pub(crate) patch_format: Option<String>,
+    pub(crate) empty: Option<String>,
+    pub(crate) reject: bool,
+    pub(crate) allow_empty: bool,
+    pub(crate) abort: bool,
+    pub(crate) quit: bool,
+    pub(crate) skip: bool,
+    pub(crate) continue_: bool,
+    pub(crate) resolved: bool,
+    pub(crate) retry: bool,
+    pub(crate) show_current_patch: Option<String>,
+}
+
+pub(crate) fn am(options: AmOptions, patches: Vec<PathBuf>) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    if options.requires_existing_session() {
+        return Err(am_resume_not_in_progress_error());
+    }
     if !worktree_clean(&repo, &store)? {
         return Err(CliError::Fatal {
             code: 128,
@@ -17,7 +49,7 @@ pub(crate) fn am(patches: Vec<PathBuf>) -> Result<()> {
         });
     }
     for mail in mails {
-        apply_mail_patch(&repo, &store, &mail)?;
+        apply_mail_patch(&repo, &store, &mail, &options)?;
     }
     Ok(())
 }
@@ -53,7 +85,12 @@ fn split_am_mailbox(input: &str) -> Vec<String> {
     mails
 }
 
-fn apply_mail_patch(repo: &GitRepo, store: &LooseObjectStore, mail: &str) -> Result<()> {
+fn apply_mail_patch(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    mail: &str,
+    am_options: &AmOptions,
+) -> Result<()> {
     let (headers, body) = split_mail_headers(mail);
     let header_map = parse_mail_headers(headers);
     let from = header_map.get("from").ok_or_else(|| CliError::Fatal {
@@ -62,7 +99,7 @@ fn apply_mail_patch(repo: &GitRepo, store: &LooseObjectStore, mail: &str) -> Res
     })?;
     let subject = header_map
         .get("subject")
-        .map(|value| clean_mail_subject(value, false, false))
+        .map(|value| clean_mail_subject(value, am_options.keep, false))
         .ok_or_else(|| CliError::Fatal {
             code: 128,
             message: "mail patch is missing Subject header".into(),
@@ -95,41 +132,117 @@ fn apply_mail_patch(repo: &GitRepo, store: &LooseObjectStore, mail: &str) -> Res
         summary: false,
         index: true,
         recount: false,
-        quiet: false,
+        quiet: am_options.quiet,
         verbose: false,
         unsafe_paths: false,
         unidiff_zero: false,
-        ignore_space_change: false,
-        ignore_whitespace: false,
+        ignore_space_change: am_options.ignore_space_change,
+        ignore_whitespace: am_options.ignore_whitespace,
         whitespace: None,
         strip: None,
         context: None,
         z: false,
-        reject: false,
-        three_way: false,
+        reject: am_options.reject,
+        three_way: am_options.three_way && !am_options.no_three_way,
         ours: false,
         theirs: false,
         union: false,
         reverse: false,
         patches: Vec::new(),
     };
-    for patch in patch_commands::parse_apply_patches(patch_text.as_bytes())? {
+    let _accepted_parser_only = (
+        am_options.utf8,
+        am_options.no_utf8,
+        am_options.keep_cr,
+        am_options.no_keep_cr,
+        am_options.message_id,
+        am_options.no_message_id,
+        am_options.quoted_cr.as_deref(),
+        am_options.patch_format.as_deref(),
+        am_options.empty.as_deref(),
+    );
+    let patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
+    if am_options.reject {
+        for patch in &patches {
+            eprintln!(
+                "Checking patch {}...",
+                String::from_utf8_lossy(am_patch_display_path(patch))
+            );
+        }
+    }
+    for patch in patches {
         let update = patch_commands::apply_file_patch(repo, store, &index, &patch, &options)?;
+        if am_options.reject {
+            eprintln!(
+                "Applied patch {} cleanly.",
+                String::from_utf8_lossy(am_patch_display_path(&patch))
+            );
+        }
         patch_commands::write_apply_update(repo, store, &mut index, update, &options)?;
     }
     index.write_to_path(&repo.index_path)?;
     let tree = write_tree_from_index(store, &index)?;
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
-    let message = mail_commit_message(&subject, &message_body);
+    let mut message = mail_commit_message(&subject, &message_body).into_bytes();
+    if am_options.signoff {
+        append_am_signoff(&mut message, &committer);
+    }
     let commit = CommitBuilder::new(tree, author, committer)
         .parent(head_id)
-        .message(message.as_bytes().to_vec())?
+        .message(message)?
         .encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
-    println!("Applying: {subject}");
+    if !am_options.quiet {
+        println!("Applying: {subject}");
+    }
     Ok(())
+}
+
+impl AmOptions {
+    fn requires_existing_session(&self) -> bool {
+        self.allow_empty
+            || self.abort
+            || self.quit
+            || self.skip
+            || self.continue_
+            || self.resolved
+            || self.retry
+            || self.show_current_patch.is_some()
+    }
+}
+
+fn am_resume_not_in_progress_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "Resolve operation not in progress, we are not resuming.".into(),
+    }
+}
+
+fn am_patch_display_path(patch: &patch_commands::ApplyFilePatch) -> &[u8] {
+    patch
+        .new_path
+        .as_deref()
+        .or(patch.old_path.as_deref())
+        .unwrap_or(b"<unknown>")
+}
+
+fn append_am_signoff(message: &mut Vec<u8>, committer: &Signature) {
+    if message.iter().all(|byte| byte.is_ascii_whitespace()) {
+        message.extend_from_slice(
+            format!("Signed-off-by: {} <{}>", committer.name, committer.email).as_bytes(),
+        );
+        message.push(b'\n');
+        return;
+    }
+    message.extend_from_slice(b"\nSigned-off-by: ");
+    message.extend_from_slice(committer.name.as_bytes());
+    message.push(b' ');
+    message.push(b'<');
+    message.extend_from_slice(committer.email.as_bytes());
+    message.push(b'>');
+    message.push(b'\n');
 }
 
 fn parse_mail_date(value: &str) -> Result<(i64, String)> {
