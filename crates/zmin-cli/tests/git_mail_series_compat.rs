@@ -6,8 +6,8 @@ use tempfile::TempDir;
 
 use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin, command_output_with_env,
-    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
-    git_status_args, read_named_files, run_zmin, run_zmin_args, run_zmin_failure_output,
+    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_status_args,
+    git_with_env, read_named_files, run_zmin, run_zmin_args, run_zmin_failure_output,
     run_zmin_status, run_zmin_status_args, run_zmin_with_env, write_file, zmin_bin,
 };
 
@@ -447,6 +447,47 @@ fn format_patch_shared_diff_alias_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_helper_free_pickaxe_and_short_diff_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let head_blob = git(repo.path(), ["rev-parse", "HEAD:alpha.txt"]);
+    let cases: Vec<Vec<String>> = vec![
+        vec!["-q".into()],
+        vec!["-u".into()],
+        vec!["-w".into()],
+        vec!["-b".into()],
+        vec!["-S".into(), "beta".into()],
+        vec!["-G".into(), "beta".into()],
+        vec!["--pickaxe-regex".into(), "-S".into(), "beta".into()],
+        vec!["--pickaxe-all".into(), "-S".into(), "beta".into()],
+        vec!["-I".into(), "nomatch".into()],
+        vec!["--ignore-matching-lines=nomatch".into()],
+        vec!["--find-object".into(), head_blob],
+        vec!["-l".into(), "10".into()],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(repo.path(), &args_ref);
+        let stock = git_args(repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args_ref),
+            git_status_args(repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
 fn am_applies_stock_format_patch_mail_like_stock_git() {
     let repo = format_patch_fixture_repo();
     let base = git(repo.path(), ["rev-parse", "HEAD~2"]);
@@ -487,7 +528,10 @@ fn am_applies_stock_format_patch_mail_like_stock_git() {
 fn am_single_patch_fixture() -> (TempDir, String, String) {
     let repo = format_patch_fixture_repo();
     let base = git(repo.path(), ["rev-parse", "HEAD~1"]);
-    git(repo.path(), ["format-patch", "-o", "stock-patches", "HEAD~1"]);
+    git(
+        repo.path(),
+        ["format-patch", "-o", "stock-patches", "HEAD~1"],
+    );
     let patch_name = read_named_files(&repo.path().join("stock-patches"))
         .into_iter()
         .map(|(name, _)| name)
@@ -528,7 +572,10 @@ fn am_directory_patch_fixture() -> (TempDir, String, String) {
     write_file(source.path(), "alpha.txt", "alpha\n");
     git(source.path(), ["add", "alpha.txt"]);
     git_with_env(source.path(), ["commit", "-m", "add alpha"]);
-    git(source.path(), ["format-patch", "-o", "stock-patches", "HEAD~1"]);
+    git(
+        source.path(),
+        ["format-patch", "-o", "stock-patches", "HEAD~1"],
+    );
     let patch_name = read_named_files(&source.path().join("stock-patches"))
         .into_iter()
         .map(|(name, _)| name)
@@ -546,7 +593,11 @@ fn am_directory_patch_fixture() -> (TempDir, String, String) {
     let patch_path = target.path().join("directory.patch");
     fs::copy(&source_patch_path, &patch_path).expect("copy directory patch");
 
-    (target, patch_path.to_string_lossy().into_owned(), "subdir".into())
+    (
+        target,
+        patch_path.to_string_lossy().into_owned(),
+        "subdir".into(),
+    )
 }
 
 fn am_empty_mail_fixture() -> (TempDir, String) {
@@ -601,17 +652,26 @@ fn am_option_surface_batch_matches_stock_git() {
         ("--3way", &["am", "--3way", patch]),
         ("-3", &["am", "-3", patch]),
         ("--no-3way", &["am", "--no-3way", patch]),
-        ("--ignore-space-change", &["am", "--ignore-space-change", patch]),
+        (
+            "--ignore-space-change",
+            &["am", "--ignore-space-change", patch],
+        ),
         ("--ignore-whitespace", &["am", "--ignore-whitespace", patch]),
         ("--whitespace=warn", &["am", "--whitespace=warn", patch]),
         ("-C1", &["am", "-C1", patch]),
         ("-p1", &["am", "-p1", patch]),
         ("--include=alpha.txt", &["am", "--include=alpha.txt", patch]),
         ("--exclude=alpha.txt", &["am", "--exclude=alpha.txt", patch]),
-        ("--patch-format=mboxrd", &["am", "--patch-format=mboxrd", patch]),
+        (
+            "--patch-format=mboxrd",
+            &["am", "--patch-format=mboxrd", patch],
+        ),
         ("--patch-format=mbox", &["am", "--patch-format=mbox", patch]),
         ("--patch-format=hg", &["am", "--patch-format=hg", patch]),
-        ("--patch-format=stgit", &["am", "--patch-format=stgit", patch]),
+        (
+            "--patch-format=stgit",
+            &["am", "--patch-format=stgit", patch],
+        ),
         ("--empty=stop", &["am", "--empty=stop", patch]),
         ("--empty=drop", &["am", "--empty=drop", patch]),
         ("--reject", &["am", "--reject", patch]),
@@ -701,7 +761,12 @@ fn am_option_surface_batch_matches_stock_git() {
         &patch_stdin,
         "zmin",
     );
-    assert_eq!(zmin_result, git_result, "args: {:?}", ["am", "--patch-format=stgit-series"]);
+    assert_eq!(
+        zmin_result,
+        git_result,
+        "args: {:?}",
+        ["am", "--patch-format=stgit-series"]
+    );
     assert_eq!(
         git(zmin_apply.path(), ["status", "--short"]),
         git(git_apply.path(), ["status", "--short"]),
@@ -719,7 +784,13 @@ fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
     for args in [
         ["am", directory_equals.as_str(), patch].as_slice(),
         ["am", "--directory", directory.as_str(), patch].as_slice(),
-        ["am", directory_unused.as_str(), directory_equals.as_str(), patch].as_slice(),
+        [
+            "am",
+            directory_unused.as_str(),
+            directory_equals.as_str(),
+            patch,
+        ]
+        .as_slice(),
     ] {
         let git_repo = clone_repo_fixture(repo.path());
         let zmin_repo = clone_repo_fixture(repo.path());
@@ -756,8 +827,13 @@ fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
     configure_identity(zmin_repo.path());
     git(git_repo.path(), ["reset", "--hard", &base]);
     git(zmin_repo.path(), ["reset", "--hard", &base]);
-    let git_result =
-        command_output_with_env("git", git_repo.path(), &["am", "--ignore-date", patch], &envs, "git");
+    let git_result = command_output_with_env(
+        "git",
+        git_repo.path(),
+        &["am", "--ignore-date", patch],
+        &envs,
+        "git",
+    );
     let zmin_result = command_output_with_env(
         zmin_bin(),
         zmin_repo.path(),
@@ -768,10 +844,29 @@ fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
     assert_eq!(zmin_result.0, git_result.0);
     assert_eq!(zmin_result.1, git_result.1);
     assert_eq!(
-        git(zmin_repo.path(), ["log", "-1", "--format=%an <%ae>%n%cn <%ce>%n%cd%n%B", "--date=raw"]),
-        git(git_repo.path(), ["log", "-1", "--format=%an <%ae>%n%cn <%ce>%n%cd%n%B", "--date=raw"])
+        git(
+            zmin_repo.path(),
+            [
+                "log",
+                "-1",
+                "--format=%an <%ae>%n%cn <%ce>%n%cd%n%B",
+                "--date=raw"
+            ]
+        ),
+        git(
+            git_repo.path(),
+            [
+                "log",
+                "-1",
+                "--format=%an <%ae>%n%cn <%ce>%n%cd%n%B",
+                "--date=raw"
+            ]
+        )
     );
-    let zmin_author = git(zmin_repo.path(), ["log", "-1", "--format=%ad", "--date=raw"]);
+    let zmin_author = git(
+        zmin_repo.path(),
+        ["log", "-1", "--format=%ad", "--date=raw"],
+    );
     let git_author = git(git_repo.path(), ["log", "-1", "--format=%ad", "--date=raw"]);
     assert_eq!(zmin_author, git_author);
 
@@ -781,11 +876,21 @@ fn am_directory_ignore_date_and_reject_tail_matches_stock_git() {
     configure_identity(zmin_combo_repo.path());
     git(git_combo_repo.path(), ["reset", "--hard", &base]);
     git(zmin_combo_repo.path(), ["reset", "--hard", &base]);
-    let combo_args = ["am", "--ignore-date", "--committer-date-is-author-date", patch];
+    let combo_args = [
+        "am",
+        "--ignore-date",
+        "--committer-date-is-author-date",
+        patch,
+    ];
     let git_combo_result =
         command_output_with_env("git", git_combo_repo.path(), &combo_args, &envs, "git");
-    let zmin_combo_result =
-        command_output_with_env(zmin_bin(), zmin_combo_repo.path(), &combo_args, &envs, "zmin");
+    let zmin_combo_result = command_output_with_env(
+        zmin_bin(),
+        zmin_combo_repo.path(),
+        &combo_args,
+        &envs,
+        "zmin",
+    );
     assert_eq!(zmin_combo_result, git_combo_result);
     assert_eq!(
         git(
@@ -882,7 +987,12 @@ fn am_empty_mail_family_matches_stock_git() {
         configure_identity(git_repo.path());
         configure_identity(zmin_repo.path());
         let _ = command_any_output("git", git_repo.path(), &["am", "--empty=stop", mail], "git");
-        let _ = command_any_output(zmin_bin(), zmin_repo.path(), &["am", "--empty=stop", mail], "zmin");
+        let _ = command_any_output(
+            zmin_bin(),
+            zmin_repo.path(),
+            &["am", "--empty=stop", mail],
+            "zmin",
+        );
 
         let git_result = command_any_output("git", git_repo.path(), args, "git");
         let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin");
@@ -953,8 +1063,14 @@ fn am_resume_only_flags_without_session_match_stock_git() {
         ("--resolved", &["am", "--resolved"]),
         ("-r", &["am", "-r"]),
         ("--retry", &["am", "--retry"]),
-        ("--show-current-patch=raw", &["am", "--show-current-patch=raw"]),
-        ("--show-current-patch=diff", &["am", "--show-current-patch=diff"]),
+        (
+            "--show-current-patch=raw",
+            &["am", "--show-current-patch=raw"],
+        ),
+        (
+            "--show-current-patch=diff",
+            &["am", "--show-current-patch=diff"],
+        ),
     ];
     for (label, args) in failure_cases {
         let repo = git_init();
@@ -1032,7 +1148,10 @@ fn am_conflict_session_family_matches_stock_git() {
 
         let git_result = command_any_output("git", git_repo.path(), cleanup_args, "git");
         let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), cleanup_args, "zmin");
-        assert_eq!(zmin_result, git_result, "case {label}: args {cleanup_args:?}");
+        assert_eq!(
+            zmin_result, git_result,
+            "case {label}: args {cleanup_args:?}"
+        );
         assert_eq!(
             git(zmin_repo.path(), ["status", "--short"]),
             git(git_repo.path(), ["status", "--short"]),

@@ -3815,7 +3815,7 @@ pub enum Command {
         function_context: bool,
         #[arg(long = "histogram", action = ArgAction::SetTrue)]
         histogram: bool,
-        #[arg(long = "ignore-all-space", action = ArgAction::SetTrue)]
+        #[arg(short = 'w', long = "ignore-all-space", action = ArgAction::SetTrue)]
         ignore_all_space: bool,
         #[arg(long = "ignore-blank-lines", action = ArgAction::SetTrue)]
         ignore_blank_lines: bool,
@@ -3823,8 +3823,10 @@ pub enum Command {
         ignore_cr_at_eol: bool,
         #[arg(long = "ignore-space-at-eol", action = ArgAction::SetTrue)]
         ignore_space_at_eol: bool,
-        #[arg(long = "ignore-space-change", action = ArgAction::SetTrue)]
+        #[arg(short = 'b', long = "ignore-space-change", action = ArgAction::SetTrue)]
         ignore_space_change: bool,
+        #[arg(short = 'I', long = "ignore-matching-lines")]
+        ignore_matching_lines: Vec<String>,
         #[arg(long = "ignore-submodules")]
         ignore_submodules: Option<String>,
         #[arg(long = "indent-heuristic", action = ArgAction::SetTrue)]
@@ -3835,6 +3837,18 @@ pub enum Command {
         irreversible_delete: bool,
         #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
         ita_invisible_in_index: bool,
+        #[arg(short = 'S')]
+        pickaxe_string: Option<String>,
+        #[arg(short = 'G')]
+        pickaxe_regex: Option<String>,
+        #[arg(long = "pickaxe-regex", action = ArgAction::SetTrue)]
+        pickaxe_regex_mode: bool,
+        #[arg(long = "pickaxe-all", action = ArgAction::SetTrue)]
+        pickaxe_all: bool,
+        #[arg(long = "find-object")]
+        find_object: Option<String>,
+        #[arg(short = 'l')]
+        rename_limit_short: Option<String>,
         #[arg(long = "line-prefix")]
         line_prefix: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]
@@ -3891,7 +3905,7 @@ pub enum Command {
         patch_with_stat: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
-        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "relative", action = ArgAction::SetTrue)]
         relative: bool,
@@ -3901,7 +3915,7 @@ pub enum Command {
         root: bool,
         #[arg(long = "src-prefix")]
         src_prefix: Option<String>,
-        #[arg(long = "unified", short = 'U')]
+        #[arg(short = 'U', short_alias = 'u', long = "unified", num_args = 0..=1, default_missing_value = "3")]
         unified: Option<String>,
         #[arg(long = "ws-error-highlight")]
         ws_error_highlight: Option<String>,

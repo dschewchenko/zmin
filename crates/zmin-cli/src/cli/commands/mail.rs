@@ -43,9 +43,14 @@ pub(crate) fn dispatch(
             mboxrd: _,
             output,
             paths,
-        } => {
-            super::mail_commands::mailsplit(precision, first, keep_from > 0, keep_cr > 0, output, paths)
-        }
+        } => super::mail_commands::mailsplit(
+            precision,
+            first,
+            keep_from > 0,
+            keep_cr > 0,
+            output,
+            paths,
+        ),
         runtime::Command::Mailinfo {
             keep_subject,
             keep_non_patch_brackets,
@@ -205,11 +210,18 @@ pub(crate) fn dispatch(
             ignore_cr_at_eol: _,
             ignore_space_at_eol: _,
             ignore_space_change: _,
+            ignore_matching_lines: _,
             ignore_submodules: _,
             indent_heuristic: _,
             inter_hunk_context: _,
             irreversible_delete: _,
             ita_invisible_in_index: _,
+            pickaxe_string: _,
+            pickaxe_regex: _,
+            pickaxe_regex_mode: _,
+            pickaxe_all: _,
+            find_object: _,
+            rename_limit_short: _,
             line_prefix: _,
             minimal: _,
             no_attach: _,
