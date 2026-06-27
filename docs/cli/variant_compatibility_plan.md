@@ -22,6 +22,61 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` shared diff-option parser closure on the already modeled
+single-commit stdout mail-series lane. This batch added exact stock-Git matrix
+evidence for `--abbrev`, `--always`, `--anchored`, `--color`,
+`--color-moved`, `--color-moved-ws`, `--diff-algorithm`,
+`--diff-filter`, `--function-context`, `--histogram`,
+`--ignore-all-space`, `--ignore-blank-lines`, `--ignore-cr-at-eol`,
+`--ignore-space-at-eol`, `--ignore-space-change`,
+`--ignore-submodules`, `--indent-heuristic`, `--inter-hunk-context`,
+`--irreversible-delete`, `--ita-invisible-in-index`, `--minimal`, and
+`--patience`, and lifted twenty-two documented option pairs into the
+reviewed-complete represented surface without adding new mail-series rendering
+logic beyond parser/schema acceptance.
+
+The batch closed one cohesive parser-and-evidence gap rather than introducing a
+new `format-patch` behavior family:
+
+- Zmin already matched stock Git on the covered helper-free single-commit
+  stdout mail-series lane, and the remaining work here was to accept the
+  documented shared diff spellings above and promote the resulting exact
+  stock-oracle evidence into represented plus reviewed-complete
+  `format-patch` doc-option pairs
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_shared_diff_option_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2209 / 3212`
+- represented documented command-option pairs: `2209 / 3212`
+- matrix rows: `6353`
+- verified rows: `5541`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `43 / 43` reviewed-complete documented option pairs,
+  `43 / 43` represented documented option pairs, `49` written rows, `49`
+  classified rows, `49` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has `119` remaining `doc_option_not_in_zmin_schema` rows,
+now led by helper-free documented tails such as `--add-header`, `--base`,
+`--break-rewrites`, `--cc`, `--check`, `--color-words`,
+`--compact-summary`, `--description-file`, and related diff/mail spellings.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` default/no-op diff-option closure on the already modeled
 single-commit stdout mail-series lane. This batch added exact stock-Git matrix
 evidence for `--binary`, `--default-prefix`, `--no-ext-diff`,

@@ -300,6 +300,58 @@ fn format_patch_default_diff_option_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_shared_diff_option_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let cases = [
+        ["--abbrev"],
+        ["--always"],
+        ["--color-moved"],
+        ["--color-moved-ws=ignore-space-change"],
+        ["--histogram"],
+        ["--minimal"],
+        ["--patience"],
+        ["--indent-heuristic"],
+        ["--ignore-all-space"],
+        ["--ignore-space-change"],
+        ["--ignore-space-at-eol"],
+        ["--ignore-blank-lines"],
+        ["--ignore-cr-at-eol"],
+        ["--inter-hunk-context=0"],
+        ["--diff-algorithm=myers"],
+        ["--diff-algorithm=minimal"],
+        ["--diff-algorithm=patience"],
+        ["--diff-algorithm=histogram"],
+        ["--anchored=alpha"],
+        ["--color=never"],
+        ["--ignore-submodules=all"],
+        ["--ita-invisible-in-index"],
+        ["--irreversible-delete"],
+        ["--diff-filter=AM"],
+        ["--function-context"],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch", "--stdout"];
+        args.extend(extra);
+        args.push("-1");
+        args.push("HEAD");
+        let zmin = run_zmin_args(repo.path(), &args);
+        let stock = git_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args),
+            git_status_args(repo.path(), &args),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
 fn am_applies_stock_format_patch_mail_like_stock_git() {
     let repo = format_patch_fixture_repo();
     let base = git(repo.path(), ["rev-parse", "HEAD~2"]);

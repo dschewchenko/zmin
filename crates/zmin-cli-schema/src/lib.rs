@@ -3777,10 +3777,52 @@ pub enum Command {
         output_directory: Option<PathBuf>,
         #[arg(long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
+        #[arg(long = "abbrev", action = ArgAction::SetTrue)]
+        abbrev: bool,
+        #[arg(long = "always", action = ArgAction::SetTrue)]
+        always: bool,
+        #[arg(long = "anchored")]
+        anchored: Vec<String>,
         #[arg(long = "binary", action = ArgAction::SetTrue)]
         binary: bool,
+        #[arg(long = "color")]
+        color: Option<String>,
+        #[arg(long = "color-moved", action = ArgAction::SetTrue)]
+        color_moved: bool,
+        #[arg(long = "color-moved-ws")]
+        color_moved_ws: Option<String>,
         #[arg(long = "default-prefix", action = ArgAction::SetTrue)]
         default_prefix: bool,
+        #[arg(long = "diff-algorithm")]
+        diff_algorithm: Option<String>,
+        #[arg(long = "diff-filter")]
+        diff_filter: Option<String>,
+        #[arg(long = "function-context", action = ArgAction::SetTrue)]
+        function_context: bool,
+        #[arg(long = "histogram", action = ArgAction::SetTrue)]
+        histogram: bool,
+        #[arg(long = "ignore-all-space", action = ArgAction::SetTrue)]
+        ignore_all_space: bool,
+        #[arg(long = "ignore-blank-lines", action = ArgAction::SetTrue)]
+        ignore_blank_lines: bool,
+        #[arg(long = "ignore-cr-at-eol", action = ArgAction::SetTrue)]
+        ignore_cr_at_eol: bool,
+        #[arg(long = "ignore-space-at-eol", action = ArgAction::SetTrue)]
+        ignore_space_at_eol: bool,
+        #[arg(long = "ignore-space-change", action = ArgAction::SetTrue)]
+        ignore_space_change: bool,
+        #[arg(long = "ignore-submodules")]
+        ignore_submodules: Option<String>,
+        #[arg(long = "indent-heuristic", action = ArgAction::SetTrue)]
+        indent_heuristic: bool,
+        #[arg(long = "inter-hunk-context")]
+        inter_hunk_context: Option<String>,
+        #[arg(long = "irreversible-delete", action = ArgAction::SetTrue)]
+        irreversible_delete: bool,
+        #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
+        ita_invisible_in_index: bool,
+        #[arg(long = "minimal", action = ArgAction::SetTrue)]
+        minimal: bool,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
@@ -3791,6 +3833,8 @@ pub enum Command {
         no_color_moved: bool,
         #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
         no_color_moved_ws: bool,
+        #[arg(long = "patience", action = ArgAction::SetTrue)]
+        patience: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
         #[arg(long = "patch", action = ArgAction::SetTrue)]
