@@ -3785,6 +3785,8 @@ pub enum Command {
         anchored: Vec<String>,
         #[arg(long = "binary", action = ArgAction::SetTrue)]
         binary: bool,
+        #[arg(long = "break-rewrites", action = ArgAction::SetTrue)]
+        break_rewrites: bool,
         #[arg(long = "color")]
         color: Option<String>,
         #[arg(long = "color-moved", action = ArgAction::SetTrue)]
@@ -3797,6 +3799,16 @@ pub enum Command {
         diff_algorithm: Option<String>,
         #[arg(long = "diff-filter")]
         diff_filter: Option<String>,
+        #[arg(long = "dst-prefix")]
+        dst_prefix: Option<String>,
+        #[arg(long = "exit-code", action = ArgAction::SetTrue)]
+        exit_code: bool,
+        #[arg(long = "find-copies", action = ArgAction::SetTrue)]
+        find_copies: bool,
+        #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
+        find_copies_harder: bool,
+        #[arg(long = "find-renames", action = ArgAction::SetTrue)]
+        find_renames: bool,
         #[arg(long = "function-context", action = ArgAction::SetTrue)]
         function_context: bool,
         #[arg(long = "histogram", action = ArgAction::SetTrue)]
@@ -3821,10 +3833,20 @@ pub enum Command {
         irreversible_delete: bool,
         #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
         ita_invisible_in_index: bool,
+        #[arg(long = "line-prefix")]
+        line_prefix: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]
         minimal: bool,
+        #[arg(long = "compact-summary", action = ArgAction::SetTrue)]
+        compact_summary: bool,
         #[arg(long = "no-ext-diff", action = ArgAction::SetTrue)]
         no_ext_diff: bool,
+        #[arg(long = "no-attach", action = ArgAction::SetTrue)]
+        no_attach: bool,
+        #[arg(long = "no-binary", action = ArgAction::SetTrue)]
+        no_binary: bool,
+        #[arg(long = "no-cover-letter", action = ArgAction::SetTrue)]
+        no_cover_letter: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
         #[arg(long = "no-color", action = ArgAction::SetTrue)]
@@ -3833,12 +3855,42 @@ pub enum Command {
         no_color_moved: bool,
         #[arg(long = "no-color-moved-ws", action = ArgAction::SetTrue)]
         no_color_moved_ws: bool,
+        #[arg(long = "no-indent-heuristic", action = ArgAction::SetTrue)]
+        no_indent_heuristic: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
+        #[arg(long = "no-renames", action = ArgAction::SetTrue)]
+        no_renames: bool,
+        #[arg(long = "no-thread", action = ArgAction::SetTrue)]
+        no_thread: bool,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "output-indicator-context")]
+        output_indicator_context: Option<String>,
+        #[arg(long = "output-indicator-new")]
+        output_indicator_new: Option<String>,
+        #[arg(long = "output-indicator-old")]
+        output_indicator_old: Option<String>,
         #[arg(long = "patience", action = ArgAction::SetTrue)]
         patience: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
         #[arg(long = "patch", action = ArgAction::SetTrue)]
         patch: bool,
+        #[arg(long = "patch-with-stat", action = ArgAction::SetTrue)]
+        patch_with_stat: bool,
+        #[arg(long = "progress", action = ArgAction::SetTrue)]
+        progress: bool,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "relative", action = ArgAction::SetTrue)]
+        relative: bool,
+        #[arg(long = "rename-empty", action = ArgAction::SetTrue)]
+        rename_empty: bool,
+        #[arg(long = "root", action = ArgAction::SetTrue)]
+        root: bool,
+        #[arg(long = "src-prefix")]
+        src_prefix: Option<String>,
         #[arg(long = "attach", action = ArgAction::SetTrue)]
         attach: bool,
         #[arg(long = "inline", action = ArgAction::SetTrue)]
