@@ -881,6 +881,81 @@ fn pull_merge_commit_mode_flags_match_stock_git_for_explicit_local_branch() {
 }
 
 #[test]
+fn pull_merge_stat_toggle_family_matches_stock_git_for_explicit_local_branch() {
+    for (label, args) in [
+        (
+            "pull --stat",
+            ["pull", "--stat", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --summary",
+            ["pull", "--summary", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --no-stat",
+            ["pull", "--no-stat", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --no-summary",
+            ["pull", "--no-summary", "--no-rebase", ".", "side"],
+        ),
+        ("pull -n", ["pull", "-n", "--no-rebase", ".", "side"]),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let git_repo = dir.path().join("git-repo");
+        let zmin_repo = dir.path().join("zmin-repo");
+        for repo in [&git_repo, &zmin_repo] {
+            git(
+                dir.path(),
+                ["init", "-b", "main", repo.to_str().expect("repo path")],
+            );
+            configure_identity(repo);
+            fs::write(repo.join("base.txt"), b"base\n").expect("write base");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "base"]);
+            git(repo, ["switch", "-c", "side"]);
+            fs::write(repo.join("side.txt"), b"side\n").expect("write side");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "side"]);
+            git(repo, ["switch", "main"]);
+            fs::write(repo.join("main.txt"), b"main\n").expect("write main");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        let git_output = command_any_output("git", &git_repo, &args, label);
+        let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, label);
+        assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+        assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+        assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
+        assert_eq!(
+            git(&zmin_repo, ["rev-parse", "HEAD^{tree}"]),
+            git(&git_repo, ["rev-parse", "HEAD^{tree}"]),
+            "{label} tree"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            git(&git_repo, ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            "{label} parents"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["status", "--porcelain=v1", "--branch"]),
+            git(&git_repo, ["status", "--porcelain=v1", "--branch"]),
+            "{label} status"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_repo.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{label} FETCH_HEAD"
+        );
+    }
+}
+
+#[test]
 fn fetch_without_remote_uses_current_branch_remote_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");

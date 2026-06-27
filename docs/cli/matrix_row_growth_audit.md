@@ -12,6 +12,31 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`pull`/`merge` stat-family closure across the explicit local no-rebase merge
+lane and the shared merge default-commit lane. The selected change added ten
+exact stock-Git rows for `pull --stat`, `pull --no-stat`, `pull --summary`,
+`pull --no-summary`, `pull -n`, `merge --stat`, `merge --no-stat`,
+`merge --summary`, `merge --no-summary`, and `merge -n`, plus the
+parser/runtime closure needed to thread the diffstat toggle family through
+`pull` merge dispatch and shared merge execution with stock-like last-one-wins
+raw-argv resolution. The pull path also now routes explicit stat-family merge
+flags through the merge engine instead of aborting in the fast-forward helper
+path on non-fast-forward local pulls. Actual delta is `+10` matrix rows, `+10`
+complete documented option pairs, `+10` represented documented option pairs,
+`+10` verified rows, `+0` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `6639` matrix rows, `5827` verified rows,
+`787` invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2434/3212` complete documented option pairs, and `2434/3212`
+represented documented option pairs. The touched commands now sit at
+`pull 46/99` reviewed-complete documented option pairs with `69/71`
+stock-matching rows and `merge 15/51` reviewed-complete documented option
+pairs with `21/29` stock-matching rows. The next default follow-up should
+reselect from the refreshed census head rather than keep widening this
+micro-family, because the shared stat parser tail is now closed and the
+remaining `pull` and `merge` queues are broader documented-option expansion
+work.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` commit-mode closure across the explicit local no-rebase merge
 lane and the shared merge default-commit lane. The selected change added six
 exact stock-Git rows for `pull --commit`, `pull --no-commit`,

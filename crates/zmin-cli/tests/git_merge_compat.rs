@@ -459,6 +459,46 @@ fn merge_commit_and_no_squash_match_stock_git_merge_commit_state() {
 }
 
 #[test]
+fn merge_stat_toggle_family_matches_stock_git_output_and_state() {
+    for args in [
+        ["merge", "--stat", "feature"].as_slice(),
+        ["merge", "--summary", "feature"].as_slice(),
+        ["merge", "--no-stat", "feature"].as_slice(),
+        ["merge", "--no-summary", "feature"].as_slice(),
+        ["merge", "-n", "feature"].as_slice(),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            git(repo, ["switch", "-c", "feature"]);
+            write_file(repo, "feature.txt", "feature\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "feature"]);
+            git(repo, ["switch", &default_branch]);
+            write_file(repo, "main.txt", "main\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        assert_eq!(run_zmin_args(zmin_repo.path(), args), git_args(git_repo.path(), args));
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
+            git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+        );
+    }
+}
+
+#[test]
 fn merge_non_ff_clean_changes_creates_stock_compatible_merge_commit() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();

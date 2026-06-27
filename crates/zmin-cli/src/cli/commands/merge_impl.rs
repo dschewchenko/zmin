@@ -5,6 +5,7 @@ pub(crate) struct MergeOptions {
     pub(crate) continue_: bool,
     pub(crate) ff_only: bool,
     pub(crate) no_ff: bool,
+    pub(crate) show_diffstat: bool,
     pub(crate) no_commit: bool,
     pub(crate) squash: bool,
     pub(crate) strategies: Vec<String>,
@@ -18,6 +19,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         continue_,
         ff_only,
         no_ff,
+        show_diffstat,
         no_commit,
         squash,
         strategies,
@@ -71,6 +73,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             commit_label.as_deref(),
             &strategies,
             !no_ff && !squash,
+            show_diffstat,
             mode,
         );
     }
@@ -82,6 +85,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         commit_label.as_deref(),
         "ort",
         !no_ff && !squash,
+        show_diffstat,
         mode,
     )
 }
@@ -228,6 +232,7 @@ fn merge_with_strategy(
     target_label: Option<&str>,
     strategies: &[String],
     allow_fast_forward: bool,
+    show_diffstat: bool,
     mode: MergeCommitMode,
 ) -> Result<()> {
     if strategies.len() == 1 && strategies[0] == "ours" {
@@ -242,6 +247,7 @@ fn merge_with_strategy(
             target_label,
             &strategies[0],
             allow_fast_forward,
+            show_diffstat,
             mode,
         );
     }
@@ -302,6 +308,7 @@ fn merge_commit(
     target_label: Option<&str>,
     strategy_label: &str,
     allow_fast_forward: bool,
+    show_diffstat: bool,
     mode: MergeCommitMode,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -418,7 +425,9 @@ fn merge_commit(
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     println!("Merge made by the '{strategy_label}' strategy.");
-    print_merge_commit_stat(repo, store, &ours, &merged)?;
+    if show_diffstat {
+        print_merge_commit_stat(repo, store, &ours, &merged)?;
+    }
     Ok(())
 }
 

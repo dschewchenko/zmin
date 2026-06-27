@@ -10,6 +10,10 @@ pub(crate) fn dispatch(
             continue_,
             ff_only,
             no_ff,
+            stat,
+            no_stat,
+            summary,
+            no_summary,
             commit,
             no_commit,
             squash,
@@ -19,11 +23,14 @@ pub(crate) fn dispatch(
         } => {
             let (no_commit, squash) =
                 resolve_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
+            let show_diffstat =
+                resolve_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
             super::merge_commands::merge(super::merge_commands::MergeOptions {
                 abort,
                 continue_,
                 ff_only,
                 no_ff,
+                show_diffstat,
                 no_commit,
                 squash,
                 strategies,
@@ -140,6 +147,32 @@ pub(crate) fn dispatch(
         } => super::merge_commands::merge_index(one_shot, quiet, &merge_program, all, paths),
         command => unreachable!("non-merge command routed to merge dispatcher: {command:?}"),
     }
+}
+
+fn resolve_merge_diffstat_mode(
+    raw_args: &[String],
+    stat: bool,
+    no_stat: bool,
+    summary: bool,
+    no_summary: bool,
+) -> bool {
+    let mut show_diffstat = true;
+    if no_stat || no_summary {
+        show_diffstat = false;
+    } else if stat || summary {
+        show_diffstat = true;
+    }
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--stat" | "--summary" => show_diffstat = true,
+            "-n" | "--no-stat" | "--no-summary" => show_diffstat = false,
+            _ => {}
+        }
+    }
+    show_diffstat
 }
 
 fn resolve_merge_commit_mode(

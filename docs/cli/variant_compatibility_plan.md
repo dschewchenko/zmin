@@ -22,64 +22,60 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`diff` family color-word-diff and regex closure across the modeled local
-worktree, worktree-versus-HEAD, and tree-to-tree patch lanes. This batch
-added twelve exact stock-Git rows and the shared parser/runtime plumbing
-needed to carry `--color-words` and `--word-diff-regex` through `diff`,
-`diff-files`, `diff-index`, and `diff-tree`. The closure covers the bare
-color-word mode, the explicit `--color-words=<regex>` form, and direct
-`--word-diff-regex=<regex> --word-diff=plain` rendering on all four
-entrypoints. One parser distinction had to be made exact to match stock Git:
-bare `--color-words` now requires the equals form for an attached regex value
-so treeish and revision arguments are not consumed as the optional regex on
-the modeled local lanes.
+`pull`/`merge` stat-family closure across the explicit local no-rebase merge
+lane and the shared merge default-commit lane. This batch added ten exact
+stock-Git rows for `pull --stat`, `pull --no-stat`, `pull --summary`,
+`pull --no-summary`, `pull -n`, `merge --stat`, `merge --no-stat`,
+`merge --summary`, `merge --no-summary`, and `merge -n`, plus the
+parser/runtime closure needed to thread the full diffstat toggle family
+through both porcelain merge dispatch and the local pull merge path with
+stock-like last-one-wins raw-argv resolution. The key runtime fix was real:
+explicit stat-mode merge pulls now route through the merge engine instead of
+falling into the fast-forward helper path and aborting on non-fast-forward
+local pulls.
 
 Focused verification was
-`cargo test -p zmin-cli --test git_diff_compat diff_color_words_and_word_diff_regex_match_stock_git_for_diff_family -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_merge_compat merge_stat_toggle_family_matches_stock_git_output_and_state -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_stat_toggle_family_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_merge_compat merge_commit_and_no_squash_match_stock_git_merge_commit_state -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_commit_mode_flags_match_stock_git_for_explicit_local_branch -- --exact --nocapture`,
 `cargo check -p zmin-cli -p zmin-cli-schema`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(pull|merge|summary)\t'`,
 and `git diff --check`.
 
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2418 / 3212`
-- represented documented command-option pairs: `2418 / 3212`
-- matrix rows: `6623`
-- verified rows: `5811`
+- complete documented command-option pairs: `2434 / 3212`
+- represented documented command-option pairs: `2434 / 3212`
+- matrix rows: `6639`
+- verified rows: `5827`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
-- remaining to fix or verify rows: `794`
+- remaining to fix or verify rows: `778`
 
 Per-command position on the touched surface:
 
-- `diff`: `92 / 117` reviewed-complete documented option pairs,
-  `92 / 117` represented documented option pairs, `260` written rows, `260`
-  classified rows, `256` stock-matching rows, `4` invalid-input rows, and `0`
+- `pull`: `46 / 99` reviewed-complete documented option pairs,
+  `46 / 99` represented documented option pairs, `71` written rows, `71`
+  classified rows, `69` stock-matching rows, `2` invalid-input rows, and `0`
   exact-open rows
-- `diff-files`: `91 / 118` reviewed-complete documented option pairs,
-  `91 / 118` represented documented option pairs, `111` written rows, `111`
-  classified rows, `111` stock-matching rows, `0` invalid-input rows, and `0`
-  exact-open rows
-- `diff-index`: `90 / 112` reviewed-complete documented option pairs,
-  `90 / 112` represented documented option pairs, `118` written rows, `118`
-  classified rows, `118` stock-matching rows, `0` invalid-input rows, and `0`
-  exact-open rows
-- `diff-tree`: `97 / 132` reviewed-complete documented option pairs,
-  `97 / 132` represented documented option pairs, `130` written rows, `130`
-  classified rows, `130` stock-matching rows, `0` invalid-input rows, and `0`
+- `merge`: `15 / 51` reviewed-complete documented option pairs,
+  `15 / 51` represented documented option pairs, `29` written rows, `29`
+  classified rows, `21` stock-matching rows, `8` invalid-input rows, and `0`
   exact-open rows
 
-The next best high-throughput follow-up should move off this `diff` family
-runtime tail, because the new rows closed a coherent shared parser/runtime lane
-and left the remaining surface mostly as unrepresented documented-option
-expansion work. The largest remaining documented queues are now the mostly
-unrepresented `replay` (`117`), `pull` (`62`), `send-email` (`62`),
-`rebase` (`54`), `log` (`47`), `merge` (`43`), `rev-list` (`36`),
-`diff-tree` (`35`), `pack-objects` (`30`), and `diff-files` (`27`) tails.
+The next best high-throughput follow-up should reselect from the refreshed
+backlog head instead of staying on this narrower merge diffstat family,
+because the current batch closed the shared parser/runtime lane and the
+remaining queue is broader documented-option expansion work. The largest
+remaining documented queues are now `replay` (`117`), `send-email` (`62`),
+`rebase` (`54`), `pull` (`53`), `log` (`47`), `merge` (`36`),
+`rev-list` (`36`), `diff-tree` (`35`), `pack-objects` (`30`), and
+`diff-files` (`27`).
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `diff` family reviewed-complete promotion batch across the already represented

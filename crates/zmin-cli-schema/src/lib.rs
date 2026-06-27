@@ -1810,6 +1810,14 @@ pub enum Command {
         ff_only: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
         no_ff: bool,
+        #[arg(long = "stat", action = ArgAction::SetTrue)]
+        stat: bool,
+        #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
+        #[arg(long = "summary", action = ArgAction::SetTrue)]
+        summary: bool,
+        #[arg(long = "no-summary", action = ArgAction::SetTrue)]
+        no_summary: bool,
         #[arg(long = "commit", action = ArgAction::SetTrue)]
         commit: bool,
         #[arg(long = "no-commit", action = ArgAction::SetTrue)]
@@ -4854,6 +4862,14 @@ pub enum Command {
         ff_only: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
         no_ff: bool,
+        #[arg(long = "stat", action = ArgAction::SetTrue)]
+        stat: bool,
+        #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
+        #[arg(long = "summary", action = ArgAction::SetTrue)]
+        summary: bool,
+        #[arg(long = "no-summary", action = ArgAction::SetTrue)]
+        no_summary: bool,
         #[arg(long = "commit", action = ArgAction::SetTrue)]
         commit: bool,
         #[arg(long = "no-commit", action = ArgAction::SetTrue)]

@@ -11310,6 +11310,10 @@ pub(crate) fn run_pull(
     ff: bool,
     ff_only: bool,
     no_ff: bool,
+    stat: bool,
+    no_stat: bool,
+    summary: bool,
+    no_summary: bool,
     commit: bool,
     no_commit: bool,
     squash: bool,
@@ -11336,6 +11340,8 @@ pub(crate) fn run_pull(
     let _ = ff;
     let _ = no_all;
     let repo = find_repo_or_bare()?;
+    let show_diffstat =
+        resolve_pull_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
     let (no_commit, squash) =
         resolve_pull_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
@@ -11565,12 +11571,24 @@ fatal: the remote end hung up unexpectedly\n"
             pull_rebase_mode == PullRebaseMode::Interactive,
         );
     }
-    if !ff_only && (commit || no_commit || squash || no_squash || no_ff || !strategies.is_empty()) {
+    if !ff_only
+        && (stat
+            || no_stat
+            || summary
+            || no_summary
+            || commit
+            || no_commit
+            || squash
+            || no_squash
+            || no_ff
+            || !strategies.is_empty())
+    {
         return merge_commands::merge(merge_commands::MergeOptions {
             abort: false,
             continue_: false,
             ff_only,
             no_ff,
+            show_diffstat,
             no_commit,
             squash,
             strategies,
@@ -11613,6 +11631,32 @@ fn resolve_pull_merge_commit_mode(
         }
     }
     (effective_no_commit, effective_squash)
+}
+
+fn resolve_pull_merge_diffstat_mode(
+    raw_args: &[String],
+    stat: bool,
+    no_stat: bool,
+    summary: bool,
+    no_summary: bool,
+) -> bool {
+    let mut show_diffstat = true;
+    if no_stat || no_summary {
+        show_diffstat = false;
+    } else if stat || summary {
+        show_diffstat = true;
+    }
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--stat" | "--summary" => show_diffstat = true,
+            "-n" | "--no-stat" | "--no-summary" => show_diffstat = false,
+            _ => {}
+        }
+    }
+    show_diffstat
 }
 
 fn missing_pull_tracking_info(current_branch_short: &str) -> CliError {
