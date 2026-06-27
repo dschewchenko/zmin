@@ -747,10 +747,20 @@ pub(crate) fn format_patch(
     no_patch: bool,
     numstat: bool,
     dirstat: Option<&str>,
-    dirstat_by_file: bool,
+    dirstat_short: Option<&str>,
+    cumulative: bool,
+    dirstat_by_file: Option<&str>,
     shortstat: bool,
     raw: bool,
     summary: bool,
+    separate_merges: bool,
+    combined_merges: bool,
+    tree_in_diff: bool,
+    first_parent_diff: bool,
+    diff_merges: Option<&str>,
+    no_diff_merges: bool,
+    combined_all_paths: bool,
+    remerge_diff: bool,
     full_index: bool,
     nul_terminated: bool,
     no_prefix: bool,
@@ -811,6 +821,22 @@ pub(crate) fn format_patch(
             message: "--name-status does not make sense".into(),
         });
     }
+    if remerge_diff || diff_merges.is_some_and(|value| matches!(value, "remerge" | "r")) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--remerge-diff does not make sense".into(),
+        });
+    }
+    let allows_combined_all_paths = combined_merges
+        || diff_merges.is_some_and(|value| {
+            matches!(value, "combined" | "c" | "dense-combined" | "dense_combined" | "cc")
+        });
+    if combined_all_paths && !allows_combined_all_paths {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--combined-all-paths makes no sense without -c or --cc".into(),
+        });
+    }
     if stdout && output_directory.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -857,9 +883,10 @@ pub(crate) fn format_patch(
     } else {
         abbrev_len
     };
-    let dirstat_by_file = dirstat_by_file
-        || dirstat
-            .is_some_and(|value| value.split(',').any(|part| part.trim() == "files"));
+    let dirstat = normalize_format_patch_dirstat(dirstat, dirstat_short, cumulative, dirstat_by_file);
+    let dirstat_by_file = dirstat
+        .as_deref()
+        .is_some_and(|value| value.split(',').any(|part| part.trim() == "files"));
     let word_diff = parse_word_diff_option(color_words.map(|_| "color").or(word_diff))?;
     let word_diff_regex = color_words
         .filter(|value| !value.is_empty())
@@ -915,6 +942,10 @@ pub(crate) fn format_patch(
         encode_email_headers,
         no_encode_email_headers,
         word_diff_regex,
+        separate_merges,
+        tree_in_diff,
+        first_parent_diff,
+        no_diff_merges,
     );
     let message_id_timestamp = if thread {
         Some(current_unix_timestamp()?)
@@ -1094,6 +1125,38 @@ fn format_patch_prelude_mode(
         FormatPatchPreludeMode::None
     } else {
         FormatPatchPreludeMode::Diffstat
+    }
+}
+
+fn normalize_format_patch_dirstat(
+    dirstat: Option<&str>,
+    dirstat_short: Option<&str>,
+    cumulative: bool,
+    dirstat_by_file: Option<&str>,
+) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(value) = dirstat_short.or(dirstat) {
+        if !value.is_empty() {
+            parts.push(value.to_owned());
+        }
+    }
+    if let Some(value) = dirstat_by_file {
+        parts.push("files".to_owned());
+        if !value.is_empty() {
+            parts.push(value.to_owned());
+        }
+    }
+    if cumulative {
+        parts.push("cumulative".to_owned());
+    }
+    if parts.is_empty() {
+        if dirstat.is_some() || dirstat_short.is_some() || dirstat_by_file.is_some() || cumulative {
+            Some(String::new())
+        } else {
+            None
+        }
+    } else {
+        Some(parts.join(","))
     }
 }
 

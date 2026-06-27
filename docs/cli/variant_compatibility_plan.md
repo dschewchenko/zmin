@@ -22,6 +22,54 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` merge-diff and dirstat-alias closure across the modeled
+merge-only exclude revision set and nested-directory single-commit stdout
+mail-series lanes. This batch was mostly parser plus stock-guard parity rather
+than new renderer work: `format-patch` now accepts the merge-diff family
+`-m`, `-c`, `-t`, `--dd`, `--diff-merges=first-parent|separate|combined|dense-combined|off`,
+`--no-diff-merges`, and the valid `--combined-all-paths` compositions on a
+merge-only revision set, matching stock Git's empty stdout lane there.
+It also closed the remaining helper-free dirstat aliases and expansions around
+`--dirstat=cumulative`, `--cumulative`, `-X`, `-X10`, and
+`--dirstat-by-file=10,cumulative` on the nested-directory stdout lane.
+Two stock fatal guards were also made exact: bare `--combined-all-paths`
+preserves the stock `makes no sense without -c or --cc` failure, and
+`--remerge-diff` preserves the stock `does not make sense` failure.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_merge_diff_and_dirstat_alias_family_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_word_diff_color_and_regex_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2319 / 3212`
+- matrix rows: `6492`
+- verified rows: `5680`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `131 / 162` reviewed-complete documented option pairs,
+  `153 / 162` represented documented option pairs, `188` written rows, `188`
+  classified rows, `188` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should still stay on `format-patch`,
+but the queue is now much more concentrated in command-specific mail-series
+tails: `--base`, `--no-base`, `--cover-from-description`,
+`--description-file`, `--filename-max-length`, `--ignore-if-in-upstream`,
+`--interdiff`, `--range-diff`, and `--creation-factor`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` color-word-diff and bounded-regex closure across the modeled
 multi-file single-commit stdout mail-series lane. This batch closed a real
 mail-render gap rather than just expanding evidence: `format-patch` now matches

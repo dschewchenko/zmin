@@ -3957,14 +3957,34 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         dirstat: Option<String>,
-        #[arg(long = "dirstat-by-file", action = ArgAction::SetTrue)]
-        dirstat_by_file: bool,
+        #[arg(short = 'X', num_args = 0..=1, default_missing_value = "")]
+        dirstat_short: Option<String>,
+        #[arg(long = "cumulative", action = ArgAction::SetTrue)]
+        cumulative: bool,
+        #[arg(long = "dirstat-by-file", num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        dirstat_by_file: Option<String>,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
         #[arg(long = "raw", action = ArgAction::SetTrue)]
         raw: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
         summary: bool,
+        #[arg(short = 'm', action = ArgAction::SetTrue)]
+        separate_merges: bool,
+        #[arg(short = 'c', action = ArgAction::SetTrue)]
+        combined_merges: bool,
+        #[arg(short = 't', action = ArgAction::SetTrue)]
+        tree_in_diff: bool,
+        #[arg(long = "dd", action = ArgAction::SetTrue)]
+        first_parent_diff: bool,
+        #[arg(long = "diff-merges")]
+        diff_merges: Option<String>,
+        #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+        no_diff_merges: bool,
+        #[arg(long = "combined-all-paths", action = ArgAction::SetTrue)]
+        combined_all_paths: bool,
+        #[arg(long = "remerge-diff", action = ArgAction::SetTrue)]
+        remerge_diff: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]

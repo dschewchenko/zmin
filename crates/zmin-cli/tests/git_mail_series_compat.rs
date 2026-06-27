@@ -100,6 +100,27 @@ fn format_patch_nested_dir_fixture_repo() -> TempDir {
     repo
 }
 
+fn format_patch_merge_commit_fixture_repo() -> TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "base.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "side"]);
+    write_file(repo.path(), "side.txt", "side\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "side"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "main.txt", "main\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "main"]);
+    git(repo.path(), ["merge", "--no-ff", "-m", "merge", "side"]);
+    repo
+}
+
 fn normalize_format_patch_version(output: &str) -> String {
     let mut normalized = Vec::new();
     let mut version_line = false;
@@ -873,6 +894,101 @@ fn format_patch_prefix_null_and_dirstat_family_matches_stock_git() {
         vec!["--dirstat-by-file".into()],
     ];
     for extra in nested_cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("-1".to_owned());
+        args.push("HEAD".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(nested_repo.path(), &args_ref);
+        let stock = git_args(nested_repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(nested_repo.path(), &args_ref),
+            git_status_args(nested_repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
+fn format_patch_merge_diff_and_dirstat_alias_family_matches_stock_git() {
+    let merge_repo = format_patch_merge_commit_fixture_repo();
+    let merge_cases: Vec<Vec<String>> = vec![
+        vec!["-m".into()],
+        vec!["-c".into()],
+        vec!["-t".into()],
+        vec!["--dd".into()],
+        vec!["--diff-merges=first-parent".into()],
+        vec!["--diff-merges=separate".into()],
+        vec!["--diff-merges=combined".into()],
+        vec!["--diff-merges=dense-combined".into()],
+        vec!["--diff-merges=off".into()],
+        vec!["--no-diff-merges".into()],
+        vec!["--combined-all-paths".into(), "-c".into()],
+        vec![
+            "--combined-all-paths".into(),
+            "--diff-merges=combined".into(),
+        ],
+    ];
+    for extra in merge_cases {
+        let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
+        args.extend(extra);
+        args.push("HEAD".to_owned());
+        args.push("^HEAD^1".to_owned());
+        args.push("^HEAD^2".to_owned());
+        let args_ref = args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin = run_zmin_args(merge_repo.path(), &args_ref);
+        let stock = git_args(merge_repo.path(), &args_ref);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args_ref.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(merge_repo.path(), &args_ref),
+            git_status_args(merge_repo.path(), &args_ref),
+            "status case mismatch"
+        );
+    }
+
+    for args in [
+        vec![
+            "format-patch",
+            "--stdout",
+            "--combined-all-paths",
+            "HEAD",
+            "^HEAD^1",
+            "^HEAD^2",
+        ],
+        vec![
+            "format-patch",
+            "--stdout",
+            "--remerge-diff",
+            "HEAD",
+            "^HEAD^1",
+            "^HEAD^2",
+        ],
+    ] {
+        let git_result = git_failure_output(merge_repo.path(), &args);
+        let zmin_result = run_zmin_failure_output(merge_repo.path(), &args);
+        assert_eq!(zmin_result, git_result, "args: {args:?}");
+    }
+
+    let nested_repo = format_patch_nested_dir_fixture_repo();
+    let dirstat_cases: Vec<Vec<String>> = vec![
+        vec!["--dirstat=cumulative".into()],
+        vec!["--cumulative".into()],
+        vec!["-X".into()],
+        vec!["-X10".into()],
+        vec!["--dirstat-by-file=10,cumulative".into()],
+    ];
+    for extra in dirstat_cases {
         let mut args = vec!["format-patch".to_owned(), "--stdout".to_owned()];
         args.extend(extra);
         args.push("-1".to_owned());
