@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2523	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2537	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2548	3212	documented command-option pairs with at least one behavior row
 behavior_rows_written	6851	6851	current written command option value combination state transport platform rows
@@ -49,10 +49,10 @@ cvsserver	8	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 daemon	27	13	13	48.1	14	14	100.0	13	92.9	0	0	1	yes
 describe	14	14	14	100.0	19	19	100.0	19	100.0	0	0	0	yes
 diagnose	5	5	5	100.0	5	5	100.0	5	100.0	0	0	0	yes
-diff	117	92	94	80.3	268	268	100.0	264	98.5	0	0	4	yes
-diff-files	118	91	95	80.5	121	121	100.0	121	100.0	0	0	0	yes
-diff-index	112	90	94	83.9	128	128	100.0	128	100.0	0	0	0	yes
-diff-tree	132	97	101	76.5	140	140	100.0	140	100.0	0	0	0	yes
+diff	117	94	94	80.3	268	268	100.0	264	98.5	0	0	4	yes
+diff-files	118	95	95	80.5	121	121	100.0	121	100.0	0	0	0	yes
+diff-index	112	94	94	83.9	128	128	100.0	128	100.0	0	0	0	yes
+diff-tree	132	101	101	76.5	140	140	100.0	140	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
 fast-export	18	0	0	0.0	7	7	100.0	4	57.1	0	0	3	yes
 fast-import	19	1	1	5.3	11	11	100.0	8	72.7	0	0	3	yes

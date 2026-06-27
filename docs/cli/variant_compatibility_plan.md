@@ -21,6 +21,58 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free `diff*`
+dirstat-family review closure across the already represented local porcelain
+and plumbing lanes. This batch did not add runtime behavior or matrix rows; it
+promoted the already verified dirstat family into the reviewed-complete census
+set for `diff --cumulative`, `diff -X`, `diff-files --cumulative`,
+`diff-files --dirstat`, `diff-files --dirstat-by-file`, `diff-files -X`,
+`diff-index --cumulative`, `diff-index --dirstat`,
+`diff-index --dirstat-by-file`, `diff-index -X`, `diff-tree --cumulative`,
+`diff-tree --dirstat`, `diff-tree --dirstat-by-file`, and `diff-tree -X`.
+The closure is evidence-only: the existing exact stock-Git rows already cover
+the treeish-pair, dirty-worktree, index-vs-tree, and tree-to-tree dirstat
+lanes, including empty, cutoff, `files`, cumulative, and paired cumulative
+forms where modeled.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_diff_compat diff_dirstat -- --nocapture`,
+`python3 tools/git-compat-census.py --root .`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2537 / 3212`
+- represented documented command-option pairs: `2548 / 3212`
+- matrix rows: `6851`
+- verified rows: `6006`
+- invalid-input rows: `820`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `675`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `diff`: `94 / 117` reviewed-complete documented option pairs,
+  `94 / 117` represented documented option pairs, `268` written rows, `264`
+  stock-matching rows, `4` invalid-input rows, and `0` exact-open rows
+- `diff-files`: `95 / 118` reviewed-complete documented option pairs,
+  `95 / 118` represented documented option pairs, `121` written rows, `121`
+  stock-matching rows, `0` invalid-input rows, and `0` exact-open rows
+- `diff-index`: `94 / 112` reviewed-complete documented option pairs,
+  `94 / 112` represented documented option pairs, `128` written rows, `128`
+  stock-matching rows, `0` invalid-input rows, and `0` exact-open rows
+- `diff-tree`: `101 / 132` reviewed-complete documented option pairs,
+  `101 / 132` represented documented option pairs, `140` written rows, `140`
+  stock-matching rows, `0` invalid-input rows, and `0` exact-open rows
+
+This is a reviewed-complete census promotion batch rather than an
+implementation batch: it closes the remaining represented `diff*` dirstat
+doc-option family without changing runtime code or row counts.
+
 As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
 option-family transport expansion across the existing file URL, dumb HTTP,
 smart HTTP, git-daemon, and SSH lanes. This batch widened the already
