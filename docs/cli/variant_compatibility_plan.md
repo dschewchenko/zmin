@@ -22,19 +22,20 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`grep` traversal, untracked, and no-index closure across modeled tracked,
+`grep` schema-tail plus override/value closure across modeled tracked,
 untracked, ignored, and filesystem-only lanes. This batch added exact
-stock-Git evidence and runtime support for `--untracked`,
-`--exclude-standard`, `--recursive`, `--no-recursive`, `--max-depth`,
-`--threads`, and `--no-index`. The implementation stayed deliberately local
-and helper-free: repo worktree grep now reuses the existing tracked/untracked
-and standard-ignore loaders so `--untracked` includes tracked plus untracked
-files while still excluding ignored paths like stock Git, explicit
-`--no-recursive` and `--max-depth` now gate both tracked and untracked local
-path traversal on the modeled lane, `--threads` is accepted as the stock local
-no-op output lane on this surface, and `--no-index` now searches ordinary
-filesystem paths outside a repository with stock-compatible recursive and
-top-level-only behavior.
+stock-Git evidence and runtime support for `-r`, `--no-exclude-standard`,
+`--textconv`, `-P`, and `--perl-regexp`, while also widening repeated
+documented value parsing for `-A` / `--after-context`, `-B` /
+`--before-context`, `-C` / `--context`, `--max-depth`, and `--threads`. The
+implementation stayed deliberately local and helper-free: repeated value forms
+now preserve the stock last-one-wins lane for context, depth, and thread
+arguments, `--no-exclude-standard` now disables the implicit ignore filtering
+that comes with the modeled `--untracked` worktree lane, `--textconv` stays a
+stock-compatible no-op on the current text-only fixture surface, perl-regexp
+aliases are now accepted on the simple local regex lane, and explicit
+`--no-index --recursive` plus repeated no-index depth forms now match stock
+Git on the filesystem traversal lane.
 
 Focused verification was
 `cargo test -p zmin-cli --test git_grep_compat -- --nocapture`,
@@ -49,28 +50,27 @@ Actual durable readiness/status after this batch:
 
 - complete command matrices: `148 / 151`
 - complete documented command-option pairs: `2297 / 3212`
-- represented documented command-option pairs: `2371 / 3212`
-- matrix rows: `6558`
-- verified rows: `5746`
+- represented documented command-option pairs: `2376 / 3212`
+- matrix rows: `6576`
+- verified rows: `5764`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
 - `grep`: `21 / 73` reviewed-complete documented option pairs,
-  `64 / 73` represented documented option pairs, `89` written rows, `89`
-  classified rows, `89` stock-matching rows, `0` invalid-input rows, and `0`
+  `69 / 73` represented documented option pairs, `107` written rows, `107`
+  classified rows, `107` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
 
 The next best high-throughput follow-up should likely stay on `grep`, because
 it remains the largest safe local helper-free documented queue after this
-batch. The newly closed traversal and index toggles moved out of the remaining
-tail; the queue is now more concentrated in expansion work on already modeled
-local families such as `--after-context`, `--all-match`, `--and`,
-`--basic-regexp`, `--before-context`, `--color`, `--column`, `--context`,
-`--extended-regexp`, `--function-context`, `--name-only`, `--not`, `--null`,
-`--only-matching`, `--or`, and the remaining schema gaps led by
-`--no-exclude-standard`.
+batch. The new schema-tail and repeated-value closures moved more of the local
+surface out of the remaining tail; the queue is now concentrated in the last
+few schema gaps such as `--open-files-in-pager`, `--recurse-submodules`, `-I`,
+and `-O`, plus expansion work on already modeled local families like
+`--all-match`, `--and`, `--color`, `--column`, `--function-context`,
+`--name-only`, `--not`, `--null`, `--only-matching`, and `--or`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` mail-series tail closure across the modeled two-patch and

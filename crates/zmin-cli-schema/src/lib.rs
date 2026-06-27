@@ -4467,16 +4467,18 @@ pub enum Command {
         untracked: bool,
         #[arg(long = "exclude-standard", action = ArgAction::SetTrue)]
         exclude_standard: bool,
+        #[arg(long = "no-exclude-standard", action = ArgAction::SetTrue)]
+        no_exclude_standard: bool,
         #[arg(long = "no-index", action = ArgAction::SetTrue)]
         no_index: bool,
-        #[arg(long = "recursive", action = ArgAction::SetTrue)]
+        #[arg(short = 'r', long = "recursive", action = ArgAction::SetTrue)]
         recursive: bool,
         #[arg(long = "no-recursive", action = ArgAction::SetTrue)]
         no_recursive: bool,
         #[arg(long = "max-depth")]
-        max_depth: Option<usize>,
+        max_depth: Vec<usize>,
         #[arg(long = "threads")]
-        threads: Option<usize>,
+        threads: Vec<usize>,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
@@ -4498,11 +4500,11 @@ pub enum Command {
         #[arg(short = 'm', long = "max-count")]
         max_count: Option<usize>,
         #[arg(short = 'A', long = "after-context")]
-        after_context: Option<usize>,
+        after_context: Vec<usize>,
         #[arg(short = 'B', long = "before-context")]
-        before_context: Option<usize>,
+        before_context: Vec<usize>,
         #[arg(short = 'C', long = "context")]
-        context: Option<usize>,
+        context: Vec<usize>,
         #[arg(long = "and", action = ArgAction::SetTrue)]
         and: bool,
         #[arg(long = "or", action = ArgAction::SetTrue)]
@@ -4535,8 +4537,12 @@ pub enum Command {
         extended_regexp: bool,
         #[arg(short = 'F', long = "fixed-strings", action = ArgAction::SetTrue)]
         fixed_strings: bool,
+        #[arg(short = 'P', long = "perl-regexp", action = ArgAction::SetTrue)]
+        perl_regexp: bool,
         #[arg(short = 'a', long = "text", action = ArgAction::SetTrue)]
         text: bool,
+        #[arg(long = "textconv", action = ArgAction::SetTrue)]
+        textconv: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
         #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]

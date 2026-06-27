@@ -342,3 +342,73 @@ fn grep_traversal_untracked_and_no_index_family_matches_stock_git() {
         );
     }
 }
+
+#[test]
+fn grep_schema_tail_and_override_value_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir/sub")).expect("create dir tree");
+    fs::write(repo.path().join(".gitignore"), b"*.log\n").expect("write gitignore");
+    fs::write(
+        repo.path().join("a.txt"),
+        b"alpha\nhello\nworld\nomega\n",
+    )
+    .expect("write a");
+    fs::write(repo.path().join("b.txt"), b"hello.world\n").expect("write b");
+    fs::write(repo.path().join("dir/sub/c.txt"), b"nested hello\n").expect("write c");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+    fs::write(repo.path().join("u.txt"), b"hello untracked\n").expect("write untracked");
+    fs::write(repo.path().join("ignored.log"), b"hello ignored\n").expect("write ignored");
+
+    for args in [
+        ["grep", "-r", "hello"].as_slice(),
+        ["grep", "--no-exclude-standard", "--untracked", "hello"].as_slice(),
+        ["grep", "--textconv", "hello"].as_slice(),
+        ["grep", "-P", "hello"].as_slice(),
+        ["grep", "--perl-regexp", "hello"].as_slice(),
+        ["grep", "-A", "1", "--after-context", "2", "hello"].as_slice(),
+        ["grep", "--after-context", "1", "-A", "2", "hello"].as_slice(),
+        ["grep", "-B", "1", "--before-context", "2", "hello"].as_slice(),
+        ["grep", "--before-context", "1", "-B", "2", "hello"].as_slice(),
+        ["grep", "-C", "1", "--context", "2", "hello"].as_slice(),
+        ["grep", "--context", "1", "-C", "2", "hello"].as_slice(),
+        ["grep", "--max-depth=2", "--max-depth=0", "hello"].as_slice(),
+        ["grep", "--max-depth=0", "--max-depth=2", "hello"].as_slice(),
+        ["grep", "--threads=1", "--threads=0", "hello"].as_slice(),
+        ["grep", "--threads=0", "--threads=1", "hello"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status args: {args:?}"
+        );
+    }
+
+    let outside = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(outside.path().join("sub")).expect("create outside tree");
+    fs::write(outside.path().join("top.txt"), b"hello top\n").expect("write top");
+    fs::write(outside.path().join("sub/nested.txt"), b"hello nested\n").expect("write nested");
+
+    for args in [
+        ["grep", "--no-index", "--recursive", "hello"].as_slice(),
+        ["grep", "--no-index", "--max-depth=2", "--max-depth=0", "hello"].as_slice(),
+        ["grep", "--no-index", "--max-depth=0", "--max-depth=2", "hello"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(outside.path(), args),
+            git_args(outside.path(), args),
+            "outside args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_status_args(outside.path(), args),
+            git_status_args(outside.path(), args),
+            "outside status args: {args:?}"
+        );
+    }
+}

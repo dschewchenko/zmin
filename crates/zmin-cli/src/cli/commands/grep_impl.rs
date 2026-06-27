@@ -4,11 +4,12 @@ pub(crate) fn grep(
     cached: bool,
     untracked: bool,
     exclude_standard: bool,
+    no_exclude_standard: bool,
     no_index: bool,
     recursive: bool,
     no_recursive: bool,
-    max_depth: Option<usize>,
-    threads: Option<usize>,
+    max_depth: Vec<usize>,
+    threads: Vec<usize>,
     quiet: bool,
     ignore_case: bool,
     invert_match: bool,
@@ -19,9 +20,9 @@ pub(crate) fn grep(
     count: bool,
     all_match: bool,
     max_count: Option<usize>,
-    after_context: Option<usize>,
-    before_context: Option<usize>,
-    context: Option<usize>,
+    after_context: Vec<usize>,
+    before_context: Vec<usize>,
+    context: Vec<usize>,
     and: bool,
     or: bool,
     not: bool,
@@ -38,7 +39,9 @@ pub(crate) fn grep(
     basic_regexp: bool,
     extended_regexp: bool,
     fixed_strings: bool,
+    perl_regexp: bool,
     text: bool,
+    textconv: bool,
     no_textconv: bool,
     color: Option<String>,
     no_color: bool,
@@ -48,7 +51,8 @@ pub(crate) fn grep(
     pattern: Option<String>,
     args: Vec<String>,
 ) -> Result<()> {
-    let _threads = threads;
+    let max_depth = threads_last_value(&max_depth);
+    let _threads = threads_last_value(&threads);
     if no_index {
         return grep_no_index(
             cached,
@@ -84,7 +88,9 @@ pub(crate) fn grep(
             basic_regexp,
             extended_regexp,
             fixed_strings,
+            perl_regexp,
             text,
+            textconv,
             no_textconv,
             color,
             no_color,
@@ -120,11 +126,18 @@ pub(crate) fn grep(
         not,
     )?;
     let files_with_matches = files_with_matches || name_only;
-    let context = context.unwrap_or(0);
-    let before_context = before_context.unwrap_or(context);
-    let after_context = after_context.unwrap_or(context);
+    let context = threads_last_value(&context).unwrap_or(0);
+    let before_context = threads_last_value(&before_context).unwrap_or(context);
+    let after_context = threads_last_value(&after_context).unwrap_or(context);
     let color_mode = grep_color_mode(color.as_deref(), no_color)?;
-    let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv);
+    let _accepted_parser_only = (
+        basic_regexp,
+        extended_regexp,
+        perl_regexp,
+        text,
+        textconv,
+        no_textconv,
+    );
     if cached && untracked {
         return Err(CliError::Fatal {
             code: 128,
@@ -133,7 +146,10 @@ pub(crate) fn grep(
     }
     let recursive_enabled = recursive || !no_recursive;
     let tracked_paths = worktree_commands::tracked_path_set(&grep_input.index);
-    let repo_ignore = if matches!(grep_input.source, GrepSource::Worktree) && (untracked || exclude_standard) {
+    let repo_ignore = if matches!(grep_input.source, GrepSource::Worktree)
+        && !no_exclude_standard
+        && (untracked || exclude_standard)
+    {
         worktree_commands::standard_repo_ignore(&repo)?
     } else {
         GitIgnore::default()
@@ -285,9 +301,9 @@ fn grep_no_index(
     count: bool,
     all_match: bool,
     max_count: Option<usize>,
-    after_context: Option<usize>,
-    before_context: Option<usize>,
-    context: Option<usize>,
+    after_context: Vec<usize>,
+    before_context: Vec<usize>,
+    context: Vec<usize>,
     and: bool,
     or: bool,
     not: bool,
@@ -304,7 +320,9 @@ fn grep_no_index(
     basic_regexp: bool,
     extended_regexp: bool,
     fixed_strings: bool,
+    perl_regexp: bool,
     text: bool,
+    textconv: bool,
     no_textconv: bool,
     color: Option<String>,
     no_color: bool,
@@ -333,11 +351,19 @@ fn grep_no_index(
         not,
     )?;
     let files_with_matches = files_with_matches || name_only;
-    let context = context.unwrap_or(0);
-    let before_context = before_context.unwrap_or(context);
-    let after_context = after_context.unwrap_or(context);
+    let context = threads_last_value(&context).unwrap_or(0);
+    let before_context = threads_last_value(&before_context).unwrap_or(context);
+    let after_context = threads_last_value(&after_context).unwrap_or(context);
     let color_mode = grep_color_mode(color.as_deref(), no_color)?;
-    let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv, full_name);
+    let _accepted_parser_only = (
+        basic_regexp,
+        extended_regexp,
+        perl_regexp,
+        text,
+        textconv,
+        no_textconv,
+        full_name,
+    );
     let recursive_enabled = recursive || !no_recursive;
     let search_roots = if args.is_empty() {
         vec![PathBuf::from(".")]
@@ -393,6 +419,10 @@ fn grep_no_index(
     } else {
         Err(CliError::Exit(1))
     }
+}
+
+fn threads_last_value(values: &[usize]) -> Option<usize> {
+    values.last().copied()
 }
 
 fn grep_no_index_files(
