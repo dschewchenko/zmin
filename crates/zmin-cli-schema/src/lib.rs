@@ -3252,17 +3252,29 @@ pub enum Command {
         ignore_space_change: bool,
         #[arg(long = "ignore-whitespace", action = ArgAction::SetTrue)]
         ignore_whitespace: bool,
+        #[arg(long = "inaccurate-eof", action = ArgAction::SetTrue)]
+        inaccurate_eof: bool,
         #[arg(long = "whitespace")]
         whitespace: Option<String>,
         #[arg(short = 'p')]
         strip: Option<String>,
         #[arg(short = 'C')]
         context: Option<String>,
+        #[arg(long = "directory")]
+        directory: Option<String>,
+        #[arg(long = "include")]
+        include: Vec<String>,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
+        #[arg(long = "intent-to-add", action = ArgAction::SetTrue)]
+        intent_to_add: bool,
+        #[arg(long = "no-add", action = ArgAction::SetTrue)]
+        no_add: bool,
         #[arg(short = 'z', action = ArgAction::SetTrue)]
         z: bool,
         #[arg(long = "reject", action = ArgAction::SetTrue)]
         reject: bool,
-        #[arg(long = "3way", action = ArgAction::SetTrue)]
+        #[arg(short = '3', long = "3way", action = ArgAction::SetTrue)]
         three_way: bool,
         #[arg(long = "ours", action = ArgAction::SetTrue)]
         ours: bool,

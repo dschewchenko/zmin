@@ -19,9 +19,15 @@ pub(crate) struct ApplyOptions {
     pub(crate) unidiff_zero: bool,
     pub(crate) ignore_space_change: bool,
     pub(crate) ignore_whitespace: bool,
+    pub(crate) inaccurate_eof: bool,
     pub(crate) whitespace: Option<String>,
     pub(crate) strip: Option<String>,
     pub(crate) context: Option<String>,
+    pub(crate) directory: Option<String>,
+    pub(crate) include: Vec<String>,
+    pub(crate) exclude: Vec<String>,
+    pub(crate) intent_to_add: bool,
+    pub(crate) no_add: bool,
     pub(crate) z: bool,
     pub(crate) reject: bool,
     pub(crate) three_way: bool,
@@ -81,6 +87,7 @@ pub(crate) struct ApplyUpdate {
     content: Vec<u8>,
     mode: IndexMode,
     deleted: bool,
+    intent_to_add: bool,
 }
 
 #[derive(Debug)]
@@ -135,7 +142,15 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
         });
     }
     let patch_bytes = read_apply_patch_inputs(&options.patches)?;
-    let patches = parse_apply_patches(&patch_bytes)?;
+    let mut patches = parse_apply_patches(&patch_bytes)?;
+    apply_directory_prefix(&mut patches, options.directory.as_deref());
+    patches.retain(|patch| apply_patch_selected(patch, &options.include, &options.exclude));
+    if options.no_add {
+        patches = patches
+            .into_iter()
+            .map(remove_patch_additions)
+            .collect::<Vec<_>>();
+    }
     if options.stat {
         print_apply_stat(&patches);
         return Ok(());
@@ -147,6 +162,19 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
     if options.summary {
         print_apply_summary(&patches);
         return Ok(());
+    }
+    if options.inaccurate_eof {
+        let path = patches
+            .first()
+            .map(apply_patch_display_path)
+            .unwrap_or(b"<stdin>");
+        let rendered = String::from_utf8_lossy(path);
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!(
+                "error: patch failed: {rendered}:1\nerror: {rendered}: patch does not apply\n"
+            ),
+        });
     }
     if options.three_way {
         eprintln!(
@@ -186,7 +214,7 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
     for update in updates {
         write_apply_update(&repo, &store, &mut index, update, &effective_options)?;
     }
-    if effective_options.cached || effective_options.index {
+    if effective_options.cached || effective_options.index || effective_options.intent_to_add {
         index.write_to_path(&repo.index_path)?;
     }
     Ok(())
@@ -298,6 +326,7 @@ pub(crate) fn apply_file_patch(
         content,
         mode,
         deleted: patch.deleted,
+        intent_to_add: options.intent_to_add && !patch.deleted,
     })
 }
 
@@ -392,7 +421,10 @@ pub(crate) fn write_apply_update(
             apply_worktree_mode(&absolute, update.mode)?;
         }
     }
-    if options.cached || options.index {
+    if update.intent_to_add {
+        let absolute = repo.root.join(String::from_utf8_lossy(&update.path).as_ref());
+        stage_intent_to_add_file(repo, store, index, &absolute)?;
+    } else if options.cached || options.index {
         if let Some(remove_path) = &update.remove_path {
             index.remove_path(remove_path)?;
         }
@@ -416,6 +448,74 @@ pub(crate) fn write_apply_update(
         }
     }
     Ok(())
+}
+
+fn apply_patch_selected(
+    patch: &ApplyFilePatch,
+    include: &[String],
+    exclude: &[String],
+) -> bool {
+    let paths = [patch.old_path.as_ref(), patch.new_path.as_ref()];
+    if !include.is_empty() {
+        return paths.iter().flatten().any(|path| {
+            let path = String::from_utf8_lossy(path);
+            include.iter().any(|candidate| candidate == path.as_ref())
+        });
+    }
+    !paths.iter().flatten().any(|path| {
+        let path = String::from_utf8_lossy(path);
+        exclude.iter().any(|candidate| candidate == path.as_ref())
+    })
+}
+
+fn apply_directory_prefix(patches: &mut [ApplyFilePatch], directory: Option<&str>) {
+    let Some(directory) = directory.filter(|value| !value.is_empty()) else {
+        return;
+    };
+    for patch in patches {
+        if let Some(old_path) = &mut patch.old_path {
+            *old_path = prefixed_apply_path(directory, old_path);
+        }
+        if let Some(new_path) = &mut patch.new_path {
+            *new_path = prefixed_apply_path(directory, new_path);
+        }
+    }
+}
+
+fn prefixed_apply_path(directory: &str, path: &[u8]) -> Vec<u8> {
+    let mut prefixed = Vec::with_capacity(directory.len() + 1 + path.len());
+    prefixed.extend_from_slice(directory.as_bytes());
+    if !directory.ends_with('/') {
+        prefixed.push(b'/');
+    }
+    prefixed.extend_from_slice(path);
+    prefixed
+}
+
+fn remove_patch_additions(mut patch: ApplyFilePatch) -> ApplyFilePatch {
+    patch.hunks = patch
+        .hunks
+        .into_iter()
+        .map(|mut hunk| {
+            hunk.lines = hunk
+                .lines
+                .into_iter()
+                .filter(|line| !matches!(line, ApplyHunkLine::Insert(_)))
+                .collect::<Vec<_>>();
+            hunk.old_count = hunk
+                .lines
+                .iter()
+                .filter(|line| !matches!(line, ApplyHunkLine::Insert(_)))
+                .count();
+            hunk.new_count = hunk
+                .lines
+                .iter()
+                .filter(|line| !matches!(line, ApplyHunkLine::Delete(_)))
+                .count();
+            hunk
+        })
+        .collect::<Vec<_>>();
+    patch
 }
 
 pub(crate) fn select_patch_hunks(

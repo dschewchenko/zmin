@@ -22,6 +22,50 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`apply` documented-option representation closure on the tracked-patch and
+add-file lanes. This batch added exact stock-Git matrix evidence for
+`--directory`, `--include`, `--exclude`, `--intent-to-add`, `--no-add`,
+`--inaccurate-eof`, and the short `-3` alias.
+
+The batch fixed one cohesive parser-plus-behavior gap on the `apply` path:
+
+- Zmin now exposes the missing `apply` parser surface for path-routing,
+  intent-to-add, no-add, inaccurate-eof, and short `-3`, and it matches the
+  current local stock Git side effects for the modeled helper-free lanes,
+  including the current `/usr/bin/git` `--intent-to-add` behavior that rewrites
+  touched paths into intent-to-add index entries on this host
+
+Focused verification was
+`cargo test -p zmin-cli --test git_apply_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(apply|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2100 / 3212`
+- represented documented command-option pairs: `2110 / 3212`
+- matrix rows: `6199`
+- verified rows: `5389`
+- invalid-input rows: `785`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `apply`: `30 / 38` reviewed-complete documented option pairs, `37 / 38`
+  represented documented option pairs, `54` written rows, `54` classified
+  rows, `49` stock-matching rows, `5` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move off `apply`. The remaining
+`apply` head is now narrow: the lone unrepresented `--build-fake-ancestor`
+seed plus expansion-only tails on the newly represented option family. Reselect
+the next dense non-`apply` helper-free batch from the refreshed backlog head.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `am` represented-tail closure on the modeled add-file, fixed-date, and
 conflict lanes. This batch finished representation for all documented `am`
 option pairs by adding exact stock-Git matrix evidence for
