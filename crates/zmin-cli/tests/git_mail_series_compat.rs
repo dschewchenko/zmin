@@ -5,8 +5,8 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, configure_identity, git, git_args,
-    git_failure_output, git_init, git_status, git_with_env, read_named_files, run_zmin,
+    clone_repo_fixture, command_any_output, command_output_with_env, configure_identity, git,
+    git_args, git_failure_output, git_init, git_status, git_with_env, read_named_files, run_zmin,
     run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env, write_file,
     zmin_bin,
 };
@@ -318,28 +318,39 @@ fn am_single_patch_fixture() -> (TempDir, String, String) {
 fn am_option_surface_batch_matches_stock_git() {
     let (source, base, patch_path) = am_single_patch_fixture();
     let patch = patch_path.as_str();
-    let success_cases: [(&str, &[&str]); 21] = [
+    let success_cases: [(&str, &[&str]); 32] = [
         ("--quiet", &["am", "--quiet", patch]),
         ("-q", &["am", "-q", patch]),
         ("--utf8", &["am", "--utf8", patch]),
+        ("-u", &["am", "-u", patch]),
         ("--no-utf8", &["am", "--no-utf8", patch]),
         ("--keep", &["am", "--keep", patch]),
         ("-k", &["am", "-k", patch]),
+        ("--keep-non-patch", &["am", "--keep-non-patch", patch]),
         ("--signoff", &["am", "--signoff", patch]),
         ("--keep-cr", &["am", "--keep-cr", patch]),
         ("--no-keep-cr", &["am", "--no-keep-cr", patch]),
         ("--message-id", &["am", "--message-id", patch]),
+        ("-m", &["am", "-m", patch]),
         ("--no-message-id", &["am", "--no-message-id", patch]),
+        ("--scissors", &["am", "--scissors", patch]),
+        ("-c", &["am", "-c", patch]),
+        ("--no-scissors", &["am", "--no-scissors", patch]),
         ("--quoted-cr=strip", &["am", "--quoted-cr=strip", patch]),
         ("--3way", &["am", "--3way", patch]),
         ("-3", &["am", "-3", patch]),
         ("--no-3way", &["am", "--no-3way", patch]),
         ("--ignore-space-change", &["am", "--ignore-space-change", patch]),
         ("--ignore-whitespace", &["am", "--ignore-whitespace", patch]),
+        ("--whitespace=warn", &["am", "--whitespace=warn", patch]),
+        ("-C1", &["am", "-C1", patch]),
+        ("-p1", &["am", "-p1", patch]),
         ("--patch-format=mboxrd", &["am", "--patch-format=mboxrd", patch]),
         ("--empty=stop", &["am", "--empty=stop", patch]),
         ("--empty=drop", &["am", "--empty=drop", patch]),
         ("--reject", &["am", "--reject", patch]),
+        ("--no-verify", &["am", "--no-verify", patch]),
+        ("-n", &["am", "-n", patch]),
     ];
     for (label, args) in success_cases {
         let git_apply = clone_repo_fixture(source.path());
@@ -370,6 +381,50 @@ fn am_option_surface_batch_matches_stock_git() {
         );
         assert!(!label.is_empty());
     }
+}
+
+#[test]
+fn am_committer_date_is_author_date_matches_stock_git() {
+    let (source, base, patch_path) = am_single_patch_fixture();
+    let patch = patch_path.as_str();
+    let args = ["am", "--committer-date-is-author-date", patch];
+    let envs = [
+        ("GIT_AUTHOR_NAME", "Bench"),
+        ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+        ("GIT_AUTHOR_DATE", "1700000200 +0000"),
+        ("GIT_COMMITTER_NAME", "Bench"),
+        ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+        ("GIT_COMMITTER_DATE", "1700000300 +0000"),
+    ];
+
+    let git_apply = clone_repo_fixture(source.path());
+    let zmin_apply = clone_repo_fixture(source.path());
+    configure_identity(git_apply.path());
+    configure_identity(zmin_apply.path());
+    git(git_apply.path(), ["reset", "--hard", &base]);
+    git(zmin_apply.path(), ["reset", "--hard", &base]);
+
+    let git_result = command_output_with_env("git", git_apply.path(), &args, &envs, "git");
+    let zmin_result = command_output_with_env(zmin_bin(), zmin_apply.path(), &args, &envs, "zmin");
+    assert_eq!(zmin_result, git_result);
+    assert_eq!(
+        git(
+            zmin_apply.path(),
+            ["log", "-1", "--format=%ad%n%cd%n%s%n%B", "--date=raw"]
+        ),
+        git(
+            git_apply.path(),
+            ["log", "-1", "--format=%ad%n%cd%n%s%n%B", "--date=raw"]
+        )
+    );
+    assert_eq!(
+        git(zmin_apply.path(), ["rev-parse", "HEAD^{tree}"]),
+        git(git_apply.path(), ["rev-parse", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        git(zmin_apply.path(), ["status", "--short"]),
+        git(git_apply.path(), ["status", "--short"])
+    );
 }
 
 #[test]

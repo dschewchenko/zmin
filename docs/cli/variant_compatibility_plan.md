@@ -22,6 +22,55 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`am` alias-and-passthrough closure on the same single-mail stock
+format-patch lane. This batch added twelve represented documented option
+pairs and promoted all twelve to reviewed-complete by proving stock-Git
+parity for accepted `am -u`, `--keep-non-patch`, `-m`, `--scissors`, `-c`,
+`--no-scissors`, `--whitespace=warn`, `-C1`, `-p1`, `--no-verify`, `-n`,
+and `--committer-date-is-author-date`.
+
+The batch fixed one cohesive parser/runtime gap on the `am` path:
+
+- Zmin now exposes the next dense `am` alias and passthrough family on the
+  existing clean single-mail lane, including stock apply passthrough for
+  `--whitespace`, `-C`, and `-p`, stock acceptance for the scissors and
+  hook-bypass spellings on a no-scissors/no-hooks lane, and stock
+  committer-date rewriting when `--committer-date-is-author-date` is used
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(am|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2084 / 3212`
+- represented documented command-option pairs: `2089 / 3212`
+- matrix rows: `6149`
+- verified rows: `5354`
+- invalid-input rows: `770`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `am`: `35 / 54` reviewed-complete documented option pairs, `40 / 54`
+  represented documented option pairs, `43` written rows, `43` classified
+  rows, `34` stock-matching rows, `9` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `am`, but move off
+this alias-and-passthrough closure into the remaining semantic tails:
+`--quoted-cr`, `--patch-format`, `--empty=keep`, active-session
+`rebase-apply` resume flows, and then the more stateful
+`directory`/`ignore-date`/`gpg-sign` families that still sit near the head of
+`remaining_to_fix_or_verify.tsv`.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `am` option-surface closure on the single-mail stock format-patch lane. This
 batch added twenty-eight represented documented option pairs and promoted
 twenty-three of them to reviewed-complete by proving stock-Git parity for

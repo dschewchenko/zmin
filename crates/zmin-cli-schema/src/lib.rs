@@ -3280,20 +3280,26 @@ pub enum Command {
         quiet: bool,
         #[arg(long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
-        #[arg(long = "utf8", action = ArgAction::SetTrue)]
+        #[arg(long = "utf8", short = 'u', action = ArgAction::SetTrue)]
         utf8: bool,
         #[arg(long = "no-utf8", action = ArgAction::SetTrue)]
         no_utf8: bool,
         #[arg(long = "keep", short = 'k', action = ArgAction::SetTrue)]
         keep: bool,
+        #[arg(long = "keep-non-patch", action = ArgAction::SetTrue)]
+        keep_non_patch: bool,
         #[arg(long = "keep-cr", action = ArgAction::SetTrue)]
         keep_cr: bool,
         #[arg(long = "no-keep-cr", action = ArgAction::SetTrue)]
         no_keep_cr: bool,
-        #[arg(long = "message-id", action = ArgAction::SetTrue)]
+        #[arg(long = "message-id", short = 'm', action = ArgAction::SetTrue)]
         message_id: bool,
         #[arg(long = "no-message-id", action = ArgAction::SetTrue)]
         no_message_id: bool,
+        #[arg(long = "scissors", short = 'c', action = ArgAction::SetTrue)]
+        scissors: bool,
+        #[arg(long = "no-scissors", action = ArgAction::SetTrue)]
+        no_scissors: bool,
         #[arg(long = "quoted-cr")]
         quoted_cr: Option<String>,
         #[arg(long = "3way", short = '3', action = ArgAction::SetTrue)]
@@ -3304,12 +3310,22 @@ pub enum Command {
         ignore_space_change: bool,
         #[arg(long = "ignore-whitespace", action = ArgAction::SetTrue)]
         ignore_whitespace: bool,
+        #[arg(long = "whitespace")]
+        whitespace: Option<String>,
+        #[arg(short = 'C')]
+        context: Option<String>,
+        #[arg(short = 'p')]
+        strip: Option<String>,
         #[arg(long = "patch-format")]
         patch_format: Option<String>,
         #[arg(long = "empty")]
         empty: Option<String>,
         #[arg(long = "reject", action = ArgAction::SetTrue)]
         reject: bool,
+        #[arg(long = "no-verify", short = 'n', action = ArgAction::SetTrue)]
+        no_verify: bool,
+        #[arg(long = "committer-date-is-author-date", action = ArgAction::SetTrue)]
+        committer_date_is_author_date: bool,
         #[arg(long = "allow-empty", action = ArgAction::SetTrue)]
         allow_empty: bool,
         #[arg(long = "abort", action = ArgAction::SetTrue)]

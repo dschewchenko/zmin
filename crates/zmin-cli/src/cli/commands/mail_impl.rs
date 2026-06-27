@@ -7,18 +7,26 @@ pub(crate) struct AmOptions {
     pub(crate) utf8: bool,
     pub(crate) no_utf8: bool,
     pub(crate) keep: bool,
+    pub(crate) keep_non_patch: bool,
     pub(crate) keep_cr: bool,
     pub(crate) no_keep_cr: bool,
     pub(crate) message_id: bool,
     pub(crate) no_message_id: bool,
+    pub(crate) scissors: bool,
+    pub(crate) no_scissors: bool,
     pub(crate) quoted_cr: Option<String>,
     pub(crate) three_way: bool,
     pub(crate) no_three_way: bool,
     pub(crate) ignore_space_change: bool,
     pub(crate) ignore_whitespace: bool,
+    pub(crate) whitespace: Option<String>,
+    pub(crate) context: Option<String>,
+    pub(crate) strip: Option<String>,
     pub(crate) patch_format: Option<String>,
     pub(crate) empty: Option<String>,
     pub(crate) reject: bool,
+    pub(crate) no_verify: bool,
+    pub(crate) committer_date_is_author_date: bool,
     pub(crate) allow_empty: bool,
     pub(crate) abort: bool,
     pub(crate) quit: bool,
@@ -110,8 +118,17 @@ fn apply_mail_patch(
     })?;
     let (author_name, author_email) = parse_mail_author(from);
     let (timestamp, timezone) = parse_mail_date(date)?;
-    let author = Signature::new(author_name, author_email, timestamp, timezone)?;
-    let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+    let author_timezone = timezone.clone();
+    let author = Signature::new(author_name, author_email, timestamp, author_timezone)?;
+    let mut committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+    if am_options.committer_date_is_author_date {
+        committer = Signature::new(
+            committer.name.clone(),
+            committer.email.clone(),
+            timestamp,
+            timezone.clone(),
+        )?;
+    }
     let (message_body, patch_text) = split_mail_body_patch(body);
     if patch_text.trim().is_empty() {
         return Err(CliError::Fatal {
@@ -138,9 +155,9 @@ fn apply_mail_patch(
         unidiff_zero: false,
         ignore_space_change: am_options.ignore_space_change,
         ignore_whitespace: am_options.ignore_whitespace,
-        whitespace: None,
-        strip: None,
-        context: None,
+        whitespace: am_options.whitespace.clone(),
+        strip: am_options.strip.as_ref().and_then(|value| value.parse().ok()),
+        context: am_options.context.as_ref().and_then(|value| value.parse().ok()),
         z: false,
         reject: am_options.reject,
         three_way: am_options.three_way && !am_options.no_three_way,
@@ -153,13 +170,17 @@ fn apply_mail_patch(
     let _accepted_parser_only = (
         am_options.utf8,
         am_options.no_utf8,
+        am_options.keep_non_patch,
         am_options.keep_cr,
         am_options.no_keep_cr,
         am_options.message_id,
         am_options.no_message_id,
+        am_options.scissors,
+        am_options.no_scissors,
         am_options.quoted_cr.as_deref(),
         am_options.patch_format.as_deref(),
         am_options.empty.as_deref(),
+        am_options.no_verify,
     );
     let patches = patch_commands::parse_apply_patches(patch_text.as_bytes())?;
     if am_options.reject {
