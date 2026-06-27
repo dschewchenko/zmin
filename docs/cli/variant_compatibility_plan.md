@@ -22,16 +22,17 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`grep` regex, filename, and output-shape closure across the modeled tracked
-text-file local lane. This batch added exact stock-Git evidence and runtime
-support for `--name-only`, `-q`, `--quiet`, `-G`, `--basic-regexp`, `-E`,
-`--extended-regexp`, `-z`, `--null`, `-a`, `--text`, `--no-textconv`,
-`--column`, `-o`, and `--only-matching`. The implementation stayed bounded to
-the helper-free local text surface: basic and extended regexp mode flags are
-accepted on the current regex engine lanes, quiet preserves the stock zero-
-output success and failure exits, null filename mode now emits stock NUL
-separators, and column or only-matching now render the same first-match byte
-offsets and per-occurrence fragments as stock Git on the current fixture.
+`grep` context, expression, and pattern-source closure across the modeled
+tracked text-file local lane. This batch added exact stock-Git evidence and
+runtime support for `-A`, `--after-context`, `-B`, `--before-context`, `-C`,
+`--context`, `-h`, `-w`, `--word-regexp`, `-e`, `-f`, `--and`, `--or`, and
+the bounded `--not` helper-free two-pattern lane. The implementation stayed
+deliberately local and helper-free: context groups now render the stock
+`:`/`-` match versus context separators plus `--` group delimiters, `-h`
+suppresses inline filenames on the multi-file lane, word-regexp preserves
+stock whole-word matching on the current ASCII fixture, pattern files load
+newline-delimited local patterns, and boolean expression handling now matches
+stock for the modeled `or`, `and`, and `and not` forms.
 
 Focused verification was
 `cargo test -p zmin-cli --test git_grep_compat -- --nocapture`,
@@ -46,25 +47,26 @@ Actual durable readiness/status after this batch:
 
 - complete command matrices: `148 / 151`
 - complete documented command-option pairs: `2297 / 3212`
-- represented documented command-option pairs: `2343 / 3212`
-- matrix rows: `6522`
-- verified rows: `5710`
+- represented documented command-option pairs: `2357 / 3212`
+- matrix rows: `6537`
+- verified rows: `5725`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
 - `grep`: `21 / 73` reviewed-complete documented option pairs,
-  `36 / 73` represented documented option pairs, `53` written rows, `53`
-  classified rows, `53` stock-matching rows, `0` invalid-input rows, and `0`
+  `50 / 73` represented documented option pairs, `68` written rows, `68`
+  classified rows, `68` stock-matching rows, `0` invalid-input rows, and `0`
   exact-open rows
 
 The next best high-throughput follow-up should likely stay on `grep`, because
 it remains the largest safe local helper-free documented queue after this
-batch. The remaining documented tails are now concentrated around context and
-boolean-expression families such as `-A`, `-B`, `-C`, `--context`, `--and`,
-`--or`, `--not`, plus additional local output toggles like `--color`,
-`--no-color`, `-h`, `-w`, `-e`, and `-f`.
+batch. The remaining documented tails are now more concentrated around local
+output and parser families such as `--color`, `--no-color`, `--all-match`,
+`--show-function`, `--function-context`, `-p`, `-W`, and the still-unmodeled
+local recursion or index toggles that can be closed without crossing into
+remote transport work.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` mail-series tail closure across the modeled two-patch and

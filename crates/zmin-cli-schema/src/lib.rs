@@ -4459,6 +4459,7 @@ pub enum Command {
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    #[command(disable_help_flag = true)]
     Grep {
         #[arg(long = "cached", action = ArgAction::SetTrue)]
         cached: bool,
@@ -4480,8 +4481,26 @@ pub enum Command {
         count: bool,
         #[arg(short = 'm', long = "max-count")]
         max_count: Option<usize>,
+        #[arg(short = 'A', long = "after-context")]
+        after_context: Option<usize>,
+        #[arg(short = 'B', long = "before-context")]
+        before_context: Option<usize>,
+        #[arg(short = 'C', long = "context")]
+        context: Option<usize>,
+        #[arg(long = "and", action = ArgAction::SetTrue)]
+        and: bool,
+        #[arg(long = "or", action = ArgAction::SetTrue)]
+        or: bool,
+        #[arg(long = "not", action = ArgAction::SetTrue)]
+        not: bool,
+        #[arg(short = 'e', long = "regexp")]
+        patterns: Vec<String>,
+        #[arg(short = 'f', value_hint = ValueHint::FilePath)]
+        pattern_files: Vec<PathBuf>,
         #[arg(short = 'H', action = ArgAction::SetTrue)]
         with_filename: bool,
+        #[arg(short = 'h', action = ArgAction::SetTrue)]
+        no_filename: bool,
         #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
         null_terminated: bool,
         #[arg(long = "full-name", action = ArgAction::SetTrue)]
@@ -4500,11 +4519,13 @@ pub enum Command {
         text: bool,
         #[arg(long = "no-textconv", action = ArgAction::SetTrue)]
         no_textconv: bool,
+        #[arg(short = 'w', long = "word-regexp", action = ArgAction::SetTrue)]
+        word_regexp: bool,
         #[arg(long = "column", action = ArgAction::SetTrue)]
         column: bool,
         #[arg(short = 'o', long = "only-matching", action = ArgAction::SetTrue)]
         only_matching: bool,
-        pattern: String,
+        pattern: Option<String>,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

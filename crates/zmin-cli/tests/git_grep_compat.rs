@@ -186,3 +186,47 @@ fn grep_regex_filename_and_output_shape_family_matches_stock_git() {
         );
     }
 }
+
+#[test]
+fn grep_context_expression_and_pattern_source_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    fs::write(
+        repo.path().join("a.txt"),
+        b"alpha\nhello\nbeta\nhello world\ngamma\n",
+    )
+    .expect("write a");
+    fs::write(repo.path().join("b.txt"), b"hello beta\nzeta\n").expect("write b");
+    fs::write(repo.path().join("dir/c.txt"), b"outer\nhello_inner\n").expect("write c");
+    fs::write(repo.path().join("patterns.txt"), b"hello\nzeta\n").expect("write patterns");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    for args in [
+        ["grep", "-A", "1", "hello"].as_slice(),
+        ["grep", "--after-context", "1", "hello"].as_slice(),
+        ["grep", "-B", "1", "hello"].as_slice(),
+        ["grep", "--before-context", "1", "hello"].as_slice(),
+        ["grep", "-C", "1", "hello"].as_slice(),
+        ["grep", "--context", "1", "hello"].as_slice(),
+        ["grep", "-h", "hello"].as_slice(),
+        ["grep", "-w", "hello"].as_slice(),
+        ["grep", "--word-regexp", "hello"].as_slice(),
+        ["grep", "-e", "hello", "--or", "-e", "zeta"].as_slice(),
+        ["grep", "-e", "hello", "--and", "-e", "beta"].as_slice(),
+        ["grep", "-e", "hello", "--and", "--not", "-e", "world"].as_slice(),
+        ["grep", "-f", "patterns.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status args: {args:?}"
+        );
+    }
+}

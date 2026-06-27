@@ -11,7 +11,16 @@ pub(crate) fn grep(
     files_without_match: bool,
     count: bool,
     max_count: Option<usize>,
+    after_context: Option<usize>,
+    before_context: Option<usize>,
+    context: Option<usize>,
+    and: bool,
+    or: bool,
+    not: bool,
+    patterns: Vec<String>,
+    pattern_files: Vec<PathBuf>,
     with_filename: bool,
+    no_filename: bool,
     null_terminated: bool,
     full_name: bool,
     heading: bool,
@@ -21,9 +30,10 @@ pub(crate) fn grep(
     fixed_strings: bool,
     text: bool,
     no_textconv: bool,
+    word_regexp: bool,
     column: bool,
     only_matching: bool,
-    pattern: &str,
+    pattern: Option<String>,
     args: Vec<String>,
 ) -> Result<()> {
     let repo = find_repo()?;
@@ -39,8 +49,21 @@ pub(crate) fn grep(
     if pathspecs.is_empty() && !cwd_prefix.is_empty() {
         pathspecs.push(cwd_prefix.clone());
     }
-    let matcher = GrepMatcher::new(pattern, fixed_strings, ignore_case)?;
+    let expression = GrepExpression::new(
+        pattern,
+        patterns,
+        pattern_files,
+        fixed_strings,
+        ignore_case,
+        word_regexp,
+        and,
+        or,
+        not,
+    )?;
     let files_with_matches = files_with_matches || name_only;
+    let context = context.unwrap_or(0);
+    let before_context = before_context.unwrap_or(context);
+    let after_context = after_context.unwrap_or(context);
     let _accepted_parser_only = (basic_regexp, extended_regexp, text, no_textconv);
     let mut selected_any = false;
     let mut printed_group = false;
@@ -68,7 +91,7 @@ pub(crate) fn grep(
             GrepSource::Index => read_index_entry_content(&store, entry)?,
         };
         let outcome = grep_file(
-            &matcher,
+            &expression,
             grep_input.output_prefix.as_deref(),
             &entry.path,
             &cwd_prefix,
@@ -79,12 +102,16 @@ pub(crate) fn grep(
             files_without_match,
             count,
             max_count,
+            before_context,
+            after_context,
             with_filename,
+            no_filename,
             null_terminated,
             full_name,
             heading,
             break_groups,
             quiet,
+            word_regexp,
             column,
             only_matching,
             printed_group,
@@ -204,7 +231,7 @@ impl GrepMatcher {
             })
     }
 
-    fn match_ranges(&self, line: &[u8]) -> Vec<(usize, usize)> {
+    fn match_ranges(&self, line: &[u8], word_regexp: bool) -> Vec<(usize, usize)> {
         match self {
             Self::Fixed(pattern) => {
                 if pattern.is_empty() {
@@ -227,12 +254,129 @@ impl GrepMatcher {
                         start += 1;
                     }
                 }
+                if word_regexp {
+                    filter_word_ranges(line, ranges)
+                } else {
+                    ranges
+                }
+            }
+            Self::Regex(regex) => {
+                let ranges = regex
+                    .find_iter(line)
+                    .map(|m| (m.start(), m.end()))
+                    .collect();
+                if word_regexp {
+                    filter_word_ranges(line, ranges)
+                } else {
+                    ranges
+                }
+            }
+        }
+    }
+}
+
+enum GrepExpressionMode {
+    Any,
+    All,
+    AllButLast,
+}
+
+struct GrepExpression {
+    mode: GrepExpressionMode,
+    matchers: Vec<GrepMatcher>,
+}
+
+impl GrepExpression {
+    fn new(
+        pattern: Option<String>,
+        patterns: Vec<String>,
+        pattern_files: Vec<PathBuf>,
+        fixed_strings: bool,
+        ignore_case: bool,
+        word_regexp: bool,
+        and: bool,
+        or: bool,
+        not: bool,
+    ) -> Result<Self> {
+        let mut all_patterns = Vec::new();
+        if let Some(pattern) = pattern {
+            all_patterns.push(pattern);
+        }
+        all_patterns.extend(patterns);
+        for path in pattern_files {
+            let content = fs::read_to_string(path)?;
+            all_patterns.extend(content.lines().map(str::to_owned));
+        }
+        if all_patterns.is_empty() {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "no pattern given".into(),
+            });
+        }
+        if not && (!and || all_patterns.len() != 2) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "git grep --not is only modeled in a two-pattern --and expression".into(),
+            });
+        }
+        if and && or {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: "git grep does not support mixing modeled --and and --or in one helper-free lane".into(),
+            });
+        }
+        let matchers = all_patterns
+            .iter()
+            .map(|pattern| GrepMatcher::new(pattern, fixed_strings, ignore_case))
+            .collect::<Result<Vec<_>>>()?;
+        let mode = if and && not {
+            GrepExpressionMode::AllButLast
+        } else if and {
+            GrepExpressionMode::All
+        } else {
+            let _ = or;
+            GrepExpressionMode::Any
+        };
+        let _ = word_regexp;
+        Ok(Self { mode, matchers })
+    }
+
+    fn match_ranges(&self, line: &[u8], word_regexp: bool) -> Vec<(usize, usize)> {
+        match self.mode {
+            GrepExpressionMode::Any => self
+                .matchers
+                .iter()
+                .flat_map(|matcher| matcher.match_ranges(line, word_regexp))
+                .collect(),
+            GrepExpressionMode::All => {
+                let mut ranges = Vec::new();
+                for matcher in &self.matchers {
+                    let matcher_ranges = matcher.match_ranges(line, word_regexp);
+                    if matcher_ranges.is_empty() {
+                        return Vec::new();
+                    }
+                    ranges.extend(matcher_ranges);
+                }
                 ranges
             }
-            Self::Regex(regex) => regex
-                .find_iter(line)
-                .map(|m| (m.start(), m.end()))
-                .collect(),
+            GrepExpressionMode::AllButLast => {
+                let mut head_ranges = Vec::new();
+                for matcher in &self.matchers[..self.matchers.len() - 1] {
+                    let matcher_ranges = matcher.match_ranges(line, word_regexp);
+                    if matcher_ranges.is_empty() {
+                        return Vec::new();
+                    }
+                    head_ranges.extend(matcher_ranges);
+                }
+                if self.matchers[self.matchers.len() - 1]
+                    .match_ranges(line, word_regexp)
+                    .is_empty()
+                {
+                    head_ranges
+                } else {
+                    Vec::new()
+                }
+            }
         }
     }
 }
@@ -251,7 +395,7 @@ fn grep_cwd_prefix(repo: &GitRepo) -> Result<Vec<u8>> {
 }
 
 fn grep_file(
-    matcher: &GrepMatcher,
+    expression: &GrepExpression,
     output_prefix: Option<&str>,
     path: &[u8],
     cwd_prefix: &[u8],
@@ -262,62 +406,143 @@ fn grep_file(
     files_without_match: bool,
     count: bool,
     max_count: Option<usize>,
+    before_context: usize,
+    after_context: usize,
     with_filename: bool,
+    no_filename: bool,
     null_terminated: bool,
     full_name: bool,
     heading: bool,
     break_groups: bool,
     quiet: bool,
+    word_regexp: bool,
     column: bool,
     only_matching: bool,
     printed_group: bool,
 ) -> Result<GrepFileOutcome> {
-    let mut matched = false;
-    let mut match_count = 0usize;
     let mut emitted = false;
     let display_path = grep_display_path(path, cwd_prefix, full_name);
     let display_path = String::from_utf8_lossy(&display_path);
-    let filename_prefix = with_filename || output_prefix.is_some() || !heading;
-    for (idx, line) in grep_lines(content).enumerate() {
-        let ranges = matcher.match_ranges(line);
+    let filename_prefix = !no_filename && (with_filename || output_prefix.is_some() || !heading);
+    let lines = grep_lines(content).collect::<Vec<_>>();
+    let mut line_ranges = Vec::with_capacity(lines.len());
+    let mut matching_lines = Vec::new();
+    for (idx, line) in lines.iter().enumerate() {
+        let ranges = expression.match_ranges(line, word_regexp);
         let is_match = !ranges.is_empty();
-        if is_match == invert_match {
-            continue;
+        line_ranges.push(ranges);
+        if is_match != invert_match {
+            matching_lines.push(idx);
         }
-        matched = true;
-        match_count += 1;
-        if quiet {
-            continue;
-        }
-        if files_without_match {
+    }
+    if let Some(limit) = max_count {
+        matching_lines.truncate(limit);
+    }
+    let matched = !matching_lines.is_empty();
+    let match_count = matching_lines.len();
+    if quiet {
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: false,
+        });
+    }
+    if files_without_match {
+        if matched {
             return Ok(GrepFileOutcome {
                 matched: true,
                 printed: false,
             });
         }
-        if files_with_matches {
+        if break_groups && printed_group {
+            println!();
+        }
+        if let Some(prefix) = output_prefix {
+            print!("{prefix}:");
+        }
+        println!("{display_path}");
+        return Ok(GrepFileOutcome {
+            matched: false,
+            printed: true,
+        });
+    }
+    if files_with_matches {
+        if !matched {
+            return Ok(GrepFileOutcome {
+                matched: false,
+                printed: false,
+            });
+        }
+        if break_groups && printed_group {
+            println!();
+        }
+        if let Some(prefix) = output_prefix {
+            print!("{prefix}:");
+        }
+        if null_terminated {
+            print!("{display_path}\0");
+        } else {
+            println!("{display_path}");
+        }
+        return Ok(GrepFileOutcome {
+            matched: true,
+            printed: true,
+        });
+    }
+    if count {
+        if matched {
             if break_groups && printed_group {
                 println!();
             }
             if let Some(prefix) = output_prefix {
                 print!("{prefix}:");
             }
-            if null_terminated {
-                print!("{display_path}\0");
-            } else {
-                println!("{display_path}");
-            }
-            return Ok(GrepFileOutcome {
-                matched: true,
-                printed: true,
-            });
+            println!("{display_path}:{match_count}");
         }
-        if count {
-            if max_count.is_some_and(|limit| match_count >= limit) {
-                break;
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: matched,
+        });
+    }
+    if before_context > 0 || after_context > 0 {
+        let groups = build_context_groups(lines.len(), &matching_lines, before_context, after_context);
+        for (group_idx, (start, end)) in groups.iter().enumerate() {
+            if printed_group || group_idx > 0 {
+                println!("--");
             }
-            continue;
+            for line_idx in *start..=*end {
+                let is_match = matching_lines.binary_search(&line_idx).is_ok();
+                let line = lines[line_idx];
+                let ranges = &line_ranges[line_idx];
+                if let Some(prefix) = output_prefix {
+                    let separator = if is_match { ':' } else { '-' };
+                    print!("{prefix}{separator}");
+                }
+                if filename_prefix {
+                    let separator = if is_match { ':' } else { '-' };
+                    print!("{display_path}{separator}");
+                    if line_number {
+                        print!("{}{separator}", line_idx + 1);
+                    }
+                } else if line_number {
+                    let separator = if is_match { ':' } else { '-' };
+                    print!("{}{separator}", line_idx + 1);
+                }
+                if is_match && column {
+                    print!("{}:", ranges[0].0 + 1);
+                }
+                io::stdout().write_all(line)?;
+                println!();
+                emitted = true;
+            }
         }
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: emitted,
+        });
+    }
+    for idx in matching_lines {
+        let line = lines[idx];
+        let ranges = &line_ranges[idx];
         if !emitted {
             if break_groups && printed_group {
                 println!();
@@ -327,7 +552,7 @@ fn grep_file(
             }
         }
         if only_matching {
-            for (start, end) in ranges {
+            for &(start, end) in ranges {
                 if let Some(prefix) = output_prefix {
                     print!("{prefix}:");
                 }
@@ -342,9 +567,6 @@ fn grep_file(
                 }
                 println!("{}", String::from_utf8_lossy(&line[start..end]));
                 emitted = true;
-            }
-            if max_count.is_some_and(|limit| match_count >= limit) {
-                break;
             }
             continue;
         }
@@ -366,40 +588,47 @@ fn grep_file(
         io::stdout().write_all(line)?;
         println!();
         emitted = true;
-        if max_count.is_some_and(|limit| match_count >= limit) {
-            break;
-        }
-    }
-    if count && matched {
-        if break_groups && printed_group {
-            println!();
-        }
-        if let Some(prefix) = output_prefix {
-            print!("{prefix}:");
-        }
-        println!("{display_path}:{match_count}");
-        return Ok(GrepFileOutcome {
-            matched: true,
-            printed: true,
-        });
-    }
-    if files_without_match && !matched {
-        if break_groups && printed_group {
-            println!();
-        }
-        if let Some(prefix) = output_prefix {
-            print!("{prefix}:");
-        }
-        println!("{display_path}");
-        return Ok(GrepFileOutcome {
-            matched: false,
-            printed: true,
-        });
     }
     Ok(GrepFileOutcome {
         matched,
         printed: emitted,
     })
+}
+
+fn filter_word_ranges(line: &[u8], ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    ranges
+        .into_iter()
+        .filter(|(start, end)| {
+            let left = *start == 0 || !is_word_byte(line[start.saturating_sub(1)]);
+            let right = *end == line.len() || !is_word_byte(line[*end]);
+            left && right
+        })
+        .collect()
+}
+
+fn is_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn build_context_groups(
+    total_lines: usize,
+    matching_lines: &[usize],
+    before_context: usize,
+    after_context: usize,
+) -> Vec<(usize, usize)> {
+    let mut groups: Vec<(usize, usize)> = Vec::new();
+    for line_idx in matching_lines {
+        let start = line_idx.saturating_sub(before_context);
+        let end = (line_idx + after_context).min(total_lines.saturating_sub(1));
+        if let Some((_, previous_end)) = groups.last_mut() {
+            if start <= *previous_end + 1 {
+                *previous_end = (*previous_end).max(end);
+                continue;
+            }
+        }
+        groups.push((start, end));
+    }
+    groups
 }
 
 fn grep_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {
