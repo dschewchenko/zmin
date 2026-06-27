@@ -21,6 +21,57 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `shortlog`
+documented-tail closure across the already modeled range, all-refs,
+symmetric-difference, and timestamp-filter lanes. This batch added eleven exact
+stock-Git rows and promoted the same eleven documented option pairs into the
+reviewed-complete census set: `--ancestry-path`, `--exclude`,
+`--exclude-first-parent-only`, `--exclude-hidden`,
+`--exclude-promisor-objects`, `--left-only`, `--merge`,
+`--no-commit-header`, `--not`, `--simplify-by-decoration`, and
+`--since-as-filter`. The runtime closure stayed intentionally bounded:
+`shortlog` now accepts the remaining documented selector and filter spellings
+through schema and dispatch, applies ancestry-path, left-only,
+simplify-by-decoration, and since-as-filter on the modeled helper-free lanes,
+keeps `--exclude*` as stock-compatible no-op acceptance on the current all-refs
+fixture, rejects `--exclude-promisor-objects` and `--no-commit-header` with
+the stock unknown-option diagnostics, emits the stock pseudoref-required fatal
+for `--merge`, and treats negative-only `--not` revision sets like stock Git by
+collapsing to empty output instead of surfacing the lower `rev-list` guard.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat shortlog_remaining_documented_tail_matches_stock_git -- --exact --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(shortlog|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2594 / 3212`
+- represented documented command-option pairs: `2594 / 3212`
+- matrix rows: `6897`
+- verified rows: `6049`
+- invalid-input rows: `823`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `618`
+- implemented but unverified rows: `25`
+
+Per-command position on the touched surface:
+
+- `shortlog`: `125 / 125` reviewed-complete documented option pairs,
+  `125 / 125` represented documented option pairs, `157` written rows, `157`
+  classified rows, `131` stock-matching rows, `26` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes the full represented `shortlog` documented surface and
+fixes the real negative-only `--not` runtime mismatch while keeping the new
+selector/filter semantics bounded to already modeled helper-free lanes.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `reset`
 documented-option family closure across the already modeled revision-reset and
 path-reset lanes. This batch added six exact stock-Git rows and promoted the

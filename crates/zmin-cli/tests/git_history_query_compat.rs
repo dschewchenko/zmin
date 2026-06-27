@@ -809,6 +809,45 @@ fn shortlog_proof_only_history_tail_batch_matches_stock_git() {
 }
 
 #[test]
+fn shortlog_remaining_documented_tail_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
+    git(repo.path(), ["branch", "side", "HEAD~1"]);
+    git(repo.path(), ["tag", "v1", "HEAD~1"]);
+
+    for args in [
+        ["shortlog", "--ancestry-path", "HEAD~1..HEAD"].as_slice(),
+        ["shortlog", "--exclude=main", "--all"].as_slice(),
+        ["shortlog", "--exclude-first-parent-only", "--all"].as_slice(),
+        ["shortlog", "--exclude-hidden=fetch", "--all"].as_slice(),
+        ["shortlog", "--left-only", "HEAD...side"].as_slice(),
+        ["shortlog", "--not", "HEAD"].as_slice(),
+        ["shortlog", "--simplify-by-decoration", "--all"].as_slice(),
+        ["shortlog", "--since-as-filter=1700000300", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["shortlog", "--exclude-promisor-objects", "HEAD"].as_slice(),
+        ["shortlog", "--no-commit-header", "HEAD"].as_slice(),
+        ["shortlog", "--merge", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_failure_output(repo.path(), args),
+            git_failure_output(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn log_grep_family_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

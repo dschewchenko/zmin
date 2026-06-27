@@ -595,6 +595,14 @@ pub enum Command {
         oneline: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
+        #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
+        exclude_first_parent_only: bool,
+        #[arg(long = "exclude-hidden")]
+        exclude_hidden: Option<String>,
+        #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
+        exclude_promisor_objects: bool,
         #[arg(
             long = "branches",
             num_args = 0..=1,
@@ -629,6 +637,8 @@ pub enum Command {
         no_merges: bool,
         #[arg(long = "merges", action = ArgAction::SetTrue)]
         merges: bool,
+        #[arg(long = "merge", action = ArgAction::SetTrue)]
+        merge: bool,
         #[arg(long = "do-walk", action = ArgAction::SetTrue)]
         do_walk: bool,
         #[arg(long = "no-walk", action = ArgAction::SetTrue)]
@@ -639,6 +649,8 @@ pub enum Command {
         date_order: bool,
         #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
         author_date_order: bool,
+        #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
+        ancestry_path: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
         #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
@@ -667,6 +679,8 @@ pub enum Command {
         show_linear_break: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
+        #[arg(long = "left-only", action = ArgAction::SetTrue)]
+        left_only: bool,
         #[arg(long = "right-only", action = ArgAction::SetTrue)]
         right_only: bool,
         #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
@@ -723,6 +737,8 @@ pub enum Command {
         show_pulls: bool,
         #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
         simplify_merges: bool,
+        #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
+        simplify_by_decoration: bool,
         #[arg(long = "sparse", action = ArgAction::SetTrue)]
         sparse: bool,
         #[arg(long = "parents", action = ArgAction::SetTrue)]
@@ -828,6 +844,8 @@ pub enum Command {
         min_age: Option<String>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
+        #[arg(long = "since-as-filter")]
+        since_as_filter: Option<String>,
         #[arg(long = "until", alias = "before")]
         until: Option<String>,
         #[arg(allow_hyphen_values = true)]

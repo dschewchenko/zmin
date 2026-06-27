@@ -1866,6 +1866,10 @@ const SHORTLOG_USAGE: &str = "usage: git shortlog [<options>] [<revision-range>]
 pub(crate) struct ShortlogOptions<'a> {
     pub(crate) oneline: bool,
     pub(crate) all: bool,
+    pub(crate) exclude: Vec<String>,
+    pub(crate) exclude_first_parent_only: bool,
+    pub(crate) exclude_hidden: Option<&'a str>,
+    pub(crate) exclude_promisor_objects: bool,
     pub(crate) author: Option<&'a str>,
     pub(crate) pretty: Option<&'a str>,
     pub(crate) encoding: Option<&'a str>,
@@ -1875,6 +1879,7 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) skip: Option<usize>,
     pub(crate) min_age: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
+    pub(crate) since_as_filter: Option<&'a str>,
     pub(crate) until: Option<&'a str>,
     pub(crate) committer: bool,
     pub(crate) numbered: bool,
@@ -1882,11 +1887,13 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) email: bool,
     pub(crate) no_merges: bool,
     pub(crate) merges: bool,
+    pub(crate) merge: bool,
     pub(crate) do_walk: bool,
     pub(crate) no_walk: bool,
     pub(crate) topo_order: bool,
     pub(crate) date_order: bool,
     pub(crate) author_date_order: bool,
+    pub(crate) ancestry_path: bool,
     pub(crate) reverse: bool,
     pub(crate) alternate_refs: bool,
     pub(crate) bisect: bool,
@@ -1901,6 +1908,7 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) expand_tabs: bool,
     pub(crate) show_linear_break: bool,
     pub(crate) left_right: bool,
+    pub(crate) left_only: bool,
     pub(crate) right_only: bool,
     pub(crate) cherry_pick: bool,
     pub(crate) cherry_mark: bool,
@@ -1929,6 +1937,7 @@ pub(crate) struct ShortlogOptions<'a> {
     pub(crate) quiet: bool,
     pub(crate) show_pulls: bool,
     pub(crate) simplify_merges: bool,
+    pub(crate) simplify_by_decoration: bool,
     pub(crate) sparse: bool,
     pub(crate) parents: bool,
     pub(crate) objects: bool,
@@ -1998,6 +2007,10 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let ShortlogOptions {
         oneline,
         all,
+        exclude,
+        exclude_first_parent_only,
+        exclude_hidden,
+        exclude_promisor_objects,
         author,
         pretty,
         encoding,
@@ -2007,6 +2020,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         skip,
         min_age,
         since,
+        since_as_filter,
         until,
         committer,
         numbered,
@@ -2014,11 +2028,13 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         email,
         no_merges,
         merges,
+        merge,
         do_walk,
         no_walk,
         topo_order,
         date_order,
         author_date_order,
+        ancestry_path,
         reverse,
         alternate_refs,
         bisect,
@@ -2033,6 +2049,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         expand_tabs,
         show_linear_break,
         left_right,
+        left_only,
         right_only,
         cherry_pick,
         cherry_mark,
@@ -2061,6 +2078,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         quiet,
         show_pulls,
         simplify_merges,
+        simplify_by_decoration,
         sparse,
         parents,
         objects,
@@ -2103,6 +2121,9 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
         revs,
     } = options;
     let _accepted_oneline = oneline;
+    let _accepted_exclude = exclude;
+    let _accepted_exclude_first_parent_only = exclude_first_parent_only;
+    let _accepted_exclude_hidden = exclude_hidden;
     let _accepted_pretty = pretty;
     let _accepted_encoding = encoding;
     let _accepted_abbrev_commit = abbrev_commit;
@@ -2110,6 +2131,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let _accepted_topo_order = topo_order;
     let _accepted_date_order = date_order;
     let _accepted_author_date_order = author_date_order;
+    let _accepted_ancestry_path = ancestry_path;
     let _accepted_reverse = reverse;
     let _accepted_alternate_refs = alternate_refs;
     let _accepted_bisect = bisect;
@@ -2122,6 +2144,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let _accepted_expand_tabs = expand_tabs;
     let _accepted_show_linear_break = show_linear_break;
     let _accepted_left_right = left_right;
+    let _accepted_left_only = left_only;
     let _accepted_right_only = right_only;
     let _accepted_cherry_pick = cherry_pick;
     let _accepted_cherry_mark = cherry_mark;
@@ -2150,6 +2173,15 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     let _accepted_objects = objects;
     let _accepted_graph = graph;
     let _accepted_show_signature = show_signature;
+    if exclude_promisor_objects {
+        return Err(shortlog_unknown_option("--exclude-promisor-objects"));
+    }
+    if merge {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--merge requires one of the pseudorefs MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD or REBASE_HEAD".into(),
+        });
+    }
     if stdin {
         return Err(shortlog_unknown_option("--stdin"));
     }
@@ -2167,6 +2199,9 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     }
     if commit_header {
         return Err(shortlog_unknown_option("--commit-header"));
+    }
+    if raw_arg_present_before_dashdash(raw_args, "--no-commit-header") {
+        return Err(shortlog_unknown_option("--no-commit-header"));
     }
     if disk_usage {
         return Err(shortlog_unknown_option("--disk-usage"));
@@ -2222,7 +2257,9 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     }
     let max_count = parse_log_max_count(max_count)?;
     let no_walk = resolve_history_walk_mode(raw_args, no_walk, do_walk);
-    let (since, until) = resolve_history_age_bounds(raw_args, since, max_age, until, min_age);
+    let effective_since = since.or(since_as_filter);
+    let (since, until) =
+        resolve_history_age_bounds(raw_args, effective_since, max_age, until, min_age);
     let Some(since) = parse_log_since(since) else {
         return Ok(());
     };
@@ -2240,7 +2277,11 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     )?;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let revs = collect_rev_list_revs(&repo, &store, all, revs)?;
+    let effective_revs = shortlog_effective_revs(raw_args, revs);
+    if !all && !shortlog_has_positive_revs(&effective_revs) {
+        return Ok(());
+    }
+    let revs = collect_rev_list_revs(&repo, &store, all, effective_revs)?;
     let commit_cache = CommitObjectCache::new(&store);
     let post_collection_filters = since.is_some()
         || until.is_some()
@@ -2302,6 +2343,33 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
     }
     if post_collection_filters && let Some(max_count) = max_count {
         commits.truncate(max_count);
+    }
+    if ancestry_path {
+        commits = filter_commits_by_ancestry_path(&repo, &store, &commit_cache, &revs, commits)?;
+    }
+    if simplify_by_decoration {
+        let decorated = collect_default_log_decoration_ids(&repo)?;
+        commits.retain(|entry| decorated.contains(&entry.id.to_hex()));
+    }
+    if left_only {
+        let commit_ids = commits
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect::<Vec<_>>();
+        let traversal = collect_history_traversal_decoration(
+            &repo,
+            &store,
+            &commit_cache,
+            &revs,
+            &commit_ids,
+            true,
+            false,
+            false,
+            false,
+        )?;
+        commits.retain(|entry| {
+            traversal.markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left)
+        });
     }
     let groups_spec = parse_shortlog_groups(&group, committer)?;
     let date_arg = history_raw_date_arg(raw_args, date, relative_date);
@@ -2396,6 +2464,52 @@ fn shortlog_unknown_option(option: &str) -> CliError {
         code: 129,
         text: format!("error: unknown option `{option}'\n{SHORTLOG_USAGE}"),
     }
+}
+
+fn shortlog_effective_revs(raw_args: &[String], mut revs: Vec<String>) -> Vec<String> {
+    if raw_arg_present_before_dashdash(raw_args, "--not")
+        && !revs.iter().any(|rev| rev == "--not")
+    {
+        revs.insert(0, "--not".to_owned());
+    }
+    revs
+}
+
+fn shortlog_has_positive_revs(revs: &[String]) -> bool {
+    let mut not_mode = false;
+    for rev in revs {
+        if rev == "--not" {
+            not_mode = !not_mode;
+            continue;
+        }
+        if rev == "--branches"
+            || rev == "--heads"
+            || rev == "--remotes"
+            || rev == "--tags"
+            || rev.starts_with("--branches=")
+            || rev.starts_with("--heads=")
+            || rev.starts_with("--remotes=")
+            || rev.starts_with("--tags=")
+        {
+            if !not_mode {
+                return true;
+            }
+            continue;
+        }
+        if rev.starts_with('^') {
+            if not_mode {
+                return true;
+            }
+            continue;
+        }
+        if rev.contains("..") {
+            return true;
+        }
+        if !not_mode {
+            return true;
+        }
+    }
+    false
 }
 
 fn parse_shortlog_groups(values: &[String], committer: bool) -> Result<Vec<ShortlogGroup>> {
