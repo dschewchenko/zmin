@@ -21,6 +21,57 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-27 the latest completed batch is a helper-free local `grep`
+documented-option closure on the tracked mixed-case, grouped-output, capped
+count, files-without-match, and subdirectory-scope lanes. This batch added
+exact stock-Git matrix evidence for `-i`, `--ignore-case`, `-v`,
+`--invert-match`, `-c`, `--count`, `-L`, `--files-without-match`, `-m 1`,
+`-m 1 -c`, `--max-count 1`, `--max-count 1 -c`, `-H`, `--heading`,
+`--break`, `--heading --break`, the `-L hello` all-files-match exit-status
+lane, the `-c absent` no-match exit-status lane, plus default and
+`--full-name` output from a subdirectory.
+
+The batch fixed one cohesive local grep parity gap:
+
+- Zmin now matches stock Git for the covered helper-free `grep` family by
+  accepting the documented local option spellings above, applying ignore-case,
+  invert-match, capped count, files-without-match and grouped-output behavior
+  with stock-compatible stdout and exit codes, and honoring current-subdirectory
+  default search scope plus `--full-name` path rendering from inside nested
+  directories
+
+Focused verification was `cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_grep_compat -- --nocapture`,
+`python3 tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(grep|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2103 / 3212`
+- represented documented command-option pairs: `2178 / 3212`
+- matrix rows: `6319`
+- verified rows: `5507`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `grep`: `21 / 73` reviewed-complete documented option pairs, `36 / 73`
+  represented documented option pairs, `36` written rows, `36` classified
+  rows, `36` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should move to the refreshed `apply`
+head instead of staying on `grep`, because the newly represented local grep
+family is now closed on the current modeled surface while `apply` still has a
+dense helper-free expansion tail centered on `--directory`, include/exclude,
+`--no-add`, `--intent-to-add`, `--inaccurate-eof`, and `-3/--3way`.
+
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `commit` parser-and-expansion batch on the modeled verify, include,
 pathspec-file, no-signoff, no-post-rewrite, and patch quit lanes. This batch
@@ -2156,7 +2207,6 @@ until a full matrix is expanded and verified.
 | `log --diff-merges` invalid value usage | `1` | `0` | `git log --diff-merges=bogus -1` exits `128` with stock fatal diagnostic instead of a custom unsupported-value fatal diagnostic |
 | `merge` invalid strategy usage | `1` | `0` | `git merge -s bogus feature` exits `1` with stock missing-strategy diagnostic instead of a custom unsupported-strategy fatal diagnostic |
 | `rebase -i` invalid todo command usage | `1` | `0` | `GIT_SEQUENCE_EDITOR=<editor> git rebase -i HEAD~1` with an unknown todo command exits `1` with stock invalid-command diagnostics, leaves `.git/rebase-merge` state for recovery, moves HEAD to the stock in-progress rebase point, and supports `git rebase --abort` cleanup instead of a custom unsupported-interactive-command fatal diagnostic |
-| `grep` tracked, cached and treeish text search forms | `12` | `0` | default pattern search, `-n`, `-l`, `-F`, pathspec, `--cached`, `HEAD -- <path>`, treeish line/filename modes, treeish directory pathspec and no-match exit behavior already covered by `git_grep_compat` |
 | `check-ref-format` common accepted and invalid forms | `11` | `0` | full refname validation, `--allow-onelevel`, `--normalize`, `--branch`, one-level rejection, invalid path components, trailing slash and invalid branch shorthand already covered by `git_check_ref_format_compat` |
 | `filter-branch` supported filters and options | `13` | `0` | `--msg-filter`, `--tree-filter`, `--index-filter`, `--env-filter`, `--parent-filter`, `--subdirectory-filter`, `--tag-name-filter`, `--setup` plus message filter, `-d` temp directory, `--commit-filter` passthrough, `--commit-filter` with `skip_commit`, initial `--state-branch`, and repeated state-branch forms already covered by `git_filter_branch_compat` |
 | `clone` local path options | `51` | `0` | default local clone, `--quiet`, `--local`, `--no-local`, `--no-hardlinks`, `--hardlinks`, `--shared`, repeated `-c` config, `--template`, `--no-template` ordering, custom origin name, long/equals `--origin`, `--branch`, `--single-branch` and `--config` forms, `--no-tags`, `--tags`, tag-option ordering, local `--reference`, local `--reference-if-able`, missing `--reference-if-able`, `--dissociate` with reference, `--shared --dissociate`, local and file URL `--depth 1`, `-b`/`--branch feature`, `--checkout`/`--no-checkout` ordering, `--separate-git-dir`, `--no-single-branch` ordering, bare, mirror, shared bare/mirror and bare/mirror no-tags forms, explicit `--ref-format=files`, and case-insensitive symlink/directory collision checkout already covered by `git_clone_compat` |

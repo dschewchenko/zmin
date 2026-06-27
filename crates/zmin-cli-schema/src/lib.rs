@@ -4179,10 +4179,28 @@ pub enum Command {
     Grep {
         #[arg(long = "cached", action = ArgAction::SetTrue)]
         cached: bool,
+        #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
+        ignore_case: bool,
+        #[arg(short = 'v', long = "invert-match", action = ArgAction::SetTrue)]
+        invert_match: bool,
         #[arg(short = 'n', long = "line-number", action = ArgAction::SetTrue)]
         line_number: bool,
         #[arg(short = 'l', long = "files-with-matches", action = ArgAction::SetTrue)]
         files_with_matches: bool,
+        #[arg(short = 'L', long = "files-without-match", action = ArgAction::SetTrue)]
+        files_without_match: bool,
+        #[arg(short = 'c', long = "count", action = ArgAction::SetTrue)]
+        count: bool,
+        #[arg(short = 'm', long = "max-count")]
+        max_count: Option<usize>,
+        #[arg(short = 'H', action = ArgAction::SetTrue)]
+        with_filename: bool,
+        #[arg(long = "full-name", action = ArgAction::SetTrue)]
+        full_name: bool,
+        #[arg(long = "heading", action = ArgAction::SetTrue)]
+        heading: bool,
+        #[arg(long = "break", action = ArgAction::SetTrue)]
+        break_: bool,
         #[arg(short = 'F', long = "fixed-strings", action = ArgAction::SetTrue)]
         fixed_strings: bool,
         pattern: String,

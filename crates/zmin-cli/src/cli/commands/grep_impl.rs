@@ -2,8 +2,17 @@ use super::*;
 
 pub(crate) fn grep(
     cached: bool,
+    ignore_case: bool,
+    invert_match: bool,
     line_number: bool,
     files_with_matches: bool,
+    files_without_match: bool,
+    count: bool,
+    max_count: Option<usize>,
+    with_filename: bool,
+    full_name: bool,
+    heading: bool,
+    break_groups: bool,
     fixed_strings: bool,
     pattern: &str,
     args: Vec<String>,
@@ -12,13 +21,18 @@ pub(crate) fn grep(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let index = read_repo_index(&repo)?;
     let grep_input = parse_grep_input(&repo, &store, &index, cached, args)?;
-    let pathspecs = grep_input
+    let cwd_prefix = grep_cwd_prefix(&repo)?;
+    let mut pathspecs = grep_input
         .paths
         .iter()
         .map(|path| path_arg_to_repo_relative(&repo, path))
         .collect::<Result<Vec<_>>>()?;
-    let matcher = GrepMatcher::new(pattern, fixed_strings)?;
-    let mut matched_any = false;
+    if pathspecs.is_empty() && !cwd_prefix.is_empty() {
+        pathspecs.push(cwd_prefix.clone());
+    }
+    let matcher = GrepMatcher::new(pattern, fixed_strings, ignore_case)?;
+    let mut selected_any = false;
+    let mut printed_group = false;
 
     for entry in grep_input
         .index
@@ -42,19 +56,35 @@ pub(crate) fn grep(
             }
             GrepSource::Index => read_index_entry_content(&store, entry)?,
         };
-        if grep_file(
+        let outcome = grep_file(
             &matcher,
             grep_input.output_prefix.as_deref(),
             &entry.path,
+            &cwd_prefix,
             &content,
+            invert_match,
             line_number,
             files_with_matches,
-        )? {
-            matched_any = true;
+            files_without_match,
+            count,
+            max_count,
+            with_filename,
+            full_name,
+            heading,
+            break_groups,
+            printed_group,
+        )?;
+        selected_any |= if files_without_match {
+            outcome.printed
+        } else {
+            outcome.matched
+        };
+        if outcome.printed {
+            printed_group = true;
         }
     }
 
-    if matched_any {
+    if selected_any {
         Ok(())
     } else {
         Err(CliError::Exit(1))
@@ -140,11 +170,18 @@ enum GrepMatcher {
 }
 
 impl GrepMatcher {
-    fn new(pattern: &str, fixed_strings: bool) -> Result<Self> {
+    fn new(pattern: &str, fixed_strings: bool, ignore_case: bool) -> Result<Self> {
         if fixed_strings {
-            return Ok(Self::Fixed(pattern.as_bytes().to_vec()));
+            let pattern = if ignore_case {
+                pattern.bytes().map(lower_ascii).collect()
+            } else {
+                pattern.as_bytes().to_vec()
+            };
+            return Ok(Self::Fixed(pattern));
         }
-        Regex::new(pattern)
+        regex::bytes::RegexBuilder::new(pattern)
+            .case_insensitive(ignore_case)
+            .build()
             .map(Self::Regex)
             .map_err(|error| CliError::Fatal {
                 code: 128,
@@ -155,55 +192,210 @@ impl GrepMatcher {
     fn is_match(&self, line: &[u8]) -> bool {
         match self {
             Self::Fixed(pattern) => {
-                pattern.is_empty() || line.windows(pattern.len()).any(|w| w == pattern)
+                let owned;
+                let haystack = if pattern
+                    .iter()
+                    .any(|byte| byte.is_ascii_uppercase())
+                {
+                    line
+                } else {
+                    owned = line.iter().copied().map(lower_ascii).collect::<Vec<_>>();
+                    owned.as_slice()
+                };
+                pattern.is_empty() || haystack.windows(pattern.len()).any(|w| w == pattern)
             }
             Self::Regex(regex) => regex.is_match(line),
         }
     }
 }
 
+struct GrepFileOutcome {
+    matched: bool,
+    printed: bool,
+}
+
+fn grep_cwd_prefix(repo: &GitRepo) -> Result<Vec<u8>> {
+    let mut prefix = repo_relative_path(&repo.root, &std::env::current_dir()?)?;
+    while prefix.ends_with(b"/") {
+        prefix.pop();
+    }
+    Ok(prefix)
+}
+
 fn grep_file(
     matcher: &GrepMatcher,
     output_prefix: Option<&str>,
     path: &[u8],
+    cwd_prefix: &[u8],
     content: &[u8],
+    invert_match: bool,
     line_number: bool,
     files_with_matches: bool,
-) -> Result<bool> {
+    files_without_match: bool,
+    count: bool,
+    max_count: Option<usize>,
+    with_filename: bool,
+    full_name: bool,
+    heading: bool,
+    break_groups: bool,
+    printed_group: bool,
+) -> Result<GrepFileOutcome> {
     let mut matched = false;
+    let mut match_count = 0usize;
+    let mut emitted = false;
+    let display_path = grep_display_path(path, cwd_prefix, full_name);
+    let display_path = String::from_utf8_lossy(&display_path);
+    let filename_prefix = with_filename || output_prefix.is_some() || !heading;
     for (idx, line) in grep_lines(content).enumerate() {
-        if !matcher.is_match(line) {
+        let is_match = matcher.is_match(line);
+        if is_match == invert_match {
             continue;
         }
         matched = true;
-        let display_path = String::from_utf8_lossy(path);
+        match_count += 1;
+        if files_without_match {
+            return Ok(GrepFileOutcome {
+                matched: true,
+                printed: false,
+            });
+        }
         if files_with_matches {
+            if break_groups && printed_group {
+                println!();
+            }
             if let Some(prefix) = output_prefix {
                 print!("{prefix}:");
             }
             println!("{display_path}");
-            return Ok(true);
+            return Ok(GrepFileOutcome {
+                matched: true,
+                printed: true,
+            });
+        }
+        if count {
+            if max_count.is_some_and(|limit| match_count >= limit) {
+                break;
+            }
+            continue;
+        }
+        if !emitted {
+            if break_groups && printed_group {
+                println!();
+            }
+            if heading {
+                println!("{display_path}");
+            }
         }
         if let Some(prefix) = output_prefix {
             print!("{prefix}:");
         }
-        if line_number {
-            print!("{display_path}:{}:", idx + 1);
-        } else {
-            print!("{display_path}:");
+        if filename_prefix {
+            if line_number {
+                print!("{display_path}:{}:", idx + 1);
+            } else {
+                print!("{display_path}:");
+            }
+        } else if line_number {
+            print!("{}:", idx + 1);
         }
         io::stdout().write_all(line)?;
         println!();
+        emitted = true;
+        if max_count.is_some_and(|limit| match_count >= limit) {
+            break;
+        }
     }
-    Ok(matched)
+    if count && matched {
+        if break_groups && printed_group {
+            println!();
+        }
+        if let Some(prefix) = output_prefix {
+            print!("{prefix}:");
+        }
+        println!("{display_path}:{match_count}");
+        return Ok(GrepFileOutcome {
+            matched: true,
+            printed: true,
+        });
+    }
+    if files_without_match && !matched {
+        if break_groups && printed_group {
+            println!();
+        }
+        if let Some(prefix) = output_prefix {
+            print!("{prefix}:");
+        }
+        println!("{display_path}");
+        return Ok(GrepFileOutcome {
+            matched: false,
+            printed: true,
+        });
+    }
+    Ok(GrepFileOutcome {
+        matched,
+        printed: emitted,
+    })
 }
 
 fn grep_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {
-    content.split(|byte| *byte == b'\n').map(|line| {
+    content
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty() || !content.ends_with(b"\n"))
+        .map(|line| {
         if let Some(line) = line.strip_suffix(b"\r") {
             line
         } else {
             line
         }
     })
+}
+
+fn grep_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Vec<u8> {
+    if full_name || cwd_prefix.is_empty() {
+        return path.to_vec();
+    }
+    if path == cwd_prefix {
+        return Vec::new();
+    }
+    if let Some(rest) = path
+        .strip_prefix(cwd_prefix)
+        .and_then(|rest| rest.strip_prefix(b"/"))
+    {
+        return rest.to_vec();
+    }
+    relative_pathspec_bytes(cwd_prefix, path)
+}
+
+fn relative_pathspec_bytes(from: &[u8], to: &[u8]) -> Vec<u8> {
+    let from_components = from
+        .split(|byte| *byte == b'/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let to_components = to
+        .split(|byte| *byte == b'/')
+        .filter(|component| !component.is_empty())
+        .collect::<Vec<_>>();
+    let common = from_components
+        .iter()
+        .zip(&to_components)
+        .take_while(|(left, right)| left == right)
+        .count();
+    let mut out = Vec::new();
+    for _ in common..from_components.len() {
+        if !out.is_empty() {
+            out.push(b'/');
+        }
+        out.extend_from_slice(b"..");
+    }
+    for component in &to_components[common..] {
+        if !out.is_empty() {
+            out.push(b'/');
+        }
+        out.extend_from_slice(component);
+    }
+    out
+}
+
+fn lower_ascii(byte: u8) -> u8 {
+    byte.to_ascii_lowercase()
 }
