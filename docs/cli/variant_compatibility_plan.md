@@ -22,6 +22,56 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`grep` binary, submodule, and pager schema-tail closure across the modeled
+tracked text-plus-binary local lane. This batch closed the last remaining
+`grep` schema gaps on the helper-free surface by adding exact stock-Git
+evidence and runtime support for `-I`, `--recurse-submodules`, `-O`,
+`--open-files-in-pager`, and `--open-files-in-pager=less`. The only real
+implementation wrinkle was parser recovery rather than search behavior:
+`clap` treated bare `-O hello` and `--open-files-in-pager hello` as though
+`hello` were the pager argument, so `grep` dispatch now locally normalizes the
+raw argv tail for this option family and recovers the stock pattern/pathspec
+lane without widening parser behavior elsewhere. The runtime stays intentionally
+bounded to the current helper-free local surface: `-I` suppresses matching
+binary-file output, `--recurse-submodules` remains a stock-compatible no-op on
+the repository-without-submodules lane, bare pager mode follows `GIT_PAGER`,
+and explicit pager values emit the same raw matched-file contents as stock Git
+on the modeled `less` lane.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_grep_compat grep_binary_submodule_and_pager_schema_tail_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_grep_compat -- --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(grep|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2297 / 3212`
+- represented documented command-option pairs: `2380 / 3212`
+- matrix rows: `6581`
+- verified rows: `5769`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `grep`: `21 / 73` reviewed-complete documented option pairs,
+  `73 / 73` represented documented option pairs, `112` written rows, `112`
+  classified rows, `112` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should still stay on `grep`, but it is
+now a pure expansion queue rather than a schema-gap queue. The remaining helper-
+free documented tail is concentrated in already modeled families such as
+`--all-match`, `--and`, `--color`, `--column`, `--function-context`,
+`--name-only`, `--not`, `--null`, `--only-matching`, and `--or`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `grep` schema-tail plus override/value closure across modeled tracked,
 untracked, ignored, and filesystem-only lanes. This batch added exact
 stock-Git evidence and runtime support for `-r`, `--no-exclude-standard`,

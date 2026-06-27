@@ -3,8 +3,9 @@ mod common;
 use std::fs;
 
 use common::{
-    configure_identity, git, git_args, git_init, git_status, git_with_env, run_zmin,
-    run_zmin_args, run_zmin_status, run_zmin_status_args, git_status_args,
+    command_output_with_env, configure_identity, git, git_args, git_init, git_status,
+    git_status_args, git_with_env, run_zmin, run_zmin_args, run_zmin_status, run_zmin_status_args,
+    zmin_bin,
 };
 
 #[test]
@@ -82,7 +83,11 @@ fn grep_documented_local_option_batch_matches_stock_git() {
         b"Hello\nworld\nHELLO\nhello.world\nextra hello\n",
     )
     .expect("write a");
-    fs::write(repo.path().join("b.txt"), b"alpha\nhello beta\ngamma\nhello\n").expect("write b");
+    fs::write(
+        repo.path().join("b.txt"),
+        b"alpha\nhello beta\ngamma\nhello\n",
+    )
+    .expect("write b");
     fs::write(repo.path().join("dir/c.txt"), b"nested hello\nline two\n").expect("write c");
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "initial"]);
@@ -144,7 +149,11 @@ fn grep_regex_filename_and_output_shape_family_matches_stock_git() {
         b"Hello\nworld\nHELLO\nhello.world\nextra hello\n",
     )
     .expect("write a");
-    fs::write(repo.path().join("b.txt"), b"alpha\nhello beta\ngamma\nhello\n").expect("write b");
+    fs::write(
+        repo.path().join("b.txt"),
+        b"alpha\nhello beta\ngamma\nhello\n",
+    )
+    .expect("write b");
     fs::write(repo.path().join("dir/c.txt"), b"nested hello\nline two\n").expect("write c");
     git(repo.path(), ["add", "-A"]);
     git_with_env(repo.path(), ["commit", "-m", "initial"]);
@@ -178,7 +187,10 @@ fn grep_regex_filename_and_output_shape_family_matches_stock_git() {
         );
     }
 
-    for args in [["grep", "-q", "absent"].as_slice(), ["grep", "--quiet", "absent"].as_slice()] {
+    for args in [
+        ["grep", "-q", "absent"].as_slice(),
+        ["grep", "--quiet", "absent"].as_slice(),
+    ] {
         assert_eq!(
             run_zmin_status_args(repo.path(), args),
             git_status_args(repo.path(), args),
@@ -349,11 +361,7 @@ fn grep_schema_tail_and_override_value_family_matches_stock_git() {
     configure_identity(repo.path());
     fs::create_dir_all(repo.path().join("dir/sub")).expect("create dir tree");
     fs::write(repo.path().join(".gitignore"), b"*.log\n").expect("write gitignore");
-    fs::write(
-        repo.path().join("a.txt"),
-        b"alpha\nhello\nworld\nomega\n",
-    )
-    .expect("write a");
+    fs::write(repo.path().join("a.txt"), b"alpha\nhello\nworld\nomega\n").expect("write a");
     fs::write(repo.path().join("b.txt"), b"hello.world\n").expect("write b");
     fs::write(repo.path().join("dir/sub/c.txt"), b"nested hello\n").expect("write c");
     git(repo.path(), ["add", "-A"]);
@@ -397,8 +405,22 @@ fn grep_schema_tail_and_override_value_family_matches_stock_git() {
 
     for args in [
         ["grep", "--no-index", "--recursive", "hello"].as_slice(),
-        ["grep", "--no-index", "--max-depth=2", "--max-depth=0", "hello"].as_slice(),
-        ["grep", "--no-index", "--max-depth=0", "--max-depth=2", "hello"].as_slice(),
+        [
+            "grep",
+            "--no-index",
+            "--max-depth=2",
+            "--max-depth=0",
+            "hello",
+        ]
+        .as_slice(),
+        [
+            "grep",
+            "--no-index",
+            "--max-depth=0",
+            "--max-depth=2",
+            "hello",
+        ]
+        .as_slice(),
     ] {
         assert_eq!(
             run_zmin_args(outside.path(), args),
@@ -410,5 +432,47 @@ fn grep_schema_tail_and_override_value_family_matches_stock_git() {
             git_status_args(outside.path(), args),
             "outside status args: {args:?}"
         );
+    }
+}
+
+#[test]
+fn grep_binary_submodule_and_pager_schema_tail_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    fs::write(repo.path().join("a.txt"), b"hello\n").expect("write text");
+    fs::write(repo.path().join("b.bin"), b"hello\0world\n").expect("write binary");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial"]);
+
+    for args in [
+        ["grep", "-I", "hello"].as_slice(),
+        ["grep", "--recurse-submodules", "hello"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), args),
+            git_status_args(repo.path(), args),
+            "status args: {args:?}"
+        );
+    }
+
+    for args in [
+        ["grep", "-O", "hello"].as_slice(),
+        ["grep", "--open-files-in-pager", "hello"].as_slice(),
+        ["grep", "--open-files-in-pager=less", "hello"].as_slice(),
+    ] {
+        let zmin = command_output_with_env(
+            zmin_bin(),
+            repo.path(),
+            args,
+            &[("GIT_PAGER", "cat")],
+            "zmin",
+        );
+        let git = command_output_with_env("git", repo.path(), args, &[("GIT_PAGER", "cat")], "git");
+        assert_eq!(zmin, git, "env args: {args:?}");
     }
 }

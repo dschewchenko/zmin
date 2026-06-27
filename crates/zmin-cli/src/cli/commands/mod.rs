@@ -277,7 +277,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::RevList { .. }
         | crate::runtime::Command::MergeBase { .. }
         | crate::runtime::Command::LastModified { .. }) => history::dispatch(command, raw_args),
-        command @ crate::runtime::Command::Grep { .. } => grep::dispatch(command),
+        command @ crate::runtime::Command::Grep { .. } => grep::dispatch(command, raw_args),
         command @ (crate::runtime::Command::CherryPick { .. }
         | crate::runtime::Command::Revert { .. }
         | crate::runtime::Command::Bisect { .. }

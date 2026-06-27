@@ -6,6 +6,7 @@ pub(crate) fn grep(
     exclude_standard: bool,
     no_exclude_standard: bool,
     no_index: bool,
+    recurse_submodules: bool,
     recursive: bool,
     no_recursive: bool,
     max_depth: Vec<usize>,
@@ -30,6 +31,8 @@ pub(crate) fn grep(
     pattern_files: Vec<PathBuf>,
     with_filename: bool,
     no_filename: bool,
+    ignore_binary: bool,
+    open_files_in_pager: Option<String>,
     null_terminated: bool,
     full_name: bool,
     heading: bool,
@@ -56,6 +59,7 @@ pub(crate) fn grep(
     if no_index {
         return grep_no_index(
             cached,
+            recurse_submodules,
             recursive,
             no_recursive,
             max_depth,
@@ -79,6 +83,8 @@ pub(crate) fn grep(
             pattern_files,
             with_filename,
             no_filename,
+            ignore_binary,
+            open_files_in_pager,
             null_terminated,
             full_name,
             heading,
@@ -131,6 +137,7 @@ pub(crate) fn grep(
     let after_context = threads_last_value(&after_context).unwrap_or(context);
     let color_mode = grep_color_mode(color.as_deref(), no_color)?;
     let _accepted_parser_only = (
+        recurse_submodules,
         basic_regexp,
         extended_regexp,
         perl_regexp,
@@ -199,6 +206,9 @@ pub(crate) fn grep(
             after_context,
             with_filename,
             no_filename,
+            ignore_binary,
+            open_files_in_pager.as_deref(),
+            text || textconv || no_textconv,
             null_terminated,
             full_name,
             heading,
@@ -254,6 +264,9 @@ pub(crate) fn grep(
                 after_context,
                 with_filename,
                 no_filename,
+                ignore_binary,
+                open_files_in_pager.as_deref(),
+                text || textconv || no_textconv,
                 null_terminated,
                 full_name,
                 heading,
@@ -288,6 +301,7 @@ pub(crate) fn grep(
 #[allow(clippy::too_many_arguments)]
 fn grep_no_index(
     cached: bool,
+    recurse_submodules: bool,
     recursive: bool,
     no_recursive: bool,
     max_depth: Option<usize>,
@@ -311,6 +325,8 @@ fn grep_no_index(
     pattern_files: Vec<PathBuf>,
     with_filename: bool,
     no_filename: bool,
+    ignore_binary: bool,
+    open_files_in_pager: Option<String>,
     null_terminated: bool,
     full_name: bool,
     heading: bool,
@@ -356,6 +372,7 @@ fn grep_no_index(
     let after_context = threads_last_value(&after_context).unwrap_or(context);
     let color_mode = grep_color_mode(color.as_deref(), no_color)?;
     let _accepted_parser_only = (
+        recurse_submodules,
         basic_regexp,
         extended_regexp,
         perl_regexp,
@@ -392,6 +409,9 @@ fn grep_no_index(
             after_context,
             with_filename,
             no_filename,
+            ignore_binary,
+            open_files_in_pager.as_deref(),
+            text || textconv || no_textconv,
             null_terminated,
             false,
             heading,
@@ -436,14 +456,7 @@ fn grep_no_index_files(
         let absolute = cwd.join(root);
         match fs::symlink_metadata(&absolute) {
             Ok(metadata) if metadata.is_dir() => {
-                collect_no_index_files(
-                    cwd,
-                    &absolute,
-                    recursive,
-                    max_depth,
-                    0,
-                    &mut files,
-                )?;
+                collect_no_index_files(cwd, &absolute, recursive, max_depth, 0, &mut files)?;
             }
             Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {
                 files.push(repo_relative_path(cwd, &absolute)?);
@@ -650,7 +663,8 @@ impl GrepMatcher {
     }
 
     fn matches_anywhere(&self, lines: &[&[u8]], word_regexp: bool) -> bool {
-        lines.iter()
+        lines
+            .iter()
             .any(|line| !self.match_ranges(line, word_regexp).is_empty())
     }
 }
@@ -803,6 +817,9 @@ fn grep_file(
     after_context: usize,
     with_filename: bool,
     no_filename: bool,
+    ignore_binary: bool,
+    open_files_in_pager: Option<&str>,
+    text_like_binary_lane: bool,
     null_terminated: bool,
     full_name: bool,
     heading: bool,
@@ -821,6 +838,7 @@ fn grep_file(
     let display_path = String::from_utf8_lossy(&display_path);
     let filename_prefix = !no_filename && (with_filename || output_prefix.is_some() || !heading);
     let lines = grep_lines(content).collect::<Vec<_>>();
+    let is_binary = content.contains(&b'\0');
     let mut line_ranges = Vec::with_capacity(lines.len());
     let mut matching_lines = Vec::new();
     for (idx, line) in lines.iter().enumerate() {
@@ -839,10 +857,34 @@ fn grep_file(
     }
     let matched = !matching_lines.is_empty();
     let match_count = matching_lines.len();
+    if ignore_binary && is_binary {
+        return Ok(GrepFileOutcome {
+            matched: false,
+            printed: false,
+        });
+    }
     if quiet {
         return Ok(GrepFileOutcome {
             matched,
             printed: false,
+        });
+    }
+    if open_files_in_pager.is_some_and(|value| !value.is_empty()) {
+        if matched {
+            io::stdout().write_all(content)?;
+        }
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: matched,
+        });
+    }
+    if is_binary && !text_like_binary_lane {
+        if matched {
+            println!("Binary file {display_path} matches");
+        }
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: matched,
         });
     }
     if files_without_match {
@@ -942,7 +984,10 @@ fn grep_file(
                 emitted = true;
             }
         }
-        return Ok(GrepFileOutcome { matched, printed: emitted });
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: emitted,
+        });
     }
     if show_function {
         let spans = grep_function_spans(&lines);
@@ -950,7 +995,10 @@ fn grep_file(
         for idx in matching_lines {
             let line = lines[idx];
             let ranges = &line_ranges[idx];
-            if let Some(span) = spans.iter().find(|span| span.start <= idx && idx <= span.end) {
+            if let Some(span) = spans
+                .iter()
+                .find(|span| span.start <= idx && idx <= span.end)
+            {
                 if !emitted_headers.contains(&span.start) {
                     print_grep_line(
                         output_prefix,
@@ -973,7 +1021,11 @@ fn grep_file(
                 &display_path,
                 line_number,
                 idx + 1,
-                if column { ranges.first().map(|(start, _)| start + 1) } else { None },
+                if column {
+                    ranges.first().map(|(start, _)| start + 1)
+                } else {
+                    None
+                },
                 ':',
                 line,
                 ranges,
@@ -981,10 +1033,14 @@ fn grep_file(
             )?;
             emitted = true;
         }
-        return Ok(GrepFileOutcome { matched, printed: emitted });
+        return Ok(GrepFileOutcome {
+            matched,
+            printed: emitted,
+        });
     }
     if before_context > 0 || after_context > 0 {
-        let groups = build_context_groups(lines.len(), &matching_lines, before_context, after_context);
+        let groups =
+            build_context_groups(lines.len(), &matching_lines, before_context, after_context);
         for (group_idx, (start, end)) in groups.iter().enumerate() {
             if printed_group || group_idx > 0 {
                 println!("--");
@@ -1052,7 +1108,11 @@ fn grep_file(
             &display_path,
             line_number,
             idx + 1,
-            if column { ranges.first().map(|(start, _)| start + 1) } else { None },
+            if column {
+                ranges.first().map(|(start, _)| start + 1)
+            } else {
+                None
+            },
             ':',
             line,
             ranges,
@@ -1135,14 +1195,19 @@ fn grep_function_spans(lines: &[&[u8]]) -> Vec<GrepFunctionSpan> {
     spans
 }
 
-fn build_function_groups(matching_lines: &[usize], spans: &[GrepFunctionSpan]) -> Vec<GrepFunctionGroup> {
+fn build_function_groups(
+    matching_lines: &[usize],
+    spans: &[GrepFunctionSpan],
+) -> Vec<GrepFunctionGroup> {
     let mut groups = Vec::new();
     for &line_idx in matching_lines {
-        if let Some(span) = spans.iter().find(|span| span.start <= line_idx && line_idx <= span.end) {
-            if let Some(group) = groups
-                .iter_mut()
-                .find(|group: &&mut GrepFunctionGroup| group.start == span.start && group.end == span.end)
-            {
+        if let Some(span) = spans
+            .iter()
+            .find(|span| span.start <= line_idx && line_idx <= span.end)
+        {
+            if let Some(group) = groups.iter_mut().find(|group: &&mut GrepFunctionGroup| {
+                group.start == span.start && group.end == span.end
+            }) {
                 group.matching_lines.push(line_idx);
             } else {
                 groups.push(GrepFunctionGroup {
@@ -1242,7 +1307,11 @@ fn print_grep_prefix(value: &str, separator: char, color_name: bool, color_mode:
     }
 }
 
-fn print_grep_payload(line: &[u8], ranges: &[(usize, usize)], color_mode: GrepColorMode) -> Result<()> {
+fn print_grep_payload(
+    line: &[u8],
+    ranges: &[(usize, usize)],
+    color_mode: GrepColorMode,
+) -> Result<()> {
     match color_mode {
         GrepColorMode::Never => io::stdout().write_all(line)?,
         GrepColorMode::Always => {
@@ -1269,12 +1338,12 @@ fn grep_lines(content: &[u8]) -> impl Iterator<Item = &[u8]> {
         .split(|byte| *byte == b'\n')
         .filter(|line| !line.is_empty() || !content.ends_with(b"\n"))
         .map(|line| {
-        if let Some(line) = line.strip_suffix(b"\r") {
-            line
-        } else {
-            line
-        }
-    })
+            if let Some(line) = line.strip_suffix(b"\r") {
+                line
+            } else {
+                line
+            }
+        })
 }
 
 fn grep_display_path(path: &[u8], cwd_prefix: &[u8], full_name: bool) -> Vec<u8> {

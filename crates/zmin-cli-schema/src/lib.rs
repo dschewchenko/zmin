@@ -4471,6 +4471,8 @@ pub enum Command {
         no_exclude_standard: bool,
         #[arg(long = "no-index", action = ArgAction::SetTrue)]
         no_index: bool,
+        #[arg(long = "recurse-submodules", action = ArgAction::SetTrue)]
+        recurse_submodules: bool,
         #[arg(short = 'r', long = "recursive", action = ArgAction::SetTrue)]
         recursive: bool,
         #[arg(long = "no-recursive", action = ArgAction::SetTrue)]
@@ -4519,6 +4521,15 @@ pub enum Command {
         with_filename: bool,
         #[arg(short = 'h', action = ArgAction::SetTrue)]
         no_filename: bool,
+        #[arg(short = 'I', action = ArgAction::SetTrue)]
+        ignore_binary: bool,
+        #[arg(
+            short = 'O',
+            long = "open-files-in-pager",
+            num_args = 0..=1,
+            default_missing_value = ""
+        )]
+        open_files_in_pager: Option<String>,
         #[arg(short = 'z', long = "null", action = ArgAction::SetTrue)]
         null_terminated: bool,
         #[arg(long = "full-name", action = ArgAction::SetTrue)]
