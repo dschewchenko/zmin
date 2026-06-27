@@ -22,31 +22,28 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
-`cherry-pick` and `revert` expansion batch on the modeled clean, editor,
-reference-message, and initially-empty lanes. This batch added broader
-stock-Git matrix evidence for repeated and paired `--signoff` / `-s`,
-repeated and paired `--edit` / `-e`, paired rerere toggle spellings, separate
-`--strategy` plus `--strategy-option` values, separate `-X` values, the
-current-host `cherry-pick -x -r` no-op lane, `revert --no-edit --edit`, and
-`revert --reference --no-edit`, plus the combined initially-empty
-`cherry-pick --allow-empty --keep-redundant-commits` lane.
+`commit` parser-and-expansion batch on the modeled verify, include,
+pathspec-file, no-signoff, no-post-rewrite, and patch quit lanes. This batch
+added broader stock-Git matrix evidence for repeated `--verify`, repeated
+`--include`, separate and repeated `--pathspec-from-file` forms, separate and
+repeated `--pathspec-file-nul` forms, repeated `--no-signoff`, repeated
+`--no-post-rewrite`, repeated `--patch`, and mixed `--patch -p`.
 
-The batch fixed one cohesive parser-plus-runtime gap on the helper-free
-sequencer path:
+The batch fixed one cohesive parser gap on the helper-free `commit` path:
 
-- Zmin now accepts repeated `cherry-pick` and `revert` boolean spellings on
-  the covered clean lanes, accepts separate `-X patience` and separate
-  `--strategy ort --strategy-option patience` forms like stock Git, and now
-  matches the current stock-Git `cherry-pick -x -r` behavior where `-r` is a
-  no-op and does not suppress the recorded origin trailer
+- Zmin now accepts repeated `commit` boolean spellings on the covered
+  verify, include, no-signoff, no-post-rewrite, and patch lanes, and it now
+  accepts repeated or separate `pathspec-from-file` spellings with the current
+  last-one-wins dispatch needed to match stock Git on the modeled LF and NUL
+  pathspec-file lanes
 
 Focused verification was `cargo check -p zmin-cli`,
-`cargo test -p zmin-cli --test git_sequencer_compat -- --nocapture`,
+`cargo test -p zmin-cli --test git_commit_compat -- --nocapture`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(cherry-pick|revert|summary)\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`,
 and `git diff --check`.
 
 Actual durable census after this batch:
@@ -54,29 +51,24 @@ Actual durable census after this batch:
 - complete command matrices: `146 / 151`
 - complete documented command-option pairs: `2103 / 3212`
 - represented documented command-option pairs: `2157 / 3212`
-- matrix rows: `6277`
-- verified rows: `5465`
+- matrix rows: `6287`
+- verified rows: `5475`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
 
 Per-command position on the touched surface:
 
-- `cherry-pick`: `4 / 24` reviewed-complete documented option pairs, `24 / 24`
-  represented documented option pairs, `35` written rows, `35` classified
-  rows, `33` stock-matching rows, `2` invalid-input rows, and `0`
-  exact-open rows
-- `revert`: `4 / 19` reviewed-complete documented option pairs, `19 / 19`
-  represented documented option pairs, `31` written rows, `31` classified
-  rows, `29` stock-matching rows, `2` invalid-input rows, and `0`
+- `commit`: `46 / 58` reviewed-complete documented option pairs, `58 / 58`
+  represented documented option pairs, `115` written rows, `115` classified
+  rows, `110` stock-matching rows, `5` invalid-input rows, and `0`
   exact-open rows
 
 The next best high-throughput follow-up should reselect from the refreshed
 backlog head instead of treating this as a completion point. This batch
-materially expanded the sequencer exact evidence layer, but `cherry-pick` and
-`revert` still have large expansion-only tails and did not move the
-reviewed-complete numerator; the next dense helper-free follow-up can either
-continue on the sequencer clean-lane families with the refreshed harness or
-pivot to the next represented expansion head such as `commit`.
+materially expanded the `commit` exact evidence layer, but the
+reviewed-complete numerator did not move; the next dense helper-free follow-up
+can either keep pushing the represented `commit` tail or return to the larger
+sequencer expansion head with the refreshed harnesses.
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `cherry-pick` and `revert` follow-up schema-tail closure on the modeled clean,

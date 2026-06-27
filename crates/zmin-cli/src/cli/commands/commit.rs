@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::runtime;
 
 pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
@@ -48,15 +50,15 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             paths,
         } => super::commit_commands::commit_command(super::commit_commands::CommitCommandOptions {
             all,
-            include,
+            include: include > 0,
             only,
-            patch,
+            patch: patch > 0,
             allow_empty,
             amend,
             edit,
             no_edit,
             signoff,
-            no_signoff,
+            no_signoff: no_signoff > 0,
             quiet,
             verbose,
             dry_run,
@@ -65,7 +67,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             null,
             porcelain,
             long,
-            verify,
+            verify: verify > 0,
             no_verify,
             status,
             no_status,
@@ -85,9 +87,9 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             fixup: fixup.as_deref(),
             message_file: message_file.as_deref(),
             messages,
-            no_post_rewrite,
-            pathspec_from_file: pathspec_from_file.as_deref(),
-            pathspec_file_nul,
+            no_post_rewrite: no_post_rewrite > 0,
+            pathspec_from_file: pathspec_from_file.last().map(PathBuf::as_path),
+            pathspec_file_nul: pathspec_file_nul > 0,
             trailers,
             paths,
         }),

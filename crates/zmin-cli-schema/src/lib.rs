@@ -2112,16 +2112,16 @@ pub enum Command {
     Commit {
         #[arg(short = 'a', long = "all", action = ArgAction::SetTrue)]
         all: bool,
-        #[arg(short = 'i', long = "include", action = ArgAction::SetTrue)]
-        include: bool,
+        #[arg(short = 'i', long = "include", action = ArgAction::Count)]
+        include: u8,
         #[arg(short = 'o', long = "only", action = ArgAction::SetTrue)]
         only: bool,
-        #[arg(short = 'p', long = "patch", action = ArgAction::SetTrue)]
-        patch: bool,
+        #[arg(short = 'p', long = "patch", action = ArgAction::Count)]
+        patch: u8,
         #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
-        #[arg(long = "no-signoff", action = ArgAction::SetTrue, overrides_with = "signoff")]
-        no_signoff: bool,
+        #[arg(long = "no-signoff", action = ArgAction::Count, overrides_with = "signoff")]
+        no_signoff: u8,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
@@ -2138,8 +2138,8 @@ pub enum Command {
         porcelain: bool,
         #[arg(long = "long", action = ArgAction::SetTrue)]
         long: bool,
-        #[arg(long = "verify", action = ArgAction::SetTrue, overrides_with = "no_verify")]
-        verify: bool,
+        #[arg(long = "verify", action = ArgAction::Count, overrides_with = "no_verify")]
+        verify: u8,
         #[arg(short = 'n', long = "no-verify", action = ArgAction::SetTrue)]
         no_verify: bool,
         #[arg(long = "status", action = ArgAction::SetTrue, overrides_with = "no_status")]
@@ -2198,12 +2198,12 @@ pub enum Command {
         message_file: Option<PathBuf>,
         #[arg(short = 'm', long = "message")]
         messages: Vec<String>,
-        #[arg(long = "no-post-rewrite", action = ArgAction::SetTrue)]
-        no_post_rewrite: bool,
+        #[arg(long = "no-post-rewrite", action = ArgAction::Count)]
+        no_post_rewrite: u8,
         #[arg(long = "pathspec-from-file", value_hint = ValueHint::FilePath)]
-        pathspec_from_file: Option<PathBuf>,
-        #[arg(long = "pathspec-file-nul", action = ArgAction::SetTrue)]
-        pathspec_file_nul: bool,
+        pathspec_from_file: Vec<PathBuf>,
+        #[arg(long = "pathspec-file-nul", action = ArgAction::Count)]
+        pathspec_file_nul: u8,
         #[arg(long = "trailer")]
         trailers: Vec<String>,
         #[arg(value_hint = ValueHint::AnyPath)]

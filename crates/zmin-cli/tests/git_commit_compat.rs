@@ -1976,26 +1976,14 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             command_output_with_env(
                 zmin_bin(),
                 zmin_repo.path(),
-                &[
-                    "commit",
-                    "--include",
-                    "--pathspec-from-file=paths.txt",
-                    "-m",
-                    "include",
-                ],
+                &["commit", "--include", "--pathspec-from-file=paths.txt", "-m", "include"],
                 &COMMIT_ENV,
                 "zmin"
             ),
             command_output_with_env(
                 "git",
                 git_repo.path(),
-                &[
-                    "commit",
-                    "--include",
-                    "--pathspec-from-file=paths.txt",
-                    "-m",
-                    "include",
-                ],
+                &["commit", "--include", "--pathspec-from-file=paths.txt", "-m", "include"],
                 &COMMIT_ENV,
                 "git"
             )
@@ -2008,6 +1996,69 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
             git(git_repo.path(), ["status", "--porcelain=v1"])
         );
+
+        for args in [
+            [
+                "commit",
+                "--include",
+                "--include",
+                "--pathspec-from-file=paths.txt",
+                "-m",
+                "include-repeat",
+            ]
+            .as_slice(),
+            [
+                "commit",
+                "--include",
+                "--pathspec-from-file",
+                "paths.txt",
+                "-m",
+                "include-separate",
+            ]
+            .as_slice(),
+            [
+                "commit",
+                "--include",
+                "--pathspec-from-file=paths.txt",
+                "--pathspec-from-file=paths.txt",
+                "-m",
+                "include-repeat-file",
+            ]
+            .as_slice(),
+        ] {
+            let git_repo = git_init();
+            let zmin_repo = git_init();
+            configure_identity(git_repo.path());
+            configure_identity(zmin_repo.path());
+            for repo in [git_repo.path(), zmin_repo.path()] {
+                fs::write(repo.join("a.txt"), b"base\n").expect("write a");
+                fs::write(repo.join("b.txt"), b"base\n").expect("write b");
+            }
+            git(git_repo.path(), ["add", "a.txt", "b.txt"]);
+            run_zmin(zmin_repo.path(), ["add", "a.txt", "b.txt"]);
+            git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+            run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+            for repo in [git_repo.path(), zmin_repo.path()] {
+                fs::write(repo.join("a.txt"), b"include\n").expect("write include a");
+                fs::write(repo.join("b.txt"), b"left dirty\n").expect("write include b");
+                fs::write(repo.join("paths.txt"), b"a.txt\n").expect("write pathspec file");
+            }
+            assert_eq!(
+                command_output_with_env(zmin_bin(), zmin_repo.path(), args, &COMMIT_ENV, "zmin"),
+                command_output_with_env("git", git_repo.path(), args, &COMMIT_ENV, "git"),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+                git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+                git(git_repo.path(), ["status", "--porcelain=v1"]),
+                "args: {args:?}"
+            );
+        }
     }
 
     {
@@ -2069,28 +2120,14 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             command_output_with_env(
                 zmin_bin(),
                 zmin_repo.path(),
-                &[
-                    "commit",
-                    "--include",
-                    "--pathspec-from-file=paths.nul",
-                    "--pathspec-file-nul",
-                    "-m",
-                    "include-nul",
-                ],
+                &["commit", "--include", "--pathspec-from-file=paths.nul", "--pathspec-file-nul", "-m", "include-nul"],
                 &COMMIT_ENV,
                 "zmin"
             ),
             command_output_with_env(
                 "git",
                 git_repo.path(),
-                &[
-                    "commit",
-                    "--include",
-                    "--pathspec-from-file=paths.nul",
-                    "--pathspec-file-nul",
-                    "-m",
-                    "include-nul",
-                ],
+                &["commit", "--include", "--pathspec-from-file=paths.nul", "--pathspec-file-nul", "-m", "include-nul"],
                 &COMMIT_ENV,
                 "git"
             )
@@ -2103,6 +2140,63 @@ fn commit_documented_open_option_batch_matches_stock_git() {
             run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
             git(git_repo.path(), ["status", "--porcelain=v1"])
         );
+
+        for args in [
+            [
+                "commit",
+                "--include",
+                "--pathspec-from-file",
+                "paths.nul",
+                "--pathspec-file-nul",
+                "-m",
+                "include-nul-separate",
+            ]
+            .as_slice(),
+            [
+                "commit",
+                "--include",
+                "--pathspec-from-file",
+                "paths.nul",
+                "--pathspec-file-nul",
+                "--pathspec-file-nul",
+                "-m",
+                "include-nul-repeat",
+            ]
+            .as_slice(),
+        ] {
+            let git_repo = git_init();
+            let zmin_repo = git_init();
+            configure_identity(git_repo.path());
+            configure_identity(zmin_repo.path());
+            for repo in [git_repo.path(), zmin_repo.path()] {
+                fs::write(repo.join("a.txt"), b"base\n").expect("write a");
+                fs::write(repo.join("b.txt"), b"base\n").expect("write b");
+            }
+            git(git_repo.path(), ["add", "a.txt", "b.txt"]);
+            run_zmin(zmin_repo.path(), ["add", "a.txt", "b.txt"]);
+            git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+            run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+            for repo in [git_repo.path(), zmin_repo.path()] {
+                fs::write(repo.join("a.txt"), b"include nul\n").expect("write include nul a");
+                fs::write(repo.join("b.txt"), b"left dirty\n").expect("write include nul b");
+                fs::write(repo.join("paths.nul"), b"a.txt\0").expect("write nul pathspec file");
+            }
+            assert_eq!(
+                command_output_with_env(zmin_bin(), zmin_repo.path(), args, &COMMIT_ENV, "zmin"),
+                command_output_with_env("git", git_repo.path(), args, &COMMIT_ENV, "git"),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+                git(git_repo.path(), ["cat-file", "-p", "HEAD"]),
+                "args: {args:?}"
+            );
+            assert_eq!(
+                run_zmin(zmin_repo.path(), ["status", "--porcelain=v1"]),
+                git(git_repo.path(), ["status", "--porcelain=v1"]),
+                "args: {args:?}"
+            );
+        }
     }
 
     {
@@ -2136,6 +2230,31 @@ fn commit_documented_open_option_batch_matches_stock_git() {
                 &COMMIT_ENV,
                 "git"
             )
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"nosign\n").expect("write nosign");
+            git(repo, ["add", "a.txt"]);
+        }
+        let args = ["commit", "--signoff", "--no-signoff", "--no-signoff", "-m", "nosign-repeat"];
+        assert_eq!(
+            command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &COMMIT_ENV, "zmin"),
+            command_output_with_env("git", git_repo.path(), &args, &COMMIT_ENV, "git")
         );
         assert_eq!(
             git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
@@ -2183,9 +2302,70 @@ fn commit_documented_open_option_batch_matches_stock_git() {
         );
         assert!(!git_repo.path().join("rewrite.log").exists());
         assert!(!zmin_repo.path().join("rewrite.log").exists());
+
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        install_post_rewrite_hook(git_repo.path());
+        install_post_rewrite_hook(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"amended\n").expect("write amended");
+            git(repo, ["add", "a.txt"]);
+        }
+        let args = ["commit", "--amend", "--no-post-rewrite", "--no-post-rewrite", "-m", "amended"];
+        assert_eq!(
+            command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &COMMIT_ENV, "zmin"),
+            command_output_with_env("git", git_repo.path(), &args, &COMMIT_ENV, "git")
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+        assert!(!git_repo.path().join("rewrite.log").exists());
+        assert!(!zmin_repo.path().join("rewrite.log").exists());
     }
 
-    for flag in ["--patch", "-p"] {
+    {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"base\n").expect("write base");
+        }
+        git(git_repo.path(), ["add", "a.txt"]);
+        run_zmin(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "base"]);
+        run_zmin_with_env(zmin_repo.path(), ["commit", "-m", "base"]);
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            fs::write(repo.join("a.txt"), b"verify\n").expect("write verify");
+            git(repo, ["add", "a.txt"]);
+        }
+        let args = ["commit", "--verify", "--verify", "-m", "verify-repeat"];
+        assert_eq!(
+            command_output_with_env(zmin_bin(), zmin_repo.path(), &args, &COMMIT_ENV, "zmin"),
+            command_output_with_env("git", git_repo.path(), &args, &COMMIT_ENV, "git")
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "HEAD"]),
+            git(git_repo.path(), ["cat-file", "-p", "HEAD"])
+        );
+    }
+
+    for args in [
+        ["commit", "--patch", "-m", "patch"].as_slice(),
+        ["commit", "-p", "-m", "patch"].as_slice(),
+        ["commit", "--patch", "--patch", "-m", "patch-repeat"].as_slice(),
+        ["commit", "--patch", "-p", "-m", "patch-mixed-repeat"].as_slice(),
+    ] {
         let git_repo = git_init();
         let zmin_repo = git_init();
         configure_identity(git_repo.path());
@@ -2200,10 +2380,9 @@ fn commit_documented_open_option_batch_matches_stock_git() {
         for repo in [git_repo.path(), zmin_repo.path()] {
             fs::write(repo.join("a.txt"), b"patch\n").expect("write patch");
         }
-        let args = ["commit", flag, "-m", "patch"];
         assert_eq!(
-            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), &args, "", "zmin"),
-            command_any_output_with_stdin("git", git_repo.path(), &args, "", "git"),
+            command_any_output_with_stdin(zmin_bin(), zmin_repo.path(), args, "", "zmin"),
+            command_any_output_with_stdin("git", git_repo.path(), args, "", "git"),
             "args: {args:?}"
         );
         assert_eq!(
