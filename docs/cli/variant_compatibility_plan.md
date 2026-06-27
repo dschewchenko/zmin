@@ -22,6 +22,62 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`diff*` dirstat value-form expansion across the existing treeish-pair,
+tree-to-tree, and dirty-worktree nested-directory lanes. This batch added
+twenty-four exact stock-Git rows for `-X10`, `--dirstat=files`,
+`--dirstat=files,10`, `--dirstat=cumulative`, `--dirstat-by-file=10,cumulative`,
+and standalone `--cumulative` across `diff`, `diff-files`, `diff-index`, and
+`diff-tree`. The only runtime change stayed intentionally narrow: `diff*` now
+pre-normalizes short dirstat argv spellings before clap parsing, so Git-style
+attached forms like `-X10` are accepted without the parser accidentally
+consuming the following revision operand as an option value.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_diff_compat diff_dirstat_family_matches_stock_git_for_porcelain_and_plumbing -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2523 / 3212`
+- represented documented command-option pairs: `2537 / 3212`
+- matrix rows: `6773`
+- verified rows: `5936`
+- invalid-input rows: `812`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `689`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `diff`: `92 / 117` reviewed-complete documented option pairs,
+  `94 / 117` represented documented option pairs, `268` written rows, `268`
+  classified rows, `264` stock-matching rows, `4` invalid-input rows, and `0`
+  exact-open rows
+- `diff-files`: `91 / 118` reviewed-complete documented option pairs,
+  `95 / 118` represented documented option pairs, `121` written rows, `121`
+  classified rows, `121` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+- `diff-index`: `90 / 112` reviewed-complete documented option pairs,
+  `94 / 112` represented documented option pairs, `128` written rows, `128`
+  classified rows, `128` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+- `diff-tree`: `97 / 132` reviewed-complete documented option pairs,
+  `101 / 132` represented documented option pairs, `140` written rows, `140`
+  classified rows, `140` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+This is still an expansion-only batch inside the already represented dirstat
+surface: it did not move the documented-option denominators, but it did close
+the remaining helper-free short-attached parser gap and widened exact stock-Git
+evidence for the existing `diff*` dirstat family.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `diff-tree` dirstat tail expansion across the existing tree-to-tree nested
 directory lane. This batch added four exact stock-Git rows for
 `diff-tree --dirstat`, `diff-tree --dirstat-by-file`, `diff-tree -X`, and

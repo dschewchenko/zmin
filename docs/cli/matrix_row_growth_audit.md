@@ -11,6 +11,23 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local `diff*`
+dirstat value-form expansion across the existing treeish-pair, tree-to-tree,
+and dirty-worktree nested-directory lanes. The selected change added twenty-four
+exact stock-Git rows for `-X10`, `--dirstat=files`, `--dirstat=files,10`,
+`--dirstat=cumulative`, `--dirstat-by-file=10,cumulative`, and standalone
+`--cumulative` across `diff`, `diff-files`, `diff-index`, and `diff-tree`.
+The runtime closure stayed intentionally narrow: the CLI now pre-normalizes
+short dirstat argv spellings before clap parsing, so `-X10` no longer misparses
+by consuming the following revision operand as a value. Actual delta is `+24`
+matrix rows, `+0` complete documented option pairs, `+0` represented documented
+option pairs, `+24` verified rows, `+0` invalid-input rows, and `+0` complete
+command matrices. Current census counts are `6773` matrix rows, `5936`
+verified rows, `812` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2523/3212` complete documented option
+pairs, and `2537/3212` represented documented option pairs. This remained an
+expansion-only batch inside the already represented `diff*` dirstat surface.
+
 As of 2026-06-27 the latest completed batch is a helper-free local
 `diff-tree` dirstat tail expansion across the existing tree-to-tree nested
 directory lane. The selected change added four exact stock-Git rows for

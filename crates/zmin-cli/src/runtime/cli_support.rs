@@ -107,6 +107,7 @@ pub(crate) fn parse_cli_invocation(
     let command_args = normalize_empty_init_template(command_args);
     let command_args = normalize_history_count_shorthand(command_args);
     let command_args = normalize_log_date_hyphen_value(command_args);
+    let command_args = normalize_diff_dirstat_short_value(command_args);
     validate_version_invocation_before_clap(&command_args)?;
     validate_var_invocation_before_clap(&command_args)?;
     validate_check_mailmap_invocation_before_clap(&command_args)?;
@@ -150,6 +151,40 @@ pub(crate) fn parse_cli_invocation(
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
+}
+
+fn normalize_diff_dirstat_short_value(command_args: Vec<String>) -> Vec<String> {
+    let Some(command) = command_args.first().map(String::as_str) else {
+        return command_args;
+    };
+    if !matches!(command, "diff" | "diff-files" | "diff-index" | "diff-tree") {
+        return command_args;
+    }
+    let mut normalized = Vec::with_capacity(command_args.len());
+    let mut stop_normalizing = false;
+    for arg in command_args {
+        if stop_normalizing {
+            normalized.push(arg);
+            continue;
+        }
+        if arg == "--" {
+            stop_normalizing = true;
+            normalized.push(arg);
+            continue;
+        }
+        if arg == "-X" {
+            normalized.push("--dirstat".to_owned());
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("-X")
+            && !value.is_empty()
+        {
+            normalized.push(format!("--dirstat={value}"));
+            continue;
+        }
+        normalized.push(arg);
+    }
+    normalized
 }
 
 fn maybe_exec_diff_output_redirection(
