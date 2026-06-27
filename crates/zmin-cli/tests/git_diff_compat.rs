@@ -277,6 +277,57 @@ fn diff_tree_combined_raw_for_merge_matches_stock_git() {
 }
 
 #[test]
+fn diff_tree_remaining_documented_header_and_common_diff_flags_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "first"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "second"]);
+    git(repo.path(), ["notes", "add", "-m", "note text", "HEAD"]);
+    let blob = git(repo.path(), ["rev-parse", "HEAD:a.txt"]);
+
+    for args in [
+        ["diff-tree", "--abbrev-commit", "HEAD"].as_slice(),
+        ["diff-tree", "--no-abbrev-commit", "HEAD"].as_slice(),
+        ["diff-tree", "--oneline", "HEAD"].as_slice(),
+        ["diff-tree", "--encoding=UTF-8", "HEAD"].as_slice(),
+        ["diff-tree", "--expand-tabs", "HEAD"].as_slice(),
+        ["diff-tree", "--no-expand-tabs", "HEAD"].as_slice(),
+        ["diff-tree", "--show-notes", "HEAD"].as_slice(),
+        ["diff-tree", "--show-notes-by-default", "HEAD"].as_slice(),
+        ["diff-tree", "--standard-notes", "HEAD"].as_slice(),
+        ["diff-tree", "--no-standard-notes", "HEAD"].as_slice(),
+        ["diff-tree", "--show-signature", "HEAD"].as_slice(),
+        ["diff-tree", "--no-commit-id", "HEAD"].as_slice(),
+        ["diff-tree", "-v", "HEAD"].as_slice(),
+        ["diff-tree", "--combined-all-paths", "-c", "HEAD"].as_slice(),
+        ["diff-tree", "--dd", "-c", "HEAD"].as_slice(),
+        ["diff-tree", "--diff-merges=combined", "HEAD"].as_slice(),
+        ["diff-tree", "--function-context", "HEAD"].as_slice(),
+        ["diff-tree", "-W", "HEAD"].as_slice(),
+        ["diff-tree", "--remerge-diff", "HEAD"].as_slice(),
+        ["diff-tree", "--ws-error-highlight=old,new,context", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "diff-tree parity mismatch for {args:?}",
+        );
+    }
+
+    let find_object_args = vec!["diff-tree", "--find-object", blob.trim(), "HEAD"];
+    let find_object_refs = find_object_args.iter().copied().collect::<Vec<_>>();
+    assert_eq!(
+        command_output(zmin_bin(), repo.path(), &find_object_refs),
+        command_output("git", repo.path(), &find_object_refs),
+        "diff-tree parity mismatch for --find-object",
+    );
+}
+
+#[test]
 fn diff_noop_option_surface_matches_stock_git_for_porcelain_and_plumbing() {
     let repo = git_init();
     configure_identity(repo.path());

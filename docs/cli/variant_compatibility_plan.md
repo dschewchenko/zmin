@@ -22,6 +22,63 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`diff-tree` documented-tail closure across the already modeled single-parent
+header, raw tree diff, noted commit, non-merge combined, modified-blob, and
+no-patch lanes. This batch added twenty-one exact stock-Git rows and promoted
+the same twenty-one documented option pairs into the reviewed-complete census
+set: `--abbrev-commit`, `--combined-all-paths`, `--dd`, `--diff-merges`,
+`--encoding`, `--expand-tabs`, `--find-object`, `--function-context`,
+`--no-abbrev-commit`, `--no-commit-id`, `--no-expand-tabs`,
+`--no-standard-notes`, `--oneline`, `--remerge-diff`, `--show-notes`,
+`--show-notes-by-default`, `--show-signature`, `--standard-notes`, `-v`,
+`-W`, and `--ws-error-highlight`. The runtime closure stayed intentionally
+bounded: `diff-tree` now accepts the remaining documented helper-free header,
+notes, merge-diff, and common-diff spellings through schema and dispatch;
+`--oneline` and `-v` render the stock commit header forms on the current
+single-parent lane; `--no-commit-id` suppresses the stock header while
+preserving the raw diff body; note toggles load notes state without widening
+default output semantics; and the remaining new flags stay stock-compatible as
+bounded no-op acceptance on the current unsigned, non-merge, modified-blob, or
+no-patch fixtures.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_diff_compat diff_tree_remaining_documented_header_and_common_diff_flags_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2698 / 3212`
+- represented documented command-option pairs: `2698 / 3212`
+- matrix rows: `7001`
+- verified rows: `6139`
+- invalid-input rows: `837`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `514`
+- implemented but unverified rows: `25`
+
+Per-command position on the touched surface:
+
+- `diff-tree`: `126 / 132` reviewed-complete documented option pairs,
+  `126 / 132` represented documented option pairs, `165` written rows, `165`
+  classified rows, `165` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes another large helper-free `diff-tree` documented tail
+without widening into merge-base, check-mode whitespace diagnostics, or
+broader merge-parent semantics yet. The densest remaining helper-free backlog
+now still starts with `replay`, `send-email`, `rebase`, `pack-objects`, `p4`,
+and the remaining `log` / `diff-index` / `diff*` tails; the only command
+matrices still not promoted are `archimport`, `citool`, `cvsexportcommit`,
+`cvsimport`, and `svn`.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `for-each-ref` documented-tail closure across the already modeled listing,
 format-atom, invalid-format, and date-atom lanes. This batch added fifteen
 exact stock-Git rows plus one stock-compatible invalid-input lane and promoted
@@ -69,10 +126,6 @@ Per-command position on the touched surface:
 This is an implementation-plus-review closure batch rather than a census-only
 promotion: it closes the full represented `for-each-ref` documented surface
 without widening into broader ref-walking or extra output-encoding lanes yet.
-The densest remaining helper-free backlog now still starts with `replay`,
-`send-email`, `rebase`, `pack-objects`, `p4`, and `diff-tree`; the only
-command matrices still not promoted are `archimport`, `citool`,
-`cvsexportcommit`, `cvsimport`, and `svn`.
 
 As of 2026-06-28 the previous completed batch is a helper-free local `tag`
 documented-tail closure across the already modeled annotated-create and

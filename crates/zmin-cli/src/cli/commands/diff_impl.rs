@@ -1256,6 +1256,29 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         relative_prefix: relative_prefix.clone(),
         ..render_options
     };
+    let parsed_pretty = if options.oneline && options.pretty.is_none() && options.format.is_none() {
+        Some("oneline")
+    } else if options.verbose && options.pretty.is_none() && options.format.is_none() {
+        Some("")
+    } else {
+        options.pretty.as_deref()
+    };
+    let _accepted_noops = (
+        options.encoding.as_deref(),
+        options.abbrev_commit,
+        options.no_abbrev_commit,
+        options.function_context,
+        options.expand_tabs,
+        options.no_expand_tabs,
+        options.find_object.as_deref(),
+        options.diff_merges.as_deref(),
+        options.remerge_diff,
+        options.combined_all_paths,
+        options.dd,
+        options.ws_error_highlight.as_deref(),
+        options.show_signature,
+        options.no_standard_notes,
+    );
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
@@ -1288,7 +1311,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         let id = resolve_objectish(&repo, old).map_err(|_| ambiguous_revision_error(old))?;
         let commit = commit_cache.read_commit(&id)?;
         if commit.parents.len() > 1 {
-            print_diff_tree_commit_id(&id, options.nul_terminated);
+            if !options.no_commit_id {
+                print_diff_tree_commit_id(&id, options.nul_terminated);
+            }
             let parent_indexes =
                 combined_diff_tree_parent_indexes(&commit, &commit_cache, &tree_cache)?;
             let result_index = tree_cache
@@ -1345,7 +1370,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         let id = resolve_objectish(&repo, old).map_err(|_| ambiguous_revision_error(old))?;
         let commit = commit_cache.read_commit(&id)?;
         if commit.parents.len() > 1 {
-            print_diff_tree_commit_id(&id, options.nul_terminated);
+            if !options.no_commit_id {
+                print_diff_tree_commit_id(&id, options.nul_terminated);
+            }
             let parent_indexes =
                 combined_diff_tree_parent_indexes(&commit, &commit_cache, &tree_cache)?;
             let result_index = tree_cache
@@ -1379,7 +1406,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         let id = resolve_objectish(&repo, old).map_err(|_| ambiguous_revision_error(old))?;
         let commit = commit_cache.read_commit(&id)?;
         if commit.parents.len() > 1 {
-            print_diff_tree_commit_id(&id, options.nul_terminated);
+            if !options.no_commit_id {
+                print_diff_tree_commit_id(&id, options.nul_terminated);
+            }
             let parent_indexes =
                 combined_diff_tree_parent_indexes(&commit, &commit_cache, &tree_cache)?;
             let result_index = tree_cache
@@ -1405,7 +1434,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         let id = resolve_objectish(&repo, old).map_err(|_| ambiguous_revision_error(old))?;
         let commit = commit_cache.read_commit(&id)?;
         if commit.parents.len() > 1 {
-            print_diff_tree_commit_id(&id, options.nul_terminated);
+            if !options.no_commit_id {
+                print_diff_tree_commit_id(&id, options.nul_terminated);
+            }
             if options.no_patch {
                 return Ok(());
             }
@@ -1472,7 +1503,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         let commit = commit_cache.read_commit(&id)?;
         if commit.parents.len() > 1 {
             for parent in &commit.parents {
-                print_diff_tree_commit_id(&id, options.nul_terminated);
+                if !options.no_commit_id {
+                    print_diff_tree_commit_id(&id, options.nul_terminated);
+                }
                 let mut parent_options = options.clone();
                 parent_options.merge = false;
                 parent_options.treeish = Some(parent.to_hex());
@@ -1488,11 +1521,11 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
             return Ok(());
         }
     }
-    let log_format = if options.pretty.is_some() || options.format.is_some() {
+    let log_format = if parsed_pretty.is_some() || options.format.is_some() {
         Some(history_commands::LogFormat::parse(
             false,
             options.format.as_deref(),
-            options.pretty.as_deref(),
+            parsed_pretty,
         )?)
     } else {
         None
@@ -1501,6 +1534,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         &repo,
         &store,
         options.notes
+            || options.show_notes
+            || options.show_notes_by_default
+            || options.standard_notes
             || options
                 .format
                 .as_deref()
@@ -1537,7 +1573,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
                     !options.no_patch,
                     options.patch_with_stat,
                 )?;
-            } else {
+            } else if !options.no_commit_id {
                 print_diff_tree_commit_id(&id, options.nul_terminated);
             }
         }
@@ -1578,7 +1614,7 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
                 !options.no_patch,
                 options.patch_with_stat,
             )?;
-        } else {
+        } else if !options.no_commit_id {
             print_diff_tree_commit_id(&id, options.nul_terminated);
         }
         let old_index = if let Some(parent) = commit.parents.first() {

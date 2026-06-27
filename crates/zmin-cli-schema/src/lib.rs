@@ -2875,6 +2875,10 @@ pub enum Command {
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
         no_abbrev: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "full-index", action = ArgAction::SetTrue)]
         full_index: bool,
         #[arg(long = "no-full-index", action = ArgAction::SetTrue)]
@@ -2893,6 +2897,14 @@ pub enum Command {
         no_relative: bool,
         #[arg(short = 'U', long = "unified", num_args = 0..=1, default_missing_value = "3")]
         unified: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "oneline", action = ArgAction::SetTrue)]
+        oneline: bool,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
         #[arg(long = "inter-hunk-context")]
         inter_hunk_context: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]
@@ -3097,6 +3109,10 @@ pub enum Command {
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
         no_abbrev: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "full-index", action = ArgAction::SetTrue)]
         full_index: bool,
         #[arg(long = "no-full-index", action = ArgAction::SetTrue)]
@@ -3115,6 +3131,14 @@ pub enum Command {
         no_relative: bool,
         #[arg(short = 'U', long = "unified", num_args = 0..=1, default_missing_value = "3")]
         unified: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "oneline", action = ArgAction::SetTrue)]
+        oneline: bool,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
         #[arg(long = "inter-hunk-context")]
         inter_hunk_context: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]
@@ -3279,6 +3303,10 @@ pub enum Command {
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
         no_abbrev: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "full-index", action = ArgAction::SetTrue)]
         full_index: bool,
         #[arg(long = "no-full-index", action = ArgAction::SetTrue)]
@@ -3297,6 +3325,14 @@ pub enum Command {
         no_relative: bool,
         #[arg(short = 'U', long = "unified", num_args = 0..=1, default_missing_value = "3")]
         unified: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "oneline", action = ArgAction::SetTrue)]
+        oneline: bool,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
         #[arg(long = "inter-hunk-context")]
         inter_hunk_context: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]
@@ -3466,6 +3502,10 @@ pub enum Command {
         abbrev: Option<String>,
         #[arg(long = "no-abbrev", action = ArgAction::SetTrue)]
         no_abbrev: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "full-index", action = ArgAction::SetTrue)]
         full_index: bool,
         #[arg(long = "no-full-index", action = ArgAction::SetTrue)]
@@ -3484,6 +3524,16 @@ pub enum Command {
         no_relative: bool,
         #[arg(short = 'U', long = "unified", num_args = 0..=1, default_missing_value = "3")]
         unified: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
+        #[arg(long = "oneline", action = ArgAction::SetTrue)]
+        oneline: bool,
+        #[arg(short = 'W', long = "function-context", action = ArgAction::SetTrue)]
+        function_context: bool,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
         #[arg(long = "inter-hunk-context")]
         inter_hunk_context: Option<String>,
         #[arg(long = "minimal", action = ArgAction::SetTrue)]
@@ -3548,6 +3598,18 @@ pub enum Command {
         rename_empty: bool,
         #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
         no_rename_empty: bool,
+        #[arg(long = "find-object")]
+        find_object: Option<String>,
+        #[arg(long = "diff-merges")]
+        diff_merges: Option<String>,
+        #[arg(long = "remerge-diff", action = ArgAction::SetTrue)]
+        remerge_diff: bool,
+        #[arg(long = "combined-all-paths", action = ArgAction::SetTrue)]
+        combined_all_paths: bool,
+        #[arg(long = "dd", action = ArgAction::SetTrue)]
+        dd: bool,
+        #[arg(long = "ws-error-highlight")]
+        ws_error_highlight: Option<String>,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -3556,10 +3618,24 @@ pub enum Command {
         pretty: Option<String>,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
+        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+        show_notes: bool,
+        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+        show_notes_by_default: bool,
+        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+        standard_notes: bool,
+        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+        no_standard_notes: bool,
+        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+        show_signature: bool,
+        #[arg(long = "no-commit-id", action = ArgAction::SetTrue)]
+        no_commit_id: bool,
         #[arg(long = "always", action = ArgAction::SetTrue)]
         always: bool,
         #[arg(long = "format")]
         format: Option<String>,
+        #[arg(short = 'v', action = ArgAction::SetTrue)]
+        verbose: bool,
         old: Option<String>,
         new: Option<String>,
         #[arg(value_hint = ValueHint::AnyPath)]
@@ -6564,6 +6640,8 @@ pub struct PlumbingDiffOptions {
     pub word_diff_regex: Option<String>,
     pub abbrev: Option<String>,
     pub no_abbrev: bool,
+    pub abbrev_commit: bool,
+    pub no_abbrev_commit: bool,
     pub full_index: bool,
     pub no_full_index: bool,
     pub no_prefix: bool,
@@ -6573,6 +6651,11 @@ pub struct PlumbingDiffOptions {
     pub relative: Option<String>,
     pub no_relative: bool,
     pub unified: Option<String>,
+    pub encoding: Option<String>,
+    pub oneline: bool,
+    pub function_context: bool,
+    pub expand_tabs: bool,
+    pub no_expand_tabs: bool,
     pub inter_hunk_context: Option<String>,
     pub minimal: bool,
     pub patience: bool,
@@ -6604,12 +6687,25 @@ pub struct PlumbingDiffOptions {
     pub no_indent_heuristic: bool,
     pub rename_empty: bool,
     pub no_rename_empty: bool,
+    pub find_object: Option<String>,
+    pub diff_merges: Option<String>,
+    pub remerge_diff: bool,
+    pub combined_all_paths: bool,
+    pub dd: bool,
+    pub ws_error_highlight: Option<String>,
     pub quiet: bool,
     pub exit_code: bool,
     pub pretty: Option<String>,
     pub notes: bool,
+    pub show_notes: bool,
+    pub show_notes_by_default: bool,
+    pub standard_notes: bool,
+    pub no_standard_notes: bool,
+    pub show_signature: bool,
+    pub no_commit_id: bool,
     pub always: bool,
     pub format: Option<String>,
+    pub verbose: bool,
     pub stdin: bool,
     pub treeish: Option<String>,
     pub new_treeish: Option<String>,
