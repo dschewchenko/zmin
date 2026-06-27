@@ -2181,9 +2181,10 @@ pub enum Command {
             num_args = 0..=1,
             require_equals = true,
             default_missing_value = "",
+            action = ArgAction::Append,
             overrides_with = "no_gpg_sign"
         )]
-        gpg_sign: Option<String>,
+        gpg_sign: Vec<String>,
         #[arg(long = "no-gpg-sign", action = ArgAction::Count, overrides_with = "gpg_sign")]
         no_gpg_sign: u8,
         #[arg(long = "reset-author", action = ArgAction::SetTrue)]

@@ -79,7 +79,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             date_override: date.as_deref(),
             squash: squash.as_deref(),
             template: template.as_deref(),
-            gpg_sign: effective_commit_tree_gpg_sign(gpg_sign, no_gpg_sign > 0),
+            gpg_sign: effective_commit_gpg_sign(gpg_sign, no_gpg_sign > 0),
             no_gpg_sign: no_gpg_sign > 0,
             reset_author,
             reuse_message: reuse_message.as_deref(),
@@ -267,6 +267,44 @@ fn effective_commit_tree_gpg_sign(
             }
             _ if arg.starts_with("-S") && arg.len() > 2 => {
                 effective = Some(arg[2..].to_owned());
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    effective
+}
+
+fn effective_commit_gpg_sign(gpg_sign: Vec<String>, no_gpg_sign: bool) -> Option<String> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let Some(command_index) = args.iter().position(|arg| arg == "commit") else {
+        return if no_gpg_sign {
+            None
+        } else {
+            gpg_sign.into_iter().last()
+        };
+    };
+    let mut supplied = gpg_sign.into_iter();
+    let mut effective = if no_gpg_sign {
+        None
+    } else {
+        supplied.next_back()
+    };
+    let mut index = command_index + 1;
+    while index < args.len() {
+        let arg = args[index].to_string_lossy();
+        match arg.as_ref() {
+            "--no-gpg-sign" => effective = None,
+            "--gpg-sign" | "-S" => {
+                effective = supplied.next().or_else(|| Some(String::new()));
+            }
+            _ if arg.starts_with("--gpg-sign=") => {
+                effective = supplied
+                    .next()
+                    .or_else(|| Some(arg.trim_start_matches("--gpg-sign=").to_owned()));
+            }
+            _ if arg.starts_with("-S") && arg.len() > 2 => {
+                effective = supplied.next().or_else(|| Some(arg[2..].to_owned()));
             }
             _ => {}
         }

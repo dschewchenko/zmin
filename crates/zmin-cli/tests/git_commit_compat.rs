@@ -2,11 +2,12 @@ mod common;
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 use common::{
     clone_repo_fixture, command_any_output, command_any_output_with_stdin,
     command_failure_output_with_env, command_output_with_env, configure_identity, git, git_init,
-    git_with_env, run_zmin, run_zmin_with_env, zmin_bin,
+    git_with_env, run_zmin, run_zmin_with_env, stock_git_bin, zmin_bin,
 };
 
 const COMMIT_ENV: [(&str, &str); 6] = [
@@ -17,6 +18,28 @@ const COMMIT_ENV: [(&str, &str); 6] = [
     ("GIT_COMMITTER_EMAIL", "bench@example.test"),
     ("GIT_COMMITTER_DATE", "1700000000 +0000"),
 ];
+
+#[test]
+fn commit_gpg_sign_family_matches_stock_git_with_fixture_key() {
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root");
+    let script = workspace_root.join("tools/git-commit-gpg-oracle-smoke.sh");
+    let output = Command::new("bash")
+        .arg(&script)
+        .env("ZMIN_BIN", zmin_bin())
+        .env("GIT_BIN", stock_git_bin())
+        .current_dir(workspace_root)
+        .output()
+        .expect("run commit gpg oracle smoke");
+    assert!(
+        output.status.success(),
+        "commit gpg oracle smoke failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
 
 fn commit_dry_run_fixture_repos() -> (tempfile::TempDir, tempfile::TempDir) {
     let git_repo = git_init();

@@ -115,6 +115,7 @@ run_case() {
 
 run_no_gpg_sign_case() {
   local name="$1"
+  shift
   local git_work="$tmpdir/${name}.git.work"
   local zmin_work="$tmpdir/${name}.zmin.work"
   local git_out="$tmpdir/${name}.git.out"
@@ -133,8 +134,8 @@ run_no_gpg_sign_case() {
   "$GIT_BIN" -C "$git_work" add a.txt
   "$ZMIN_BIN" -C "$zmin_work" add a.txt
 
-  "$GIT_BIN" -C "$git_work" commit --no-gpg-sign -m unsigned >"$git_out" 2>"$git_err"
-  "$ZMIN_BIN" -C "$zmin_work" commit --no-gpg-sign -m unsigned >"$zmin_out" 2>"$zmin_err"
+  "$GIT_BIN" -C "$git_work" commit "$@" >"$git_out" 2>"$git_err"
+  "$ZMIN_BIN" -C "$zmin_work" commit "$@" >"$zmin_out" 2>"$zmin_err"
 
   compare_files stdout "$git_out" "$zmin_out"
   compare_files stderr "$git_err" "$zmin_err"
@@ -151,4 +152,9 @@ run_no_gpg_sign_case() {
 ensure_gpg_fixture
 run_case commit_gpg_sign_long --gpg-sign -m signed
 run_case commit_gpg_sign_short -S -m signed-short
-run_no_gpg_sign_case commit_no_gpg_sign
+run_case commit_gpg_sign_long_repeat --gpg-sign --gpg-sign -m signed-repeat
+run_case commit_gpg_sign_short_repeat -S -S -m signed-short-repeat
+run_case commit_gpg_sign_mixed_repeat --gpg-sign -S -m signed-mixed
+run_no_gpg_sign_case commit_no_gpg_sign --no-gpg-sign -m unsigned
+run_no_gpg_sign_case commit_no_gpg_sign_repeat --no-gpg-sign --no-gpg-sign -m unsigned-repeat
+run_no_gpg_sign_case commit_gpg_then_no_gpg_sign --gpg-sign --no-gpg-sign -m unsigned-override

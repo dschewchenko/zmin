@@ -1520,47 +1520,37 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free shared `git log`/`git rev-list`
-notes-plus-quiet precedence expansion on the current local lane. Zmin now
-accepts and matches stock Git for `log --standard-notes`,
-`log --standard-notes --no-standard-notes`, `log --show-notes
---no-standard-notes`, `log --quiet --format=%H`, `rev-list --quiet
---format=%H`, and `rev-list --standard-notes --no-standard-notes`, and
-matches the current stock invalid-input behavior for `rev-list --show-notes
---no-standard-notes` on modeled single-commit local history, commit-note, and
-HEAD reflog-adjacent lanes, including the current stock literal `%N`
-custom-format lane for `log --standard-notes`, the same literal `%N` lane for
-order-sensitive `--standard-notes --no-standard-notes` on both commands, the
-stock blank note-suppressed custom-format lane for `log --show-notes
---no-standard-notes`, the stock empty-output `rev-list --quiet --format=%H`
-surface, and the stock unsupported-notes fatal even when `rev-list
---show-notes` is followed by `--no-standard-notes`.
+The latest completed slice is a proof-only `git commit` GPG-sign expansion on
+the existing fixture-key signed-commit lane. Zmin now accepts and matches
+stock Git for repeated `commit --gpg-sign`, repeated `commit -S`, mixed
+`commit --gpg-sign -S`, repeated `commit --no-gpg-sign`, and
+`commit --gpg-sign --no-gpg-sign`, while reusing the already modeled
+`commit-tree` signing runtime. The concrete parser closure here is that
+repeated `commit` GPG-sign spellings are now accepted instead of failing
+before the existing signed-commit lane runs.
 Focused gates were
-`cargo test -p zmin-cli --test git_history_query_compat log_reflog_relative_date_and_notes_aliases_match_stock_git -- --nocapture`,
-`cargo test -p zmin-cli --test git_history_query_compat rev_list_reflog_relative_date_and_notes_aliases_match_stock_git -- --nocapture`,
-`cargo check -p zmin-cli --bin zmin --profile compat`,
+`cargo test -p zmin-cli --test git_commit_compat commit_gpg_sign_family_matches_stock_git_with_fixture_key -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_commit_compat commit_documented_open_option_batch_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`python3 tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(log|rev-list|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`, and
 `git diff --check`.
-Actual delta from the prior `rev-list` reflog/date/notes closure is `+7`
-matrix rows, `+0` complete documented option pairs, `+1` represented
-documented option pair, `+6` verified rows, `+1` invalid-input row, and `+0`
-complete command matrices. Current census counts are `5917` matrix rows,
-`5147` verified rows, `733` invalid-input rows, `12` exact-open rows,
-`146/151` complete command matrices, `1867/3212` complete documented option
-pairs, and `1889/3212` represented documented option pairs. `log` now sits at
-`71/131` reviewed-complete documented option pairs with `180` written rows,
-`179` classified rows, `169` stock-matching rows, `10` invalid-input rows,
-and `0` exact-open rows, while `rev-list` now sits at `68/117`
-reviewed-complete documented option pairs with `115` written rows, `115`
-classified rows, `109` stock-matching rows, `6` invalid-input rows, and `0`
-exact-open rows. The next default follow-up should keep expanding the newly
-represented shared history-query tails with additional value and combination
-lanes, especially `log --standard-notes`, `log --reflog`, `rev-list
---reflog`, and adjacent notes/date/quiet combinations, instead of switching
-back to isolated one-row tails.
+Actual delta from the prior `commit` parser-and-expansion closure is `+5`
+matrix rows, `+0` complete documented option pairs, `+0` represented
+documented option pairs, `+5` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `6292` matrix rows,
+`5480` verified rows, `787` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2103/3212` complete documented option
+pairs, and `2157/3212` represented documented option pairs. `commit` now sits
+at `46/58` reviewed-complete documented option pairs with `120` written rows,
+`120` classified rows, `115` stock-matching rows, `5` invalid-input rows, and
+`0` exact-open rows. The next default follow-up should reselect from the
+refreshed backlog head instead of staying on `commit`, because the exact
+evidence layer is broader now but the reviewed-complete numerator did not
+move.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family
