@@ -2686,6 +2686,7 @@ pub(crate) fn plumbing_render_options(options: &PlumbingDiffOptions) -> Result<D
         output_indicator_new,
         output_indicator_old,
         output_indicator_context,
+        line_prefix: options.line_prefix.clone(),
         ignore_matching_lines,
         ignore_blank_lines: options.ignore_blank_lines,
         whitespace_mode,
@@ -2696,7 +2697,6 @@ pub(crate) fn plumbing_render_options(options: &PlumbingDiffOptions) -> Result<D
         color_mode,
         old_source: DiffSideSource::Index,
         new_source: DiffSideSource::Index,
-        line_prefix: None,
     })
 }
 

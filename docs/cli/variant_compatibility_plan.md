@@ -1520,37 +1520,44 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a proof-only `git commit` GPG-sign expansion on
-the existing fixture-key signed-commit lane. Zmin now accepts and matches
-stock Git for repeated `commit --gpg-sign`, repeated `commit -S`, mixed
-`commit --gpg-sign -S`, repeated `commit --no-gpg-sign`, and
-`commit --gpg-sign --no-gpg-sign`, while reusing the already modeled
-`commit-tree` signing runtime. The concrete parser closure here is that
-repeated `commit` GPG-sign spellings are now accepted instead of failing
-before the existing signed-commit lane runs.
+The latest completed slice is a helper-free shared `diff*` parser-and-evidence
+batch centered on `--output` and plumbing `--line-prefix`. Zmin now accepts
+and matches stock Git for `diff --output`, `diff-files --output`,
+`diff-index --output`, `diff-tree --output`, plus `diff-files --line-prefix`,
+`diff-index --line-prefix`, and `diff-tree --line-prefix` on the modeled
+two-commit and dirty-worktree patch lanes. The concrete closure here is split
+in two parts: the new `--output` surface is handled as an early self-reexec
+stdout redirect so the existing render pipeline stays unchanged, while the
+plumbing `line-prefix` surface is now threaded through the shared diff render
+options instead of stopping at the parser layer.
 Focused gates were
-`cargo test -p zmin-cli --test git_commit_compat commit_gpg_sign_family_matches_stock_git_with_fixture_key -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_commit_compat commit_documented_open_option_batch_matches_stock_git -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_diff_compat diff_output_and_plumbing_line_prefix_match_stock_git -- --exact --nocapture`,
 `cargo check -p zmin-cli`,
 `python3 tools/git-existing-oracle-inventory.py --root . > docs/cli/existing_oracle_test_inventory.tsv`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(commit|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`, and
 `git diff --check`.
-Actual delta from the prior `commit` parser-and-expansion closure is `+5`
-matrix rows, `+0` complete documented option pairs, `+0` represented
-documented option pairs, `+5` verified rows, `+0` invalid-input rows, and
-`+0` complete command matrices. Current census counts are `6292` matrix rows,
-`5480` verified rows, `787` invalid-input rows, `0` exact-open rows,
+Actual delta from the prior `commit` GPG-sign expansion closure is `+7`
+matrix rows, `+0` complete documented option pairs, `+7` represented
+documented option pairs, `+7` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `6299` matrix rows,
+`5487` verified rows, `787` invalid-input rows, `0` exact-open rows,
 `146/151` complete command matrices, `2103/3212` complete documented option
-pairs, and `2157/3212` represented documented option pairs. `commit` now sits
-at `46/58` reviewed-complete documented option pairs with `120` written rows,
-`120` classified rows, `115` stock-matching rows, `5` invalid-input rows, and
-`0` exact-open rows. The next default follow-up should reselect from the
-refreshed backlog head instead of staying on `commit`, because the exact
-evidence layer is broader now but the reviewed-complete numerator did not
-move.
+pairs, and `2164/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `diff` `84/117` reviewed-complete
+documented option pairs with `251/251` classified written rows and `247`
+stock-matching rows; `diff-files` `81/118` reviewed-complete documented
+option pairs with `100/100` classified written rows and `100` stock-matching
+rows; `diff-index` `80/112` reviewed-complete documented option pairs with
+`107/107` classified written rows and `107` stock-matching rows; and
+`diff-tree` `87/132` reviewed-complete documented option pairs with
+`119/119` classified written rows and `119` stock-matching rows. The next
+default follow-up should stay census-first and reselect from the refreshed
+backlog head rather than keep drilling on `diff*`, because this batch removed
+the dense shared parser tail but did not reduce the remaining expansion-only
+heads for these commands.
 
 The previous completed slice was a helper-free shared `git log`/`git rev-list`
 history-simplification acceptance plus ancestry-path documented-option family

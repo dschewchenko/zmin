@@ -97,6 +97,9 @@ pub(crate) fn parse_cli_invocation(
     set_global_repo_options(global_repo_options);
     set_global_pathspec_options(pathspec_options);
     let command_args = apply_command_alias(command_args)?;
+    if let Some(code) = maybe_exec_diff_output_redirection(raw_args, &command_args)? {
+        return Err(CliError::Exit(code));
+    }
     if let Some(build_options) = root_version_invocation(&command_args) {
         write_git_compatible_version(io::stdout().lock(), build_options).map_err(CliError::Io)?;
         return Err(CliError::Exit(0));
@@ -146,6 +149,84 @@ pub(crate) fn parse_cli_invocation(
     let args = Args::try_parse_from(std::iter::once(program).chain(command_args.iter().cloned()))
         .unwrap_or_else(|error| error.exit());
     Ok((args, command_args))
+}
+
+fn maybe_exec_diff_output_redirection(
+    raw_args: &[String],
+    command_args: &[String],
+) -> Result<Option<i32>> {
+    let Some(command) = command_args.first().map(String::as_str) else {
+        return Ok(None);
+    };
+    if !matches!(command, "diff" | "diff-files" | "diff-index" | "diff-tree") {
+        return Ok(None);
+    }
+    let Some(output_path) = find_diff_output_path(raw_args, command)? else {
+        return Ok(None);
+    };
+    let child_args = strip_diff_output_args(raw_args, command);
+    let output_file = fs::File::create(output_path).map_err(CliError::Io)?;
+    let status = std::process::Command::new(std::env::current_exe().map_err(CliError::Io)?)
+        .args(child_args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::from(output_file))
+        .stderr(Stdio::inherit())
+        .status()
+        .map_err(CliError::Io)?;
+    Ok(Some(status.code().unwrap_or(1)))
+}
+
+fn find_diff_output_path(raw_args: &[String], command: &str) -> Result<Option<std::path::PathBuf>> {
+    let Some(command_index) = raw_args.iter().position(|arg| arg == command) else {
+        return Ok(None);
+    };
+    let mut output_path = None;
+    let mut index = command_index + 1;
+    while index < raw_args.len() {
+        let arg = &raw_args[index];
+        if arg == "--" {
+            break;
+        }
+        if arg == "--output" {
+            let Some(path) = raw_args.get(index + 1) else {
+                return Ok(None);
+            };
+            output_path = Some(std::path::PathBuf::from(path));
+            index += 2;
+            continue;
+        }
+        if let Some(path) = arg.strip_prefix("--output=") {
+            output_path = Some(std::path::PathBuf::from(path));
+        }
+        index += 1;
+    }
+    Ok(output_path)
+}
+
+fn strip_diff_output_args(raw_args: &[String], command: &str) -> Vec<String> {
+    let Some(command_index) = raw_args.iter().position(|arg| arg == command) else {
+        return raw_args.to_vec();
+    };
+    let mut stripped = raw_args[..=command_index].to_vec();
+    let mut index = command_index + 1;
+    while index < raw_args.len() {
+        let arg = &raw_args[index];
+        if arg == "--" {
+            stripped.extend_from_slice(&raw_args[index..]);
+            break;
+        }
+        if arg == "--output" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with("--output=") {
+            index += 1;
+            continue;
+        }
+        stripped.push(arg.clone());
+        index += 1;
+    }
+    stripped
 }
 
 fn validate_add_invocation_before_clap(command_args: &[String]) -> Result<()> {

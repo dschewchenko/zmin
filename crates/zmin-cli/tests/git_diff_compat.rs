@@ -1214,6 +1214,70 @@ fn diff_patch_format_options_match_stock_git() {
 }
 
 #[test]
+fn diff_output_and_plumbing_line_prefix_match_stock_git() {
+    let repo = two_commit_repo();
+
+    fs::write(repo.path().join("a.txt"), b"worktree change\n").expect("modify tracked file");
+    fs::write(repo.path().join("b.txt"), b"staged change\n").expect("modify second tracked file");
+
+    for (git_args, zmin_args, git_output, zmin_output) in [
+        (
+            ["diff", "--output=git-diff.patch", "HEAD~1", "HEAD"].as_slice(),
+            ["diff", "--output=zmin-diff.patch", "HEAD~1", "HEAD"].as_slice(),
+            "git-diff.patch",
+            "zmin-diff.patch",
+        ),
+        (
+            ["diff-files", "--output", "git-diff-files.patch", "-p"].as_slice(),
+            ["diff-files", "--output", "zmin-diff-files.patch", "-p"].as_slice(),
+            "git-diff-files.patch",
+            "zmin-diff-files.patch",
+        ),
+        (
+            ["diff-index", "--output=git-diff-index.patch", "-p", "HEAD"].as_slice(),
+            ["diff-index", "--output=zmin-diff-index.patch", "-p", "HEAD"].as_slice(),
+            "git-diff-index.patch",
+            "zmin-diff-index.patch",
+        ),
+        (
+            ["diff-tree", "--output", "git-diff-tree.patch", "-p", "HEAD~1", "HEAD"].as_slice(),
+            [
+                "diff-tree",
+                "--output",
+                "zmin-diff-tree.patch",
+                "-p",
+                "HEAD~1",
+                "HEAD",
+            ]
+            .as_slice(),
+            "git-diff-tree.patch",
+            "zmin-diff-tree.patch",
+        ),
+    ] {
+        let zmin = command_output(zmin_bin(), repo.path(), zmin_args);
+        let git = command_output("git", repo.path(), git_args);
+        assert_eq!(zmin, git, "git args: {git_args:?}");
+        assert_eq!(
+            fs::read_to_string(repo.path().join(zmin_output)).expect("read zmin redirected output"),
+            fs::read_to_string(repo.path().join(git_output)).expect("read git redirected output"),
+            "git args: {git_args:?}"
+        );
+    }
+
+    for args in [
+        ["diff-files", "-p", "--line-prefix=LP "].as_slice(),
+        ["diff-index", "-p", "--line-prefix=LP ", "HEAD"].as_slice(),
+        ["diff-tree", "-p", "--line-prefix=LP ", "HEAD~1", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn diff_prefix_config_matches_stock_git_for_porcelain() {
     let repo = git_init();
     configure_identity(repo.path());

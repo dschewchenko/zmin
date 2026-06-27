@@ -11,24 +11,27 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-27 the latest completed batch is a proof-only `git commit`
-GPG-sign expansion on the existing fixture-key signed-commit lane. The
-selected change added five exact stock-Git rows for repeated `--gpg-sign`,
-repeated `-S`, mixed `--gpg-sign -S`, repeated `--no-gpg-sign`, and
-`--gpg-sign --no-gpg-sign`, plus the parser/dispatch closure needed for
-repeated `commit` GPG-sign spellings to reach the already modeled signing
-runtime. Actual delta is `+5` matrix rows, `+0` complete documented option
-pairs, `+0` represented documented option pairs, `+5` verified rows, `+0`
-invalid-input rows, and `+0` complete command matrices. Current census counts
-are `6292` matrix rows, `5480` verified rows, `787` invalid-input rows, `0`
-exact-open rows, `146/151` complete command matrices, `2103/3212` complete
-documented option pairs, and `2157/3212` represented documented option pairs.
-`commit` now sits at `46/58` reviewed-complete documented option pairs with
-`120/120` classified written rows, `115` stock-matching rows, `5`
-invalid-input rows, and `0` exact-open rows. The next default follow-up
-should reselect from the refreshed backlog head instead of staying on
-`commit`, because this batch broadened exact evidence inside already
-represented GPG families without moving the reviewed-complete denominator.
+As of 2026-06-27 the latest completed batch is a helper-free shared `diff*`
+parser-and-evidence closure for `--output` and plumbing `--line-prefix`. The
+selected change added seven exact stock-Git rows for `diff --output`,
+`diff-files --output`, `diff-index --output`, `diff-tree --output`,
+`diff-files --line-prefix`, `diff-index --line-prefix`, and
+`diff-tree --line-prefix`, plus the parser/runtime closure needed to route
+plumbing `line-prefix` through shared render options and to implement
+`diff* --output` as an early self-reexec stdout redirect without touching the
+render layer. Actual delta is `+7` matrix rows, `+0` complete documented
+option pairs, `+7` represented documented option pairs, `+7` verified rows,
+`+0` invalid-input rows, and `+0` complete command matrices. Current census
+counts are `6299` matrix rows, `5487` verified rows, `787` invalid-input
+rows, `0` exact-open rows, `146/151` complete command matrices,
+`2103/3212` complete documented option pairs, and `2164/3212` represented
+documented option pairs. The touched commands now sit at `84/117` reviewed
+complete option pairs for `diff`, `81/118` for `diff-files`, `80/112` for
+`diff-index`, and `87/132` for `diff-tree`, with zero exact-open rows across
+all four modeled surfaces. The next default follow-up should reselect from
+the refreshed backlog head rather than keep widening `diff*`, because this
+batch closed the main shared parser tail but left only expansion-only
+documented-option heads on these commands.
 
 As of 2026-06-26 the latest completed batch closes the final exact-open tail:
 top-level `scalar` no-subcommand plus the modeled `git svn clone` and

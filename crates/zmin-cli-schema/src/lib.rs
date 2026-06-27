@@ -2773,6 +2773,8 @@ pub enum Command {
         output_indicator_old: Option<String>,
         #[arg(long = "output-indicator-context")]
         output_indicator_context: Option<String>,
+        #[arg(long = "output", value_hint = ValueHint::FilePath)]
+        output: Option<PathBuf>,
         #[arg(long = "line-prefix")]
         line_prefix: Option<String>,
         #[arg(long = "ignore-space-at-eol", action = ArgAction::SetTrue)]
@@ -2949,6 +2951,10 @@ pub enum Command {
         output_indicator_old: Option<String>,
         #[arg(long = "output-indicator-context")]
         output_indicator_context: Option<String>,
+        #[arg(long = "output", value_hint = ValueHint::FilePath)]
+        output: Option<PathBuf>,
+        #[arg(long = "line-prefix")]
+        line_prefix: Option<String>,
         #[arg(long = "ignore-space-at-eol", action = ArgAction::SetTrue)]
         ignore_space_at_eol: bool,
         #[arg(long = "ignore-cr-at-eol", action = ArgAction::SetTrue)]
@@ -3095,6 +3101,10 @@ pub enum Command {
         output_indicator_old: Option<String>,
         #[arg(long = "output-indicator-context")]
         output_indicator_context: Option<String>,
+        #[arg(long = "output", value_hint = ValueHint::FilePath)]
+        output: Option<PathBuf>,
+        #[arg(long = "line-prefix")]
+        line_prefix: Option<String>,
         #[arg(long = "ignore-space-at-eol", action = ArgAction::SetTrue)]
         ignore_space_at_eol: bool,
         #[arg(long = "ignore-cr-at-eol", action = ArgAction::SetTrue)]
@@ -3246,6 +3256,10 @@ pub enum Command {
         output_indicator_old: Option<String>,
         #[arg(long = "output-indicator-context")]
         output_indicator_context: Option<String>,
+        #[arg(long = "output", value_hint = ValueHint::FilePath)]
+        output: Option<PathBuf>,
+        #[arg(long = "line-prefix")]
+        line_prefix: Option<String>,
         #[arg(long = "ignore-space-at-eol", action = ArgAction::SetTrue)]
         ignore_space_at_eol: bool,
         #[arg(long = "ignore-cr-at-eol", action = ArgAction::SetTrue)]
@@ -5614,6 +5628,7 @@ pub struct PlumbingDiffOptions {
     pub output_indicator_new: Option<String>,
     pub output_indicator_old: Option<String>,
     pub output_indicator_context: Option<String>,
+    pub line_prefix: Option<String>,
     pub ignore_space_at_eol: bool,
     pub ignore_cr_at_eol: bool,
     pub ignore_space_change: bool,
