@@ -12,27 +12,27 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`pull`/`merge` unrelated-history and strategy-option closure across the
-explicit local no-rebase merge lane and the shared merge default-commit lane.
-The selected change added six exact stock-Git rows for
-`pull --allow-unrelated-histories`, `pull --strategy-option`, `pull -X`,
-`merge --allow-unrelated-histories`, `merge --strategy-option`, and
-`merge -X`, plus the shared parser/runtime closure needed to thread
-unrelated-history merges and content-favoring `-X ours/theirs` conflict
-resolution through both porcelain merge dispatch and explicit local pull
-merges. Actual delta is `+6` matrix rows, `+6` complete documented option
-pairs, `+6` represented documented option pairs, `+6` verified rows, `+0`
+`pull`/`merge` commit-flag closure across the explicit local no-rebase merge
+lane and the shared merge default-commit lane. The selected change added
+twenty-one exact stock-Git rows for merge and explicit-local pull
+`edit`/`no-edit`, `signoff`/`no-signoff`, `verify`/`no-verify`,
+`quiet`, `progress`/`no-progress`, plus merge `-e` / `-q` and pull `-q`.
+It also closed the shared parser/runtime gap needed to route explicit pull
+merge-behavior flags into the merge engine, append stock signoff trailers on
+merge commits, and suppress success-path fetch or merge output on quiet lanes.
+Actual delta is `+21` matrix rows, `+21` complete documented option pairs,
+`+21` represented documented option pairs, `+21` verified rows, `+0`
 invalid-input rows, and `+0` complete command matrices. Current census counts
-are `6653` matrix rows, `5841` verified rows, `787` invalid-input rows, `0`
-exact-open rows, `146/151` complete command matrices, `2444/3212` complete
-documented option pairs, and `2444/3212` represented documented option pairs.
-The touched commands now sit at `pull 51/99` reviewed-complete documented
-option pairs with `76/78` stock-matching rows and `merge 20/51`
-reviewed-complete documented option pairs with `28/36` stock-matching rows.
+are `6674` matrix rows, `5862` verified rows, `787` invalid-input rows, `0`
+exact-open rows, `146/151` complete command matrices, `2465/3212` complete
+documented option pairs, and `2465/3212` represented documented option pairs.
+The touched commands now sit at `pull 61/99` reviewed-complete documented
+option pairs with `86/88` stock-matching rows and `merge 31/51`
+reviewed-complete documented option pairs with `39/47` stock-matching rows.
 The next default follow-up should stay on the refreshed shared
 `pull`/`merge` backlog rather than drop into a one-row tail, because the
 merge engine lane is still active and the remaining `pull`/`merge` queue is
-broader documented-option expansion work.
+still meaningful documented-option expansion work.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` stat-family closure across the explicit local no-rebase merge

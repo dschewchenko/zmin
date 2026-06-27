@@ -9,6 +9,8 @@ pub(crate) struct MergeOptions {
     pub(crate) no_commit: bool,
     pub(crate) log_limit: Option<usize>,
     pub(crate) squash: bool,
+    pub(crate) signoff: bool,
+    pub(crate) quiet: bool,
     pub(crate) allow_unrelated_histories: bool,
     pub(crate) strategies: Vec<String>,
     pub(crate) strategy_options: Vec<String>,
@@ -27,6 +29,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         no_commit,
         log_limit,
         squash,
+        signoff,
+        quiet,
         allow_unrelated_histories,
         strategies,
         strategy_options,
@@ -86,6 +90,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             show_diffstat,
             log_limit,
             mode,
+            signoff,
+            quiet,
             commit_source.as_deref(),
         );
     }
@@ -102,6 +108,8 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         show_diffstat,
         log_limit,
         mode,
+        signoff,
+        quiet,
         commit_source.as_deref(),
     )
 }
@@ -253,10 +261,12 @@ fn merge_with_strategy(
     show_diffstat: bool,
     log_limit: Option<usize>,
     mode: MergeCommitMode,
+    signoff: bool,
+    quiet: bool,
     commit_source: Option<&str>,
 ) -> Result<()> {
     if strategies.len() == 1 && strategies[0] == "ours" {
-        return merge_ours_strategy(repo, store, commit_cache, target, target_label);
+        return merge_ours_strategy(repo, store, commit_cache, target, target_label, signoff, quiet);
     }
     if strategies.len() == 1 && matches!(strategies[0].as_str(), "ort" | "recursive") {
         return merge_commit(
@@ -272,6 +282,8 @@ fn merge_with_strategy(
             show_diffstat,
             log_limit,
             mode,
+            signoff,
+            quiet,
             commit_source,
         );
     }
@@ -290,6 +302,8 @@ fn merge_ours_strategy(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     target: &str,
     target_label: Option<&str>,
+    signoff: bool,
+    quiet: bool,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
@@ -297,7 +311,9 @@ fn merge_ours_strategy(
     if head_id == target_id
         || is_ancestor_commit_with_repo_cached(repo, commit_cache, &target_id, &head_id)?
     {
-        println!("Already up to date.");
+        if !quiet {
+            println!("Already up to date.");
+        }
         return Ok(());
     }
     let head_commit = commit_cache.read_commit(&head_id)?;
@@ -307,14 +323,20 @@ fn merge_ours_strategy(
         "Merge branch '{}'\n",
         merge_display_name_or_label(repo, target, target_label)
     );
-    let commit = CommitBuilder::new(head_commit.tree.clone(), author, committer)
+    let mut message = message.into_bytes();
+    if signoff {
+        super::commit_commands::append_commit_signoff(&mut message, &committer)?;
+    }
+    let commit = CommitBuilder::new(head_commit.tree.clone(), author, committer.clone())
         .parent(head_id)
         .parent(target_id)
-        .message(message.into_bytes())?
+        .message(message)?
         .encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
-    println!("Merge made by the 'ours' strategy.");
+    if !quiet {
+        println!("Merge made by the 'ours' strategy.");
+    }
     Ok(())
 }
 
@@ -337,6 +359,8 @@ fn merge_commit(
     show_diffstat: bool,
     log_limit: Option<usize>,
     mode: MergeCommitMode,
+    signoff: bool,
+    quiet: bool,
     commit_source: Option<&str>,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -345,7 +369,9 @@ fn merge_commit(
     if head_id == target_id
         || is_ancestor_commit_with_repo_cached(repo, commit_cache, &target_id, &head_id)?
     {
-        println!("Already up to date.");
+        if !quiet {
+            println!("Already up to date.");
+        }
         return Ok(());
     }
     if allow_fast_forward
@@ -385,7 +411,9 @@ fn merge_commit(
                 resolve_strategy_option_conflicts(store, &index, &files, strategy_options)?
             {
                 for path in &resolved.auto_merged_paths {
-                    println!("Auto-merging {}", String::from_utf8_lossy(path));
+                    if !quiet {
+                        println!("Auto-merging {}", String::from_utf8_lossy(path));
+                    }
                 }
                 resolved.index
             } else {
@@ -395,29 +423,37 @@ fn merge_commit(
                 write_worktree_file(repo, &file.path, &file.content)?;
                 match &file.kind {
                     MergeConflictKind::Binary => {
-                        println!(
-                            "warning: Cannot merge binary files: {} (HEAD vs. {})",
-                            String::from_utf8_lossy(&file.path),
-                            merge_display_name(repo, target)
-                        );
-                        println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                        if !quiet {
+                            println!(
+                                "warning: Cannot merge binary files: {} (HEAD vs. {})",
+                                String::from_utf8_lossy(&file.path),
+                                merge_display_name(repo, target)
+                            );
+                            println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                        }
                         eprintln!(
                             "CONFLICT (content): Merge conflict in {}",
                             String::from_utf8_lossy(&file.path)
                         );
                     }
                     MergeConflictKind::Content => {
-                        println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                        if !quiet {
+                            println!("Auto-merging {}", String::from_utf8_lossy(&file.path));
+                        }
                         eprintln!(
                             "CONFLICT (content): Merge conflict in {}",
                             String::from_utf8_lossy(&file.path)
                         );
                     }
                     MergeConflictKind::ModifyDelete { message } => {
-                        println!("{message}");
+                        if !quiet {
+                            println!("{message}");
+                        }
                     }
                     MergeConflictKind::RenameDelete { message } => {
-                        println!("{message}");
+                        if !quiet {
+                            println!("{message}");
+                        }
                     }
                 }
             }
@@ -464,15 +500,21 @@ fn merge_commit(
         commit_source,
         log_limit,
     )?;
+    let mut message = message.into_bytes();
+    if signoff {
+        super::commit_commands::append_commit_signoff(&mut message, &committer)?;
+    }
     let commit = CommitBuilder::new(tree, author, committer)
         .parent(head_id.clone())
         .parent(target_id.clone())
-        .message(message.into_bytes())?
+        .message(message)?
         .encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
-    println!("Merge made by the '{strategy_label}' strategy.");
-    if show_diffstat {
+    if !quiet {
+        println!("Merge made by the '{strategy_label}' strategy.");
+    }
+    if show_diffstat && !quiet {
         print_merge_commit_stat(repo, store, &ours, &merged)?;
     }
     Ok(())

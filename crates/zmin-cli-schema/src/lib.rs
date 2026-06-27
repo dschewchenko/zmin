@@ -996,7 +996,7 @@ pub enum Command {
         empty: Option<String>,
         #[arg(short = 's', long = "signoff", action = ArgAction::Count)]
         signoff: u8,
-        #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
+        #[arg(long = "edit", action = ArgAction::Count)]
         edit: u8,
         #[arg(long = "cleanup")]
         cleanup: Option<String>,
@@ -1835,6 +1835,24 @@ pub enum Command {
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
         no_squash: bool,
+        #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
+        edit: u8,
+        #[arg(long = "no-edit", action = ArgAction::Count)]
+        no_edit: u8,
+        #[arg(long = "signoff", action = ArgAction::Count)]
+        signoff: u8,
+        #[arg(long = "no-signoff", action = ArgAction::Count)]
+        no_signoff: u8,
+        #[arg(long = "verify", action = ArgAction::Count)]
+        verify: u8,
+        #[arg(long = "no-verify", action = ArgAction::Count)]
+        no_verify: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "progress", action = ArgAction::Count)]
+        progress: u8,
+        #[arg(long = "no-progress", action = ArgAction::Count)]
+        no_progress: u8,
         #[arg(long = "allow-unrelated-histories", action = ArgAction::SetTrue)]
         allow_unrelated_histories: bool,
         #[arg(short = 's', long = "strategy")]
@@ -4900,6 +4918,24 @@ pub enum Command {
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
         no_squash: bool,
+        #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
+        edit: u8,
+        #[arg(long = "no-edit", action = ArgAction::Count)]
+        no_edit: u8,
+        #[arg(long = "signoff", action = ArgAction::Count)]
+        signoff: u8,
+        #[arg(long = "no-signoff", action = ArgAction::Count)]
+        no_signoff: u8,
+        #[arg(long = "verify", action = ArgAction::Count)]
+        verify: u8,
+        #[arg(long = "no-verify", action = ArgAction::Count)]
+        no_verify: u8,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "progress", action = ArgAction::Count)]
+        progress: u8,
+        #[arg(long = "no-progress", action = ArgAction::Count)]
+        no_progress: u8,
         #[arg(long = "allow-unrelated-histories", action = ArgAction::SetTrue)]
         allow_unrelated_histories: bool,
         #[arg(short = 's', long = "strategy")]

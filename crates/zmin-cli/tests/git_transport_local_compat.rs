@@ -1038,6 +1038,107 @@ fn pull_merge_log_family_matches_stock_git_for_explicit_local_branch() {
 }
 
 #[test]
+fn pull_merge_commit_flag_family_matches_stock_git_for_explicit_local_branch() {
+    let envs = [("GIT_EDITOR", ":"), ("VISUAL", ":"), ("EDITOR", ":")];
+    for (label, args) in [
+        (
+            "pull --edit",
+            ["pull", "--edit", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --no-edit",
+            ["pull", "--no-edit", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --signoff",
+            ["pull", "--signoff", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --no-signoff",
+            ["pull", "--no-signoff", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --verify",
+            ["pull", "--verify", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --no-verify",
+            ["pull", "--no-verify", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --quiet",
+            ["pull", "--quiet", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --progress",
+            ["pull", "--progress", "--no-rebase", ".", "side"],
+        ),
+        (
+            "pull --no-progress",
+            ["pull", "--no-progress", "--no-rebase", ".", "side"],
+        ),
+        ("pull -q", ["pull", "-q", "--no-rebase", ".", "side"]),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let git_repo = dir.path().join("git-repo");
+        let zmin_repo = dir.path().join("zmin-repo");
+        for repo in [&git_repo, &zmin_repo] {
+            git(
+                dir.path(),
+                ["init", "-b", "main", repo.to_str().expect("repo path")],
+            );
+            configure_identity(repo);
+            fs::write(repo.join("base.txt"), b"base\n").expect("write base");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "base"]);
+            git(repo, ["switch", "-c", "side"]);
+            fs::write(repo.join("side.txt"), b"side\n").expect("write side");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "side"]);
+            git(repo, ["switch", "main"]);
+            fs::write(repo.join("main.txt"), b"main\n").expect("write main");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", &git_repo, &args, &envs, label);
+        let zmin_output = command_output_with_env(zmin_bin(), &zmin_repo, &args, &envs, label);
+        assert_eq!(zmin_output.0, git_output.0, "{label} exit code");
+        assert_eq!(zmin_output.1, git_output.1, "{label} stdout");
+        assert_eq!(zmin_output.2, git_output.2, "{label} stderr");
+        assert_eq!(
+            git(&zmin_repo, ["rev-parse", "HEAD^{tree}"]),
+            git(&git_repo, ["rev-parse", "HEAD^{tree}"]),
+            "{label} tree"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            git(&git_repo, ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            "{label} parent shape"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["log", "-1", "--pretty=%B"]),
+            git(&git_repo, ["log", "-1", "--pretty=%B"]),
+            "{label} merge message"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["status", "--porcelain=v1", "--branch"]),
+            git(&git_repo, ["status", "--porcelain=v1", "--branch"]),
+            "{label} status"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_repo.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "{label} FETCH_HEAD"
+        );
+    }
+}
+
+#[test]
 fn pull_merge_allow_unrelated_histories_matches_stock_git_for_explicit_local_branch() {
     let dir = TempDir::new().expect("temp dir");
     let remote = dir.path().join("two");

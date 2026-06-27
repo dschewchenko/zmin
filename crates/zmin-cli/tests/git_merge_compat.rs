@@ -5,9 +5,9 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    command_any_output, configure_identity, git, git_args, git_failure_output, git_init,
-    git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
-    run_zmin_with_env, zmin_bin, write_file,
+    command_any_output, command_output_with_env, configure_identity, git, git_args,
+    git_failure_output, git_init, git_status, git_with_env, run_zmin, run_zmin_args,
+    run_zmin_failure_output, run_zmin_status, run_zmin_with_env, write_file, zmin_bin,
 };
 
 fn two_commit_repo() -> TempDir {
@@ -543,6 +543,69 @@ fn merge_log_family_matches_stock_git_output_state_and_message() {
         assert_eq!(
             git(zmin_repo.path(), ["log", "-1", "--pretty=%B"]),
             git(git_repo.path(), ["log", "-1", "--pretty=%B"])
+        );
+    }
+}
+
+#[test]
+fn merge_commit_flag_family_matches_stock_git_output_state_and_message() {
+    let envs = [("GIT_EDITOR", ":"), ("VISUAL", ":"), ("EDITOR", ":")];
+    for args in [
+        ["merge", "--edit", "feature"].as_slice(),
+        ["merge", "--no-edit", "feature"].as_slice(),
+        ["merge", "--signoff", "feature"].as_slice(),
+        ["merge", "--no-signoff", "feature"].as_slice(),
+        ["merge", "--verify", "feature"].as_slice(),
+        ["merge", "--no-verify", "feature"].as_slice(),
+        ["merge", "--quiet", "feature"].as_slice(),
+        ["merge", "--progress", "feature"].as_slice(),
+        ["merge", "--no-progress", "feature"].as_slice(),
+        ["merge", "-e", "feature"].as_slice(),
+        ["merge", "-q", "feature"].as_slice(),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            git(repo, ["switch", "-c", "feature"]);
+            write_file(repo, "feature.txt", "feature\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "feature"]);
+            git(repo, ["switch", &default_branch]);
+            write_file(repo, "main.txt", "main\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        let git_output =
+            command_output_with_env("git", git_repo.path(), args, &envs, "merge flag git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &envs, "merge flag zmin");
+        assert_eq!(zmin_output, git_output, "{args:?} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{args:?} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            "{args:?} parent shape"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--pretty=%B"]),
+            git(git_repo.path(), ["log", "-1", "--pretty=%B"]),
+            "{args:?} message"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "{args:?} status"
         );
     }
 }

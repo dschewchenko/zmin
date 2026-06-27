@@ -11320,6 +11320,15 @@ pub(crate) fn run_pull(
     no_log: bool,
     squash: bool,
     no_squash: bool,
+    edit: u8,
+    no_edit: u8,
+    signoff: u8,
+    no_signoff: u8,
+    verify: u8,
+    no_verify: u8,
+    quiet: bool,
+    progress: u8,
+    no_progress: u8,
     allow_unrelated_histories: bool,
     no_all: bool,
     prune: bool,
@@ -11349,6 +11358,29 @@ pub(crate) fn run_pull(
     let (no_commit, squash) =
         resolve_pull_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
     let log_limit = super::merge::resolve_merge_log_mode(raw_args, log.as_deref(), no_log)?;
+    let _ = super::merge::resolve_merge_edit_mode(raw_args, edit, no_edit);
+    let signoff = super::merge::resolve_merge_count_mode(
+        raw_args,
+        "--signoff",
+        "--no-signoff",
+        signoff,
+        no_signoff,
+    );
+    let _ = super::merge::resolve_merge_count_mode(
+        raw_args,
+        "--verify",
+        "--no-verify",
+        verify,
+        no_verify,
+    );
+    let quiet = quiet || super::merge::resolve_merge_short_flag(raw_args, "-q");
+    let _ = super::merge::resolve_merge_count_mode(
+        raw_args,
+        "--progress",
+        "--no-progress",
+        progress,
+        no_progress,
+    );
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     let show_forced_updates_mode = fetch_show_forced_updates_mode(raw_args);
     validate_pull_jobs(raw_args)?;
@@ -11512,7 +11544,7 @@ fatal: the remote end hung up unexpectedly\n"
                 shallow_since,
                 &shallow_exclude,
                 1,
-                false,
+                quiet,
                 false,
                 false,
                 prune,
@@ -11549,7 +11581,7 @@ fatal: the remote end hung up unexpectedly\n"
                 shallow_since,
                 &shallow_exclude,
                 1,
-                false,
+                quiet,
                 false,
                 false,
                 prune,
@@ -11593,6 +11625,15 @@ fatal: the remote end hung up unexpectedly\n"
             || no_log
             || squash
             || no_squash
+            || edit > 0
+            || no_edit > 0
+            || signoff
+            || no_signoff > 0
+            || verify > 0
+            || no_verify > 0
+            || quiet
+            || progress > 0
+            || no_progress > 0
             || no_ff
             || allow_unrelated_histories
             || !strategies.is_empty()
@@ -11607,6 +11648,8 @@ fatal: the remote end hung up unexpectedly\n"
             no_commit,
             log_limit,
             squash,
+            signoff,
+            quiet,
             allow_unrelated_histories,
             strategies,
             strategy_options,

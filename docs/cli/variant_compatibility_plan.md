@@ -22,24 +22,26 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`pull`/`merge` unrelated-history and strategy-option closure across the
-explicit local no-rebase merge lane and the shared merge default-commit lane.
-This batch added six exact stock-Git rows for
-`pull --allow-unrelated-histories`, `pull --strategy-option`, `pull -X`,
-`merge --allow-unrelated-histories`, `merge --strategy-option`, and
-`merge -X`, plus the shared parser/runtime closure needed to thread
-`allow-unrelated-histories` and `strategy-option`/`-X` through both porcelain
-merge dispatch and the local pull merge path. The runtime fixes were real:
-unrelated histories now use the stock empty-base merge lane instead of
-aborting, explicit local pull merges now preserve the stock source-path merge
-subject for unrelated histories, and add/add text conflicts now resolve like
-stock on the modeled `-X ours/theirs` lane.
+`pull`/`merge` commit-flag closure across the explicit local no-rebase merge
+lane and the shared merge default-commit lane. This batch added twenty-one
+exact stock-Git rows for `merge --edit`, `merge --no-edit`,
+`merge --signoff`, `merge --no-signoff`, `merge --verify`,
+`merge --no-verify`, `merge --quiet`, `merge --progress`,
+`merge --no-progress`, `merge -e`, `merge -q`, `pull --edit`,
+`pull --no-edit`, `pull --signoff`, `pull --no-signoff`, `pull --verify`,
+`pull --no-verify`, `pull --quiet`, `pull --progress`,
+`pull --no-progress`, and `pull -q`, plus the shared parser/runtime closure
+needed to thread these merge-commit behavior flags through porcelain merge
+dispatch and explicit local pull merges. The real runtime fixes were cohesive:
+merge commits and explicit local pull merges now append stock
+`Signed-off-by:` trailers when requested, success-path output is suppressed on
+the modeled `--quiet` / `-q` lanes, pull now routes explicit merge-behavior
+flags into the merge engine instead of the fast-forward helper path, and the
+explicit local fetch step now honors stock quiet suppression before the merge.
 
 Focused verification was
-`cargo test -p zmin-cli --test git_merge_compat merge_allow_unrelated_histories_matches_stock_git_output_state_and_message -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_merge_compat merge_strategy_option_ours_and_theirs_match_stock_git_output_state_and_message -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_allow_unrelated_histories_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_strategy_option_ours_and_theirs_match_stock_git_for_explicit_local_branch -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_merge_compat merge_commit_flag_family_matches_stock_git_output_state_and_message -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_commit_flag_family_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
 `cargo check -p zmin-cli -p zmin-cli-schema`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -50,33 +52,32 @@ and `git diff --check`.
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2444 / 3212`
-- represented documented command-option pairs: `2444 / 3212`
-- matrix rows: `6653`
-- verified rows: `5841`
+- complete documented command-option pairs: `2465 / 3212`
+- represented documented command-option pairs: `2465 / 3212`
+- matrix rows: `6674`
+- verified rows: `5862`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
-- remaining to fix or verify rows: `768`
+- remaining to fix or verify rows: `747`
 
 Per-command position on the touched surface:
 
-- `pull`: `51 / 99` reviewed-complete documented option pairs,
-  `51 / 99` represented documented option pairs, `78` written rows, `78`
-  classified rows, `76` stock-matching rows, `2` invalid-input rows, and `0`
+- `pull`: `61 / 99` reviewed-complete documented option pairs,
+  `61 / 99` represented documented option pairs, `88` written rows, `88`
+  classified rows, `86` stock-matching rows, `2` invalid-input rows, and `0`
   exact-open rows
-- `merge`: `20 / 51` reviewed-complete documented option pairs,
-  `20 / 51` represented documented option pairs, `36` written rows, `36`
-  classified rows, `28` stock-matching rows, `8` invalid-input rows, and `0`
+- `merge`: `31 / 51` reviewed-complete documented option pairs,
+  `31 / 51` represented documented option pairs, `47` written rows, `47`
+  classified rows, `39` stock-matching rows, `8` invalid-input rows, and `0`
   exact-open rows
 
 The next best high-throughput follow-up should still stay on the shared
 `pull`/`merge` runtime cluster rather than dropping back to unrelated
-single-option work, because the current batch extended the same merge engine
-path and left a broad documented-option expansion tail behind it. The largest
+one-row work, because the current batch extended the same merge engine path
+and left a still-meaningful documented-option tail behind it. The largest
 remaining documented queues are now `replay` (`117`), `send-email` (`62`),
-`rebase` (`54`), `pull` (`48`), `log` (`47`), `rev-list` (`36`),
-`diff-tree` (`35`), `merge` (`31`), `pack-objects` (`30`), and
-`p4` (`28`).
+`rebase` (`54`), `log` (`47`), `pull` (`38`), `rev-list` (`36`),
+`diff-tree` (`35`), `pack-objects` (`30`), `p4` (`28`), and `merge` (`20`).
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `diff` family reviewed-complete promotion batch across the already represented

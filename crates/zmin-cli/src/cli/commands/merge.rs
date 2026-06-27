@@ -20,6 +20,15 @@ pub(crate) fn dispatch(
             no_log,
             squash,
             no_squash,
+            edit,
+            no_edit,
+            signoff,
+            no_signoff,
+            verify,
+            no_verify,
+            quiet,
+            progress,
+            no_progress,
             allow_unrelated_histories,
             strategies,
             strategy_options,
@@ -30,6 +39,11 @@ pub(crate) fn dispatch(
             let show_diffstat =
                 resolve_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
             let log_limit = resolve_merge_log_mode(raw_args, log.as_deref(), no_log)?;
+            let _ = resolve_merge_edit_mode(raw_args, edit, no_edit);
+            let signoff = resolve_merge_count_mode(raw_args, "--signoff", "--no-signoff", signoff, no_signoff);
+            let _ = resolve_merge_count_mode(raw_args, "--verify", "--no-verify", verify, no_verify);
+            let quiet = quiet || resolve_merge_short_flag(raw_args, "-q");
+            let _ = resolve_merge_count_mode(raw_args, "--progress", "--no-progress", progress, no_progress);
             super::merge_commands::merge(super::merge_commands::MergeOptions {
                 abort,
                 continue_,
@@ -39,6 +53,8 @@ pub(crate) fn dispatch(
                 no_commit,
                 log_limit,
                 squash,
+                signoff,
+                quiet,
                 allow_unrelated_histories,
                 strategies,
                 strategy_options,
@@ -212,6 +228,50 @@ fn resolve_merge_commit_mode(
         }
     }
     (effective_no_commit, effective_squash)
+}
+
+pub(crate) fn resolve_merge_edit_mode(raw_args: &[String], edit: u8, no_edit: u8) -> bool {
+    let mut enabled = edit > 0 && no_edit == 0;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "-e" | "--edit" => enabled = true,
+            "--no-edit" => enabled = false,
+            _ => {}
+        }
+    }
+    enabled
+}
+
+pub(crate) fn resolve_merge_count_mode(
+    raw_args: &[String],
+    positive: &str,
+    negative: &str,
+    positive_count: u8,
+    negative_count: u8,
+) -> bool {
+    let mut enabled = positive_count > 0 && negative_count == 0;
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if arg == positive {
+            enabled = true;
+        } else if arg == negative {
+            enabled = false;
+        }
+    }
+    enabled
+}
+
+pub(crate) fn resolve_merge_short_flag(raw_args: &[String], flag: &str) -> bool {
+    raw_args
+        .iter()
+        .skip(1)
+        .take_while(|arg| arg.as_str() != "--")
+        .any(|arg| arg == flag)
 }
 
 pub(crate) fn resolve_merge_log_mode(
