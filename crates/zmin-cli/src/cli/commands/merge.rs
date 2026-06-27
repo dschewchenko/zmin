@@ -16,6 +16,8 @@ pub(crate) fn dispatch(
             no_summary,
             commit,
             no_commit,
+            log,
+            no_log,
             squash,
             no_squash,
             strategies,
@@ -25,6 +27,7 @@ pub(crate) fn dispatch(
                 resolve_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
             let show_diffstat =
                 resolve_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
+            let log_limit = resolve_merge_log_mode(raw_args, log.as_deref(), no_log)?;
             super::merge_commands::merge(super::merge_commands::MergeOptions {
                 abort,
                 continue_,
@@ -32,6 +35,7 @@ pub(crate) fn dispatch(
                 no_ff,
                 show_diffstat,
                 no_commit,
+                log_limit,
                 squash,
                 strategies,
                 commits,
@@ -203,4 +207,53 @@ fn resolve_merge_commit_mode(
         }
     }
     (effective_no_commit, effective_squash)
+}
+
+pub(crate) fn resolve_merge_log_mode(
+    raw_args: &[String],
+    log: Option<&str>,
+    no_log: bool,
+) -> std::result::Result<Option<usize>, runtime::CliError> {
+    const DEFAULT_MERGE_LOG_LIMIT: usize = 20;
+
+    let mut log_limit = if no_log {
+        None
+    } else {
+        parse_merge_log_limit(log, DEFAULT_MERGE_LOG_LIMIT)?
+    };
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--log" => log_limit = Some(DEFAULT_MERGE_LOG_LIMIT),
+            "--no-log" => log_limit = None,
+            _ => {
+                if let Some(value) = arg.strip_prefix("--log=") {
+                    log_limit = parse_merge_log_limit(Some(value), DEFAULT_MERGE_LOG_LIMIT)?;
+                }
+            }
+        }
+    }
+    Ok(log_limit)
+}
+
+fn parse_merge_log_limit(
+    value: Option<&str>,
+    default_limit: usize,
+) -> std::result::Result<Option<usize>, runtime::CliError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Ok(Some(default_limit));
+    }
+    let parsed = value.parse::<usize>().map_err(|_| runtime::CliError::Fatal {
+        code: 129,
+        message: format!("option `--log` expects a non-negative integer, got `{value}`"),
+    })?;
+    if parsed == 0 {
+        return Ok(None);
+    }
+    Ok(Some(parsed))
 }

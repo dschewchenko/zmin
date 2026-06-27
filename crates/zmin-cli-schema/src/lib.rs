@@ -1822,6 +1822,15 @@ pub enum Command {
         commit: bool,
         #[arg(long = "no-commit", action = ArgAction::SetTrue)]
         no_commit: bool,
+        #[arg(
+            long = "log",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        log: Option<String>,
+        #[arg(long = "no-log", action = ArgAction::SetTrue)]
+        no_log: bool,
         #[arg(long = "squash", action = ArgAction::SetTrue)]
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
@@ -4874,6 +4883,15 @@ pub enum Command {
         commit: bool,
         #[arg(long = "no-commit", action = ArgAction::SetTrue)]
         no_commit: bool,
+        #[arg(
+            long = "log",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = ""
+        )]
+        log: Option<String>,
+        #[arg(long = "no-log", action = ArgAction::SetTrue)]
+        no_log: bool,
         #[arg(long = "squash", action = ArgAction::SetTrue)]
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]

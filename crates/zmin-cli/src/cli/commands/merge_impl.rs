@@ -7,6 +7,7 @@ pub(crate) struct MergeOptions {
     pub(crate) no_ff: bool,
     pub(crate) show_diffstat: bool,
     pub(crate) no_commit: bool,
+    pub(crate) log_limit: Option<usize>,
     pub(crate) squash: bool,
     pub(crate) strategies: Vec<String>,
     pub(crate) commits: Vec<String>,
@@ -21,6 +22,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         no_ff,
         show_diffstat,
         no_commit,
+        log_limit,
         squash,
         strategies,
         commits,
@@ -74,6 +76,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             &strategies,
             !no_ff && !squash,
             show_diffstat,
+            log_limit,
             mode,
         );
     }
@@ -86,6 +89,7 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         "ort",
         !no_ff && !squash,
         show_diffstat,
+        log_limit,
         mode,
     )
 }
@@ -233,6 +237,7 @@ fn merge_with_strategy(
     strategies: &[String],
     allow_fast_forward: bool,
     show_diffstat: bool,
+    log_limit: Option<usize>,
     mode: MergeCommitMode,
 ) -> Result<()> {
     if strategies.len() == 1 && strategies[0] == "ours" {
@@ -248,6 +253,7 @@ fn merge_with_strategy(
             &strategies[0],
             allow_fast_forward,
             show_diffstat,
+            log_limit,
             mode,
         );
     }
@@ -309,6 +315,7 @@ fn merge_commit(
     strategy_label: &str,
     allow_fast_forward: bool,
     show_diffstat: bool,
+    log_limit: Option<usize>,
     mode: MergeCommitMode,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
@@ -413,10 +420,16 @@ fn merge_commit(
     let tree = write_tree_from_index(store, &merged)?;
     let author = signature_from_identity(repo, "GIT_AUTHOR")?;
     let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
-    let message = format!(
-        "Merge branch '{}'\n",
-        merge_display_name_or_label(repo, target, target_label)
-    );
+    let message = build_merge_commit_message(
+        repo,
+        commit_cache,
+        &head_id,
+        &target_id,
+        &base_id,
+        target,
+        target_label,
+        log_limit,
+    )?;
     let commit = CommitBuilder::new(tree, author, committer)
         .parent(head_id.clone())
         .parent(target_id.clone())
@@ -439,6 +452,64 @@ fn merge_display_name_or_label(repo: &GitRepo, target: &str, target_label: Optio
     target_label
         .map(str::to_owned)
         .unwrap_or_else(|| merge_display_name(repo, target))
+}
+
+fn build_merge_commit_message(
+    repo: &GitRepo,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    head_id: &ObjectId,
+    target_id: &ObjectId,
+    base_id: &ObjectId,
+    target: &str,
+    target_label: Option<&str>,
+    log_limit: Option<usize>,
+) -> Result<String> {
+    let label = merge_display_name_or_label(repo, target, target_label);
+    let mut message = format!("Merge branch '{}'\n", label);
+    let Some(log_limit) = log_limit else {
+        return Ok(message);
+    };
+    let subjects = collect_merge_log_subjects(commit_cache, target_id, base_id, head_id)?;
+    if subjects.is_empty() {
+        return Ok(message);
+    }
+    message.push('\n');
+    if subjects.len() > log_limit {
+        message.push_str(&format!("* {}: ({} commits)\n", label, subjects.len()));
+        for subject in subjects.iter().take(log_limit) {
+            message.push_str("  ");
+            message.push_str(subject);
+            message.push('\n');
+        }
+        message.push_str("  ...\n");
+        return Ok(message);
+    }
+    message.push_str(&format!("* {}:\n", label));
+    for subject in subjects {
+        message.push_str("  ");
+        message.push_str(&subject);
+        message.push('\n');
+    }
+    Ok(message)
+}
+
+fn collect_merge_log_subjects(
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    target_id: &ObjectId,
+    base_id: &ObjectId,
+    head_id: &ObjectId,
+) -> Result<Vec<String>> {
+    let mut subjects = Vec::new();
+    let mut current = target_id.clone();
+    while current != *base_id && current != *head_id {
+        let commit = commit_cache.read_commit(&current)?;
+        subjects.push(commit_subject(&commit.message));
+        let Some(parent) = commit.parents.first() else {
+            break;
+        };
+        current = parent.clone();
+    }
+    Ok(subjects)
 }
 
 fn write_merge_state(

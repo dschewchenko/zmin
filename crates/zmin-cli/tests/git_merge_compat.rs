@@ -499,6 +499,55 @@ fn merge_stat_toggle_family_matches_stock_git_output_and_state() {
 }
 
 #[test]
+fn merge_log_family_matches_stock_git_output_state_and_message() {
+    for args in [
+        ["merge", "--log", "feature"].as_slice(),
+        ["merge", "--log=1", "feature"].as_slice(),
+        ["merge", "--log=2", "feature"].as_slice(),
+        ["merge", "--no-log", "feature"].as_slice(),
+    ] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            git(repo, ["switch", "-c", "feature"]);
+            for (name, contents) in [
+                ("feat1", "feat1\n"),
+                ("feat2", "feat2\n"),
+                ("feat3", "feat3\n"),
+            ] {
+                write_file(repo, "feature.txt", contents);
+                git(repo, ["add", "-A"]);
+                git_with_env(repo, ["commit", "-m", name]);
+            }
+            git(repo, ["switch", &default_branch]);
+            write_file(repo, "main.txt", "main\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        assert_eq!(run_zmin_args(zmin_repo.path(), args), git_args(git_repo.path(), args));
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
+            git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"])
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--pretty=%B"]),
+            git(git_repo.path(), ["log", "-1", "--pretty=%B"])
+        );
+    }
+}
+
+#[test]
 fn merge_non_ff_clean_changes_creates_stock_compatible_merge_commit() {
     let git_repo = committed_repo();
     let zmin_repo = committed_repo();

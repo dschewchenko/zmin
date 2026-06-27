@@ -22,23 +22,20 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
-`pull`/`merge` stat-family closure across the explicit local no-rebase merge
-lane and the shared merge default-commit lane. This batch added ten exact
-stock-Git rows for `pull --stat`, `pull --no-stat`, `pull --summary`,
-`pull --no-summary`, `pull -n`, `merge --stat`, `merge --no-stat`,
-`merge --summary`, `merge --no-summary`, and `merge -n`, plus the
-parser/runtime closure needed to thread the full diffstat toggle family
-through both porcelain merge dispatch and the local pull merge path with
-stock-like last-one-wins raw-argv resolution. The key runtime fix was real:
-explicit stat-mode merge pulls now route through the merge engine instead of
-falling into the fast-forward helper path and aborting on non-fast-forward
-local pulls.
+`pull`/`merge` merge-message log-family closure across the explicit local
+no-rebase merge lane and the shared merge default-commit lane. This batch
+added eight exact stock-Git rows for `pull --log`, `pull --log=1`,
+`pull --log=2`, `pull --no-log`, `merge --log`, `merge --log=1`,
+`merge --log=2`, and `merge --no-log`, plus the shared parser/runtime
+closure needed to thread the merge-message log family through both porcelain
+merge dispatch and the local pull merge path with stock-like raw-argv
+last-one-wins resolution. The key runtime fix was real: explicit log-mode
+merge pulls now route through the merge engine instead of falling into the
+fast-forward helper path and aborting on non-fast-forward local pulls.
 
 Focused verification was
-`cargo test -p zmin-cli --test git_merge_compat merge_stat_toggle_family_matches_stock_git_output_and_state -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_stat_toggle_family_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_merge_compat merge_commit_and_no_squash_match_stock_git_merge_commit_state -- --exact --nocapture`,
-`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_commit_mode_flags_match_stock_git_for_explicit_local_branch -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_merge_compat merge_log_family_matches_stock_git_output_state_and_message -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_log_family_matches_stock_git_for_explicit_local_branch -- --exact --nocapture`,
 `cargo check -p zmin-cli -p zmin-cli-schema`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
@@ -49,33 +46,33 @@ and `git diff --check`.
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2434 / 3212`
-- represented documented command-option pairs: `2434 / 3212`
-- matrix rows: `6639`
-- verified rows: `5827`
+- complete documented command-option pairs: `2438 / 3212`
+- represented documented command-option pairs: `2438 / 3212`
+- matrix rows: `6647`
+- verified rows: `5835`
 - invalid-input rows: `787`
 - open or partial exact rows: `0`
-- remaining to fix or verify rows: `778`
+- remaining to fix or verify rows: `774`
 
 Per-command position on the touched surface:
 
-- `pull`: `46 / 99` reviewed-complete documented option pairs,
-  `46 / 99` represented documented option pairs, `71` written rows, `71`
-  classified rows, `69` stock-matching rows, `2` invalid-input rows, and `0`
+- `pull`: `48 / 99` reviewed-complete documented option pairs,
+  `48 / 99` represented documented option pairs, `75` written rows, `75`
+  classified rows, `73` stock-matching rows, `2` invalid-input rows, and `0`
   exact-open rows
-- `merge`: `15 / 51` reviewed-complete documented option pairs,
-  `15 / 51` represented documented option pairs, `29` written rows, `29`
-  classified rows, `21` stock-matching rows, `8` invalid-input rows, and `0`
+- `merge`: `17 / 51` reviewed-complete documented option pairs,
+  `17 / 51` represented documented option pairs, `33` written rows, `33`
+  classified rows, `25` stock-matching rows, `8` invalid-input rows, and `0`
   exact-open rows
 
-The next best high-throughput follow-up should reselect from the refreshed
-backlog head instead of staying on this narrower merge diffstat family,
-because the current batch closed the shared parser/runtime lane and the
-remaining queue is broader documented-option expansion work. The largest
+The next best high-throughput follow-up should still stay on the shared
+`pull`/`merge` runtime cluster rather than dropping back to unrelated
+single-option work, because the current batch extended the same merge engine
+path and left a broad documented-option expansion tail behind it. The largest
 remaining documented queues are now `replay` (`117`), `send-email` (`62`),
-`rebase` (`54`), `pull` (`53`), `log` (`47`), `merge` (`36`),
-`rev-list` (`36`), `diff-tree` (`35`), `pack-objects` (`30`), and
-`diff-files` (`27`).
+`rebase` (`54`), `pull` (`51`), `log` (`47`), `rev-list` (`36`),
+`diff-tree` (`35`), `merge` (`34`), `pack-objects` (`30`), and
+`p4` (`28`).
 
 As of 2026-06-27 the latest completed batch is a helper-free local
 `diff` family reviewed-complete promotion batch across the already represented

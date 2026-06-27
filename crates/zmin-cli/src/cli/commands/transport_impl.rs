@@ -11316,6 +11316,8 @@ pub(crate) fn run_pull(
     no_summary: bool,
     commit: bool,
     no_commit: bool,
+    log: Option<String>,
+    no_log: bool,
     squash: bool,
     no_squash: bool,
     no_all: bool,
@@ -11344,6 +11346,7 @@ pub(crate) fn run_pull(
         resolve_pull_merge_diffstat_mode(raw_args, stat, no_stat, summary, no_summary);
     let (no_commit, squash) =
         resolve_pull_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
+    let log_limit = super::merge::resolve_merge_log_mode(raw_args, log.as_deref(), no_log)?;
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     let show_forced_updates_mode = fetch_show_forced_updates_mode(raw_args);
     validate_pull_jobs(raw_args)?;
@@ -11578,6 +11581,8 @@ fatal: the remote end hung up unexpectedly\n"
             || no_summary
             || commit
             || no_commit
+            || log.is_some()
+            || no_log
             || squash
             || no_squash
             || no_ff
@@ -11590,6 +11595,7 @@ fatal: the remote end hung up unexpectedly\n"
             no_ff,
             show_diffstat,
             no_commit,
+            log_limit,
             squash,
             strategies,
             commits: vec![target],

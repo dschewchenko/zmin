@@ -12,6 +12,30 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`pull`/`merge` merge-message log-family closure across the explicit local
+no-rebase merge lane and the shared merge default-commit lane. The selected
+change added eight exact stock-Git rows for `pull --log`, `pull --log=1`,
+`pull --log=2`, `pull --no-log`, `merge --log`, `merge --log=1`,
+`merge --log=2`, and `merge --no-log`, plus the shared parser/runtime closure
+needed to thread the merge-message log family through `pull` merge dispatch
+and shared merge execution with stock-like last-one-wins raw-argv resolution.
+The pull path also now routes explicit log-family merge flags through the
+merge engine instead of aborting in the fast-forward helper path on
+non-fast-forward local pulls. Actual delta is `+8` matrix rows, `+4` complete
+documented option pairs, `+4` represented documented option pairs, `+8`
+verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
+Current census counts are `6647` matrix rows, `5835` verified rows, `787`
+invalid-input rows, `0` exact-open rows, `146/151` complete command matrices,
+`2438/3212` complete documented option pairs, and `2438/3212` represented
+documented option pairs. The touched commands now sit at `pull 48/99`
+reviewed-complete documented option pairs with `73/75` stock-matching rows
+and `merge 17/51` reviewed-complete documented option pairs with `25/33`
+stock-matching rows. The next default follow-up should stay on the refreshed
+shared `pull`/`merge` backlog rather than drop into a one-row tail, because
+the merge engine lane is still active and the remaining `pull`/`merge` queue
+is broader documented-option expansion work.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `pull`/`merge` stat-family closure across the explicit local no-rebase merge
 lane and the shared merge default-commit lane. The selected change added ten
 exact stock-Git rows for `pull --stat`, `pull --no-stat`, `pull --summary`,
