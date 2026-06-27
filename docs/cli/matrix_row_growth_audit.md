@@ -9276,3 +9276,74 @@ reviewed-complete documented option pairs with `38/38` classified rows,
 their current modeled surfaces. The next default follow-up should move to the
 remaining shared history-query topology family such as
 `full-history`/`simplify-merges`/`ancestry-path`.
+
+## 2026-06-27 - grep long-form reviewed-complete promotion batch
+
+Expected movement:
+
+- behavior rows: `+0`
+- closed rows: `+0`
+- open rows: `+0`
+- invalid-input rows: `+0`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- complete documented option pairs: `+33`
+- represented documented option pairs: `+0`
+- complete command matrices: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `-33`
+- Rust behavior changes: no
+
+Selected promoted options:
+
+- `grep --after-context`
+- `grep --all-match`
+- `grep --and`
+- `grep --basic-regexp`
+- `grep --before-context`
+- `grep --color`
+- `grep --column`
+- `grep --context`
+- `grep --exclude-standard`
+- `grep --extended-regexp`
+- `grep --function-context`
+- `grep --max-depth`
+- `grep --name-only`
+- `grep --no-color`
+- `grep --no-exclude-standard`
+- `grep --no-index`
+- `grep --no-recursive`
+- `grep --no-textconv`
+- `grep --not`
+- `grep --null`
+- `grep --only-matching`
+- `grep --open-files-in-pager`
+- `grep --or`
+- `grep --perl-regexp`
+- `grep --quiet`
+- `grep --recurse-submodules`
+- `grep --recursive`
+- `grep --show-function`
+- `grep --text`
+- `grep --textconv`
+- `grep --threads`
+- `grep --untracked`
+- `grep --word-regexp`
+
+This batch is a census/docs promotion rather than a Rust behavior change. It
+promotes the current represented helper-free long-form `grep` surface into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv` because exact stock-Git
+evidence already exists in `docs/cli/matrices/grep_v2_47.tsv`,
+`crates/zmin-cli/tests/git_grep_compat.rs`, and the existing schema-oracle
+smoke coverage for the relevant long-form parser lanes. The represented surface
+already covers context families, boolean-expression composition, output-shape
+toggles, traversal and depth/thread ordering, text and regexp mode selection,
+and the bounded binary/pager tails on the current modeled local lanes.
+
+Actual post-import movement matched the declaration: `+0` behavior rows, `+0`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+33` complete documented option pairs, `+0` represented documented
+option pairs, `+0` complete command matrices, `+0`
+implemented-but-unverified schema rows, and `-33` remaining checklist rows.

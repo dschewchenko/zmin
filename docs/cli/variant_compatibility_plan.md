@@ -22,6 +22,46 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`grep` long-form reviewed-complete promotion batch across the existing
+represented helper-free local surface. This batch did not change Rust behavior
+or add new matrix rows; it used the already closed `grep` evidence to promote
+thirty-three long-form documented options into
+`docs/cli/census/reviewed_complete_doc_option_pairs.tsv`. The promoted long
+surface now covers context families, boolean-expression composition, output-
+shape toggles, traversal and depth/thread ordering, text and regexp mode
+selection, helper-free local color and function-context rendering, and the
+bounded binary/pager tails already proven in the prior `grep` runtime slices.
+
+Focused verification was
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2330 / 3212`
+- represented documented command-option pairs: `2380 / 3212`
+- matrix rows: `6581`
+- verified rows: `5769`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `grep`: `54 / 73` reviewed-complete documented option pairs,
+  `73 / 73` represented documented option pairs, `112` written rows, `112`
+  classified rows, `112` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should still stay on `grep`, because
+the command is now down to a pure short-alias and parser-synonym tail. The
+remaining helper-free documented queue is concentrated in the short spellings
+`-A`, `-B`, `-C`, `-E`, `-G`, `-I`, `-O`, `-P`, `-W`, `-a`, `-e`, `-f`, `-h`,
+`-o`, `-p`, `-q`, `-r`, `-w`, and `-z`.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `grep` binary, submodule, and pager schema-tail closure across the modeled
 tracked text-plus-binary local lane. This batch closed the last remaining
 `grep` schema gaps on the helper-free surface by adding exact stock-Git
