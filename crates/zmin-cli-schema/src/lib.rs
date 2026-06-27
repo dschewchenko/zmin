@@ -1835,8 +1835,12 @@ pub enum Command {
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
         no_squash: bool,
+        #[arg(long = "allow-unrelated-histories", action = ArgAction::SetTrue)]
+        allow_unrelated_histories: bool,
         #[arg(short = 's', long = "strategy")]
         strategies: Vec<String>,
+        #[arg(short = 'X', long = "strategy-option")]
+        strategy_options: Vec<String>,
         #[arg(long = "rebase", num_args = 0..=1, default_missing_value = "true")]
         rebase: Option<String>,
         #[arg(long = "no-rebase", action = ArgAction::SetTrue)]
@@ -4896,8 +4900,12 @@ pub enum Command {
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
         no_squash: bool,
+        #[arg(long = "allow-unrelated-histories", action = ArgAction::SetTrue)]
+        allow_unrelated_histories: bool,
         #[arg(short = 's', long = "strategy")]
         strategies: Vec<String>,
+        #[arg(short = 'X', long = "strategy-option")]
+        strategy_options: Vec<String>,
         commits: Vec<String>,
     },
     Mergetool {

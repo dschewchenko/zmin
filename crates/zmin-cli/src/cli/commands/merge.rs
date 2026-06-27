@@ -20,7 +20,9 @@ pub(crate) fn dispatch(
             no_log,
             squash,
             no_squash,
+            allow_unrelated_histories,
             strategies,
+            strategy_options,
             commits,
         } => {
             let (no_commit, squash) =
@@ -37,9 +39,12 @@ pub(crate) fn dispatch(
                 no_commit,
                 log_limit,
                 squash,
+                allow_unrelated_histories,
                 strategies,
+                strategy_options,
                 commits,
                 commit_label: None,
+                commit_source: None,
             })
         }
         runtime::Command::Mergetool {

@@ -197,13 +197,60 @@ fn merge_content_entries(
     files: &mut Vec<MergeConflictFile>,
 ) -> Result<()> {
     let Some(base) = entry_set.base else {
-        return Err(CliError::Fatal {
-            code: 1,
-            message: format!(
-                "Automatic merge failed; non-file conflict in {}",
-                String::from_utf8_lossy(path)
-            ),
-        });
+        let (Some(ours), Some(theirs)) = (entry_set.ours, entry_set.theirs) else {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: format!(
+                    "Automatic merge failed; non-file conflict in {}",
+                    String::from_utf8_lossy(path)
+                ),
+            });
+        };
+        if ours.mode == IndexMode::Gitlink || theirs.mode == IndexMode::Gitlink {
+            return Err(CliError::Fatal {
+                code: 1,
+                message: format!(
+                    "Automatic merge failed; gitlink conflict in {}",
+                    String::from_utf8_lossy(path)
+                ),
+            });
+        }
+        let ours_content = read_index_entry_content(store, ours)?;
+        let theirs_content = read_index_entry_content(store, theirs)?;
+        if is_binary_content(&ours_content) || is_binary_content(&theirs_content) {
+            push_conflict_stage(entries, ours, 2);
+            push_conflict_stage(entries, theirs, 3);
+            files.push(MergeConflictFile {
+                path: path.to_vec(),
+                content: ours_content,
+                kind: MergeConflictKind::Binary,
+            });
+            return Ok(());
+        }
+        let labels = MergeFileLabels {
+            current: "HEAD".to_owned(),
+            ancestor: "empty".to_owned(),
+            other: target_label.to_owned(),
+        };
+        let merged = merge_file_core(&ours_content, &[], &theirs_content, &labels);
+        if merged.conflicts != 0 {
+            push_conflict_stage(entries, ours, 2);
+            push_conflict_stage(entries, theirs, 3);
+            files.push(MergeConflictFile {
+                path: path.to_vec(),
+                content: merged.content,
+                kind: MergeConflictKind::Content,
+            });
+            return Ok(());
+        }
+        let id = store.write_object(GitObjectKind::Blob, &merged.content)?;
+        entries.push(IndexEntry::new(
+            path.to_vec(),
+            id,
+            ours.mode,
+            merged.content.len().min(u32::MAX as usize) as u32,
+        )?);
+        return Ok(());
     };
     if let (Some(ours), None) = (entry_set.ours, entry_set.theirs) {
         let ours_content = read_index_entry_content(store, ours)?;

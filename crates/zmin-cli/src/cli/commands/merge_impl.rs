@@ -9,9 +9,12 @@ pub(crate) struct MergeOptions {
     pub(crate) no_commit: bool,
     pub(crate) log_limit: Option<usize>,
     pub(crate) squash: bool,
+    pub(crate) allow_unrelated_histories: bool,
     pub(crate) strategies: Vec<String>,
+    pub(crate) strategy_options: Vec<String>,
     pub(crate) commits: Vec<String>,
     pub(crate) commit_label: Option<String>,
+    pub(crate) commit_source: Option<String>,
 }
 
 pub(crate) fn merge(options: MergeOptions) -> Result<()> {
@@ -24,9 +27,12 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         no_commit,
         log_limit,
         squash,
+        allow_unrelated_histories,
         strategies,
+        strategy_options,
         commits,
         commit_label,
+        commit_source,
     } = options;
     if abort && continue_ {
         return Err(CliError::Fatal {
@@ -74,10 +80,13 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
             &commits[0],
             commit_label.as_deref(),
             &strategies,
+            &strategy_options,
+            allow_unrelated_histories,
             !no_ff && !squash,
             show_diffstat,
             log_limit,
             mode,
+            commit_source.as_deref(),
         );
     }
     merge_commit(
@@ -87,10 +96,13 @@ pub(crate) fn merge(options: MergeOptions) -> Result<()> {
         &commits[0],
         commit_label.as_deref(),
         "ort",
+        &strategy_options,
+        allow_unrelated_histories,
         !no_ff && !squash,
         show_diffstat,
         log_limit,
         mode,
+        commit_source.as_deref(),
     )
 }
 
@@ -235,10 +247,13 @@ fn merge_with_strategy(
     target: &str,
     target_label: Option<&str>,
     strategies: &[String],
+    strategy_options: &[String],
+    allow_unrelated_histories: bool,
     allow_fast_forward: bool,
     show_diffstat: bool,
     log_limit: Option<usize>,
     mode: MergeCommitMode,
+    commit_source: Option<&str>,
 ) -> Result<()> {
     if strategies.len() == 1 && strategies[0] == "ours" {
         return merge_ours_strategy(repo, store, commit_cache, target, target_label);
@@ -251,10 +266,13 @@ fn merge_with_strategy(
             target,
             target_label,
             &strategies[0],
+            strategy_options,
+            allow_unrelated_histories,
             allow_fast_forward,
             show_diffstat,
             log_limit,
             mode,
+            commit_source,
         );
     }
     Err(CliError::Stderr {
@@ -313,10 +331,13 @@ fn merge_commit(
     target: &str,
     target_label: Option<&str>,
     strategy_label: &str,
+    strategy_options: &[String],
+    allow_unrelated_histories: bool,
     allow_fast_forward: bool,
     show_diffstat: bool,
     log_limit: Option<usize>,
     mode: MergeCommitMode,
+    commit_source: Option<&str>,
 ) -> Result<()> {
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
     let head_id = refs.resolve("HEAD")?;
@@ -333,18 +354,21 @@ fn merge_commit(
         return fast_forward_to_cached(repo, store, commit_cache, target, "merge", false);
     }
 
-    let Some(base_id) = best_merge_base_with_repo_cached(repo, commit_cache, &head_id, &target_id)?
-    else {
+    let base_id = best_merge_base_with_repo_cached(repo, commit_cache, &head_id, &target_id)?;
+    let head_commit = commit_cache.read_commit(&head_id)?;
+    let target_commit = commit_cache.read_commit(&target_id)?;
+    let tree_cache = TreeObjectCache::new(store);
+    let base = if let Some(base_id) = base_id.as_ref() {
+        let base_commit = commit_cache.read_commit(base_id)?;
+        read_commit_tree_index_cached(&tree_cache, &base_commit)?
+    } else if allow_unrelated_histories {
+        GitIndex::new()
+    } else {
         return Err(CliError::Fatal {
             code: 128,
             message: "refusing to merge unrelated histories".into(),
         });
     };
-    let head_commit = commit_cache.read_commit(&head_id)?;
-    let target_commit = commit_cache.read_commit(&target_id)?;
-    let base_commit = commit_cache.read_commit(&base_id)?;
-    let tree_cache = TreeObjectCache::new(store);
-    let base = read_commit_tree_index_cached(&tree_cache, &base_commit)?;
     let ours = read_commit_tree_index_cached(&tree_cache, &head_commit)?;
     let theirs = read_commit_tree_index_cached(&tree_cache, &target_commit)?;
     let merge_result = merge_indexes(
@@ -357,6 +381,14 @@ fn merge_commit(
     let mut merged = match merge_result {
         MergeIndexResult::Clean(merged) => merged,
         MergeIndexResult::Conflicted { index, files } => {
+            if let Some(resolved) =
+                resolve_strategy_option_conflicts(store, &index, &files, strategy_options)?
+            {
+                for path in &resolved.auto_merged_paths {
+                    println!("Auto-merging {}", String::from_utf8_lossy(path));
+                }
+                resolved.index
+            } else {
             remove_tracked_paths_missing_from_target(repo, &ours, &index)?;
             checkout_merged_stage_zero(repo, store, &index)?;
             for file in files {
@@ -393,6 +425,7 @@ fn merge_commit(
             write_merge_state(repo, &target_id, &merge_display_name(repo, target), true)?;
             eprintln!("Automatic merge failed; fix conflicts and then commit the result.");
             return Err(CliError::Exit(1));
+            }
         }
     };
     remove_tracked_paths_missing_from_target(repo, &ours, &merged)?;
@@ -425,9 +458,10 @@ fn merge_commit(
         commit_cache,
         &head_id,
         &target_id,
-        &base_id,
+        base_id.as_ref(),
         target,
         target_label,
+        commit_source,
         log_limit,
     )?;
     let commit = CommitBuilder::new(tree, author, committer)
@@ -459,14 +493,18 @@ fn build_merge_commit_message(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     head_id: &ObjectId,
     target_id: &ObjectId,
-    base_id: &ObjectId,
+    base_id: Option<&ObjectId>,
     target: &str,
     target_label: Option<&str>,
+    commit_source: Option<&str>,
     log_limit: Option<usize>,
 ) -> Result<String> {
     let label = merge_display_name_or_label(repo, target, target_label);
-    let mut message = format!("Merge branch '{}'\n", label);
+    let mut message = build_merge_commit_subject(repo, target, &label, commit_source)?;
     let Some(log_limit) = log_limit else {
+        return Ok(message);
+    };
+    let Some(base_id) = base_id else {
         return Ok(message);
     };
     let subjects = collect_merge_log_subjects(commit_cache, target_id, base_id, head_id)?;
@@ -491,6 +529,77 @@ fn build_merge_commit_message(
         message.push('\n');
     }
     Ok(message)
+}
+
+fn build_merge_commit_subject(
+    repo: &GitRepo,
+    target: &str,
+    label: &str,
+    commit_source: Option<&str>,
+) -> Result<String> {
+    if let Some(source) = commit_source
+        && source != "."
+    {
+        return Ok(format!("Merge branch '{label}' of {source}\n"));
+    }
+    if symbolic_full_ref_name(repo, target)?
+        .as_deref()
+        .is_some_and(|name| name.starts_with("refs/remotes/"))
+    {
+        return Ok(format!("Merge remote-tracking branch '{label}'\n"));
+    }
+    Ok(format!("Merge branch '{label}'\n"))
+}
+
+struct ResolvedStrategyOptionConflicts {
+    index: GitIndex,
+    auto_merged_paths: Vec<Vec<u8>>,
+}
+
+fn resolve_strategy_option_conflicts(
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    files: &[MergeConflictFile],
+    strategy_options: &[String],
+) -> Result<Option<ResolvedStrategyOptionConflicts>> {
+    let prefer_stage = if merge_tree_uses_theirs_strategy_options(strategy_options) {
+        Some(3)
+    } else if merge_tree_uses_ours_strategy_options(strategy_options) {
+        Some(2)
+    } else {
+        None
+    };
+    let Some(prefer_stage) = prefer_stage else {
+        return Ok(None);
+    };
+    let mut entries = index
+        .entries()
+        .iter()
+        .filter(|entry| entry.stage == 0)
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut auto_merged_paths = Vec::new();
+    for file in files {
+        if !matches!(file.kind, MergeConflictKind::Content) {
+            return Ok(None);
+        }
+        let chosen = index.entry(&file.path, prefer_stage).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: format!(
+                "missing stage {prefer_stage} entry for {}",
+                String::from_utf8_lossy(&file.path)
+            ),
+        })?;
+        let _ = read_index_entry_content(store, chosen)?;
+        let mut merged = chosen.clone();
+        merged.stage = 0;
+        entries.push(merged);
+        auto_merged_paths.push(file.path.clone());
+    }
+    Ok(Some(ResolvedStrategyOptionConflicts {
+        index: GitIndex::from_entries(entries)?,
+        auto_merged_paths,
+    }))
 }
 
 fn collect_merge_log_subjects(
@@ -1660,14 +1769,17 @@ fn merge_tree_write_tree_once(
     let base = if let Some(base) = &options.merge_base {
         merge_tree_resolve_merge_base_index(repo, store, &tree_cache, base)?
     } else {
-        let base_id = best_merge_base_cached(commit_cache, &ours_id, &theirs_id)?.ok_or_else(|| {
-            CliError::Fatal {
+        if let Some(base_id) = best_merge_base_cached(commit_cache, &ours_id, &theirs_id)? {
+            let base_commit = commit_cache.read_commit(&base_id)?;
+            read_commit_tree_index_cached(&tree_cache, &base_commit)?
+        } else if options.allow_unrelated_histories {
+            GitIndex::new()
+        } else {
+            return Err(CliError::Fatal {
                 code: 128,
                 message: "refusing to merge unrelated histories".into(),
-            }
-        })?;
-        let base_commit = commit_cache.read_commit(&base_id)?;
-        read_commit_tree_index_cached(&tree_cache, &base_commit)?
+            });
+        }
     };
     let ours_index = read_commit_tree_index_cached(&tree_cache, &ours_commit)?;
     let theirs_index = read_commit_tree_index_cached(&tree_cache, &theirs_commit)?;
@@ -1718,17 +1830,19 @@ fn merge_tree_write_tree_once(
 }
 
 fn merge_tree_uses_ours_strategy(options: &MergeTreeOptions) -> bool {
-    options
-        .strategy_options
-        .iter()
-        .any(|option| option == "ours")
+    merge_tree_uses_ours_strategy_options(&options.strategy_options)
 }
 
 fn merge_tree_uses_theirs_strategy(options: &MergeTreeOptions) -> bool {
-    options
-        .strategy_options
-        .iter()
-        .any(|option| option == "theirs")
+    merge_tree_uses_theirs_strategy_options(&options.strategy_options)
+}
+
+fn merge_tree_uses_ours_strategy_options(strategy_options: &[String]) -> bool {
+    strategy_options.iter().any(|option| option == "ours")
+}
+
+fn merge_tree_uses_theirs_strategy_options(strategy_options: &[String]) -> bool {
+    strategy_options.iter().any(|option| option == "theirs")
 }
 
 fn merge_tree_resolve_merge_base_index(

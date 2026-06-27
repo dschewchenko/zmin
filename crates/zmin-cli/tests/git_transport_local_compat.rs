@@ -1038,6 +1038,119 @@ fn pull_merge_log_family_matches_stock_git_for_explicit_local_branch() {
 }
 
 #[test]
+fn pull_merge_allow_unrelated_histories_matches_stock_git_for_explicit_local_branch() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("two");
+    let git_repo = dir.path().join("git-repo");
+    let zmin_repo = dir.path().join("zmin-repo");
+
+    for repo in [&remote, &git_repo, &zmin_repo] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", repo.to_str().expect("repo path")],
+        );
+        configure_identity(repo);
+    }
+
+    fs::write(remote.join("remote.txt"), b"remote\n").expect("write remote");
+    git(&remote, ["add", "-A"]);
+    git_with_env(&remote, ["commit", "-m", "remote"]);
+
+    for repo in [&git_repo, &zmin_repo] {
+        fs::write(repo.join("local.txt"), b"local\n").expect("write local");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "local"]);
+    }
+
+    let args = ["pull", "--allow-unrelated-histories", "--no-rebase", "../two", "main"];
+    let git_output = command_any_output("git", &git_repo, &args, "pull unrelated git");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, "pull unrelated zmin");
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        git(&zmin_repo, ["rev-parse", "HEAD^{tree}"]),
+        git(&git_repo, ["rev-parse", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["rev-list", "--parents", "-1", "HEAD"]),
+        git(&git_repo, ["rev-list", "--parents", "-1", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["log", "-1", "--pretty=%B"]),
+        git(&git_repo, ["log", "-1", "--pretty=%B"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_repo, ["status", "--porcelain=v1", "--branch"])
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+        fs::read_to_string(git_repo.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD")
+    );
+}
+
+#[test]
+fn pull_merge_strategy_option_ours_and_theirs_match_stock_git_for_explicit_local_branch() {
+    for strategy in ["ours", "theirs"] {
+        let dir = TempDir::new().expect("temp dir");
+        let git_repo = dir.path().join("git-repo");
+        let zmin_repo = dir.path().join("zmin-repo");
+
+        for repo in [&git_repo, &zmin_repo] {
+            git(
+                dir.path(),
+                ["init", "-b", "main", repo.to_str().expect("repo path")],
+            );
+            configure_identity(repo);
+            fs::write(repo.join("base.txt"), b"base\n").expect("write base");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "base"]);
+            git(repo, ["switch", "-c", "side"]);
+            fs::write(repo.join("f.txt"), b"side\n").expect("write side");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "side"]);
+            git(repo, ["switch", "main"]);
+            fs::write(repo.join("f.txt"), b"main\n").expect("write main");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        let args = ["pull", "-X", strategy, "--no-rebase", ".", "side"];
+        let git_output = command_any_output("git", &git_repo, &args, "pull -X git");
+        let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, "pull -X zmin");
+        assert_eq!(zmin_output, git_output, "pull -X {strategy} output");
+        assert_eq!(
+            git(&zmin_repo, ["rev-parse", "HEAD^{tree}"]),
+            git(&git_repo, ["rev-parse", "HEAD^{tree}"]),
+            "pull -X {strategy} tree"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            git(&git_repo, ["rev-list", "--parents", "-1", "HEAD"])
+                .split_whitespace()
+                .count(),
+            "pull -X {strategy} parents"
+        );
+        assert_eq!(
+            git(&zmin_repo, ["log", "-1", "--pretty=%B"]),
+            git(&git_repo, ["log", "-1", "--pretty=%B"]),
+            "pull -X {strategy} message"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.join("f.txt")).expect("read zmin file"),
+            fs::read_to_string(git_repo.join("f.txt")).expect("read git file"),
+            "pull -X {strategy} worktree"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.join(".git/FETCH_HEAD")).expect("zmin FETCH_HEAD"),
+            fs::read_to_string(git_repo.join(".git/FETCH_HEAD")).expect("git FETCH_HEAD"),
+            "pull -X {strategy} FETCH_HEAD"
+        );
+    }
+}
+
+#[test]
 fn fetch_without_remote_uses_current_branch_remote_like_stock_git() {
     let dir = TempDir::new().expect("temp dir");
     let source = dir.path().join("source");

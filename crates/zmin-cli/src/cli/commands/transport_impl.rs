@@ -11320,11 +11320,13 @@ pub(crate) fn run_pull(
     no_log: bool,
     squash: bool,
     no_squash: bool,
+    allow_unrelated_histories: bool,
     no_all: bool,
     prune: bool,
     no_tags: bool,
     tags: bool,
     strategies: Vec<String>,
+    strategy_options: Vec<String>,
     rebase_mode: Option<String>,
     no_rebase: bool,
     depth: Option<String>,
@@ -11425,6 +11427,12 @@ pub(crate) fn run_pull(
         return Err(CliError::Fatal {
             code: 128,
             message: "options '--rebase' and '--strategy' cannot be used together".into(),
+        });
+    }
+    if pull_rebase_mode.rebases() && !strategy_options.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--rebase' and '--strategy-option' cannot be used together".into(),
         });
     }
     let deepen = deepen.as_deref().map(validate_positive_depth).transpose()?;
@@ -11586,7 +11594,9 @@ fatal: the remote end hung up unexpectedly\n"
             || squash
             || no_squash
             || no_ff
-            || !strategies.is_empty())
+            || allow_unrelated_histories
+            || !strategies.is_empty()
+            || !strategy_options.is_empty())
     {
         return merge_commands::merge(merge_commands::MergeOptions {
             abort: false,
@@ -11597,9 +11607,12 @@ fatal: the remote end hung up unexpectedly\n"
             no_commit,
             log_limit,
             squash,
+            allow_unrelated_histories,
             strategies,
+            strategy_options,
             commits: vec![target],
             commit_label: explicit_local_remote.then_some(branch),
+            commit_source: explicit_local_remote.then_some(remote),
         });
     }
     let store = object_adapter_from_objects_dir(repo.objects_dir.clone());

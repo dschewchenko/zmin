@@ -5,9 +5,9 @@ use std::fs;
 use tempfile::TempDir;
 
 use common::{
-    configure_identity, git, git_args, git_failure_output, git_init, git_status, git_with_env,
-    run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status, run_zmin_with_env,
-    write_file,
+    command_any_output, configure_identity, git, git_args, git_failure_output, git_init,
+    git_status, git_with_env, run_zmin, run_zmin_args, run_zmin_failure_output, run_zmin_status,
+    run_zmin_with_env, zmin_bin, write_file,
 };
 
 fn two_commit_repo() -> TempDir {
@@ -946,6 +946,108 @@ fn merge_ours_strategy_matches_stock_git_tree_and_parents() {
         git(git_repo.path(), ["status", "--porcelain=v1"])
     );
     assert!(!zmin_repo.path().join("feature.txt").exists());
+}
+
+#[test]
+fn merge_allow_unrelated_histories_matches_stock_git_output_state_and_message() {
+    let dir = TempDir::new().expect("temp dir");
+    let remote = dir.path().join("remote");
+    let git_repo = dir.path().join("git-repo");
+    let zmin_repo = dir.path().join("zmin-repo");
+
+    for repo in [&remote, &git_repo, &zmin_repo] {
+        git(
+            dir.path(),
+            ["init", "-b", "main", repo.to_str().expect("repo path")],
+        );
+        configure_identity(repo);
+    }
+
+    write_file(&remote, "remote.txt", "remote\n");
+    git(&remote, ["add", "-A"]);
+    git_with_env(&remote, ["commit", "-m", "remote"]);
+
+    for repo in [&git_repo, &zmin_repo] {
+        write_file(repo, "local.txt", "local\n");
+        git(repo, ["add", "-A"]);
+        git_with_env(repo, ["commit", "-m", "local"]);
+        git(
+            repo,
+            ["remote", "add", "other", remote.to_str().expect("remote path")],
+        );
+        git(repo, ["fetch", "other", "main"]);
+    }
+
+    let args = ["merge", "--allow-unrelated-histories", "other/main"];
+    let git_output = command_any_output("git", &git_repo, &args, "merge unrelated git");
+    let zmin_output = command_any_output(zmin_bin(), &zmin_repo, &args, "merge unrelated zmin");
+    assert_eq!(zmin_output, git_output);
+    assert_eq!(
+        git(&zmin_repo, ["rev-parse", "HEAD^{tree}"]),
+        git(&git_repo, ["rev-parse", "HEAD^{tree}"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["rev-list", "--parents", "-1", "HEAD"]),
+        git(&git_repo, ["rev-list", "--parents", "-1", "HEAD"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["log", "-1", "--pretty=%B"]),
+        git(&git_repo, ["log", "-1", "--pretty=%B"])
+    );
+    assert_eq!(
+        git(&zmin_repo, ["status", "--porcelain=v1", "--branch"]),
+        git(&git_repo, ["status", "--porcelain=v1", "--branch"])
+    );
+}
+
+#[test]
+fn merge_strategy_option_ours_and_theirs_match_stock_git_output_state_and_message() {
+    for strategy in ["ours", "theirs"] {
+        let git_repo = committed_repo();
+        let zmin_repo = committed_repo();
+        let default_branch = git(git_repo.path(), ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+        for repo in [git_repo.path(), zmin_repo.path()] {
+            git(repo, ["switch", "-c", "side"]);
+            write_file(repo, "f.txt", "side\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "side"]);
+            git(repo, ["switch", &default_branch]);
+            write_file(repo, "f.txt", "main\n");
+            git(repo, ["add", "-A"]);
+            git_with_env(repo, ["commit", "-m", "main"]);
+        }
+
+        let args = ["merge", "-X", strategy, "side"];
+        let git_output = command_any_output("git", git_repo.path(), &args, "merge -X git");
+        let zmin_output = command_any_output(zmin_bin(), zmin_repo.path(), &args, "merge -X zmin");
+        assert_eq!(zmin_output, git_output, "-X {strategy} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "-X {strategy} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
+            git(git_repo.path(), ["rev-list", "--parents", "-1", "HEAD"]),
+            "-X {strategy} parents"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--pretty=%B"]),
+            git(git_repo.path(), ["log", "-1", "--pretty=%B"]),
+            "-X {strategy} message"
+        );
+        assert_eq!(
+            fs::read_to_string(zmin_repo.path().join("f.txt")).expect("read zmin file"),
+            fs::read_to_string(git_repo.path().join("f.txt")).expect("read git file"),
+            "-X {strategy} worktree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            git(git_repo.path(), ["status", "--porcelain=v1", "--branch"]),
+            "-X {strategy} status"
+        );
+    }
 }
 
 #[test]
