@@ -2760,6 +2760,41 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
+The latest completed slice is a helper-free local `pull`/`merge`
+commit-mode closure across the explicit local no-rebase merge lane and the
+shared merge default-commit lane. Zmin now accepts and matches stock Git for
+`pull --commit`, `pull --no-commit`, `pull --squash`, `pull --no-squash`,
+`merge --commit`, and `merge --no-squash`. The concrete closure here is
+split in two parts: `merge` gains the missing documented parser surface for
+the explicit default toggles, while `pull` now threads the full
+commit/squash toggle family into merge dispatch with stock-like raw-argv
+last-one-wins resolution and uses the merge engine when explicit merge-mode
+flags are present on non-fast-forward local pulls.
+Focused gates were
+`cargo test -p zmin-cli --test git_merge_compat merge_commit_and_no_squash_match_stock_git_merge_commit_state -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_merge_commit_mode_flags_match_stock_git_for_explicit_local_branch -- --exact --nocapture`,
+`cargo test -p zmin-cli --test git_transport_local_compat pull_local_path_ours_strategy_matches_stock_git_merge_commit -- --exact --nocapture`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(pull|merge|summary)\t'`, and
+`git diff --check`.
+Actual delta from the prior `diff` color-word-diff closure is `+6` matrix
+rows, `+6` complete documented option pairs, `+6` represented documented
+option pairs, `+6` verified rows, `+0` invalid-input rows, and `+0` complete
+command matrices. Current census counts are `6629` matrix rows, `5817`
+verified rows, `787` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2424/3212` complete documented option
+pairs, and `2424/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `pull` `41/99` reviewed-complete
+documented option pairs with `66/66` classified written rows and `64`
+stock-matching rows; `merge` `10/51` reviewed-complete documented option
+pairs with `24/24` classified written rows and `16` stock-matching rows. The
+next default follow-up should reselect from the refreshed backlog head,
+because this batch closes the shared commit/squash parser tail but leaves the
+remaining `pull`/`merge` work as broader documented-option expansion.
+
 The latest completed slice is a helper-free shared `diff*` parser-and-evidence
 batch centered on `--output` and plumbing `--line-prefix`. Zmin now accepts
 and matches stock Git for `diff --output`, `diff-files --output`,

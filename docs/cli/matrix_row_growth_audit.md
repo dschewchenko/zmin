@@ -11,6 +11,30 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-27 the latest completed batch is a helper-free local
+`pull`/`merge` commit-mode closure across the explicit local no-rebase merge
+lane and the shared merge default-commit lane. The selected change added six
+exact stock-Git rows for `pull --commit`, `pull --no-commit`,
+`pull --squash`, `pull --no-squash`, `merge --commit`, and
+`merge --no-squash`, plus the parser/runtime closure needed to thread
+`--commit` / `--no-commit` and `--squash` / `--no-squash` through `pull`
+merge dispatch with stock-like last-one-wins raw-argv resolution. The pull
+path also now routes explicit merge-mode flags through the merge engine
+instead of aborting in the fast-forward-only helper path on non-fast-forward
+local pulls. Actual delta is `+6` matrix rows, `+6` complete documented
+option pairs, `+6` represented documented option pairs, `+6` verified rows,
+`+0` invalid-input rows, and `+0` complete command matrices. Current census
+counts are `6629` matrix rows, `5817` verified rows, `787` invalid-input
+rows, `0` exact-open rows, `146/151` complete command matrices,
+`2424/3212` complete documented option pairs, and `2424/3212` represented
+documented option pairs. The touched commands now sit at `pull 41/99`
+reviewed-complete documented option pairs with `64/66` stock-matching rows
+and `merge 10/51` reviewed-complete documented option pairs with `16/24`
+stock-matching rows. The next default follow-up should reselect from the
+refreshed census head rather than keep widening this micro-family, because
+the shared commit/squash parser tail is now closed and the remaining `pull`
+and `merge` queues are broader documented-option expansion work.
+
 As of 2026-06-27 the latest completed batch is a helper-free local `diff`
 family color-word-diff and regex closure across the modeled local patch lanes.
 The selected change added twelve exact stock-Git rows for `diff`,

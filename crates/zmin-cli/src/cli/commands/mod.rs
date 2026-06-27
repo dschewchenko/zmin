@@ -299,7 +299,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::MergeTree { .. }
         | crate::runtime::Command::MergeFile { .. }
         | crate::runtime::Command::MergeOneFile { .. }
-        | crate::runtime::Command::MergeIndex { .. }) => merge::dispatch(command),
+        | crate::runtime::Command::MergeIndex { .. }) => merge::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Maintenance { .. }
         | crate::runtime::Command::PrunePacked { .. }
         | crate::runtime::Command::Repack { .. }

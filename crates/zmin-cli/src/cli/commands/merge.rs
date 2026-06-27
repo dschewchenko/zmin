@@ -1,27 +1,36 @@
 use crate::runtime;
 
-pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
+pub(crate) fn dispatch(
+    command: runtime::Command,
+    raw_args: &[String],
+) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::Merge {
             abort,
             continue_,
             ff_only,
             no_ff,
+            commit,
             no_commit,
             squash,
+            no_squash,
             strategies,
             commits,
-        } => super::merge_commands::merge(super::merge_commands::MergeOptions {
-            abort,
-            continue_,
-            ff_only,
-            no_ff,
-            no_commit,
-            squash,
-            strategies,
-            commits,
-            commit_label: None,
-        }),
+        } => {
+            let (no_commit, squash) =
+                resolve_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
+            super::merge_commands::merge(super::merge_commands::MergeOptions {
+                abort,
+                continue_,
+                ff_only,
+                no_ff,
+                no_commit,
+                squash,
+                strategies,
+                commits,
+                commit_label: None,
+            })
+        }
         runtime::Command::Mergetool {
             tool,
             tool_help,
@@ -131,4 +140,34 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => super::merge_commands::merge_index(one_shot, quiet, &merge_program, all, paths),
         command => unreachable!("non-merge command routed to merge dispatcher: {command:?}"),
     }
+}
+
+fn resolve_merge_commit_mode(
+    raw_args: &[String],
+    commit: bool,
+    no_commit: bool,
+    squash: bool,
+    no_squash: bool,
+) -> (bool, bool) {
+    let mut effective_no_commit = no_commit;
+    if commit {
+        effective_no_commit = false;
+    }
+    let mut effective_squash = squash;
+    if no_squash {
+        effective_squash = false;
+    }
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--commit" => effective_no_commit = false,
+            "--no-commit" => effective_no_commit = true,
+            "--squash" => effective_squash = true,
+            "--no-squash" => effective_squash = false,
+            _ => {}
+        }
+    }
+    (effective_no_commit, effective_squash)
 }

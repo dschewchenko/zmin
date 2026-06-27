@@ -11310,6 +11310,10 @@ pub(crate) fn run_pull(
     ff: bool,
     ff_only: bool,
     no_ff: bool,
+    commit: bool,
+    no_commit: bool,
+    squash: bool,
+    no_squash: bool,
     no_all: bool,
     prune: bool,
     no_tags: bool,
@@ -11332,6 +11336,8 @@ pub(crate) fn run_pull(
     let _ = ff;
     let _ = no_all;
     let repo = find_repo_or_bare()?;
+    let (no_commit, squash) =
+        resolve_pull_merge_commit_mode(raw_args, commit, no_commit, squash, no_squash);
     let recurse_submodules_mode = fetch_recurse_submodules_mode(raw_args)?;
     let show_forced_updates_mode = fetch_show_forced_updates_mode(raw_args);
     validate_pull_jobs(raw_args)?;
@@ -11559,28 +11565,15 @@ fatal: the remote end hung up unexpectedly\n"
             pull_rebase_mode == PullRebaseMode::Interactive,
         );
     }
-    if !strategies.is_empty() {
+    if !ff_only && (commit || no_commit || squash || no_squash || no_ff || !strategies.is_empty()) {
         return merge_commands::merge(merge_commands::MergeOptions {
             abort: false,
             continue_: false,
             ff_only,
             no_ff,
-            no_commit: false,
-            squash: false,
+            no_commit,
+            squash,
             strategies,
-            commits: vec![target],
-            commit_label: explicit_local_remote.then_some(branch),
-        });
-    }
-    if no_ff {
-        return merge_commands::merge(merge_commands::MergeOptions {
-            abort: false,
-            continue_: false,
-            ff_only: false,
-            no_ff: true,
-            no_commit: false,
-            squash: false,
-            strategies: Vec::new(),
             commits: vec![target],
             commit_label: explicit_local_remote.then_some(branch),
         });
@@ -11590,6 +11583,36 @@ fatal: the remote end hung up unexpectedly\n"
         let _trace = phase_trace("pull.fast_forward");
         fast_forward_to(&repo, &store, &target, "pull", ff_only)
     }
+}
+
+fn resolve_pull_merge_commit_mode(
+    raw_args: &[String],
+    commit: bool,
+    no_commit: bool,
+    squash: bool,
+    no_squash: bool,
+) -> (bool, bool) {
+    let mut effective_no_commit = no_commit;
+    if commit {
+        effective_no_commit = false;
+    }
+    let mut effective_squash = squash;
+    if no_squash {
+        effective_squash = false;
+    }
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        match arg.as_str() {
+            "--commit" => effective_no_commit = false,
+            "--no-commit" => effective_no_commit = true,
+            "--squash" => effective_squash = true,
+            "--no-squash" => effective_squash = false,
+            _ => {}
+        }
+    }
+    (effective_no_commit, effective_squash)
 }
 
 fn missing_pull_tracking_info(current_branch_short: &str) -> CliError {

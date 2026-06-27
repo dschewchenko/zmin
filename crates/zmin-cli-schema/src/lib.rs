@@ -1810,6 +1810,14 @@ pub enum Command {
         ff_only: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
         no_ff: bool,
+        #[arg(long = "commit", action = ArgAction::SetTrue)]
+        commit: bool,
+        #[arg(long = "no-commit", action = ArgAction::SetTrue)]
+        no_commit: bool,
+        #[arg(long = "squash", action = ArgAction::SetTrue)]
+        squash: bool,
+        #[arg(long = "no-squash", action = ArgAction::SetTrue)]
+        no_squash: bool,
         #[arg(short = 's', long = "strategy")]
         strategies: Vec<String>,
         #[arg(long = "rebase", num_args = 0..=1, default_missing_value = "true")]
@@ -4846,10 +4854,14 @@ pub enum Command {
         ff_only: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
         no_ff: bool,
+        #[arg(long = "commit", action = ArgAction::SetTrue)]
+        commit: bool,
         #[arg(long = "no-commit", action = ArgAction::SetTrue)]
         no_commit: bool,
         #[arg(long = "squash", action = ArgAction::SetTrue)]
         squash: bool,
+        #[arg(long = "no-squash", action = ArgAction::SetTrue)]
+        no_squash: bool,
         #[arg(short = 's', long = "strategy")]
         strategies: Vec<String>,
         commits: Vec<String>,
