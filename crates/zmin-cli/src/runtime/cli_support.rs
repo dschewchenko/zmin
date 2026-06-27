@@ -123,6 +123,7 @@ pub(crate) fn parse_cli_invocation(
     validate_branch_invocation_before_clap(&command_args)?;
     validate_diff_invocation_before_clap(&command_args)?;
     validate_fetch_invocation_before_clap(&command_args)?;
+    validate_pull_invocation_before_clap(&command_args)?;
     validate_fetch_pack_invocation_before_clap(&command_args)?;
     validate_maintenance_invocation_before_clap(&command_args)?;
     validate_hash_object_invocation_before_clap(&command_args)?;
@@ -848,6 +849,68 @@ fn validate_request_pull_invocation_before_clap(command_args: &[String]) -> Resu
     Ok(())
 }
 
+fn validate_pull_invocation_before_clap(command_args: &[String]) -> Result<()> {
+    if command_args.first().map(String::as_str) != Some("pull") {
+        return Ok(());
+    }
+    const USAGE: &str = "usage: git pull [<options>] [<repository> [<refspec>...]]\n\n    -v, --[no-]verbose    be more verbose\n    -q, --[no-]quiet      be more quiet\n    --[no-]progress       force progress reporting\n    --[no-]recurse-submodules[=<on-demand>]\n                          control for recursive fetching of submodules\n\nOptions related to merging\n    -r, --[no-]rebase[=(false|true|merges|interactive)]\n                          incorporate changes by rebasing rather than merging\n    -n                    do not show a diffstat at the end of the merge\n    --[no-]stat           show a diffstat at the end of the merge\n    --[no-]log[=<n>]      add (at most <n>) entries from shortlog to merge commit message\n    --[no-]signoff[=...]  add a Signed-off-by trailer\n    --[no-]squash         create a single commit instead of doing a merge\n    --[no-]commit         perform a commit if the merge succeeds (default)\n    --[no-]edit           edit message before committing\n    --[no-]cleanup <mode> how to strip spaces and #comments from message\n    --[no-]ff             allow fast-forward\n    --ff-only             abort if fast-forward is not possible\n    --[no-]verify         control use of pre-merge-commit and commit-msg hooks\n    --[no-]verify-signatures\n                          verify that the named commit has a valid GPG signature\n    --[no-]autostash      automatically stash/stash pop before and after\n    -s, --[no-]strategy <strategy>\n                          merge strategy to use\n    -X, --[no-]strategy-option <option=value>\n                          option for selected merge strategy\n    -S, --[no-]gpg-sign[=<key-id>]\n                          GPG sign commit\n    --[no-]allow-unrelated-histories\n                          allow merging unrelated histories\n\nOptions related to fetching\n    --[no-]all            fetch from all remotes\n    -a, --[no-]append     append to .git/FETCH_HEAD instead of overwriting\n    --[no-]upload-pack <path>\n                          path to upload pack on remote end\n    -f, --[no-]force      force overwrite of local branch\n    -t, --[no-]tags       fetch all tags and associated objects\n    -p, --[no-]prune      prune remote-tracking branches no longer on remote\n    -j, --[no-]jobs[=<n>] number of submodules pulled in parallel\n    --[no-]dry-run        dry run\n    -k, --[no-]keep       keep downloaded pack\n    --[no-]depth <depth>  deepen history of shallow clone\n    --[no-]shallow-since <time>\n                          deepen history of shallow repository based on time\n    --[no-]shallow-exclude <ref>\n                          deepen history of shallow clone, excluding ref\n    --[no-]deepen <n>     deepen history of shallow clone\n    --unshallow           convert to a complete repository\n    --[no-]update-shallow accept refs that update .git/shallow\n    --refmap <refmap>     specify fetch refmap\n    -o, --[no-]server-option <server-specific>\n                          option to transmit\n    -4, --[no-]ipv4       use IPv4 addresses only\n    -6, --[no-]ipv6       use IPv6 addresses only\n    --[no-]negotiation-tip <revision>\n                          report that we have only objects reachable from this object\n    --[no-]show-forced-updates\n                          check for forced-updates on all updated branches\n    --[no-]set-upstream   set upstream for git pull/fetch\n\n";
+    const UNKNOWN_LONG_OPTIONS: &[&str] = &[
+        "--atomic",
+        "--auto-gc",
+        "--auto-maintenance",
+        "--multiple",
+        "--negotiate-only",
+        "--no-auto-gc",
+        "--no-auto-maintenance",
+        "--no-write-commit-graph",
+        "--no-write-fetch-head",
+        "--porcelain",
+        "--prefetch",
+        "--prune-tags",
+        "--refetch",
+        "--update-head-ok",
+        "--write-commit-graph",
+        "--write-fetch-head",
+    ];
+    for arg in command_args.iter().skip(1) {
+        if arg == "--" {
+            break;
+        }
+        if let Some(option) = UNKNOWN_LONG_OPTIONS.iter().find(|option| arg.as_str() == **option) {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown option `{}'\n{USAGE}", option.trim_start_matches("--")),
+            });
+        }
+        if arg.starts_with("--recurse-submodules-default") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!(
+                    "error: unknown option `{}'\n{USAGE}",
+                    arg.trim_start_matches("--")
+                ),
+            });
+        }
+        if arg.starts_with("--submodule-prefix") {
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!(
+                    "error: unknown option `{}'\n{USAGE}",
+                    arg.trim_start_matches("--")
+                ),
+            });
+        }
+        if matches!(arg.as_str(), "-P" | "-e" | "-u") {
+            let switch = arg.trim_start_matches('-');
+            return Err(CliError::Stderr {
+                code: 129,
+                text: format!("error: unknown switch `{switch}'\n{USAGE}"),
+            });
+        }
+    }
+    Ok(())
+}
+
 fn validate_credential_store_invocation_before_clap(command_args: &[String]) -> Result<()> {
     if command_args.first().map(String::as_str) != Some("credential-store") {
         return Ok(());
@@ -986,7 +1049,10 @@ fn validate_write_tree_invocation_before_clap(command_args: &[String]) -> Result
         return Ok(());
     }
     for (index, arg) in command_args.iter().enumerate().skip(1) {
-        if matches!(arg.as_str(), "--missing-ok" | "--no-missing-ok" | "--no-prefix") {
+        if matches!(
+            arg.as_str(),
+            "--missing-ok" | "--no-missing-ok" | "--no-prefix"
+        ) {
             continue;
         }
         if let Some(option) = arg.strip_prefix("--").and_then(|value| {
@@ -1209,7 +1275,10 @@ fn validate_patch_id_invocation_before_clap(command_args: &[String]) -> Result<(
                 });
             }
         }
-        if matches!(arg.as_str(), "--no-stable" | "--no-unstable" | "--no-verbatim") {
+        if matches!(
+            arg.as_str(),
+            "--no-stable" | "--no-unstable" | "--no-verbatim"
+        ) {
             let option = arg.trim_start_matches("--");
             return Err(CliError::Stderr {
                 code: 129,

@@ -12,6 +12,27 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local `pull`
+invalid fetch-inherited closure across the named-local ff-only lane. The
+selected change added twenty-one exact stock-Git invalid-input rows for
+`pull --atomic`, `--auto-gc`, `--auto-maintenance`, `--multiple`,
+`--negotiate-only`, `--no-auto-gc`, `--no-auto-maintenance`,
+`--no-write-commit-graph`, `--no-write-fetch-head`, `--porcelain`,
+`--prefetch`, `--prune-tags`, `--recurse-submodules-default=yes`,
+`--refetch`, `--submodule-prefix=foo/`, `--update-head-ok`,
+`--write-commit-graph`, `--write-fetch-head`, `-P`, `-e`, and `-u`. Actual
+delta is `+21` matrix rows, `+21` complete documented option pairs, `+21`
+represented documented option pairs, `+0` verified rows, `+21`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `6726` matrix rows, `5891` verified rows, `810` invalid-input rows, `0`
+exact-open rows, `146/151` complete command matrices, `2514/3212` complete
+documented option pairs, and `2514/3212` represented documented option pairs.
+`pull` now sits at `90/99` reviewed-complete documented option pairs with
+`94/118` stock-matching rows and `24` invalid-input rows. The next default
+follow-up should reselect from the refreshed larger backlog head rather than
+stay on `pull`, because the remaining `pull` tail is now only nine documented
+options and the denser unresolved queues are elsewhere.
+
+As of 2026-06-27 the latest completed batch is a helper-free local `pull`
 signature-verification closure across the explicit local no-rebase merge lane.
 The selected change added three exact stock-Git rows for
 `pull --verify-signatures` on both the signed-remote-tip success lane and the

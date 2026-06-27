@@ -3001,6 +3001,42 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
+The latest completed slice is a helper-free local `pull` invalid
+fetch-inherited closure across the named-local ff-only lane. Zmin now matches
+stock Git for the documented `pull` options that `git pull` rejects outright
+on this host when they are inherited from `fetch` docs but not accepted by the
+porcelain: `--atomic`, `--auto-gc`, `--auto-maintenance`, `--multiple`,
+`--negotiate-only`, `--no-auto-gc`, `--no-auto-maintenance`,
+`--no-write-commit-graph`, `--no-write-fetch-head`, `--porcelain`,
+`--prefetch`, `--prune-tags`, `--recurse-submodules-default=yes`,
+`--refetch`, `--submodule-prefix=foo/`, `--update-head-ok`,
+`--write-commit-graph`, `--write-fetch-head`, `-P`, `-e`, and `-u`. The
+runtime closure stayed intentionally bounded: `pull` now runs a pre-clap
+validator that emits the stock unknown-option or unknown-switch diagnostics
+for this family, and the schema also stops advertising the unsupported short
+`-e` alias on `pull --edit`. Focused gates were
+`cargo test -p zmin-cli --test git_transport_local_compat pull_invalid_fetch_inherited_option_family_matches_stock_git -- --exact --nocapture`,
+`bash tools/git-pull-invalid-fetch-inherited-oracle-smoke.sh`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(pull|summary)\t'`, and
+`git diff --check`.
+Actual delta from the prior `pull` signature-verification closure is `+21`
+matrix rows, `+21` complete documented option pairs, `+21` represented
+documented option pairs, `+0` verified rows, `+21` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `6726` matrix rows,
+`5891` verified rows, `810` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2514/3212` complete documented option
+pairs, and `2514/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `pull` `90/99` reviewed-complete
+documented option pairs with `118/118` classified written rows, `94`
+stock-matching rows, and `24` invalid-input rows. The next default follow-up
+should move back to the refreshed larger backlog head, because the remaining
+`pull` queue is now only nine documented options while `replay`,
+`send-email`, `rebase`, `log`, and `rev-list` still dominate the backlog.
+
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the
 shared merge default-commit lane. Zmin now accepts and matches stock Git for

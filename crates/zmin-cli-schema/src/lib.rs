@@ -1835,7 +1835,7 @@ pub enum Command {
         squash: bool,
         #[arg(long = "no-squash", action = ArgAction::SetTrue)]
         no_squash: bool,
-        #[arg(short = 'e', long = "edit", action = ArgAction::Count)]
+        #[arg(long = "edit", action = ArgAction::Count)]
         edit: u8,
         #[arg(long = "no-edit", action = ArgAction::Count)]
         no_edit: u8,
