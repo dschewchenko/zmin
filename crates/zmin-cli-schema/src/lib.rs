@@ -3803,6 +3803,8 @@ pub enum Command {
         dst_prefix: Option<String>,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
         exit_code: bool,
+        #[arg(long = "ext-diff", action = ArgAction::SetTrue)]
+        ext_diff: bool,
         #[arg(long = "find-copies", action = ArgAction::SetTrue)]
         find_copies: bool,
         #[arg(long = "find-copies-harder", action = ArgAction::SetTrue)]
@@ -3859,6 +3861,10 @@ pub enum Command {
         no_indent_heuristic: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]
         no_notes: bool,
+        #[arg(long = "no-relative", action = ArgAction::SetTrue)]
+        no_relative: bool,
+        #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
+        no_rename_empty: bool,
         #[arg(long = "no-renames", action = ArgAction::SetTrue)]
         no_renames: bool,
         #[arg(long = "no-thread", action = ArgAction::SetTrue)]
@@ -3873,6 +3879,10 @@ pub enum Command {
         output_indicator_old: Option<String>,
         #[arg(long = "patience", action = ArgAction::SetTrue)]
         patience: bool,
+        #[arg(long = "text", short = 'a', action = ArgAction::SetTrue)]
+        text: bool,
+        #[arg(long = "textconv", action = ArgAction::SetTrue)]
+        textconv: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
         #[arg(long = "patch", action = ArgAction::SetTrue)]
@@ -3891,6 +3901,22 @@ pub enum Command {
         root: bool,
         #[arg(long = "src-prefix")]
         src_prefix: Option<String>,
+        #[arg(long = "unified", short = 'U')]
+        unified: Option<String>,
+        #[arg(long = "ws-error-highlight")]
+        ws_error_highlight: Option<String>,
+        #[arg(short = 'B', action = ArgAction::SetTrue)]
+        break_rewrites_short: bool,
+        #[arg(short = 'C', action = ArgAction::SetTrue)]
+        find_copies_short: bool,
+        #[arg(short = 'D', action = ArgAction::SetTrue)]
+        irreversible_delete_short: bool,
+        #[arg(short = 'M', action = ArgAction::SetTrue)]
+        find_renames_short: bool,
+        #[arg(short = 'N', action = ArgAction::SetTrue)]
+        intent_to_add_short: bool,
+        #[arg(short = 'W', action = ArgAction::SetTrue)]
+        function_context_short: bool,
         #[arg(long = "attach", action = ArgAction::SetTrue)]
         attach: bool,
         #[arg(long = "inline", action = ArgAction::SetTrue)]

@@ -405,6 +405,48 @@ fn format_patch_shared_diff_noop_family_matches_stock_git() {
 }
 
 #[test]
+fn format_patch_shared_diff_alias_family_matches_stock_git() {
+    let repo = format_patch_fixture_repo();
+    let cases = [
+        ["--text"],
+        ["--textconv"],
+        ["--unified=3"],
+        ["-U3"],
+        ["-a"],
+        ["-N"],
+        ["-M"],
+        ["-C"],
+        ["-D"],
+        ["-B"],
+        ["-W"],
+        ["--ws-error-highlight=old,new,context"],
+        ["--ext-diff"],
+        ["--no-relative"],
+        ["--no-rename-empty"],
+    ];
+
+    for extra in cases {
+        let mut args = vec!["format-patch", "--stdout"];
+        args.extend(extra);
+        args.push("-1");
+        args.push("HEAD");
+        let zmin = run_zmin_args(repo.path(), &args);
+        let stock = git_args(repo.path(), &args);
+        assert_eq!(
+            normalize_format_patch_version(&zmin),
+            normalize_format_patch_version(&stock),
+            "case: {}",
+            args.join(" ")
+        );
+        assert_eq!(
+            run_zmin_status_args(repo.path(), &args),
+            git_status_args(repo.path(), &args),
+            "status case mismatch"
+        );
+    }
+}
+
+#[test]
 fn am_applies_stock_format_patch_mail_like_stock_git() {
     let repo = format_patch_fixture_repo();
     let base = git(repo.path(), ["rev-parse", "HEAD~2"]);

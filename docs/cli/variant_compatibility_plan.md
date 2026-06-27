@@ -22,6 +22,57 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free local
+`format-patch` shared diff alias/text parser closure on the already modeled
+single-commit stdout mail-series lane. This batch added exact stock-Git matrix
+evidence for `--text`, `--textconv`, `--unified`, `-U`, `-a`, `-N`, `-M`,
+`-C`, `-D`, `-B`, `-W`, `--ws-error-highlight`, `--ext-diff`,
+`--no-relative`, and `--no-rename-empty`, and lifted fifteen documented
+option pairs into the reviewed-complete represented surface without adding new
+mail-series rendering logic beyond parser/schema acceptance.
+
+The batch closed one cohesive parser-and-evidence gap rather than introducing a
+new `format-patch` behavior family:
+
+- Zmin already matched stock Git on the covered helper-free single-commit
+  stdout mail-series lane, and the remaining work here was to accept the
+  documented alias/text and unified spellings above and promote the resulting
+  exact stock-oracle evidence into represented plus reviewed-complete
+  `format-patch` doc-option pairs
+
+Focused verification was
+`cargo test -p zmin-cli --test git_mail_series_compat format_patch_shared_diff_alias_family_matches_stock_git -- --exact --nocapture`,
+`cargo check -p zmin-cli`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(format-patch|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `148 / 151`
+- complete documented command-option pairs: `2250 / 3212`
+- represented documented command-option pairs: `2250 / 3212`
+- matrix rows: `6394`
+- verified rows: `5582`
+- invalid-input rows: `787`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `format-patch`: `84 / 84` reviewed-complete documented option pairs,
+  `84 / 84` represented documented option pairs, `90` written rows, `90`
+  classified rows, `90` stock-matching rows, `0` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `format-patch`, because
+the command still has `78` remaining `doc_option_not_in_zmin_schema` rows, now
+led by helper-free documented tails such as `--add-header`, `--base`, `--cc`,
+`--check`, `--color-words`, `--cover-from-description`,
+`--description-file`, `--full-index`, `--ignore-if-in-upstream`, and related
+diff/mail spellings.
+
+As of 2026-06-27 the latest completed batch is a helper-free local
 `format-patch` shared diff noop/default-preserving parser closure on the
 already modeled single-commit stdout mail-series lane. This batch added exact
 stock-Git matrix evidence for `--exit-code`, `--progress`, `--quiet`,
