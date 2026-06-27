@@ -314,11 +314,32 @@ fn am_single_patch_fixture() -> (TempDir, String, String) {
     (repo, base, patch_path.to_string_lossy().into_owned())
 }
 
+fn am_conflict_patch_fixture() -> (TempDir, String, String) {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\nbase\n");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "a.txt", "one\nupstream\n");
+    git(repo.path(), ["add", "a.txt"]);
+    git_with_env(repo.path(), ["commit", "-m", "upstream"]);
+    git(repo.path(), ["format-patch", "-o", "patches", "HEAD~1"]);
+    let base = git(repo.path(), ["rev-parse", "HEAD~1"]);
+    let patch_name = read_named_files(&repo.path().join("patches"))
+        .into_iter()
+        .map(|(name, _)| name)
+        .next()
+        .expect("conflict patch");
+    let patch_path = repo.path().join("patches").join(patch_name);
+    (repo, base, patch_path.to_string_lossy().into_owned())
+}
+
 #[test]
 fn am_option_surface_batch_matches_stock_git() {
     let (source, base, patch_path) = am_single_patch_fixture();
     let patch = patch_path.as_str();
-    let success_cases: [(&str, &[&str]); 32] = [
+    let success_cases: [(&str, &[&str]); 33] = [
         ("--quiet", &["am", "--quiet", patch]),
         ("-q", &["am", "-q", patch]),
         ("--utf8", &["am", "--utf8", patch]),
@@ -328,6 +349,7 @@ fn am_option_surface_batch_matches_stock_git() {
         ("-k", &["am", "-k", patch]),
         ("--keep-non-patch", &["am", "--keep-non-patch", patch]),
         ("--signoff", &["am", "--signoff", patch]),
+        ("-s", &["am", "-s", patch]),
         ("--keep-cr", &["am", "--keep-cr", patch]),
         ("--no-keep-cr", &["am", "--no-keep-cr", patch]),
         ("--message-id", &["am", "--message-id", patch]),
@@ -431,13 +453,14 @@ fn am_committer_date_is_author_date_matches_stock_git() {
 fn am_resume_only_flags_without_session_match_stock_git() {
     let (_source, _base, patch_path) = am_single_patch_fixture();
     let patch = patch_path.as_str();
-    let failure_cases: [(&str, &[&str]); 9] = [
+    let failure_cases: [(&str, &[&str]); 10] = [
         ("--allow-empty", &["am", "--allow-empty", patch]),
         ("--abort", &["am", "--abort"]),
         ("--quit", &["am", "--quit"]),
         ("--skip", &["am", "--skip"]),
         ("--continue", &["am", "--continue"]),
         ("--resolved", &["am", "--resolved"]),
+        ("-r", &["am", "-r"]),
         ("--retry", &["am", "--retry"]),
         ("--show-current-patch=raw", &["am", "--show-current-patch=raw"]),
         ("--show-current-patch=diff", &["am", "--show-current-patch=diff"]),
@@ -454,6 +477,76 @@ fn am_resume_only_flags_without_session_match_stock_git() {
         assert_eq!(zmin_result, git_result, "args: {args:?}");
         assert_eq!(git(repo.path(), ["status", "--short"]), "");
         assert!(!label.is_empty());
+    }
+}
+
+#[test]
+fn am_conflict_session_family_matches_stock_git() {
+    let (source, base, patch_path) = am_conflict_patch_fixture();
+    let patch = patch_path.as_str();
+
+    let conflict_cases: [(&str, &[&str]); 7] = [
+        ("initial", &["am", patch]),
+        ("show-raw", &["am", "--show-current-patch=raw"]),
+        ("show-diff", &["am", "--show-current-patch=diff"]),
+        ("retry", &["am", "--retry"]),
+        ("continue", &["am", "--continue"]),
+        ("resolved", &["am", "--resolved"]),
+        ("-r", &["am", "-r"]),
+    ];
+
+    let git_apply = clone_repo_fixture(source.path());
+    let zmin_apply = clone_repo_fixture(source.path());
+    configure_identity(git_apply.path());
+    configure_identity(zmin_apply.path());
+    git(git_apply.path(), ["reset", "--hard", &base]);
+    git(zmin_apply.path(), ["reset", "--hard", &base]);
+    write_file(git_apply.path(), "a.txt", "one\nlocal\n");
+    write_file(zmin_apply.path(), "a.txt", "one\nlocal\n");
+    git(git_apply.path(), ["add", "a.txt"]);
+    git(zmin_apply.path(), ["add", "a.txt"]);
+    git_with_env(git_apply.path(), ["commit", "-m", "local"]);
+    git_with_env(zmin_apply.path(), ["commit", "-m", "local"]);
+
+    for (label, args) in conflict_cases {
+        let git_result = command_any_output("git", git_apply.path(), args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_apply.path(), args, "zmin");
+        assert_eq!(zmin_result, git_result, "case {label}: args {args:?}");
+        assert_eq!(
+            git(zmin_apply.path(), ["status", "--short"]),
+            git(git_apply.path(), ["status", "--short"]),
+            "status case {label}"
+        );
+    }
+
+    for (label, cleanup_args) in [
+        ("skip", ["am", "--skip"].as_slice()),
+        ("abort", ["am", "--abort"].as_slice()),
+        ("quit", ["am", "--quit"].as_slice()),
+    ] {
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        git(git_repo.path(), ["reset", "--hard", &base]);
+        git(zmin_repo.path(), ["reset", "--hard", &base]);
+        write_file(git_repo.path(), "a.txt", "one\nlocal\n");
+        write_file(zmin_repo.path(), "a.txt", "one\nlocal\n");
+        git(git_repo.path(), ["add", "a.txt"]);
+        git(zmin_repo.path(), ["add", "a.txt"]);
+        git_with_env(git_repo.path(), ["commit", "-m", "local"]);
+        git_with_env(zmin_repo.path(), ["commit", "-m", "local"]);
+        let _ = command_any_output("git", git_repo.path(), &["am", patch], "git");
+        let _ = command_any_output(zmin_bin(), zmin_repo.path(), &["am", patch], "zmin");
+
+        let git_result = command_any_output("git", git_repo.path(), cleanup_args, "git");
+        let zmin_result = command_any_output(zmin_bin(), zmin_repo.path(), cleanup_args, "zmin");
+        assert_eq!(zmin_result, git_result, "case {label}: args {cleanup_args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "status case {label}"
+        );
     }
 }
 

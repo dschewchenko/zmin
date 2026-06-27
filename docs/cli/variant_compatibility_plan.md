@@ -22,6 +22,54 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-27 the latest completed batch is a helper-free proof-only
+`am` active-session closure on the modeled single conflicting mail lane. This
+batch added two represented documented option pairs and promoted both to
+reviewed-complete by proving stock-Git parity for accepted `am -s` and `-r`,
+plus exact active-session behavior for conflicting `am <patch>`,
+`--show-current-patch=raw|diff`, `--retry`, `--continue`, `--resolved`,
+`--skip`, `--abort`, and `--quit`.
+
+The batch fixed one cohesive parser/runtime gap on the `am` path:
+
+- Zmin now persists a narrow `rebase-apply` session for the modeled
+  single-patch conflict lane, exposes the missing short aliases `-s` and `-r`,
+  and matches the current stock-Git stdout, stderr, exit code, and cleanup
+  behavior for the current unresolved-session resume family on that lane
+
+Focused verification was
+`cargo check -p zmin-cli`,
+`cargo test -p zmin-cli --test git_mail_series_compat -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(am|summary)\t'`,
+and `git diff --check`.
+
+Actual durable census after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2086 / 3212`
+- represented documented command-option pairs: `2091 / 3212`
+- matrix rows: `6160`
+- verified rows: `5360`
+- invalid-input rows: `775`
+- open or partial exact rows: `0`
+
+Per-command position on the touched surface:
+
+- `am`: `37 / 54` reviewed-complete documented option pairs, `42 / 54`
+  represented documented option pairs, `54` written rows, `54` classified
+  rows, `40` stock-matching rows, `14` invalid-input rows, and `0`
+  exact-open rows
+
+The next best high-throughput follow-up should stay on `am`, but move off
+this active-session closure into the remaining semantic tails that still sit
+at the head of `remaining_to_fix_or_verify.tsv`: `--allow-empty`,
+`--empty=keep`, `--quoted-cr` value completion, `--patch-format` value
+completion, and then the still-unrepresented `directory`/`ignore-date`/
+`gpg-sign` families.
+
+As of 2026-06-27 the latest completed batch is a helper-free proof-only
 `am` alias-and-passthrough closure on the same single-mail stock
 format-patch lane. This batch added twelve represented documented option
 pairs and promoted all twelve to reviewed-complete by proving stock-Git

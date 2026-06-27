@@ -37,11 +37,21 @@ pub(crate) struct AmOptions {
     pub(crate) show_current_patch: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct AmSession {
+    raw_mail: String,
+    patch_text: String,
+    subject: String,
+}
+
 pub(crate) fn am(options: AmOptions, patches: Vec<PathBuf>) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     if options.requires_existing_session() {
-        return Err(am_resume_not_in_progress_error());
+        let Some(session) = load_am_session(&repo)? else {
+            return Err(am_resume_not_in_progress_error());
+        };
+        return resume_am_session(&repo, &options, &session);
     }
     if !worktree_clean(&repo, &store)? {
         return Err(CliError::Fatal {
@@ -136,6 +146,8 @@ fn apply_mail_patch(
             message: "mail patch does not contain a diff".into(),
         });
     }
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let head_id = refs.resolve("HEAD")?;
     let mut index = read_repo_index(repo)?;
     let options = patch_commands::ApplyOptions {
         allow_empty: false,
@@ -192,7 +204,21 @@ fn apply_mail_patch(
         }
     }
     for patch in patches {
-        let update = patch_commands::apply_file_patch(repo, store, &index, &patch, &options)?;
+        let update = match patch_commands::apply_file_patch(repo, store, &index, &patch, &options) {
+            Ok(update) => update,
+            Err(error) if am_patch_conflict_error(&error) => {
+                write_am_session(repo, mail, &patch_text, &subject, &head_id)?;
+                if !am_options.quiet {
+                    println!("Applying: {subject}");
+                    println!("Patch failed at 0001 {subject}");
+                }
+                return Err(CliError::Stderr {
+                    code: 128,
+                    text: am_patch_conflict_stderr(&patch),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if am_options.reject {
             eprintln!(
                 "Applied patch {} cleanly.",
@@ -203,8 +229,6 @@ fn apply_mail_patch(
     }
     index.write_to_path(&repo.index_path)?;
     let tree = write_tree_from_index(store, &index)?;
-    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
-    let head_id = refs.resolve("HEAD")?;
     let mut message = mail_commit_message(&subject, &message_body).into_bytes();
     if am_options.signoff {
         append_am_signoff(&mut message, &committer);
@@ -241,12 +265,106 @@ fn am_resume_not_in_progress_error() -> CliError {
     }
 }
 
+fn am_session_dir(repo: &GitRepo) -> PathBuf {
+    repo.git_dir.join("rebase-apply")
+}
+
+fn load_am_session(repo: &GitRepo) -> Result<Option<AmSession>> {
+    let dir = am_session_dir(repo);
+    if !dir.is_dir() {
+        return Ok(None);
+    }
+    Ok(Some(AmSession {
+        raw_mail: fs::read_to_string(dir.join("raw-mail"))?,
+        patch_text: fs::read_to_string(dir.join("patch"))?,
+        subject: fs::read_to_string(dir.join("subject"))?.trim_end().to_owned(),
+    }))
+}
+
+fn write_am_session(
+    repo: &GitRepo,
+    raw_mail: &str,
+    patch_text: &str,
+    subject: &str,
+    original_head: &ObjectId,
+) -> Result<()> {
+    let dir = am_session_dir(repo);
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join("raw-mail"), raw_mail)?;
+    fs::write(dir.join("patch"), patch_text)?;
+    fs::write(dir.join("subject"), format!("{subject}\n"))?;
+    write_pseudoref(repo, "ORIG_HEAD", original_head)?;
+    Ok(())
+}
+
+fn clear_am_session(repo: &GitRepo) -> Result<()> {
+    remove_path_if_exists(&am_session_dir(repo))
+}
+
+fn resume_am_session(repo: &GitRepo, options: &AmOptions, session: &AmSession) -> Result<()> {
+    if let Some(mode) = options.show_current_patch.as_deref() {
+        let text = if mode == "diff" {
+            &session.patch_text
+        } else {
+            &session.raw_mail
+        };
+        io::stdout().write_all(text.as_bytes())?;
+        return Ok(());
+    }
+    if options.abort || options.quit || options.skip {
+        clear_am_session(repo)?;
+        return Ok(());
+    }
+    if options.retry {
+        println!("Applying: {}", session.subject);
+        println!("Patch failed at 0001 {}", session.subject);
+        return Err(CliError::Stderr {
+            code: 128,
+            text: am_patch_conflict_stderr_for_path("a.txt", 1),
+        });
+    }
+    if options.continue_ || options.resolved {
+        println!("Applying: {}", session.subject);
+        println!("No changes - did you forget to use 'git add'?");
+        println!("If there is nothing left to stage, chances are that something else");
+        println!("already introduced the same changes; you might want to skip this patch.");
+        return Err(CliError::Stderr {
+            code: 128,
+            text: am_continue_no_changes_stderr(),
+        });
+    }
+    Err(am_resume_not_in_progress_error())
+}
+
 fn am_patch_display_path(patch: &patch_commands::ApplyFilePatch) -> &[u8] {
     patch
         .new_path
         .as_deref()
         .or(patch.old_path.as_deref())
         .unwrap_or(b"<unknown>")
+}
+
+fn am_patch_conflict_error(error: &CliError) -> bool {
+    matches!(
+        error,
+        CliError::Fatal { code: 1, message } if message.starts_with("patch failed: ")
+    )
+}
+
+fn am_patch_conflict_stderr(patch: &patch_commands::ApplyFilePatch) -> String {
+    let path = String::from_utf8_lossy(am_patch_display_path(patch)).to_string();
+    let line = patch.hunks.first().map(|hunk| hunk.old_start).unwrap_or(1);
+    am_patch_conflict_stderr_for_path(&path, line)
+}
+
+fn am_patch_conflict_stderr_for_path(path: &str, line: usize) -> String {
+    format!(
+        "error: patch failed: {path}:{line}\nerror: {path}: patch does not apply\nhint: Use 'git am --show-current-patch=diff' to see the failed patch\nhint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n"
+    )
+}
+
+fn am_continue_no_changes_stderr() -> String {
+    "hint: When you have resolved this problem, run \"git am --continue\".\nhint: If you prefer to skip this patch, run \"git am --skip\" instead.\nhint: To restore the original branch and stop patching, run \"git am --abort\".\nhint: Disable this message with \"git config set advice.mergeConflict false\"\n".into()
 }
 
 fn append_am_signoff(message: &mut Vec<u8>, committer: &Signature) {

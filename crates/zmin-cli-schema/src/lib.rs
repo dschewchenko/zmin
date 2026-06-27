@@ -3278,7 +3278,7 @@ pub enum Command {
     Am {
         #[arg(long = "quiet", short = 'q', action = ArgAction::SetTrue)]
         quiet: bool,
-        #[arg(long = "signoff", action = ArgAction::SetTrue)]
+        #[arg(long = "signoff", short = 's', action = ArgAction::SetTrue)]
         signoff: bool,
         #[arg(long = "utf8", short = 'u', action = ArgAction::SetTrue)]
         utf8: bool,
@@ -3336,7 +3336,7 @@ pub enum Command {
         skip: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
         continue_: bool,
-        #[arg(long = "resolved", action = ArgAction::SetTrue)]
+        #[arg(long = "resolved", short = 'r', action = ArgAction::SetTrue)]
         resolved: bool,
         #[arg(long = "retry", action = ArgAction::SetTrue)]
         retry: bool,
