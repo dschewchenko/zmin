@@ -3,8 +3,8 @@ mod common;
 use std::fs;
 
 use common::{
-    command_output_with_env, configure_identity, git, git_failure_output, git_with_env, run_zmin,
-    run_zmin_failure_output, write_file,
+    command_any_output, command_any_output_with_stdin, command_output_with_env, configure_identity,
+    git, git_failure_output, git_with_env, run_zmin, run_zmin_failure_output, write_file, zmin_bin,
 };
 
 #[test]
@@ -376,4 +376,117 @@ fn for_each_ref_date_atoms_match_stock_git() {
             "for-each-ref date atoms should match for {pattern}"
         );
     }
+}
+
+#[test]
+fn for_each_ref_remaining_documented_flags_match_stock_git() {
+    let repo = common::git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["config", "tag.gpgSign", "false"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "initial subject"]);
+    git(repo.path(), ["branch", "feature"]);
+    git_with_env(
+        repo.path(),
+        ["tag", "-a", "v1", "-m", "tag subject\nsecond line\n\nbody"],
+    );
+    let blob_id = git(repo.path(), ["hash-object", "a.txt"]);
+    git(repo.path(), ["update-ref", "refs/blobs/a", &blob_id]);
+    write_file(repo.path(), "a.txt", "two\n");
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["add", "-A"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000100 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000100 +0000"),
+        ],
+        "git add",
+    );
+    command_output_with_env(
+        "git",
+        repo.path(),
+        &["commit", "-m", "second subject"],
+        &[
+            ("GIT_AUTHOR_NAME", "Bench"),
+            ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+            ("GIT_AUTHOR_DATE", "1700000100 +0000"),
+            ("GIT_COMMITTER_NAME", "Bench"),
+            ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+            ("GIT_COMMITTER_DATE", "1700000100 +0000"),
+        ],
+        "git commit",
+    );
+    git(repo.path(), ["tag", "tip"]);
+    let head = git(repo.path(), ["rev-parse", "HEAD"]);
+    let base = git(repo.path(), ["rev-parse", "HEAD^"]);
+
+    for args in [
+        vec!["for-each-ref", "--color=always", "--format=%(refname:short)", "refs/heads"],
+        vec!["for-each-ref", "--contains", base.trim(), "--format=%(refname:short)"],
+        vec!["for-each-ref", "--count=1", "--format=%(refname:short)"],
+        vec!["for-each-ref", "--exclude=refs/tags/*", "--format=%(refname)"],
+        vec!["for-each-ref", "--ignore-case", "refs/HEADS/*", "--format=%(refname)"],
+        vec!["for-each-ref", "--include-root-refs", "--format=%(refname)"],
+        vec!["for-each-ref", "--merged", head.trim(), "--format=%(refname:short)"],
+        vec!["for-each-ref", "--no-contains", head.trim(), "--format=%(refname:short)"],
+        vec!["for-each-ref", "--no-merged", base.trim(), "--format=%(refname:short)"],
+        vec!["for-each-ref", "--omit-empty", "--format="],
+        vec!["for-each-ref", "--shell", "--format=%(refname:short)=%(subject)", "refs/tags"],
+        vec!["for-each-ref", "--python", "--format=%(refname:short)=%(subject)", "refs/tags"],
+        vec!["for-each-ref", "--perl", "--format=%(refname:short)=%(subject)", "refs/tags"],
+        vec!["for-each-ref", "--tcl", "--format=%(refname:short)=%(subject)", "refs/tags"],
+        vec!["for-each-ref", "--points-at", head.trim(), "--format=%(refname:short)"],
+    ] {
+        assert_eq!(
+            command_any_output(zmin_bin(), repo.path(), &args, "zmin for-each-ref"),
+            command_any_output("git", repo.path(), &args, "git for-each-ref"),
+            "for-each-ref args should match for {args:?}"
+        );
+    }
+
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            repo.path(),
+            &["for-each-ref", "--stdin", "--format=%(refname)"],
+            "refs/heads\nrefs/tags\n",
+            "zmin for-each-ref --stdin",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            repo.path(),
+            &["for-each-ref", "--stdin", "--format=%(refname)"],
+            "refs/heads\nrefs/tags\n",
+            "git for-each-ref --stdin",
+        ),
+        "for-each-ref --stdin should match stock Git"
+    );
+    assert_eq!(
+        command_any_output_with_stdin(
+            zmin_bin(),
+            repo.path(),
+            &["for-each-ref", "--count=1", "--stdin", "--format=%(refname)"],
+            "refs/heads\nrefs/tags\n",
+            "zmin for-each-ref --count --stdin",
+        ),
+        command_any_output_with_stdin(
+            "git",
+            repo.path(),
+            &["for-each-ref", "--count=1", "--stdin", "--format=%(refname)"],
+            "refs/heads\nrefs/tags\n",
+            "git for-each-ref --count --stdin",
+        ),
+        "for-each-ref --count with --stdin should match stock Git"
+    );
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["for-each-ref", "--stdin", "--format=%(refname)", "refs/heads"]),
+        git_failure_output(repo.path(), &["for-each-ref", "--stdin", "--format=%(refname)", "refs/heads"]),
+        "for-each-ref should reject extra arguments with --stdin like stock Git"
+    );
 }

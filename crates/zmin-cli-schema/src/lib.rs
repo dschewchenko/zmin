@@ -5596,6 +5596,38 @@ pub enum Command {
         format: Option<String>,
         #[arg(long = "sort")]
         sort: Vec<String>,
+        #[arg(long = "count")]
+        count: Option<usize>,
+        #[arg(long = "shell", action = ArgAction::SetTrue)]
+        shell: bool,
+        #[arg(long = "python", action = ArgAction::SetTrue)]
+        python: bool,
+        #[arg(long = "perl", action = ArgAction::SetTrue)]
+        perl: bool,
+        #[arg(long = "tcl", action = ArgAction::SetTrue)]
+        tcl: bool,
+        #[arg(long = "color", num_args = 0..=1, require_equals = true, default_missing_value = "always")]
+        color: Option<String>,
+        #[arg(short = 'i', long = "ignore-case", action = ArgAction::SetTrue)]
+        ignore_case: bool,
+        #[arg(long = "contains", num_args = 0..=1, default_missing_value = "HEAD")]
+        contains: Option<String>,
+        #[arg(long = "no-contains", num_args = 0..=1, default_missing_value = "HEAD")]
+        no_contains: Option<String>,
+        #[arg(long = "merged", num_args = 0..=1, default_missing_value = "HEAD")]
+        merged: Option<String>,
+        #[arg(long = "no-merged", num_args = 0..=1, default_missing_value = "HEAD")]
+        no_merged: Option<String>,
+        #[arg(long = "points-at")]
+        points_at: Option<String>,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
+        #[arg(long = "stdin", action = ArgAction::SetTrue)]
+        stdin: bool,
+        #[arg(long = "include-root-refs", action = ArgAction::SetTrue)]
+        include_root_refs: bool,
+        #[arg(long = "omit-empty", action = ArgAction::SetTrue)]
+        omit_empty: bool,
         patterns: Vec<String>,
     },
     LsTree {

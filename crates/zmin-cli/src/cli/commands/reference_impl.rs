@@ -2126,32 +2126,94 @@ fn peel_show_ref_tag(store: &LooseObjectStore, id: &ObjectId) -> Result<Option<O
     })
 }
 
-pub(crate) fn for_each_ref(
-    format: Option<&str>,
-    sort: Vec<String>,
-    patterns: Vec<String>,
-) -> Result<()> {
+pub(crate) struct ForEachRefOptions<'a> {
+    pub(crate) format: Option<&'a str>,
+    pub(crate) sort: Vec<String>,
+    pub(crate) count: Option<usize>,
+    pub(crate) shell: bool,
+    pub(crate) python: bool,
+    pub(crate) perl: bool,
+    pub(crate) tcl: bool,
+    pub(crate) color: Option<String>,
+    pub(crate) ignore_case: bool,
+    pub(crate) contains: Option<String>,
+    pub(crate) no_contains: Option<String>,
+    pub(crate) merged: Option<String>,
+    pub(crate) no_merged: Option<String>,
+    pub(crate) points_at: Option<String>,
+    pub(crate) exclude: Vec<String>,
+    pub(crate) stdin: bool,
+    pub(crate) include_root_refs: bool,
+    pub(crate) omit_empty: bool,
+    pub(crate) patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForEachRefQuoteMode {
+    None,
+    ShellLike,
+    Tcl,
+}
+
+pub(crate) fn for_each_ref(options: ForEachRefOptions<'_>) -> Result<()> {
     let repo = find_repo_or_bare()?;
-    let format = format.unwrap_or("%(objectname) %(objecttype)\t%(refname)");
-    let requirements = for_each_ref_requirements(format, &sort)?;
+    let _color = &options.color;
+    if options.stdin && !options.patterns.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "unknown arguments supplied with --stdin".into(),
+        });
+    }
+    let quote_mode = for_each_ref_quote_mode(&options);
+    let format = options
+        .format
+        .unwrap_or("%(objectname) %(objecttype)\t%(refname)");
+    let requirements = for_each_ref_requirements(format, &options.sort)?;
     let current_head_ref = current_branch_ref_from_head_file(&repo.git_dir)?;
-    if sort.is_empty()
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let filter = for_each_ref_filter(&repo, &store, &options)?;
+    let patterns = if options.stdin {
+        read_for_each_ref_stdin_patterns()?
+    } else {
+        options.patterns
+    };
+    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let commit_cache = CommitObjectCache::new(&store);
+    if options.sort.is_empty()
         && let Some(parts) = simple_for_each_ref_format_parts(format)
     {
         let refs = OwnedCliRefsStoreAdapter::from_path(&repo.git_dir, GitHashAlgorithm::Sha1);
-        print_simple_for_each_ref_rows(&refs, &patterns, &parts)?;
+        print_simple_for_each_ref_rows(
+            &repo,
+            &refs,
+            &store,
+            &commit_cache,
+            &patterns,
+            &options.exclude,
+            options.ignore_case,
+            options.include_root_refs,
+            filter.as_ref(),
+            &parts,
+            options.count,
+        )?;
         return Ok(());
     }
-    let runtime = CliPrimitiveRuntime::new_default(&repo);
-    if sort.is_empty() {
+    if options.sort.is_empty() {
         print_for_each_ref_rows(
             &repo,
             runtime.refs(),
             runtime.objects(),
             &patterns,
+            &options.exclude,
+            options.ignore_case,
+            options.include_root_refs,
+            filter.as_ref(),
             format,
             &requirements,
             current_head_ref.as_deref(),
+            options.count,
+            options.omit_empty,
+            quote_mode,
         )?;
         return Ok(());
     }
@@ -2160,12 +2222,22 @@ pub(crate) fn for_each_ref(
         runtime.refs(),
         runtime.objects(),
         &patterns,
+        &options.exclude,
+        options.ignore_case,
+        options.include_root_refs,
+        filter.as_ref(),
         &requirements,
         current_head_ref.as_deref(),
     )?;
-    apply_for_each_ref_sort(&mut rows, &sort)?;
+    apply_for_each_ref_sort(&mut rows, &options.sort)?;
+    if let Some(count) = options.count {
+        rows.truncate(count);
+    }
     for row in &rows {
-        println!("{}", render_for_each_ref_row(format, row)?);
+        let rendered = render_for_each_ref_row_with_mode(format, row, quote_mode)?;
+        if !options.omit_empty || !rendered.is_empty() {
+            println!("{rendered}");
+        }
     }
     Ok(())
 }
@@ -2232,23 +2304,216 @@ enum RefNameStripMode {
     Rstrip,
 }
 
+#[derive(Debug, Clone)]
+struct ForEachRefFilter {
+    contains: Option<ObjectId>,
+    no_contains: Option<ObjectId>,
+    merged: Option<ObjectId>,
+    no_merged: Option<ObjectId>,
+    points_at: Option<ObjectId>,
+}
+
+fn for_each_ref_quote_mode(options: &ForEachRefOptions<'_>) -> ForEachRefQuoteMode {
+    if options.tcl {
+        return ForEachRefQuoteMode::Tcl;
+    }
+    if options.shell || options.python || options.perl {
+        return ForEachRefQuoteMode::ShellLike;
+    }
+    ForEachRefQuoteMode::None
+}
+
+fn read_for_each_ref_stdin_patterns() -> Result<Vec<String>> {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    Ok(input
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+fn read_head_direct_ref(git_dir: &Path) -> Result<String> {
+    let head = fs::read_to_string(git_dir.join("HEAD"))?;
+    let value = head.trim();
+    if let Some(target) = value.strip_prefix("ref: ") {
+        let refs = RefStore::new(git_dir, GitHashAlgorithm::Sha1);
+        let id = refs.resolve(target).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("bad ref: {target}"),
+        })?;
+        return Ok(id.to_hex());
+    }
+    Ok(value.to_owned())
+}
+
+fn for_each_ref_pattern_matches(
+    ref_name: &str,
+    patterns: &[String],
+    exclude: &[String],
+    ignore_case: bool,
+) -> bool {
+    (patterns.is_empty()
+        || patterns
+            .iter()
+            .any(|pattern| wildcard_match_maybe_casefold(pattern, ref_name, ignore_case)))
+        && !exclude
+            .iter()
+            .any(|pattern| wildcard_match_maybe_casefold(pattern, ref_name, ignore_case))
+}
+
+fn wildcard_match_maybe_casefold(pattern: &str, value: &str, ignore_case: bool) -> bool {
+    let matches_prefix = |pattern: &str, value: &str| {
+        let pattern = pattern.trim_end_matches('/');
+        value == pattern || value.starts_with(&format!("{pattern}/"))
+    };
+    if ignore_case {
+        let pattern = pattern.to_ascii_lowercase();
+        let value = value.to_ascii_lowercase();
+        if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+            wildcard_match(&pattern, &value)
+        } else {
+            matches_prefix(&pattern, &value)
+        }
+    } else if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        wildcard_match(pattern, value)
+    } else {
+        matches_prefix(pattern, value)
+    }
+}
+
+fn for_each_ref_filter(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    options: &ForEachRefOptions<'_>,
+) -> Result<Option<ForEachRefFilter>> {
+    let contains = tag_filter_target(repo, store, options.contains.as_deref(), true)?;
+    let no_contains = tag_filter_target(repo, store, options.no_contains.as_deref(), true)?;
+    let merged = tag_filter_target(repo, store, options.merged.as_deref(), false)?;
+    let no_merged = tag_filter_target(repo, store, options.no_merged.as_deref(), false)?;
+    let points_at = options
+        .points_at
+        .as_deref()
+        .map(|target| resolve_objectish(repo, target))
+        .transpose()?;
+    if contains.is_none()
+        && no_contains.is_none()
+        && merged.is_none()
+        && no_merged.is_none()
+        && points_at.is_none()
+    {
+        return Ok(None);
+    }
+    Ok(Some(ForEachRefFilter {
+        contains,
+        no_contains,
+        merged,
+        no_merged,
+        points_at,
+    }))
+}
+
+fn for_each_ref_filter_matches(
+    repo: &GitRepo,
+    ref_name: &str,
+    object_id: &str,
+    filter: Option<&ForEachRefFilter>,
+) -> Result<bool> {
+    let Some(filter) = filter else {
+        return Ok(true);
+    };
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let commit_cache = CommitObjectCache::new(&store);
+    for_each_ref_filter_matches_with_store(&store, &commit_cache, ref_name, object_id, Some(filter))
+}
+
+fn for_each_ref_filter_matches_with_store(
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    ref_name: &str,
+    object_id: &str,
+    filter: Option<&ForEachRefFilter>,
+) -> Result<bool> {
+    let Some(filter) = filter else {
+        return Ok(true);
+    };
+    let object_id = parse_primitive_object_id(object_id)?;
+    if let Some(target) = &filter.points_at {
+        let peeled = if ref_name.starts_with("refs/tags/") {
+            peel_show_ref_tag(store, &object_id)?
+        } else {
+            peel_to_commit(store, object_id.clone())?
+        };
+        if target != &object_id && peeled.as_ref() != Some(target) {
+            return Ok(false);
+        }
+    }
+    if filter.contains.is_none()
+        && filter.no_contains.is_none()
+        && filter.merged.is_none()
+        && filter.no_merged.is_none()
+    {
+        return Ok(true);
+    }
+    let Some(commit_id) = peel_to_commit(store, object_id)? else {
+        return Ok(false);
+    };
+    if let Some(target) = &filter.contains
+        && !is_ancestor_commit_cached(commit_cache, target, &commit_id)?
+    {
+        return Ok(false);
+    }
+    if let Some(target) = &filter.no_contains
+        && is_ancestor_commit_cached(commit_cache, target, &commit_id)?
+    {
+        return Ok(false);
+    }
+    if let Some(target) = &filter.merged
+        && !is_ancestor_commit_cached(commit_cache, &commit_id, target)?
+    {
+        return Ok(false);
+    }
+    if let Some(target) = &filter.no_merged
+        && is_ancestor_commit_cached(commit_cache, &commit_id, target)?
+    {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
 fn collect_for_each_ref_rows(
     repo: &GitRepo,
     refs: &dyn GitRefsStore,
     objects: &dyn GitObjectStore,
     patterns: &[String],
+    exclude: &[String],
+    ignore_case: bool,
+    include_root_refs: bool,
+    filter: Option<&ForEachRefFilter>,
     requirements: &ForEachRefRequirements,
     current_head_ref: Option<&str>,
 ) -> Result<Vec<ForEachRefRow>> {
     let mut rows = Vec::new();
+    if include_root_refs
+        && for_each_ref_pattern_matches("HEAD", patterns, exclude, ignore_case)
+        && for_each_ref_filter_matches(repo, "HEAD", &read_head_direct_ref(&repo.git_dir)?, filter)?
+    {
+        rows.push(build_for_each_ref_row(
+            repo,
+            "HEAD",
+            &read_head_direct_ref(&repo.git_dir)?,
+            objects,
+            requirements,
+            current_head_ref,
+        )?);
+    }
     for (ref_name, object_id) in refs
         .list_refs(Some("refs/"))
         .map_err(|error| map_primitive_error(error, "list refs"))?
     {
-        if patterns.is_empty()
-            || patterns
-                .iter()
-                .any(|pattern| ref_pattern_matches(&ref_name, pattern))
+        if for_each_ref_pattern_matches(&ref_name, patterns, exclude, ignore_case)
+            && for_each_ref_filter_matches(repo, &ref_name, &object_id, filter)?
         {
             rows.push(build_for_each_ref_row(
                 repo,
@@ -2268,29 +2533,68 @@ fn print_for_each_ref_rows(
     refs: &dyn GitRefsStore,
     objects: &dyn GitObjectStore,
     patterns: &[String],
+    exclude: &[String],
+    ignore_case: bool,
+    include_root_refs: bool,
+    filter: Option<&ForEachRefFilter>,
     format: &str,
     requirements: &ForEachRefRequirements,
     current_head_ref: Option<&str>,
+    count: Option<usize>,
+    omit_empty: bool,
+    quote_mode: ForEachRefQuoteMode,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
     let simple_format = simple_for_each_ref_format_parts(format);
+    let mut remaining = count.unwrap_or(usize::MAX);
     let mut outcome = Ok(());
+    if include_root_refs
+        && remaining > 0
+        && for_each_ref_pattern_matches("HEAD", patterns, exclude, ignore_case)
+        && for_each_ref_filter_matches(repo, "HEAD", &read_head_direct_ref(&repo.git_dir)?, filter)?
+    {
+        let head_id = read_head_direct_ref(&repo.git_dir)?;
+        if let Some(parts) = simple_format.as_deref() {
+            write_simple_for_each_ref_row(&mut stdout, parts, "HEAD", &head_id)?;
+            remaining = remaining.saturating_sub(1);
+        } else {
+            let row = build_for_each_ref_row(
+                repo,
+                "HEAD",
+                &head_id,
+                objects,
+                requirements,
+                current_head_ref,
+            )?;
+            let rendered = render_for_each_ref_row_with_mode(format, &row, quote_mode)?;
+            if !omit_empty || !rendered.is_empty() {
+                writeln!(stdout, "{rendered}")?;
+            }
+            remaining = remaining.saturating_sub(1);
+        }
+    }
     refs.visit_refs(Some("refs/"), &mut |ref_name, object_id| {
-        if outcome.is_err() {
+        if outcome.is_err() || remaining == 0 {
             return Ok(());
         }
-        if !patterns.is_empty()
-            && !patterns
-                .iter()
-                .any(|pattern| ref_pattern_matches(&ref_name, pattern))
-        {
+        if !for_each_ref_pattern_matches(ref_name, patterns, exclude, ignore_case) {
             return Ok(());
+        }
+        match for_each_ref_filter_matches(repo, ref_name, object_id, filter) {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(error) => {
+                outcome = Err(error);
+                return Ok(());
+            }
         }
         if let Some(parts) = simple_format.as_deref() {
             if let Err(error) =
                 write_simple_for_each_ref_row(&mut stdout, parts, ref_name, object_id)
             {
                 outcome = Err(error);
+            } else {
+                remaining = remaining.saturating_sub(1);
             }
             return Ok(());
         }
@@ -2302,11 +2606,15 @@ fn print_for_each_ref_rows(
             requirements,
             current_head_ref,
         )
-        .and_then(|row| render_for_each_ref_row(format, &row))
+        .and_then(|row| render_for_each_ref_row_with_mode(format, &row, quote_mode))
         {
             Ok(rendered) => {
-                if let Err(error) = writeln!(stdout, "{rendered}") {
+                if (!omit_empty || !rendered.is_empty())
+                    && let Err(error) = writeln!(stdout, "{rendered}")
+                {
                     outcome = Err(CliError::Io(error));
+                } else {
+                    remaining = remaining.saturating_sub(1);
                 }
             }
             Err(error) => outcome = Err(error),
@@ -2318,25 +2626,48 @@ fn print_for_each_ref_rows(
 }
 
 fn print_simple_for_each_ref_rows(
+    repo: &GitRepo,
     refs: &dyn GitRefsStore,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     patterns: &[String],
+    exclude: &[String],
+    ignore_case: bool,
+    include_root_refs: bool,
+    filter: Option<&ForEachRefFilter>,
     parts: &[SimpleForEachRefFormatPart<'_>],
+    count: Option<usize>,
 ) -> Result<()> {
     let mut stdout = io::stdout().lock();
+    let mut remaining = count.unwrap_or(usize::MAX);
     let mut outcome = Ok(());
+    if include_root_refs
+        && remaining > 0
+        && for_each_ref_pattern_matches("HEAD", patterns, exclude, ignore_case)
+        && for_each_ref_filter_matches(repo, "HEAD", &read_head_direct_ref(&repo.git_dir)?, filter)?
+    {
+        write_simple_for_each_ref_row(&mut stdout, parts, "HEAD", &read_head_direct_ref(&repo.git_dir)?)?;
+        remaining = remaining.saturating_sub(1);
+    }
     refs.visit_refs(Some("refs/"), &mut |ref_name, object_id| {
-        if outcome.is_err() {
+        if outcome.is_err() || remaining == 0 {
             return Ok(());
         }
-        if !patterns.is_empty()
-            && !patterns
-                .iter()
-                .any(|pattern| ref_pattern_matches(&ref_name, pattern))
-        {
+        if !for_each_ref_pattern_matches(ref_name, patterns, exclude, ignore_case) {
             return Ok(());
+        }
+        match for_each_ref_filter_matches_with_store(store, commit_cache, ref_name, object_id, filter) {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(error) => {
+                outcome = Err(error);
+                return Ok(());
+            }
         }
         if let Err(error) = write_simple_for_each_ref_row(&mut stdout, parts, ref_name, object_id) {
             outcome = Err(error);
+        } else {
+            remaining = remaining.saturating_sub(1);
         }
         Ok(())
     })
@@ -2707,6 +3038,14 @@ pub(crate) fn apply_for_each_ref_sort(rows: &mut [ForEachRefRow], sort: &[String
 }
 
 pub(crate) fn render_for_each_ref_row(format: &str, row: &ForEachRefRow) -> Result<String> {
+    render_for_each_ref_row_with_mode(format, row, ForEachRefQuoteMode::None)
+}
+
+fn render_for_each_ref_row_with_mode(
+    format: &str,
+    row: &ForEachRefRow,
+    quote_mode: ForEachRefQuoteMode,
+) -> Result<String> {
     let mut out = String::new();
     let mut rest = format;
     while let Some(start) = rest.find("%(") {
@@ -2719,7 +3058,7 @@ pub(crate) fn render_for_each_ref_row(format: &str, row: &ForEachRefRow) -> Resu
             });
         };
         let atom = &after_start[..end];
-        out.push_str(&for_each_ref_atom(atom, row)?);
+        out.push_str(&for_each_ref_quote(&for_each_ref_atom(atom, row)?, quote_mode));
         rest = &after_start[end + 1..];
     }
     push_for_each_ref_literal(&mut out, rest)?;
@@ -2845,6 +3184,14 @@ fn for_each_ref_atom(atom: &str, row: &ForEachRefRow) -> Result<String> {
             code: 128,
             message: format!("unknown field name: {atom}"),
         }),
+    }
+}
+
+fn for_each_ref_quote(value: &str, mode: ForEachRefQuoteMode) -> String {
+    match mode {
+        ForEachRefQuoteMode::None => value.to_owned(),
+        ForEachRefQuoteMode::ShellLike => format!("'{}'", value.replace('\'', "'\\''")),
+        ForEachRefQuoteMode::Tcl => format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
     }
 }
 
@@ -2997,11 +3344,6 @@ fn for_each_ref_strict_iso_date(timestamp: i64, timezone: &str) -> Result<String
     } else {
         Ok(formatted)
     }
-}
-
-fn ref_pattern_matches(ref_name: &str, pattern: &str) -> bool {
-    let pattern = pattern.trim_end_matches('/');
-    ref_name == pattern || ref_name.starts_with(&format!("{pattern}/"))
 }
 
 #[derive(Default)]

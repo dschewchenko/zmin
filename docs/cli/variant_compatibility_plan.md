@@ -21,7 +21,60 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-28 the latest completed batch is a helper-free local `tag`
+As of 2026-06-28 the latest completed batch is a helper-free local
+`for-each-ref` documented-tail closure across the already modeled listing,
+format-atom, invalid-format, and date-atom lanes. This batch added fifteen
+exact stock-Git rows plus one stock-compatible invalid-input lane and promoted
+the same sixteen documented option pairs into the reviewed-complete census
+set: `--color`, `--contains`, `--count`, `--exclude`, `--ignore-case`,
+`--include-root-refs`, `--merged`, `--no-contains`, `--no-merged`,
+`--omit-empty`, `--perl`, `--points-at`, `--python`, `--shell`, `--stdin`,
+and `--tcl`. The runtime closure stayed intentionally bounded:
+`for-each-ref` now accepts the remaining documented selector, quoting, and
+filter spellings through schema and dispatch, supports stock-like `--stdin`
+pattern loading and `--count` truncation, applies `--contains`,
+`--no-contains`, `--merged`, `--no-merged`, `--points-at`, `--exclude`,
+`--ignore-case`, and `--include-root-refs` on the modeled helper-free local
+fixtures, preserves empty-output behavior for `--omit-empty`, and matches
+stock Git quoting semantics for `--shell`, `--python`, `--perl`, and `--tcl`.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_for_each_ref_compat for_each_ref_remaining_documented_flags_match_stock_git -- --exact --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(for-each-ref|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2677 / 3212`
+- represented documented command-option pairs: `2677 / 3212`
+- matrix rows: `6980`
+- verified rows: `6118`
+- invalid-input rows: `837`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `535`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `for-each-ref`: `18 / 18` reviewed-complete documented option pairs,
+  `18 / 18` represented documented option pairs, `50` written rows, `50`
+  classified rows, `39` stock-matching rows, `11` invalid-input rows, and `0`
+  exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes the full represented `for-each-ref` documented surface
+without widening into broader ref-walking or extra output-encoding lanes yet.
+The densest remaining helper-free backlog now still starts with `replay`,
+`send-email`, `rebase`, `pack-objects`, `p4`, and `diff-tree`; the only
+command matrices still not promoted are `archimport`, `citool`,
+`cvsexportcommit`, `cvsimport`, and `svn`.
+
+As of 2026-06-28 the previous completed batch is a helper-free local `tag`
 documented-tail closure across the already modeled annotated-create and
 listing lanes. This batch added ten exact stock-Git rows and promoted the same
 ten documented option pairs into the reviewed-complete census set:
@@ -34,41 +87,6 @@ reopen with `GIT_EDITOR=:`, trailer insertion, and explicit/implicit GPG
 signing; and the deterministic empty-`GNUPGHOME` signing-failure lane matches
 stock Git stderr, exit code, and unchanged refs for `--sign`, `-s`,
 `--local-user`, and `-u`.
-
-Focused verification was
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_refs_compat tag_remaining_documented_flags_match_stock_git -- --exact --nocapture`,
-`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(tag|summary)\t'`,
-and `git diff --check`.
-
-Actual durable readiness/status after this batch:
-
-- complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2661 / 3212`
-- represented documented command-option pairs: `2661 / 3212`
-- matrix rows: `6964`
-- verified rows: `6102`
-- invalid-input rows: `837`
-- open or partial exact rows: `0`
-- remaining to fix or verify rows: `551`
-- implemented but unverified rows: `25`
-
-Per-command position on the touched surface:
-
-- `tag`: `38 / 38` reviewed-complete documented option pairs,
-  `38 / 38` represented documented option pairs, `57` written rows, `57`
-  classified rows, `47` stock-matching rows, `10` invalid-input rows, and `0`
-  exact-open rows
-
-This is an implementation-plus-review closure batch rather than a census-only
-promotion: it closes the full represented `tag` documented surface without
-expanding into broader signed-tag success-oracle normalization or additional
-TTY-specific listing lanes yet. The densest remaining helper-free backlog now
-still starts with `replay`, `send-email`, `rebase`, `pack-objects`, `p4`, and
-`diff-tree`.
 
 As of 2026-06-27 the latest completed batch is a helper-free local `log`
 documented-tail closure across the already modeled explicit-HEAD, all-refs,
