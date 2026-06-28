@@ -227,6 +227,21 @@ pub(crate) struct FastExportOptions {
     pub(crate) refs: Vec<String>,
 }
 
+pub(crate) struct FastImportOptions {
+    pub(crate) date_format: Option<String>,
+    pub(crate) quiet: bool,
+    pub(crate) stats: bool,
+    pub(crate) force: bool,
+    pub(crate) done: bool,
+    pub(crate) allow_unsafe_features: bool,
+    pub(crate) active_branches: Option<String>,
+    pub(crate) big_file_threshold: Option<String>,
+    pub(crate) cat_blob_fd: Option<String>,
+    pub(crate) export_marks: Option<PathBuf>,
+    pub(crate) import_marks: Option<PathBuf>,
+    pub(crate) import_marks_if_exists: Option<PathBuf>,
+}
+
 pub(crate) fn fast_export(options: FastExportOptions) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
@@ -661,8 +676,9 @@ fn write_fast_export_marks_file(path: &Path, state: &FastExportState) -> Result<
     Ok(())
 }
 
-pub(crate) fn fast_import(date_format: Option<&str>) -> Result<()> {
+pub(crate) fn fast_import(options: FastImportOptions) -> Result<()> {
     let repo = find_repo()?;
+    fast_import_modeled_noop_surface(&options);
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
     let ref_repo = GitRepo {
@@ -679,9 +695,20 @@ pub(crate) fn fast_import(date_format: Option<&str>) -> Result<()> {
         &ref_repo,
         &store,
         &refs,
-        FastImportDateFormat::from_cli(date_format, &repo.git_dir)?,
+        FastImportDateFormat::from_cli(options.date_format.as_deref(), &repo.git_dir)?,
+        options,
     )
     .parse()
+}
+
+fn fast_import_modeled_noop_surface(options: &FastImportOptions) {
+    let _ = (
+        options.force,
+        options.allow_unsafe_features,
+        options.active_branches.as_deref(),
+        options.big_file_threshold.as_deref(),
+        options.cat_blob_fd.as_deref(),
+    );
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -720,6 +747,7 @@ struct FastImportParser<'a> {
     ref_tips: HashMap<String, ObjectId>,
     pending_line: Option<String>,
     stats: FastImportStats,
+    options: FastImportOptions,
 }
 
 #[derive(Default)]
@@ -739,6 +767,7 @@ impl<'a> FastImportParser<'a> {
         store: &'a LooseObjectStore,
         refs: &'a RefStore,
         date_format: FastImportDateFormat,
+        options: FastImportOptions,
     ) -> Self {
         Self {
             input,
@@ -754,10 +783,13 @@ impl<'a> FastImportParser<'a> {
             ref_tips: HashMap::new(),
             pending_line: None,
             stats: FastImportStats::default(),
+            options,
         }
     }
 
     fn parse(&mut self) -> Result<()> {
+        self.preload_marks()?;
+        let mut saw_done = false;
         while let Some(line) = self.next_control_line()? {
             if line.is_empty() {
                 continue;
@@ -771,6 +803,7 @@ impl<'a> FastImportParser<'a> {
             } else if line == "checkpoint" {
                 continue;
             } else if line == "done" {
+                saw_done = true;
                 break;
             } else if line.starts_with("progress ") {
                 println!("{line}");
@@ -778,7 +811,62 @@ impl<'a> FastImportParser<'a> {
                 return Err(self.unsupported_fast_import_command(&line)?);
             }
         }
+        if self.options.done && !saw_done {
+            return Err(fast_import_crash_error(
+                &self.repo.git_dir,
+                "stream ends early".to_owned(),
+                None,
+            )?);
+        }
+        self.export_marks()?;
         self.write_statistics()?;
+        Ok(())
+    }
+
+    fn preload_marks(&mut self) -> Result<()> {
+        if let Some(path) = self.options.import_marks.clone() {
+            self.load_marks_file(&path)?;
+        }
+        if let Some(path) = self.options.import_marks_if_exists.clone()
+            && path.exists()
+        {
+            self.load_marks_file(&path)?;
+        }
+        Ok(())
+    }
+
+    fn load_marks_file(&mut self, path: &Path) -> Result<()> {
+        for line in fs::read_to_string(path)?.lines() {
+            let Some((mark, oid)) = line.split_once(' ') else {
+                continue;
+            };
+            let Some(mark) = mark.strip_prefix(':') else {
+                continue;
+            };
+            let mark = mark
+                .parse::<usize>()
+                .map_err(|_| fast_import_parse_error())?;
+            let id = ObjectId::from_hex(GitHashAlgorithm::Sha1, oid.trim()).map_err(CliError::Io)?;
+            self.marks.insert(mark, id);
+        }
+        Ok(())
+    }
+
+    fn export_marks(&self) -> Result<()> {
+        let Some(path) = self.options.export_marks.as_deref() else {
+            return Ok(());
+        };
+        let mut marks = self
+            .marks
+            .iter()
+            .map(|(mark, id)| (*mark, id.to_hex()))
+            .collect::<Vec<_>>();
+        marks.sort_by_key(|(mark, _)| *mark);
+        let mut out = Vec::new();
+        for (mark, id) in marks {
+            writeln!(&mut out, ":{mark} {id}")?;
+        }
+        fs::write(path, out)?;
         Ok(())
     }
 
@@ -1108,6 +1196,9 @@ impl<'a> FastImportParser<'a> {
     }
 
     fn write_statistics(&self) -> Result<()> {
+        if self.options.quiet && !self.options.stats {
+            return Ok(());
+        }
         let mut err = io::stderr().lock();
         let total_objects =
             self.stats.blobs + self.stats.trees + self.stats.commits + self.stats.tags;

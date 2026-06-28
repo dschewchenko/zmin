@@ -4743,6 +4743,28 @@ pub enum Command {
     FastImport {
         #[arg(long = "date-format")]
         date_format: Option<String>,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
+        #[arg(long = "stats", action = ArgAction::SetTrue)]
+        stats: bool,
+        #[arg(long = "force", action = ArgAction::SetTrue)]
+        force: bool,
+        #[arg(long = "done", action = ArgAction::SetTrue)]
+        done: bool,
+        #[arg(long = "allow-unsafe-features", action = ArgAction::SetTrue)]
+        allow_unsafe_features: bool,
+        #[arg(long = "active-branches")]
+        active_branches: Option<String>,
+        #[arg(long = "big-file-threshold")]
+        big_file_threshold: Option<String>,
+        #[arg(long = "cat-blob-fd")]
+        cat_blob_fd: Option<String>,
+        #[arg(long = "export-marks", value_hint = ValueHint::FilePath)]
+        export_marks: Option<PathBuf>,
+        #[arg(long = "import-marks", value_hint = ValueHint::FilePath)]
+        import_marks: Option<PathBuf>,
+        #[arg(long = "import-marks-if-exists", value_hint = ValueHint::FilePath)]
+        import_marks_if_exists: Option<PathBuf>,
     },
     CommitGraph {
         #[command(subcommand)]

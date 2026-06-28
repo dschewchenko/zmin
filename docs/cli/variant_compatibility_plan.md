@@ -21,7 +21,70 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-28 the latest completed batch is a helper-free local `log`
+As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-import` represented-family expansion across the already modeled
+done-terminated simple commit lane, the current marks-file preload/export
+lane, and the current stock crash-shape rejection lane. This batch added
+twelve exact stock-Git rows and promoted eleven documented option pairs into
+the represented census set: `fast-import --stats`, `--quiet`, `--force`,
+`--done`, `--allow-unsafe-features`, `--active-branches`,
+`--big-file-threshold`, `--cat-blob-fd`, `--export-marks`,
+`--import-marks`, and `--import-marks-if-exists`.
+The runtime closure stayed intentionally bounded: `--stats` and `--quiet`
+match the current helper-free local statistics surface including stock's
+`--quiet --stats` precedence; `--force`, `--allow-unsafe-features`,
+`--active-branches=1`, `--big-file-threshold=1`, and `--cat-blob-fd=9` are
+accepted as stock-compatible no-op surfaces on the current single-branch tiny
+object lane; `--export-marks`, `--import-marks`, and
+`--import-marks-if-exists` preserve stock marks-file behavior on the current
+helper-free local lane; and `--done` now matches both the accepted
+done-terminated stream and the stock `fatal: stream ends early` crash-shape
+rejection when the terminator is missing. This slice intentionally does not
+widen into relative-marks, export-pack-edges, max-pack-size, depth, or
+submodule-rewrite semantics yet.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_documented_option_surface_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_marks_options_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_done_flag_requires_done_terminator_like_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2814 / 3212`
+- matrix rows: `7121`
+- verified rows: `6254`
+- invalid-input rows: `842`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-import`: `1 / 19` reviewed-complete documented option pairs,
+  `12 / 19` represented documented option pairs, `23` written rows, `23`
+  classified rows, `19` stock-matching rows, `4` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-expansion batch rather than a reviewed-complete
+closure: the new `fast-import` spellings now have exact stock-Git evidence on
+the current bounded helper-free lanes, but they still sit in
+`doc_option_expansion_required` because wider value, combination, and state
+coverage is still unmodeled, and the remaining schema gaps are `--depth`,
+`--export-pack-edges`, `--max-pack-size`, `--no-relative-marks`,
+`--relative-marks`, `--rewrite-submodules-from`, and
+`--rewrite-submodules-to`.
+
+As of 2026-06-28 the previous completed batch is a helper-free local `log`
 represented-tail expansion across the already modeled unsigned two-commit
 linear lane and the current non-rename single-path history lane. This batch
 added four exact stock-Git rows and promoted four documented option pairs into

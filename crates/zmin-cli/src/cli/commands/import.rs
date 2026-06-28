@@ -58,9 +58,33 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
                 refs,
             })
         }
-        runtime::Command::FastImport { date_format } => {
-            super::import_commands::fast_import(date_format.as_deref())
-        }
+        runtime::Command::FastImport {
+            date_format,
+            quiet,
+            stats,
+            force,
+            done,
+            allow_unsafe_features,
+            active_branches,
+            big_file_threshold,
+            cat_blob_fd,
+            export_marks,
+            import_marks,
+            import_marks_if_exists,
+        } => super::import_commands::fast_import(super::import_commands::FastImportOptions {
+            date_format,
+            quiet,
+            stats,
+            force,
+            done,
+            allow_unsafe_features,
+            active_branches,
+            big_file_threshold,
+            cat_blob_fd,
+            export_marks,
+            import_marks,
+            import_marks_if_exists,
+        }),
         _ => unreachable!("non-import command dispatched to import"),
     }
 }
