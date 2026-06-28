@@ -4696,6 +4696,40 @@ pub enum Command {
     FastExport {
         #[arg(long = "all", action = ArgAction::Count)]
         all: u8,
+        #[arg(long = "progress")]
+        progress: Option<usize>,
+        #[arg(long = "signed-tags")]
+        signed_tags: Option<String>,
+        #[arg(long = "tag-of-filtered-object")]
+        tag_of_filtered_object: Option<String>,
+        #[arg(long = "reencode")]
+        reencode: Option<String>,
+        #[arg(long = "export-marks", value_hint = ValueHint::FilePath)]
+        export_marks: Option<PathBuf>,
+        #[arg(long = "import-marks", value_hint = ValueHint::FilePath)]
+        import_marks: Option<PathBuf>,
+        #[arg(long = "import-marks-if-exists", value_hint = ValueHint::FilePath)]
+        import_marks_if_exists: Option<PathBuf>,
+        #[arg(long = "fake-missing-tagger", action = ArgAction::SetTrue)]
+        fake_missing_tagger: bool,
+        #[arg(long = "full-tree", action = ArgAction::SetTrue)]
+        full_tree: bool,
+        #[arg(long = "use-done-feature", action = ArgAction::SetTrue)]
+        use_done_feature: bool,
+        #[arg(long = "no-data", action = ArgAction::SetTrue)]
+        no_data: bool,
+        #[arg(long = "refspec")]
+        refspec: Option<String>,
+        #[arg(long = "reference-excluded-parents", action = ArgAction::SetTrue)]
+        reference_excluded_parents: bool,
+        #[arg(long = "show-original-ids", action = ArgAction::SetTrue)]
+        show_original_ids: bool,
+        #[arg(long = "mark-tags", action = ArgAction::SetTrue)]
+        mark_tags: bool,
+        #[arg(short = 'C', action = ArgAction::SetTrue)]
+        detect_copies: bool,
+        #[arg(short = 'M', action = ArgAction::SetTrue)]
+        detect_renames: bool,
         refs: Vec<String>,
     },
     FastImport {

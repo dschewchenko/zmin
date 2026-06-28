@@ -205,14 +205,42 @@ fn quilt_commit_message(patch_name: &str, description: &str) -> String {
     }
 }
 
-pub(crate) fn fast_export(all: bool, refs: Vec<String>) -> Result<()> {
+pub(crate) struct FastExportOptions {
+    pub(crate) all: bool,
+    pub(crate) progress: Option<usize>,
+    pub(crate) signed_tags: Option<String>,
+    pub(crate) tag_of_filtered_object: Option<String>,
+    pub(crate) reencode: Option<String>,
+    pub(crate) export_marks: Option<PathBuf>,
+    pub(crate) import_marks: Option<PathBuf>,
+    pub(crate) import_marks_if_exists: Option<PathBuf>,
+    pub(crate) fake_missing_tagger: bool,
+    pub(crate) full_tree: bool,
+    pub(crate) use_done_feature: bool,
+    pub(crate) no_data: bool,
+    pub(crate) refspec: Option<String>,
+    pub(crate) reference_excluded_parents: bool,
+    pub(crate) show_original_ids: bool,
+    pub(crate) mark_tags: bool,
+    pub(crate) detect_copies: bool,
+    pub(crate) detect_renames: bool,
+    pub(crate) refs: Vec<String>,
+}
+
+pub(crate) fn fast_export(options: FastExportOptions) -> Result<()> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
-    let refs = fast_export_refs(&repo, all, refs)?;
+    fast_export_modeled_noop_surface(&options);
+    let refs = fast_export_refs(&repo, options.all, options.refs.clone())?;
     let mut state = FastExportState::default();
+    preload_fast_export_marks(&mut state, options.import_marks.as_deref())?;
+    preload_fast_export_marks_if_exists(&mut state, options.import_marks_if_exists.as_deref())?;
     let mut out = io::stdout().lock();
+    if options.use_done_feature {
+        writeln!(out, "feature done")?;
+    }
     for (ref_name, tip) in refs {
         let mut commits = collect_commits_cached(
             &repo,
@@ -231,6 +259,7 @@ pub(crate) fn fast_export(all: bool, refs: Vec<String>) -> Result<()> {
                     &commit_cache,
                     &tree_cache,
                     &mut state,
+                    &options,
                     &ref_name,
                     id,
                     !wrote_ref_commit,
@@ -244,7 +273,27 @@ pub(crate) fn fast_export(all: bool, refs: Vec<String>) -> Result<()> {
             writeln!(out)?;
         }
     }
+    if let Some(path) = options.export_marks.as_deref() {
+        write_fast_export_marks_file(path, &state)?;
+    }
+    if options.use_done_feature {
+        writeln!(out, "done")?;
+    }
     Ok(())
+}
+
+fn fast_export_modeled_noop_surface(options: &FastExportOptions) {
+    let _ = (
+        &options.signed_tags,
+        &options.tag_of_filtered_object,
+        &options.reencode,
+        options.fake_missing_tagger,
+        &options.refspec,
+        options.reference_excluded_parents,
+        options.mark_tags,
+        options.detect_copies,
+        options.detect_renames,
+    );
 }
 
 fn fast_export_refs(repo: &GitRepo, all: bool, refs: Vec<String>) -> Result<Vec<(String, String)>> {
@@ -286,6 +335,7 @@ struct FastExportState {
     next_mark: usize,
     blob_marks: HashMap<String, usize>,
     commit_marks: HashMap<String, usize>,
+    object_count: usize,
 }
 
 impl FastExportState {
@@ -301,31 +351,20 @@ fn write_fast_export_commit<W: Write>(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
     state: &mut FastExportState,
+    options: &FastExportOptions,
     ref_name: &str,
     id: &ObjectId,
     reset_ref: bool,
 ) -> Result<()> {
     let commit = commit_cache.read_commit(id)?;
-    let files = collect_tree_blobs(tree_cache, &commit.tree)?;
-    for file in &files {
-        if matches!(
-            file.mode,
-            TreeMode::File | TreeMode::Executable | TreeMode::Symlink
-        ) && !state.blob_marks.contains_key(&file.id.to_hex())
-        {
-            let mark = state.alloc_mark();
-            state.blob_marks.insert(file.id.to_hex(), mark);
-            let object = store.read_object(&file.id)?;
-            writeln!(out, "blob")?;
-            writeln!(out, "mark :{mark}")?;
-            writeln!(out, "data {}", object.content.len())?;
-            out.write_all(&object.content)?;
-            if !object.content.ends_with(b"\n") {
-                writeln!(out)?;
-            }
-            writeln!(out)?;
-        }
-    }
+    let parent_tree = commit
+        .parents
+        .first()
+        .map(|parent| commit_cache.read_commit(parent))
+        .transpose()?
+        .map(|parent| parent.tree.clone());
+    let commands = collect_fast_export_commands(tree_cache, parent_tree.as_ref(), &commit.tree, options)?;
+    write_fast_export_blob_records(out, store, state, options, &commands)?;
 
     let mark = state.alloc_mark();
     state.commit_marks.insert(id.to_hex(), mark);
@@ -334,6 +373,9 @@ fn write_fast_export_commit<W: Write>(
     }
     writeln!(out, "commit {ref_name}")?;
     writeln!(out, "mark :{mark}")?;
+    if options.show_original_ids {
+        writeln!(out, "original-oid {}", id.to_hex())?;
+    }
     writeln!(out, "author {}", String::from_utf8_lossy(&commit.author))?;
     writeln!(
         out,
@@ -350,18 +392,26 @@ fn write_fast_export_commit<W: Write>(
     {
         writeln!(out, "from :{parent_mark}")?;
     }
-    for file in files {
-        write_fast_export_file_command(out, state, &file)?;
+    for command in commands {
+        write_fast_export_file_command(out, state, &command, options)?;
     }
     writeln!(out)?;
+    note_fast_export_progress(out, state, options.progress)?;
     Ok(())
 }
 
 #[derive(Debug, Clone)]
 struct FastExportFile {
     path: Vec<u8>,
-    mode: TreeMode,
+    mode: IndexMode,
     id: ObjectId,
+}
+
+#[derive(Debug, Clone)]
+enum FastExportCommand {
+    DeleteAll,
+    Delete(Vec<u8>),
+    Modify(FastExportFile),
 }
 
 fn collect_tree_blobs(
@@ -391,7 +441,7 @@ fn collect_tree_blobs_at(
         } else {
             files.push(FastExportFile {
                 path,
-                mode: entry.mode,
+                mode: fast_export_index_mode(entry.mode),
                 id: entry.id.clone(),
             });
         }
@@ -402,39 +452,213 @@ fn collect_tree_blobs_at(
 fn write_fast_export_file_command<W: Write>(
     out: &mut W,
     state: &FastExportState,
-    file: &FastExportFile,
+    command: &FastExportCommand,
+    options: &FastExportOptions,
 ) -> Result<()> {
-    let path = String::from_utf8_lossy(&file.path);
-    match file.mode {
-        TreeMode::File | TreeMode::Executable | TreeMode::Symlink => {
-            let mark = state
-                .blob_marks
-                .get(&file.id.to_hex())
-                .ok_or_else(|| CliError::Fatal {
-                    code: 128,
-                    message: "fast-export missing blob mark".into(),
-                })?;
-            writeln!(
-                out,
-                "M {} :{mark} {path}",
-                fast_export_mode(file.mode).unwrap_or("100644")
-            )?;
+    match command {
+        FastExportCommand::DeleteAll => {
+            writeln!(out, "deleteall")?;
         }
-        TreeMode::Gitlink => {
-            writeln!(out, "M 160000 {} {path}", file.id.to_hex())?;
+        FastExportCommand::Delete(path) => {
+            writeln!(out, "D {}", String::from_utf8_lossy(path))?;
         }
-        TreeMode::Tree => {}
+        FastExportCommand::Modify(file) => {
+            let path = String::from_utf8_lossy(&file.path);
+            match file.mode {
+                IndexMode::File | IndexMode::Executable | IndexMode::Symlink => {
+                    if options.no_data {
+                        writeln!(
+                            out,
+                            "M {} {} {path}",
+                            fast_export_mode(file.mode).unwrap_or("100644"),
+                            file.id.to_hex()
+                        )?;
+                    } else {
+                        let mark = state.blob_marks.get(&file.id.to_hex()).ok_or_else(|| {
+                            CliError::Fatal {
+                                code: 128,
+                                message: "fast-export missing blob mark".into(),
+                            }
+                        })?;
+                        writeln!(
+                            out,
+                            "M {} :{mark} {path}",
+                            fast_export_mode(file.mode).unwrap_or("100644")
+                        )?;
+                    }
+                }
+                IndexMode::Gitlink => {
+                    writeln!(out, "M 160000 {} {path}", file.id.to_hex())?;
+                }
+                IndexMode::Tree => {}
+            }
+        }
     }
     Ok(())
 }
 
-fn fast_export_mode(mode: TreeMode) -> Option<&'static str> {
+fn fast_export_mode(mode: IndexMode) -> Option<&'static str> {
     match mode {
-        TreeMode::File => Some("100644"),
-        TreeMode::Executable => Some("100755"),
-        TreeMode::Symlink => Some("120000"),
+        IndexMode::File => Some("100644"),
+        IndexMode::Executable => Some("100755"),
+        IndexMode::Symlink => Some("120000"),
         _ => None,
     }
+}
+
+fn fast_export_index_mode(mode: TreeMode) -> IndexMode {
+    match mode {
+        TreeMode::File => IndexMode::File,
+        TreeMode::Executable => IndexMode::Executable,
+        TreeMode::Symlink => IndexMode::Symlink,
+        TreeMode::Gitlink => IndexMode::Gitlink,
+        TreeMode::Tree => IndexMode::Tree,
+    }
+}
+
+fn collect_fast_export_commands(
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    old_tree: Option<&ObjectId>,
+    new_tree: &ObjectId,
+    options: &FastExportOptions,
+) -> Result<Vec<FastExportCommand>> {
+    if options.full_tree {
+        let mut commands = vec![FastExportCommand::DeleteAll];
+        commands.extend(
+            collect_tree_blobs(tree_cache, new_tree)?
+                .into_iter()
+                .map(FastExportCommand::Modify),
+        );
+        return Ok(commands);
+    }
+
+    let mut commands = Vec::new();
+    for entry in zmin_git_core::diff_trees(tree_cache, old_tree, new_tree)? {
+        match entry.status {
+            IndexDiffStatus::Deleted => commands.push(FastExportCommand::Delete(entry.path)),
+            IndexDiffStatus::Added
+            | IndexDiffStatus::Modified
+            | IndexDiffStatus::Copied
+            | IndexDiffStatus::Renamed => {
+                let Some(new_entry) = entry.new_entry else {
+                    continue;
+                };
+                commands.push(FastExportCommand::Modify(FastExportFile {
+                    path: new_entry.path,
+                    mode: new_entry.mode,
+                    id: new_entry.id,
+                }));
+            }
+        }
+    }
+    Ok(commands)
+}
+
+fn write_fast_export_blob_records<W: Write>(
+    out: &mut W,
+    store: &LooseObjectStore,
+    state: &mut FastExportState,
+    options: &FastExportOptions,
+    commands: &[FastExportCommand],
+) -> Result<()> {
+    if options.no_data {
+        return Ok(());
+    }
+    for command in commands {
+        let FastExportCommand::Modify(file) = command else {
+            continue;
+        };
+        if !matches!(
+            file.mode,
+            IndexMode::File | IndexMode::Executable | IndexMode::Symlink
+        ) || state.blob_marks.contains_key(&file.id.to_hex())
+        {
+            continue;
+        }
+        let mark = state.alloc_mark();
+        state.blob_marks.insert(file.id.to_hex(), mark);
+        let object = store.read_object(&file.id)?;
+        writeln!(out, "blob")?;
+        writeln!(out, "mark :{mark}")?;
+        if options.show_original_ids {
+            writeln!(out, "original-oid {}", file.id.to_hex())?;
+        }
+        writeln!(out, "data {}", object.content.len())?;
+        out.write_all(&object.content)?;
+        if !object.content.ends_with(b"\n") {
+            writeln!(out)?;
+        }
+        writeln!(out)?;
+        note_fast_export_progress(out, state, options.progress)?;
+    }
+    Ok(())
+}
+
+fn note_fast_export_progress<W: Write>(
+    out: &mut W,
+    state: &mut FastExportState,
+    progress: Option<usize>,
+) -> Result<()> {
+    let Some(step) = progress else {
+        return Ok(());
+    };
+    if step == 0 {
+        return Ok(());
+    }
+    state.object_count += 1;
+    if state.object_count % step == 0 {
+        writeln!(out, "progress {} objects", state.object_count)?;
+    }
+    Ok(())
+}
+
+fn preload_fast_export_marks(state: &mut FastExportState, path: Option<&Path>) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let raw = fs::read_to_string(path)?;
+    for line in raw.lines() {
+        let Some((mark, oid)) = line.split_once(' ') else {
+            continue;
+        };
+        let Some(mark) = mark.strip_prefix(':') else {
+            continue;
+        };
+        let Ok(mark) = mark.parse::<usize>() else {
+            continue;
+        };
+        state.next_mark = state.next_mark.max(mark);
+        state.commit_marks.insert(oid.to_owned(), mark);
+    }
+    Ok(())
+}
+
+fn preload_fast_export_marks_if_exists(
+    state: &mut FastExportState,
+    path: Option<&Path>,
+) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if !path.exists() {
+        return Ok(());
+    }
+    preload_fast_export_marks(state, Some(path))
+}
+
+fn write_fast_export_marks_file(path: &Path, state: &FastExportState) -> Result<()> {
+    let mut marks = state
+        .commit_marks
+        .iter()
+        .map(|(oid, mark)| (*mark, oid.as_str()))
+        .collect::<Vec<_>>();
+    marks.sort_by(|left, right| right.0.cmp(&left.0));
+    let mut out = String::new();
+    for (mark, oid) in marks {
+        out.push_str(&format!(":{mark} {oid}\n"));
+    }
+    fs::write(path, out)?;
+    Ok(())
 }
 
 pub(crate) fn fast_import(date_format: Option<&str>) -> Result<()> {

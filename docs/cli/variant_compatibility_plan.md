@@ -3936,41 +3936,46 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free local `pull` invalid
-fetch-inherited closure across the named-local ff-only lane. Zmin now matches
-stock Git for the documented `pull` options that `git pull` rejects outright
-on this host when they are inherited from `fetch` docs but not accepted by the
-porcelain: `--atomic`, `--auto-gc`, `--auto-maintenance`, `--multiple`,
-`--negotiate-only`, `--no-auto-gc`, `--no-auto-maintenance`,
-`--no-write-commit-graph`, `--no-write-fetch-head`, `--porcelain`,
-`--prefetch`, `--prune-tags`, `--recurse-submodules-default=yes`,
-`--refetch`, `--submodule-prefix=foo/`, `--update-head-ok`,
-`--write-commit-graph`, `--write-fetch-head`, `-P`, `-e`, and `-u`. The
-runtime closure stayed intentionally bounded: `pull` now runs a pre-clap
-validator that emits the stock unknown-option or unknown-switch diagnostics
-for this family, and the schema also stops advertising the unsupported short
-`-e` alias on `pull --edit`. Focused gates were
-`cargo test -p zmin-cli --test git_transport_local_compat pull_invalid_fetch_inherited_option_family_matches_stock_git -- --exact --nocapture`,
-`bash tools/git-pull-invalid-fetch-inherited-oracle-smoke.sh`,
-`cargo check -p zmin-cli -p zmin-cli-schema`,
-`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+The latest completed slice is a helper-free local `fast-export`
+represented-family expansion across the already modeled one-commit local lane,
+the two-commit nested-path stream lane, and the marks-file exact-output lane.
+Zmin now matches stock Git for sixteen documented `fast-export` options on the
+current bounded surface: `--export-marks`, `--fake-missing-tagger`,
+`--full-tree`, `--import-marks`, `--mark-tags`, `--no-data`, `--progress`,
+`--reencode`, `--reference-excluded-parents`, `--refspec`,
+`--show-original-ids`, `--signed-tags`, `--tag-of-filtered-object`,
+`--use-done-feature`, `-C`, and `-M`. The runtime closure stayed
+intentionally bounded: no-tag, no-copy, no-rename, identity-refspec, and
+missing-import-marks-if-exists lanes are accepted as stock-compatible no-op
+surfaces; the exact-output lane now matches stock `fast-export` for changed
+path emission between commits instead of always replaying the full tree;
+`--full-tree` adds stock `deleteall` framing; `--show-original-ids`,
+`--use-done-feature`, `--no-data`, `--progress=1`, `--export-marks`, and
+`--import-marks` each match the stock stream shape on the current local
+fixtures without widening into anonymized output or generalized mark reuse.
+Focused gates were
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_documented_option_batch_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(pull|summary)\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-export|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
 `git diff --check`.
-Actual delta from the prior `pull` signature-verification closure is `+21`
-matrix rows, `+21` complete documented option pairs, `+21` represented
-documented option pairs, `+0` verified rows, `+21` invalid-input rows, and
-`+0` complete command matrices. Current census counts are `6726` matrix rows,
-`5891` verified rows, `810` invalid-input rows, `0` exact-open rows,
-`146/151` complete command matrices, `2514/3212` complete documented option
-pairs, and `2514/3212` represented documented option pairs. Per-command
-position on the touched surface is now: `pull` `90/99` reviewed-complete
-documented option pairs with `118/118` classified written rows, `94`
-stock-matching rows, and `24` invalid-input rows. The next default follow-up
-should move back to the refreshed larger backlog head, because the remaining
-`pull` queue is now only nine documented options while `replay`,
-`send-email`, `rebase`, `log`, and `rev-list` still dominate the backlog.
+Actual delta from the prior `rev-list` represented-tail expansion is `+17`
+matrix rows, `+0` complete documented option pairs, `+16` represented
+documented option pairs, `+17` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `7105` matrix rows,
+`6239` verified rows, `841` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2774/3212` complete documented option
+pairs, and `2799/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `fast-export` `0/18` reviewed-complete
+documented option pairs with `24/24` classified written rows, `21`
+stock-matching rows, `3` invalid-input rows, and `16/18` represented
+documented option pairs. The next default follow-up should either finish the
+cheap reviewed-complete closure candidates (`log` plus maybe `apply`) or
+decide whether the remaining `fast-export` anonymize family deserves a second
+modeled batch before returning to the larger backlog head.
 
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the

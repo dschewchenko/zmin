@@ -1,11 +1,46 @@
 mod common;
 
 use std::fs;
+use std::path::Path;
 
 use common::{
-    configure_identity, git, git_init, git_with_env, git_with_stdin, run_zmin, run_zmin_with_stdin,
-    write_file,
+    command_any_output, configure_identity, git, git_init, git_with_env, git_with_stdin,
+    run_zmin, run_zmin_with_stdin, write_file, zmin_bin,
 };
+
+fn seed_fast_export_repo() -> tempfile::TempDir {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    fs::create_dir_all(repo.path().join("dir")).expect("create dir");
+    write_file(repo.path(), "dir/b.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    repo
+}
+
+fn assert_fast_export_matches_stock_git<F>(args: &[&str], prepare: F, expected_files: &[&str])
+where
+    F: FnOnce(&Path, &Path),
+{
+    let git_repo = seed_fast_export_repo();
+    let zmin_repo = seed_fast_export_repo();
+    prepare(git_repo.path(), zmin_repo.path());
+
+    assert_eq!(
+        command_any_output("git", git_repo.path(), args, "git fast-export"),
+        command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin fast-export")
+    );
+    for path in expected_files {
+        assert_eq!(
+            fs::read_to_string(git_repo.path().join(path)).expect("read git file"),
+            fs::read_to_string(zmin_repo.path().join(path)).expect("read zmin file")
+        );
+    }
+}
 
 #[test]
 fn fast_export_stream_imports_into_stock_git() {
@@ -199,5 +234,52 @@ from :1
     assert_eq!(
         git(imported.path(), ["cat-file", "-p", "main:file"]),
         "contents"
+    );
+}
+
+#[test]
+fn fast_export_documented_option_batch_matches_stock_git() {
+    for args in [
+        &["fast-export", "--fake-missing-tagger", "--all"][..],
+        &["fast-export", "--signed-tags=warn", "--all"],
+        &["fast-export", "--tag-of-filtered-object=drop", "--all"],
+        &["fast-export", "--reencode=yes", "--all"],
+        &["fast-export", "--reference-excluded-parents", "--all"],
+        &["fast-export", "--mark-tags", "--all"],
+        &["fast-export", "-M", "--all"],
+        &["fast-export", "-C", "--all"],
+        &["fast-export", "--refspec=refs/heads/main:refs/heads/main", "--all"],
+        &["fast-export", "--import-marks-if-exists=missing.marks", "--all"],
+        &["fast-export", "--full-tree", "--all"],
+        &["fast-export", "--show-original-ids", "--all"],
+        &["fast-export", "--use-done-feature", "--all"],
+        &["fast-export", "--no-data", "--all"],
+        &["fast-export", "--progress=1", "--all"],
+    ] {
+        assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
+    }
+
+    assert_fast_export_matches_stock_git(
+        &["fast-export", "--export-marks=marks.txt", "--all"],
+        |_, _| {},
+        &["marks.txt"],
+    );
+    assert_fast_export_matches_stock_git(
+        &["fast-export", "--import-marks=marks.txt", "--all"],
+        |git_repo, zmin_repo| {
+            let _ = command_any_output(
+                "git",
+                git_repo,
+                &["fast-export", "--export-marks=marks.txt", "--all"],
+                "git fast-export export-marks seed",
+            );
+            let _ = command_any_output(
+                "git",
+                zmin_repo,
+                &["fast-export", "--export-marks=marks.txt", "--all"],
+                "git fast-export export-marks seed",
+            );
+        },
+        &[],
     );
 }
