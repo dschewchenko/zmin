@@ -2807,6 +2807,8 @@ pub enum Command {
         binary: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
+        #[arg(long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
         #[arg(long = "compact-summary", action = ArgAction::SetTrue)]
         compact_summary: bool,
         #[arg(long = "numstat", action = ArgAction::SetTrue)]
@@ -3043,6 +3045,8 @@ pub enum Command {
         binary: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
+        #[arg(long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
         #[arg(long = "compact-summary", action = ArgAction::SetTrue)]
         compact_summary: bool,
         #[arg(long = "numstat", action = ArgAction::SetTrue)]
@@ -3267,6 +3271,8 @@ pub enum Command {
         binary: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
+        #[arg(long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
         #[arg(long = "compact-summary", action = ArgAction::SetTrue)]
         compact_summary: bool,
         #[arg(long = "numstat", action = ArgAction::SetTrue)]
@@ -3309,6 +3315,10 @@ pub enum Command {
         rename_limit_short: Option<String>,
         #[arg(short = 'm', action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(short = 'c', action = ArgAction::SetTrue)]
+        combined: bool,
+        #[arg(long = "cc", action = ArgAction::SetTrue)]
+        dense_combined: bool,
         #[arg(short = 't', action = ArgAction::SetTrue)]
         tree_in_diff: bool,
         #[arg(short = 'R', action = ArgAction::SetTrue)]
@@ -3441,6 +3451,8 @@ pub enum Command {
         no_rename_empty: bool,
         #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
         ita_invisible_in_index: bool,
+        #[arg(long = "find-object")]
+        find_object: Option<String>,
         #[arg(long = "merge-base", action = ArgAction::SetTrue)]
         merge_base: bool,
         #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
@@ -3480,12 +3492,16 @@ pub enum Command {
         binary: bool,
         #[arg(long = "stat", action = ArgAction::SetTrue)]
         stat: bool,
+        #[arg(long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
         #[arg(long = "compact-summary", action = ArgAction::SetTrue)]
         compact_summary: bool,
         #[arg(long = "numstat", action = ArgAction::SetTrue)]
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
+        #[arg(long = "check", action = ArgAction::SetTrue)]
+        check: bool,
         #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         dirstat: Option<String>,
         #[arg(long = "cumulative", action = ArgAction::SetTrue)]
@@ -3654,6 +3670,12 @@ pub enum Command {
         rename_empty: bool,
         #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
         no_rename_empty: bool,
+        #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
+        ita_invisible_in_index: bool,
+        #[arg(long = "merge-base", action = ArgAction::SetTrue)]
+        merge_base: bool,
+        #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+        no_diff_merges: bool,
         #[arg(long = "find-object")]
         find_object: Option<String>,
         #[arg(long = "diff-merges")]
@@ -3666,6 +3688,8 @@ pub enum Command {
         dd: bool,
         #[arg(long = "ws-error-highlight")]
         ws_error_highlight: Option<String>,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -6464,6 +6488,7 @@ pub struct DiffOptions {
     pub patch_with_raw: bool,
     pub patch_with_stat: bool,
     pub stat: bool,
+    pub no_stat: bool,
     pub compact_summary: bool,
     pub no_patch: bool,
     pub binary: bool,
@@ -6569,6 +6594,7 @@ impl Default for DiffOptions {
             patch_with_raw: false,
             patch_with_stat: false,
             stat: false,
+            no_stat: false,
             compact_summary: false,
             no_patch: false,
             binary: false,
@@ -6672,6 +6698,7 @@ pub struct PlumbingDiffOptions {
     pub no_patch: bool,
     pub binary: bool,
     pub stat: bool,
+    pub no_stat: bool,
     pub compact_summary: bool,
     pub numstat: bool,
     pub shortstat: bool,
@@ -6771,6 +6798,7 @@ pub struct PlumbingDiffOptions {
     pub combined_all_paths: bool,
     pub dd: bool,
     pub ws_error_highlight: Option<String>,
+    pub no_notes: bool,
     pub quiet: bool,
     pub exit_code: bool,
     pub pretty: Option<String>,

@@ -16,6 +16,9 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     if options.combined_all_paths {
         return Err(combined_all_paths_requires_combined_diff_error());
     }
+    if options.no_stat {
+        return Err(diff_no_stat_error());
+    }
     if options.no_index {
         return diff_no_index(&options);
     }
@@ -357,6 +360,23 @@ fn reverse_precomputed_diff_entries(entries: &mut [zmin_git_core::IndexDiffEntry
     }
 }
 
+fn filter_entries_by_object_id(
+    entries: Vec<zmin_git_core::IndexDiffEntry>,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    object_id: &ObjectId,
+) -> Vec<zmin_git_core::IndexDiffEntry> {
+    entries
+        .into_iter()
+        .filter(|entry| {
+            find_index_entry(old_index, diff_entry_old_path(entry))
+                .is_some_and(|index_entry| &index_entry.id == object_id)
+                || find_index_entry(new_index, &entry.path)
+                    .is_some_and(|index_entry| &index_entry.id == object_id)
+        })
+        .collect()
+}
+
 struct PorcelainCombinedDiffInput {
     result: String,
     parents: Vec<String>,
@@ -546,6 +566,9 @@ fn porcelain_diff_prefixes(
 }
 
 pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
+    if options.no_stat {
+        return Err(diff_files_no_stat_error());
+    }
     if options.combined_all_paths && !options.combined && !options.dense_combined {
         return Err(combined_all_paths_requires_combined_diff_error());
     }
@@ -681,6 +704,13 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
         options.rotate_to.as_deref(),
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
+    let entries = if let Some(find_object) = options.find_object.as_deref() {
+        let id =
+            resolve_objectish(&repo, find_object).map_err(|_| ambiguous_revision_error(find_object))?;
+        filter_entries_by_object_id(entries, &old_index, &new_index, &id)
+    } else {
+        entries
+    };
     if let Some(dirstat_mode) = normalize_dirstat_mode(
         options.dirstat.as_deref(),
         options.cumulative,
@@ -887,9 +917,11 @@ fn render_diff_files_unmerged_combined(
         .map(|path| path_arg_to_repo_relative(repo, path))
         .collect::<Result<Vec<_>>>()?;
     print_combined_worktree_patches_with_zero_result(
+        repo,
         store,
         &[ours_index, theirs_index],
         &result_index,
+        DiffSideSource::WorktreeOrIndex,
         &pathspecs,
         CombinedPatchRenderOptions {
             abbrev_len: render_options.patch_abbrev_len,
@@ -921,9 +953,11 @@ fn unmerged_diff_entries(indexes: [&GitIndex; 2]) -> Vec<zmin_git_core::IndexDif
 }
 
 fn print_combined_worktree_patches_with_zero_result(
+    repo: &GitRepo,
     store: &LooseObjectStore,
     parent_indexes: &[GitIndex],
     result_index: &GitIndex,
+    result_source: DiffSideSource,
     pathspecs: &[Vec<u8>],
     options: CombinedPatchRenderOptions<'_>,
 ) -> Result<()> {
@@ -950,7 +984,7 @@ fn print_combined_worktree_patches_with_zero_result(
             .into_iter()
             .map(|entry| entry.expect("gitlink/missing parent entries skipped"))
             .collect::<Vec<_>>();
-        let result_content = read_index_entry_content(store, result_entry)?;
+        let result_content = read_diff_side_content(repo, store, result_entry, result_source)?;
         let parent_contents = parent_entries
             .iter()
             .map(|entry| read_index_entry_content(store, entry))
@@ -1105,6 +1139,9 @@ fn normalize_dirstat_mode(
 }
 
 pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
+    if options.no_stat {
+        return Err(diff_index_no_stat_error());
+    }
     if options.combined_all_paths {
         return Err(combined_all_paths_requires_combined_diff_error());
     }
@@ -1223,6 +1260,13 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         options.rotate_to.as_deref(),
     );
     let entries = filter_diff_relative(entries, relative_prefix.as_deref());
+    let entries = if let Some(find_object) = options.find_object.as_deref() {
+        let id =
+            resolve_objectish(&repo, find_object).map_err(|_| ambiguous_revision_error(find_object))?;
+        filter_entries_by_object_id(entries, &old_index, &new_index, &id)
+    } else {
+        entries
+    };
     if let Some(dirstat_mode) = normalize_dirstat_mode(
         options.dirstat.as_deref(),
         options.cumulative,
@@ -1273,7 +1317,177 @@ fn combined_all_paths_requires_combined_diff_error() -> CliError {
     }
 }
 
+fn diff_no_stat_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: concat!(
+            "error: invalid option: --no-stat\n",
+            "usage: git diff [<options>] [<commit>] [--] [<path>...]\n",
+            "   or: git diff [<options>] --cached [--merge-base] [<commit>] [--] [<path>...]\n",
+            "   or: git diff [<options>] [--merge-base] <commit> [<commit>...] <commit> [--] [<path>...]\n",
+            "   or: git diff [<options>] <commit>...<commit> [--] [<path>...]\n",
+            "   or: git diff [<options>] <blob> <blob>\n",
+            "   or: git diff [<options>] --no-index [--] <path> <path>\n",
+            "\n",
+            "common diff options:\n",
+            "  -z            output diff-raw with lines terminated with NUL.\n",
+            "  -p            output patch format.\n",
+            "  -u            synonym for -p.\n",
+            "  --patch-with-raw\n",
+            "                output both a patch and the diff-raw format.\n",
+            "  --stat        show diffstat instead of patch.\n",
+            "  --numstat     show numeric diffstat instead of patch.\n",
+            "  --patch-with-stat\n",
+            "                output a patch and prepend its diffstat.\n",
+            "  --name-only   show only names of changed files.\n",
+            "  --name-status show names and status of changed files.\n",
+            "  --full-index  show full object name on index lines.\n",
+            "  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n",
+            "  -R            swap input file pairs.\n",
+            "  -B            detect complete rewrites.\n",
+            "  -M            detect renames.\n",
+            "  -C            detect copies.\n",
+            "  --find-copies-harder\n",
+            "                try unchanged files as candidate for copy detection.\n",
+            "  -l<n>         limit rename attempts up to <n> paths.\n",
+            "  -O<file>      reorder diffs according to the <file>.\n",
+            "  -S<string>    find filepair whose only one side contains the string.\n",
+            "  --pickaxe-all\n",
+            "                show all files diff when -S is used and hit is found.\n",
+            "  -a  --text    treat all files as text.\n",
+            "\n",
+        )
+        .into(),
+    }
+}
+
+fn diff_files_no_stat_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: concat!(
+            "usage: git diff-files [-q] [-0 | -1 | -2 | -3 | -c | --cc] [<common-diff-options>] [<path>...]\n",
+            "\n",
+            "common diff options:\n",
+            "  -z            output diff-raw with lines terminated with NUL.\n",
+            "  -p            output patch format.\n",
+            "  -u            synonym for -p.\n",
+            "  --patch-with-raw\n",
+            "                output both a patch and the diff-raw format.\n",
+            "  --stat        show diffstat instead of patch.\n",
+            "  --numstat     show numeric diffstat instead of patch.\n",
+            "  --patch-with-stat\n",
+            "                output a patch and prepend its diffstat.\n",
+            "  --name-only   show only names of changed files.\n",
+            "  --name-status show names and status of changed files.\n",
+            "  --full-index  show full object name on index lines.\n",
+            "  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n",
+            "  -R            swap input file pairs.\n",
+            "  -B            detect complete rewrites.\n",
+            "  -M            detect renames.\n",
+            "  -C            detect copies.\n",
+            "  --find-copies-harder\n",
+            "                try unchanged files as candidate for copy detection.\n",
+            "  -l<n>         limit rename attempts up to <n> paths.\n",
+            "  -O<file>      reorder diffs according to the <file>.\n",
+            "  -S<string>    find filepair whose only one side contains the string.\n",
+            "  --pickaxe-all\n",
+            "                show all files diff when -S is used and hit is found.\n",
+            "  -a  --text    treat all files as text.\n",
+            "\n",
+        )
+        .into(),
+    }
+}
+
+fn diff_index_no_stat_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: concat!(
+            "usage: git diff-index [-m] [--cached] [--merge-base] [<common-diff-options>] <tree-ish> [<path>...]\n",
+            "\n",
+            "common diff options:\n",
+            "  -z            output diff-raw with lines terminated with NUL.\n",
+            "  -p            output patch format.\n",
+            "  -u            synonym for -p.\n",
+            "  --patch-with-raw\n",
+            "                output both a patch and the diff-raw format.\n",
+            "  --stat        show diffstat instead of patch.\n",
+            "  --numstat     show numeric diffstat instead of patch.\n",
+            "  --patch-with-stat\n",
+            "                output a patch and prepend its diffstat.\n",
+            "  --name-only   show only names of changed files.\n",
+            "  --name-status show names and status of changed files.\n",
+            "  --full-index  show full object name on index lines.\n",
+            "  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n",
+            "  -R            swap input file pairs.\n",
+            "  -B            detect complete rewrites.\n",
+            "  -M            detect renames.\n",
+            "  -C            detect copies.\n",
+            "  --find-copies-harder\n",
+            "                try unchanged files as candidate for copy detection.\n",
+            "  -l<n>         limit rename attempts up to <n> paths.\n",
+            "  -O<file>      reorder diffs according to the <file>.\n",
+            "  -S<string>    find filepair whose only one side contains the string.\n",
+            "  --pickaxe-all\n",
+            "                show all files diff when -S is used and hit is found.\n",
+            "  -a  --text    treat all files as text.\n",
+            "\n",
+        )
+        .into(),
+    }
+}
+
+fn diff_tree_no_stat_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: concat!(
+            "usage: git diff-tree [--stdin] [-m] [-s] [-v] [--no-commit-id] [--pretty]\n",
+            "              [-t] [-r] [-c | --cc] [--combined-all-paths] [--root] [--merge-base]\n",
+            "              [<common-diff-options>] <tree-ish> [<tree-ish>] [<path>...]\n",
+            "\n",
+            "  -r            diff recursively\n",
+            "  -c            show combined diff for merge commits\n",
+            "  --cc          show combined diff for merge commits removing uninteresting hunks\n",
+            "  --combined-all-paths\n",
+            "                show name of file in all parents for combined diffs\n",
+            "  --root        include the initial commit as diff against /dev/null\n",
+            "\n",
+            "common diff options:\n",
+            "  -z            output diff-raw with lines terminated with NUL.\n",
+            "  -p            output patch format.\n",
+            "  -u            synonym for -p.\n",
+            "  --patch-with-raw\n",
+            "                output both a patch and the diff-raw format.\n",
+            "  --stat        show diffstat instead of patch.\n",
+            "  --numstat     show numeric diffstat instead of patch.\n",
+            "  --patch-with-stat\n",
+            "                output a patch and prepend its diffstat.\n",
+            "  --name-only   show only names of changed files.\n",
+            "  --name-status show names and status of changed files.\n",
+            "  --full-index  show full object name on index lines.\n",
+            "  --abbrev=<n>  abbreviate object names in diff-tree header and diff-raw.\n",
+            "  -R            swap input file pairs.\n",
+            "  -B            detect complete rewrites.\n",
+            "  -M            detect renames.\n",
+            "  -C            detect copies.\n",
+            "  --find-copies-harder\n",
+            "                try unchanged files as candidate for copy detection.\n",
+            "  -l<n>         limit rename attempts up to <n> paths.\n",
+            "  -O<file>      reorder diffs according to the <file>.\n",
+            "  -S<string>    find filepair whose only one side contains the string.\n",
+            "  --pickaxe-all\n",
+            "                show all files diff when -S is used and hit is found.\n",
+            "  -a  --text    treat all files as text.\n",
+            "\n",
+        )
+        .into(),
+    }
+}
+
 pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
+    if options.no_stat {
+        return Err(diff_tree_no_stat_error());
+    }
     let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
     let break_rewrites = parse_break_rewrites_option(options.break_rewrites.as_deref())?;
     let mut detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
@@ -1330,6 +1544,10 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         options.combined_all_paths,
         options.dd,
         options.ws_error_highlight.as_deref(),
+        options.ita_invisible_in_index,
+        options.merge_base,
+        options.no_diff_merges,
+        options.no_notes,
         options.show_signature,
         options.no_standard_notes,
     );
@@ -1634,6 +1852,9 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
         if options.no_patch {
             return Ok(());
         }
+        if options.check {
+            return Ok(());
+        }
         return render_diff_tree_root_entries(
             &store,
             entries,
@@ -1769,6 +1990,17 @@ pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {
             },
             dirstat_mode.by_file,
             dirstat_mode.cumulative,
+        );
+    }
+    if options.check {
+        return diff_check(
+            &repo,
+            &store,
+            compare_old_index,
+            compare_new_index,
+            &entries,
+            DiffSideSource::Index,
+            DiffSideSource::Index,
         );
     }
     let (old_index, new_index, render_options) = if options.reverse {

@@ -413,6 +413,50 @@ fn diff_index_remaining_documented_common_flags_match_stock_git() {
 }
 
 #[test]
+fn diff_family_final_documented_tail_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "first"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "second"]);
+    git(repo.path(), ["notes", "add", "-m", "note text", "HEAD"]);
+
+    write_file(repo.path(), "a.txt", "three\n");
+    write_file(repo.path(), "b.txt", "staged\n");
+    git(repo.path(), ["add", "b.txt"]);
+    let blob = git(repo.path(), ["rev-parse", "HEAD:a.txt"]);
+
+    for args in [
+        ["diff", "--no-stat"].as_slice(),
+        ["diff-files", "--no-stat"].as_slice(),
+        ["diff-index", "--no-stat", "HEAD"].as_slice(),
+        ["diff-tree", "--no-stat", "HEAD"].as_slice(),
+        ["diff-tree", "--check", "HEAD"].as_slice(),
+        ["diff-tree", "--ita-invisible-in-index", "HEAD"].as_slice(),
+        ["diff-tree", "--merge-base", "HEAD", "HEAD"].as_slice(),
+        ["diff-tree", "--no-diff-merges", "HEAD"].as_slice(),
+        ["diff-tree", "--no-notes", "--notes", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "diff-family final-tail mismatch for {args:?}",
+        );
+    }
+
+    let find_object_args = vec!["diff-index", "--find-object", blob.trim(), "HEAD"];
+    let find_object_refs = find_object_args.iter().copied().collect::<Vec<_>>();
+    assert_eq!(
+        command_output(zmin_bin(), repo.path(), &find_object_refs),
+        command_output("git", repo.path(), &find_object_refs),
+        "diff-family final-tail mismatch for --find-object",
+    );
+}
+
+#[test]
 fn diff_noop_option_surface_matches_stock_git_for_porcelain_and_plumbing() {
     let repo = git_init();
     configure_identity(repo.path());

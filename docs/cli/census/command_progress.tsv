@@ -1,14 +1,14 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2730	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2740	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	2730	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	7033	7033	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	6171	7033	closed written rows only
-behavior_rows_classified	7008	7033	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	7033	written rows with incomplete parity
-behavior_rows_open	0	7033	written rows not implemented or not matching yet
-invalid_input_rows	837	7033	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	2740	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	7043	7043	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	6181	7043	closed written rows only
+behavior_rows_classified	7018	7043	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	7043	written rows with incomplete parity
+behavior_rows_open	0	7043	written rows not implemented or not matching yet
+invalid_input_rows	837	7043	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -49,10 +49,10 @@ cvsserver	8	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 daemon	27	13	13	48.1	14	14	100.0	13	92.9	0	0	1	yes
 describe	14	14	14	100.0	19	19	100.0	19	100.0	0	0	0	yes
 diagnose	5	5	5	100.0	5	5	100.0	5	100.0	0	0	0	yes
-diff	117	116	116	99.1	290	290	100.0	286	98.6	0	0	4	yes
-diff-files	118	117	117	99.2	143	143	100.0	143	100.0	0	0	0	yes
-diff-index	112	107	107	95.5	141	141	100.0	141	100.0	0	0	0	yes
-diff-tree	132	126	126	95.5	165	165	100.0	165	100.0	0	0	0	yes
+diff	117	117	117	100.0	291	291	100.0	287	98.6	0	0	4	yes
+diff-files	118	118	118	100.0	144	144	100.0	144	100.0	0	0	0	yes
+diff-index	112	109	109	97.3	143	143	100.0	143	100.0	0	0	0	yes
+diff-tree	132	132	132	100.0	171	171	100.0	171	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
 fast-export	18	0	0	0.0	7	7	100.0	4	57.1	0	0	3	yes
 fast-import	19	1	1	5.3	11	11	100.0	8	72.7	0	0	3	yes
