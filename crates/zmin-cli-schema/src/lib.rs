@@ -409,6 +409,8 @@ pub enum Command {
         stdin_packs: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
+        #[arg(long = "all-progress", action = ArgAction::SetTrue)]
+        all_progress: bool,
         #[arg(long = "all-progress-implied", action = ArgAction::SetTrue)]
         all_progress_implied: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
@@ -459,6 +461,18 @@ pub enum Command {
         keep_pack: Vec<String>,
         #[arg(long = "pack-loose-unreachable", action = ArgAction::SetTrue)]
         pack_loose_unreachable: bool,
+        #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
+        exclude_promisor_objects: bool,
+        #[arg(long = "no-filter", action = ArgAction::SetTrue)]
+        no_filter: bool,
+        #[arg(
+            long = "missing",
+            require_equals = true,
+            value_parser = ["error", "allow-any", "allow-promisor"]
+        )]
+        missing: Option<String>,
+        #[arg(long = "thin", action = ArgAction::SetTrue)]
+        thin: bool,
         #[arg(long = "window")]
         window: Option<usize>,
         #[arg(long = "window-memory")]
@@ -7388,6 +7402,7 @@ pub struct PackObjectsOptions {
     pub all: bool,
     pub stdin_packs: bool,
     pub progress: bool,
+    pub all_progress: bool,
     pub all_progress_implied: bool,
     pub no_progress: bool,
     pub index_version: Option<String>,
@@ -7413,6 +7428,10 @@ pub struct PackObjectsOptions {
     pub unpack_unreachable: Vec<String>,
     pub keep_pack: Vec<String>,
     pub pack_loose_unreachable: bool,
+    pub exclude_promisor_objects: bool,
+    pub no_filter: bool,
+    pub missing: Option<String>,
+    pub thin: bool,
     pub window: Option<usize>,
     pub window_memory: Option<String>,
     pub depth: Option<usize>,

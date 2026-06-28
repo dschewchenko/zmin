@@ -22,6 +22,36 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`pack-objects` progress/promisor/missing/thin tail across the existing
+explicit basename `--all` lane. This batch added seven exact stock-Git rows
+and promoted five documented `pack-objects` option pairs into the
+reviewed-complete census set: `--all-progress`,
+`--exclude-promisor-objects`, `--missing`, `--no-filter`, and `--thin`.
+The runtime closure stayed intentionally bounded: this slice now matches the
+current stock progress-meter stderr for `--all-progress`, accepts the current
+explicit-basename no-op lane for `--exclude-promisor-objects`, `--missing`
+(`error`, `allow-any`, and `allow-promisor`), and `--no-filter`, and matches
+the stock `--thin cannot be used to build an indexable pack` fatal on the
+explicit-basename lane. It does not widen into compression-level parity or
+filtered pack generation. Focused gates were
+`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-pack-schema-oracle-smoke.sh`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7417` matrix rows, `6498` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3007/3212` complete documented
+option pairs. `pack-objects` now sits at `38/40` reviewed-complete
+documented option pairs with `50/50` classified rows, `40` stock-matching
+rows, and `10` invalid-input rows. The overall backlog head remains
+`send-email` (`62`), followed by `rebase` (`54`), `p4` (`28`), `svn` (`25`),
+`cvsimport` (`14`), `cvsexportcommit` (`11`), `archimport` (`7`), and the
+remaining `pack-objects` tail (`2`); the next default follow-up should keep
+the largest safe helper-free batch bias and shift away from this command
+unless the remaining compression/filter surface is chosen deliberately.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `cvsserver` long-help-and-version tail closure across the current
 `/usr/bin/git` outside-repository surface. This batch added three exact
 stock-Git rows and promoted the final three documented `cvsserver` option

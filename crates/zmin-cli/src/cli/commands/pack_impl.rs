@@ -3980,6 +3980,9 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
     fs::rename(&temp_pack, pack_name)?;
     fs::write(index_name, &indexed.index)?;
     fs::write(reverse_index_name, &indexed.reverse_index)?;
+    if options.all_progress && !options.no_progress {
+        print_pack_objects_all_progress(ids.len());
+    }
     println!("{}", indexed.pack_id.to_hex());
     Ok(())
 }
@@ -3998,6 +4001,12 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
             text: "fatal: cannot use internal rev list with --cruft\n".into(),
         });
     }
+    if options.thin && !options.stdout {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: --thin cannot be used to build an indexable pack\n".into(),
+        });
+    }
     let max_pack_size =
         parse_pack_size_limit(options.max_pack_size.as_deref(), "max-pack-size")?;
     if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
@@ -4007,6 +4016,7 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
         options.quiet,
         options.compression.as_deref(),
         options.progress,
+        options.all_progress,
         options.all_progress_implied,
         options.no_progress,
         options.honor_pack_keep,
@@ -4029,9 +4039,39 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
         options.unpack_unreachable.last().map(String::as_str),
         &options.keep_pack,
         options.pack_loose_unreachable,
+        options.exclude_promisor_objects,
+        options.no_filter,
+        options.missing.as_deref(),
+        options.thin,
         options.window_memory.as_deref(),
     );
     Ok(())
+}
+
+fn print_pack_objects_all_progress(total: usize) {
+    let stderr = io::stderr();
+    let mut stderr = stderr.lock();
+    let _ = writeln!(stderr, "Enumerating objects: {total}, done.");
+    for current in 1..=total {
+        let percent = current * 100 / total.max(1);
+        let _ = write!(
+            stderr,
+            "Counting objects: {percent:3}% ({current}/{total})\r"
+        );
+    }
+    let _ = writeln!(stderr, "Counting objects: 100% ({total}/{total}), done.");
+    for current in 1..=total {
+        let percent = current * 100 / total.max(1);
+        let _ = write!(
+            stderr,
+            "Writing objects: {percent:3}% ({current}/{total})\r"
+        );
+    }
+    let _ = writeln!(stderr, "Writing objects: 100% ({total}/{total}), done.");
+    let _ = writeln!(
+        stderr,
+        "Total {total} (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)"
+    );
 }
 
 fn parse_pack_size_limit(raw: Option<&str>, option: &str) -> Result<Option<u64>> {

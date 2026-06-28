@@ -236,10 +236,12 @@ run_repack_gap() {
 
 run_pack_objects_exact pack_objects_all_long --all
 run_pack_objects_exact pack_objects_all_quiet_short --all -q
+run_pack_objects_exact pack_objects_all_progress --all --all-progress
 run_pack_objects_exact pack_objects_all_progress_implied --all --all-progress-implied
 run_pack_objects_exact pack_objects_cruft_internal_rev_list --all --cruft
 run_pack_objects_exact pack_objects_cruft_expiration_internal_rev_list --all --cruft-expiration=now
 run_pack_objects_exact pack_objects_delta_islands_noop --all --delta-islands
+run_pack_objects_exact pack_objects_exclude_promisor_objects_noop --all --exclude-promisor-objects
 run_pack_objects_exact pack_objects_honor_pack_keep --all --honor-pack-keep
 run_pack_objects_exact pack_objects_include_tag_noop --all --include-tag
 run_pack_objects_exact pack_objects_incremental_noop --all --incremental
@@ -248,11 +250,16 @@ run_pack_objects_exact pack_objects_keep_true_parents_noop --all --keep-true-par
 run_pack_objects_exact pack_objects_keep_unreachable_noop --all --keep-unreachable
 run_pack_objects_exact pack_objects_local_noop --all --local
 run_pack_objects_exact pack_objects_max_pack_size_warn --all --max-pack-size=1k
+run_pack_objects_exact pack_objects_missing_error_noop --all --missing=error
+run_pack_objects_exact pack_objects_missing_allow_any_noop --all --missing=allow-any
+run_pack_objects_exact pack_objects_missing_allow_promisor_noop --all --missing=allow-promisor
+run_pack_objects_exact pack_objects_no_filter_noop --all --no-filter
 run_pack_objects_exact pack_objects_non_empty --all --non-empty
 run_pack_objects_exact pack_objects_pack_loose_unreachable_noop --all --pack-loose-unreachable
 run_pack_objects_exact pack_objects_shallow_noop --all --shallow
 run_pack_objects_exact pack_objects_sparse_noop --all --sparse
 run_pack_objects_exact pack_objects_stdin_packs_internal_rev_list --all --stdin-packs
+run_pack_objects_exact pack_objects_thin_indexable_fatal --all --thin
 run_pack_objects_exact pack_objects_no_sparse_noop --all --no-sparse
 run_pack_objects_exact pack_objects_threads_one --all --threads=1
 run_pack_objects_exact pack_objects_unpack_unreachable_now --all --unpack-unreachable=now
