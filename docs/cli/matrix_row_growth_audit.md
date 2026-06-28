@@ -12,6 +12,29 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`replay` rev-walk option-family expansion across the existing bounded linear
+advance lane plus one stdin-fed range lane. The selected change added `+11`
+matrix rows and promoted eleven documented `replay` option pairs into the
+reviewed-complete census set: `--all`, `--author-date-order`, `--branches`,
+`--count`, `--date-order`, `--not`, `--remotes`, `--reverse`, `--stdin`,
+`--tags`, and `--topo-order`. This was a bounded runtime-and-evidence slice:
+the replay parser and history command wiring now accept the current rev-walk
+no-op/warning selector family on the modeled local linear advance lane,
+including stock warning passthrough for `--date-order`, `--author-date-order`
+and `--reverse`, stdin-fed revision range intake, and stock invalid-input
+handling for multi-source `--branches` / `--all` advance and empty-selection
+`--not`. Actual delta is `+11` matrix rows, `+11` complete documented option
+pairs, `+11` represented documented option pairs, `+8` verified rows, `+3`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `7281` matrix rows, `6396` verified rows, `860` invalid-input rows, `0`
+exact-open rows, `146/151` complete command matrices, `2873/3212` complete
+documented option pairs, and `2873/3212` represented documented option pairs.
+Remaining checklist rows fell from `350` to `339`. The guardrail held: row
+growth stayed inside one coherent helper-free replay family with direct
+stock-Git oracle evidence from the new bounded smoke script, not from a broad
+oracle import.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `pack-objects` represented-family expansion across the existing explicit-
 basename all-refs lane plus the current loose-object stdout lane. The selected
 change added `+14` matrix rows and promoted fourteen documented

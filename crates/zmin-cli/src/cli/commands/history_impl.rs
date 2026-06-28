@@ -63,6 +63,17 @@ fn blame_usage_error() -> CliError {
 }
 
 pub(crate) fn run_replay(
+    all: bool,
+    branches: bool,
+    tags: bool,
+    remotes: bool,
+    not: bool,
+    stdin: bool,
+    count: bool,
+    topo_order: bool,
+    date_order: bool,
+    author_date_order: bool,
+    reverse: bool,
     contained: bool,
     advance: Option<String>,
     onto: Option<String>,
@@ -81,7 +92,7 @@ pub(crate) fn run_replay(
             text: replay_usage_error("exactly one of --onto, --advance, or --revert is required"),
         });
     }
-    if revision_ranges.is_empty() {
+    if revision_ranges.is_empty() && !stdin {
         return Err(CliError::Stderr {
             code: 129,
             text: replay_usage_error("need a revision range"),
@@ -91,12 +102,48 @@ pub(crate) fn run_replay(
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
-    let revs = collect_rev_list_revs(&repo, &store, false, revision_ranges)?;
+    if topo_order || count {
+        let _ = ();
+    }
+    if date_order || author_date_order {
+        eprintln!(
+            "warning: some rev walking options will be overridden as 'sort_order' bit in 'struct rev_info' will be forced"
+        );
+    }
+    if reverse {
+        eprintln!(
+            "warning: some rev walking options will be overridden as 'reverse' bit in 'struct rev_info' will be forced"
+        );
+    }
+    let rev_args =
+        collect_replay_rev_args(branches, tags, remotes, not, stdin, revision_ranges)?;
+    let revs = collect_rev_list_revs(&repo, &store, all, rev_args).map_err(|error| {
+        if replay_needs_commits_error(&error) {
+            CliError::Fatal {
+                code: 128,
+                message: "need some commits to replay".into(),
+            }
+        } else {
+            error
+        }
+    })?;
+    if advance.is_some()
+        && (all || branches || tags || remotes)
+        && replay_has_multiple_sources(&revs)
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "cannot advance target with multiple sources because ordering would be ill-defined".into(),
+        });
+    }
     let mut commits =
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
     commits.reverse();
     let Some(first) = commits.first() else {
-        return Ok(());
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "need some commits to replay".into(),
+        });
     };
     let first_commit = commit_cache.read_commit(first)?;
     let base = first_commit
@@ -120,6 +167,50 @@ pub(crate) fn run_replay(
         refs.write_ref(&branch_ref, &new_tip)?;
     }
     Ok(())
+}
+
+fn collect_replay_rev_args(
+    branches: bool,
+    tags: bool,
+    remotes: bool,
+    not: bool,
+    stdin: bool,
+    mut revision_ranges: Vec<String>,
+) -> Result<Vec<String>> {
+    let mut rev_args = Vec::new();
+    if branches {
+        rev_args.push("--branches".to_owned());
+    }
+    if tags {
+        rev_args.push("--tags".to_owned());
+    }
+    if remotes {
+        rev_args.push("--remotes".to_owned());
+    }
+    if not {
+        rev_args.push("--not".to_owned());
+    }
+    if stdin {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        revision_ranges.extend(
+            input
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    rev_args.extend(revision_ranges);
+    Ok(rev_args)
+}
+
+fn replay_needs_commits_error(error: &CliError) -> bool {
+    matches!(error, CliError::Message(message) if message == "`rev-list` requires at least one positive revision")
+}
+
+fn replay_has_multiple_sources(revs: &RevListRevs) -> bool {
+    revs.include.len() > 1 || !revs.extra_objects.is_empty() || revs.symmetric_diff.is_some()
 }
 
 fn replay_usage_error(message: &str) -> String {

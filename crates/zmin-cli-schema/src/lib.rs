@@ -1410,6 +1410,28 @@ pub enum Command {
         revs: Vec<String>,
     },
     Replay {
+        #[arg(long = "all", action = ArgAction::SetTrue)]
+        all: bool,
+        #[arg(long = "branches", action = ArgAction::SetTrue)]
+        branches: bool,
+        #[arg(long = "tags", action = ArgAction::SetTrue)]
+        tags: bool,
+        #[arg(long = "remotes", action = ArgAction::SetTrue)]
+        remotes: bool,
+        #[arg(long = "not", action = ArgAction::Count)]
+        not: u8,
+        #[arg(long = "stdin", action = ArgAction::SetTrue)]
+        stdin: bool,
+        #[arg(long = "count", action = ArgAction::SetTrue)]
+        count: bool,
+        #[arg(long = "topo-order", action = ArgAction::SetTrue)]
+        topo_order: bool,
+        #[arg(long = "date-order", action = ArgAction::SetTrue)]
+        date_order: bool,
+        #[arg(long = "author-date-order", action = ArgAction::SetTrue)]
+        author_date_order: bool,
+        #[arg(long = "reverse", action = ArgAction::SetTrue)]
+        reverse: bool,
         #[arg(long = "contained", action = ArgAction::SetTrue)]
         contained: bool,
         #[arg(long = "advance")]

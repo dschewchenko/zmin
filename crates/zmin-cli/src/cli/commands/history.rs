@@ -6,11 +6,38 @@ pub(crate) fn dispatch(
 ) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::Replay {
+            all,
+            branches,
+            tags,
+            remotes,
+            not,
+            stdin,
+            count,
+            topo_order,
+            date_order,
+            author_date_order,
+            reverse,
             contained,
             advance,
             onto,
             revision_ranges,
-        } => run_replay(contained, advance, onto, revision_ranges),
+        } => run_replay(
+            all,
+            branches,
+            tags,
+            remotes,
+            not > 0,
+            stdin,
+            count,
+            topo_order,
+            date_order,
+            author_date_order,
+            reverse,
+            contained,
+            advance,
+            onto,
+            revision_ranges,
+        ),
         runtime::Command::History { command } => run_history(command, raw_args),
         runtime::Command::RangeDiff {
             no_dual_color,
@@ -1510,12 +1537,39 @@ fn serialize_annotate_args(
 }
 
 pub(crate) fn run_replay(
+    all: bool,
+    branches: bool,
+    tags: bool,
+    remotes: bool,
+    not: bool,
+    stdin: bool,
+    count: bool,
+    topo_order: bool,
+    date_order: bool,
+    author_date_order: bool,
+    reverse: bool,
     contained: bool,
     advance: Option<String>,
     onto: Option<String>,
     revision_ranges: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::history_commands::run_replay(contained, advance, onto, revision_ranges)
+    super::history_commands::run_replay(
+        all,
+        branches,
+        tags,
+        remotes,
+        not,
+        stdin,
+        count,
+        topo_order,
+        date_order,
+        author_date_order,
+        reverse,
+        contained,
+        advance,
+        onto,
+        revision_ranges,
+    )
 }
 
 pub(crate) fn run_history(
