@@ -5026,12 +5026,32 @@ pub enum Command {
         translate_aliases: bool,
         #[arg(long = "bcc")]
         bcc: Vec<String>,
+        #[arg(long = "cc-cover", action = ArgAction::SetTrue)]
+        cc_cover: bool,
+        #[arg(long = "chain-reply-to", action = ArgAction::SetTrue)]
+        chain_reply_to: bool,
         #[arg(long = "cc")]
         cc: Vec<String>,
         #[arg(long = "from")]
         from: Option<String>,
         #[arg(long = "reply-to")]
         reply_to: Option<String>,
+        #[arg(long = "identity")]
+        identity: Option<String>,
+        #[arg(long = "mailmap", action = ArgAction::SetTrue)]
+        mailmap: bool,
+        #[arg(long = "no-bcc", action = ArgAction::SetTrue)]
+        no_bcc: bool,
+        #[arg(long = "no-cc", action = ArgAction::SetTrue)]
+        no_cc: bool,
+        #[arg(long = "no-chain-reply-to", action = ArgAction::SetTrue)]
+        no_chain_reply_to: bool,
+        #[arg(long = "no-identity", action = ArgAction::SetTrue)]
+        no_identity: bool,
+        #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
+        no_mailmap: bool,
+        #[arg(long = "no-signed-off-by-cc", action = ArgAction::SetTrue)]
+        no_signed_off_by_cc: bool,
         #[arg(long = "smtp-auth")]
         smtp_auth: Option<String>,
         #[arg(long = "smtp-debug")]
@@ -5048,8 +5068,14 @@ pub enum Command {
         subject: Option<String>,
         #[arg(long = "suppress-cc")]
         suppress_cc: Vec<String>,
+        #[arg(long = "suppress-from", action = ArgAction::SetTrue)]
+        suppress_from: bool,
+        #[arg(long = "thread", action = ArgAction::SetTrue)]
+        thread: bool,
         #[arg(long = "to")]
         to: Vec<String>,
+        #[arg(long = "to-cover", action = ArgAction::SetTrue)]
+        to_cover: bool,
         #[arg(long = "force", action = ArgAction::SetTrue)]
         force: bool,
         #[arg(long = "format-patch", action = ArgAction::SetTrue)]
@@ -5058,6 +5084,12 @@ pub enum Command {
         no_format_patch: bool,
         #[arg(long = "no-smtp-auth", action = ArgAction::SetTrue)]
         no_smtp_auth: bool,
+        #[arg(long = "no-suppress-from", action = ArgAction::SetTrue)]
+        no_suppress_from: bool,
+        #[arg(long = "no-thread", action = ArgAction::SetTrue)]
+        no_thread: bool,
+        #[arg(long = "no-to-cover", action = ArgAction::SetTrue)]
+        no_to_cover: bool,
         #[arg(long = "no-validate", action = ArgAction::SetTrue)]
         no_validate: bool,
         #[arg(long = "validate", action = ArgAction::SetTrue)]

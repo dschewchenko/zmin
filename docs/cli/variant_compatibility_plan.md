@@ -22,6 +22,45 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`send-email` metadata/control no-op family across the existing fake-SMTP
+patch-sending lane. This batch added sixteen exact stock-Git rows and promoted
+sixteen documented `send-email` option pairs into the reviewed-complete census
+set: `--no-bcc`, `--no-cc`, `--no-identity`, `--no-mailmap`,
+`--no-signed-off-by-cc`, `--no-suppress-from`, `--no-thread`,
+`--no-to-cover`, `--cc-cover`, `--to-cover`, `--thread`,
+`--chain-reply-to`, `--no-chain-reply-to`, `--mailmap`, `--identity`, and
+`--suppress-from`. The runtime closure stayed intentionally bounded: Zmin now
+matches the current stock single-patch local SMTP lane where those spellings
+are accepted without altering the result because no cover letter is present,
+threading headers are not introduced on the modeled one-patch flow, the
+configured identity resolves to the same endpoint and recipients, mailmap
+rewrites are absent, and there are no preconfigured Bcc/Cc/from-derived
+additions for the clearing toggles to remove. This does not widen send-email
+into quiet mode, annotate/compose flows, address-generation commands, confirm
+policy, In-Reply-To control, transfer encoding, SMTP auth prompts, or TLS
+option families. The implementation stays focused on the missing closure only:
+the send-email schema now exposes the sixteen spellings, the patch-sending
+path accepts them on the bounded fake-SMTP lane without changing the existing
+stock-shaped output path, and one exact compat test exercises the full bundle
+while normalizing only dynamic Date, Message-ID, and X-Mailer lines. Focused
+gates were
+`cargo test -q -p zmin-cli --test git_mail_tools_compat send_email_metadata_noop_option_family_matches_stock_git -- --exact`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7574` matrix rows, `6655` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3084/3212` complete documented
+option pairs. `send-email` now sits at `38/64` reviewed-complete documented
+option pairs with `54/54` classified rows, `53` stock-matching rows, and `1`
+invalid-input row. The overall backlog head remains `send-email` (`26`),
+followed by `p4` (`28`), `svn` (`25`), `rebase` (`15`), `cvsimport` (`14`),
+`cvsexportcommit` (`11`), `archimport` (`7`), then the single-pair tails
+`log` and `apply`; the next default follow-up should re-evaluate whether the
+remaining `send-email` tail still contains another dense helper-free family or
+whether `p4`/`svn` now offer the better batch.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `send-email` SMTP/header no-op family across the existing fake-SMTP
 patch-sending lane. This batch added eleven exact stock-Git rows and promoted
 eleven documented `send-email` option pairs into the reviewed-complete census

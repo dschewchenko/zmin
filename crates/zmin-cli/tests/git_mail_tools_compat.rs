@@ -824,6 +824,72 @@ fn send_email_smtp_noop_option_family_matches_stock_git() {
 }
 
 #[test]
+fn send_email_metadata_noop_option_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    let patch = git(repo.path(), ["format-patch", "-1"]);
+    let patch = patch.trim().to_owned();
+    let server = FakeSmtpServer::new(2);
+    let port = server.port.to_string();
+    git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
+    git(repo.path(), ["config", "sendemail.smtpserverport", &port]);
+    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
+    git(repo.path(), ["config", "sendemail.identity", "default"]);
+    git(repo.path(), ["config", "sendemail.test.smtpserver", "127.0.0.1"]);
+    git(repo.path(), ["config", "sendemail.test.smtpserverport", &port]);
+    git(repo.path(), ["config", "sendemail.test.from", "bench@example.test"]);
+    git(repo.path(), ["config", "sendemail.test.to", "to1@example.test"]);
+
+    let args = [
+        "send-email",
+        "--suppress-cc=author",
+        "--no-bcc",
+        "--no-cc",
+        "--no-identity",
+        "--no-mailmap",
+        "--no-signed-off-by-cc",
+        "--no-suppress-from",
+        "--no-thread",
+        "--no-to-cover",
+        "--cc-cover",
+        "--to-cover",
+        "--thread",
+        "--chain-reply-to",
+        "--no-chain-reply-to",
+        "--mailmap",
+        "--identity=test",
+        "--suppress-from",
+        patch.as_str(),
+    ];
+
+    let stock = command_output("git", repo.path(), &args, "git send-email");
+    let zmin = command_output(zmin_bin(), repo.path(), &args, "zmin send-email");
+
+    assert_eq!(stock.0, zmin.0);
+    assert_eq!(stock.2, zmin.2);
+    assert_eq!(
+        normalize_send_email_patch_output(&stock.1),
+        normalize_send_email_patch_output(&zmin.1)
+    );
+
+    let messages = server.sent_messages();
+    assert_eq!(messages.len(), 2);
+    let stock_message = String::from_utf8_lossy(&messages[0]).to_string();
+    let zmin_message = String::from_utf8_lossy(&messages[1]).to_string();
+    assert_eq!(
+        normalize_send_email_patch_output(&stock_message),
+        normalize_send_email_patch_output(&zmin_message)
+    );
+}
+
+#[test]
 fn imap_send_appends_mbox_messages_to_plain_imap_server() {
     let repo = git_init();
     let server = FakeImapServer::new();
