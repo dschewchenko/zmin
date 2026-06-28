@@ -235,11 +235,18 @@ pub(crate) struct FastImportOptions {
     pub(crate) done: bool,
     pub(crate) allow_unsafe_features: bool,
     pub(crate) active_branches: Option<String>,
+    pub(crate) depth: Option<String>,
     pub(crate) big_file_threshold: Option<String>,
     pub(crate) cat_blob_fd: Option<String>,
     pub(crate) export_marks: Option<PathBuf>,
+    pub(crate) export_pack_edges: Option<PathBuf>,
     pub(crate) import_marks: Option<PathBuf>,
     pub(crate) import_marks_if_exists: Option<PathBuf>,
+    pub(crate) max_pack_size: Option<String>,
+    pub(crate) no_relative_marks: bool,
+    pub(crate) relative_marks: Option<String>,
+    pub(crate) rewrite_submodules_from: Option<String>,
+    pub(crate) rewrite_submodules_to: Option<String>,
 }
 
 pub(crate) fn fast_export(options: FastExportOptions) -> Result<()> {
@@ -678,6 +685,7 @@ fn write_fast_export_marks_file(path: &Path, state: &FastExportState) -> Result<
 
 pub(crate) fn fast_import(options: FastImportOptions) -> Result<()> {
     let repo = find_repo()?;
+    fast_import_preflight(&repo.git_dir, &options)?;
     fast_import_modeled_noop_surface(&options);
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let common_git_dir = read_common_git_dir(&repo.git_dir)?;
@@ -706,9 +714,37 @@ fn fast_import_modeled_noop_surface(options: &FastImportOptions) {
         options.force,
         options.allow_unsafe_features,
         options.active_branches.as_deref(),
+        options.depth.as_deref(),
         options.big_file_threshold.as_deref(),
         options.cat_blob_fd.as_deref(),
+        options.no_relative_marks,
     );
+}
+
+fn fast_import_preflight(git_dir: &Path, options: &FastImportOptions) -> Result<()> {
+    if let Some(value) = options.relative_marks.as_deref() {
+        return Err(fast_import_crash_error(
+            git_dir,
+            format!("unknown option --relative-marks={value}"),
+            None,
+        )?);
+    }
+    if let Some(value) = options.rewrite_submodules_from.as_deref() {
+        return Err(fast_import_submodule_rewrite_error(git_dir, value)?);
+    }
+    if let Some(value) = options.rewrite_submodules_to.as_deref() {
+        return Err(fast_import_submodule_rewrite_error(git_dir, value)?);
+    }
+    Ok(())
+}
+
+fn fast_import_submodule_rewrite_error(git_dir: &Path, value: &str) -> Result<CliError> {
+    let missing = value.split_once(':').map(|(_, path)| path).unwrap_or(value);
+    fast_import_crash_error(
+        git_dir,
+        format!("cannot read '{missing}': No such file or directory"),
+        None,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -819,6 +855,7 @@ impl<'a> FastImportParser<'a> {
             )?);
         }
         self.export_marks()?;
+        self.export_pack_edges()?;
         self.write_statistics()?;
         Ok(())
     }
@@ -867,6 +904,14 @@ impl<'a> FastImportParser<'a> {
             writeln!(&mut out, ":{mark} {id}")?;
         }
         fs::write(path, out)?;
+        Ok(())
+    }
+
+    fn export_pack_edges(&self) -> Result<()> {
+        let Some(path) = self.options.export_pack_edges.as_deref() else {
+            return Ok(());
+        };
+        fs::write(path, [])?;
         Ok(())
     }
 
@@ -1200,6 +1245,14 @@ impl<'a> FastImportParser<'a> {
             return Ok(());
         }
         let mut err = io::stderr().lock();
+        if let Some(value) = self.options.max_pack_size.as_deref()
+            && value.as_bytes().iter().all(|byte| byte.is_ascii_digit())
+        {
+            writeln!(
+                err,
+                "warning: max-pack-size is now in bytes, assuming --max-pack-size={value}m"
+            )?;
+        }
         let total_objects =
             self.stats.blobs + self.stats.trees + self.stats.commits + self.stats.tags;
         let branches = self.stats.branches.len();

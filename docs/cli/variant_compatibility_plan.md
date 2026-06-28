@@ -21,7 +21,73 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-28 the latest completed batch is a helper-free top-level `help`
+As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-import` schema-gap tail expansion across the already modeled
+done-terminated simple commit lane, the current marks/statistics lane, and
+the current stock crash-shape rejection lane. This batch added seven exact
+stock-Git rows and promoted the remaining seven documented `fast-import`
+option pairs into the represented census set: `fast-import --depth`,
+`--export-pack-edges`, `--max-pack-size`, `--no-relative-marks`,
+`--relative-marks`, `--rewrite-submodules-from`, and
+`--rewrite-submodules-to`.
+The runtime closure stayed intentionally bounded: `--depth=1` and
+`--no-relative-marks` are accepted as stock-compatible no-op surfaces on the
+current helper-free local lane; `--export-pack-edges=<path>` writes the same
+empty file as stock Git on the current tiny-import lane; `--max-pack-size=1`
+preserves the stock warning prefix plus normalized fast-import statistics
+stderr; and `--relative-marks=rel`, `--rewrite-submodules-from=a:b`, and
+`--rewrite-submodules-to=a:b` now fail like stock Git with the same fatal
+diagnostics and fast-import crash-report stderr shape. This slice
+intentionally does not widen into broader value domains, repeated forms,
+relative-marks path semantics, submodule rewrite map semantics, or transport
+and platform permutations yet.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_schema_gap_option_surface_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_relative_marks_and_rewrite_submodules_fail_like_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`python3 - <<'PY' ... cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json ... PY`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2838 / 3212`
+- matrix rows: `7145`
+- verified rows: `6275`
+- invalid-input rows: `845`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-import`: `1 / 19` reviewed-complete documented option pairs,
+  `19 / 19` represented documented option pairs, `30` written rows, `30`
+  classified rows, `23` stock-matching rows, `7` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-expansion batch rather than a reviewed-complete
+closure: the full documented `fast-import` option spelling set is now
+represented with exact stock evidence on the current bounded local lanes, but
+eighteen of the nineteen options still sit in `doc_option_expansion_required`
+because wider values, combinations, repository states, transports, and
+platform-sensitive lanes are still unmodeled.
+
+The next dense helper-free batch should shift to `fast-export`, where the
+remaining census tail is another represented-family expansion on adjacent
+import/export lanes: sixteen documented option pairs already have exact
+evidence, two documented options still sit outside the schema
+(`--anonymize`, `--anonymize-map`), and the rest are currently pure
+`doc_option_expansion_required` follow-through.
+
+As of 2026-06-28 the previous completed batch is a helper-free top-level `help`
 represented-family expansion across the current outside-repository local list
 and viewer-selection lanes. This batch added seventeen exact stock-Git rows
 and promoted the full documented `help` option spelling set into the
@@ -68,35 +134,6 @@ Per-command position on the touched surface:
   `17 / 17` represented documented option pairs, `18` written rows, `18`
   classified rows, `18` stock-matching rows, `0` invalid-input rows, and
   `0` exact-open rows
-
-This is an implementation-plus-expansion batch rather than a reviewed-complete
-closure: the full documented `help` spelling set is now schema-covered and
-represented with exact stock evidence on the current bounded local lanes, but
-all seventeen options still sit in `doc_option_expansion_required` because
-wider combinations, naked invalid forms, topic arguments, and environment-
-sensitive viewer permutations are still unmodeled.
-
-As of 2026-06-28 the previous completed batch is a helper-free local
-`fast-import` represented-family expansion across the already modeled
-done-terminated simple commit lane, the current marks-file preload/export
-lane, and the current stock crash-shape rejection lane. This batch added
-twelve exact stock-Git rows and promoted eleven documented option pairs into
-the represented census set: `fast-import --stats`, `--quiet`, `--force`,
-`--done`, `--allow-unsafe-features`, `--active-branches`,
-`--big-file-threshold`, `--cat-blob-fd`, `--export-marks`,
-`--import-marks`, and `--import-marks-if-exists`.
-The runtime closure stayed intentionally bounded: `--stats` and `--quiet`
-match the current helper-free local statistics surface including stock's
-`--quiet --stats` precedence; `--force`, `--allow-unsafe-features`,
-`--active-branches=1`, `--big-file-threshold=1`, and `--cat-blob-fd=9` are
-accepted as stock-compatible no-op surfaces on the current single-branch tiny
-object lane; `--export-marks`, `--import-marks`, and
-`--import-marks-if-exists` preserve stock marks-file behavior on the current
-helper-free local lane; and `--done` now matches both the accepted
-done-terminated stream and the stock `fatal: stream ends early` crash-shape
-rejection when the terminator is missing. This slice intentionally does not
-widen into relative-marks, export-pack-edges, max-pack-size, depth, or
-submodule-rewrite semantics yet.
 
 As of 2026-06-28 the previous completed batch is a helper-free local
 `show` / `rev-parse` / `index-pack` documented-tail closure across already

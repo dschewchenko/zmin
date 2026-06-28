@@ -71,6 +71,14 @@ fn normalize_fast_import_statistics_stderr(stderr: &str) -> String {
     normalized
 }
 
+fn normalize_fast_import_warning_and_statistics_stderr(stderr: &str, warning: &str) -> String {
+    let rest = stderr
+        .strip_prefix(warning)
+        .expect("warning prefix")
+        .trim_start_matches('\n');
+    format!("{warning}\n{}", normalize_fast_import_statistics_stderr(rest))
+}
+
 fn fast_import_crash_reports(repo: &Path) -> Vec<String> {
     let mut reports = fs::read_dir(repo.join(".git"))
         .expect("read .git")
@@ -330,6 +338,100 @@ done
 }
 
 #[test]
+fn fast_import_schema_gap_option_surface_matches_stock_git() {
+    let stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    for args in [
+        &["fast-import", "--depth=1"][..],
+        &["fast-import", "--no-relative-marks"][..],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_edges = git_repo.path().join("edges.txt");
+    let zmin_edges = zmin_repo.path().join("edges.txt");
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", &format!("--export-pack-edges={}", git_edges.display())],
+        stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", &format!("--export-pack-edges={}", zmin_edges.display())],
+        stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(&zmin_edges).expect("read zmin export-pack-edges"),
+        fs::read_to_string(&git_edges).expect("read git export-pack-edges")
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--max-pack-size=1"],
+        stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--max-pack-size=1"],
+        stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_warning_and_statistics_stderr(
+            &zmin_output.2,
+            "warning: max-pack-size is now in bytes, assuming --max-pack-size=1m"
+        ),
+        normalize_fast_import_warning_and_statistics_stderr(
+            &git_output.2,
+            "warning: max-pack-size is now in bytes, assuming --max-pack-size=1m"
+        )
+    );
+}
+
+#[test]
 fn fast_import_marks_options_match_stock_git() {
     let export_stream = "\
 blob
@@ -479,6 +581,51 @@ M 100644 :1 a.txt
         normalize_fast_import_crash_stderr(&zmin_output.2, "fatal: stream ends early"),
         normalize_fast_import_crash_stderr(&git_output.2, "fatal: stream ends early")
     );
+}
+
+#[test]
+fn fast_import_relative_marks_and_rewrite_submodules_fail_like_stock_git() {
+    let stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    for (args, fatal) in [
+        (
+            &["fast-import", "--relative-marks=rel"][..],
+            "fatal: unknown option --relative-marks=rel",
+        ),
+        (
+            &["fast-import", "--rewrite-submodules-from=a:b"][..],
+            "fatal: cannot read 'b': No such file or directory",
+        ),
+        (
+            &["fast-import", "--rewrite-submodules-to=a:b"][..],
+            "fatal: cannot read 'b': No such file or directory",
+        ),
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_crash_stderr(&zmin_output.2, fatal),
+            normalize_fast_import_crash_stderr(&git_output.2, fatal),
+            "stderr for {args:?}"
+        );
+    }
 }
 
 #[test]

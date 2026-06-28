@@ -4760,16 +4760,30 @@ pub enum Command {
         allow_unsafe_features: bool,
         #[arg(long = "active-branches")]
         active_branches: Option<String>,
+        #[arg(long = "depth")]
+        depth: Option<String>,
         #[arg(long = "big-file-threshold")]
         big_file_threshold: Option<String>,
         #[arg(long = "cat-blob-fd")]
         cat_blob_fd: Option<String>,
         #[arg(long = "export-marks", value_hint = ValueHint::FilePath)]
         export_marks: Option<PathBuf>,
+        #[arg(long = "export-pack-edges", value_hint = ValueHint::FilePath)]
+        export_pack_edges: Option<PathBuf>,
         #[arg(long = "import-marks", value_hint = ValueHint::FilePath)]
         import_marks: Option<PathBuf>,
         #[arg(long = "import-marks-if-exists", value_hint = ValueHint::FilePath)]
         import_marks_if_exists: Option<PathBuf>,
+        #[arg(long = "max-pack-size")]
+        max_pack_size: Option<String>,
+        #[arg(long = "no-relative-marks", action = ArgAction::SetTrue)]
+        no_relative_marks: bool,
+        #[arg(long = "relative-marks")]
+        relative_marks: Option<String>,
+        #[arg(long = "rewrite-submodules-from")]
+        rewrite_submodules_from: Option<String>,
+        #[arg(long = "rewrite-submodules-to")]
+        rewrite_submodules_to: Option<String>,
     },
     CommitGraph {
         #[command(subcommand)]
