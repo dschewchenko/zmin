@@ -71,10 +71,13 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         not,
         stdin,
         count,
+        exclude,
         topo_order,
         date_order,
         author_date_order,
         reverse,
+        author,
+        committer,
         alternate_refs,
         ignore_missing,
         indexed_objects,
@@ -93,9 +96,30 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         objects_edge_aggressive,
         show_signature,
         no_walk,
+        do_walk,
         no_merges,
+        dense,
+        sparse,
+        full_history,
+        children,
+        reflog,
+        grep,
+        invert_grep,
+        all_match,
+        regexp_ignore_case,
+        basic_regexp,
+        extended_regexp,
+        fixed_strings,
+        perl_regexp,
         max_count,
+        max_age,
         skip,
+        since,
+        until,
+        max_parents,
+        no_max_parents,
+        min_parents,
+        no_min_parents,
         contained,
         advance,
         onto,
@@ -145,7 +169,10 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             not,
             stdin,
             count,
+            exclude,
             alternate_refs,
+            author,
+            committer,
             ignore_missing,
             indexed_objects,
             remove_empty,
@@ -163,9 +190,30 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             objects_edge_aggressive,
             show_signature,
             no_walk,
+            do_walk,
             no_merges,
+            dense,
+            sparse,
+            full_history,
+            children,
+            reflog,
+            grep,
+            invert_grep,
+            all_match,
+            regexp_ignore_case,
+            basic_regexp,
+            extended_regexp,
+            fixed_strings,
+            perl_regexp,
             max_count,
+            max_age,
             skip,
+            since,
+            until,
+            max_parents,
+            no_max_parents,
+            min_parents,
+            no_min_parents,
             revision_ranges,
         )?;
     let revs = collect_rev_list_revs(&repo, &store, all, rev_args).map_err(|error| {
@@ -227,7 +275,10 @@ fn collect_replay_rev_args(
     not: bool,
     stdin: bool,
     count: bool,
+    exclude: Vec<String>,
     alternate_refs: bool,
+    author: Option<String>,
+    committer: Option<String>,
     ignore_missing: bool,
     indexed_objects: bool,
     remove_empty: bool,
@@ -245,14 +296,38 @@ fn collect_replay_rev_args(
     objects_edge_aggressive: bool,
     show_signature: bool,
     no_walk: bool,
+    do_walk: bool,
     no_merges: bool,
+    dense: bool,
+    sparse: bool,
+    full_history: bool,
+    children: bool,
+    reflog: bool,
+    grep: Vec<String>,
+    invert_grep: bool,
+    all_match: bool,
+    regexp_ignore_case: bool,
+    basic_regexp: bool,
+    extended_regexp: bool,
+    fixed_strings: bool,
+    perl_regexp: bool,
     max_count: Option<String>,
+    max_age: Option<String>,
     skip: Option<usize>,
+    since: Option<String>,
+    until: Option<String>,
+    max_parents: Option<String>,
+    no_max_parents: bool,
+    min_parents: Option<String>,
+    no_min_parents: bool,
     mut revision_ranges: Vec<String>,
 ) -> Result<Vec<String>> {
     let mut rev_args = Vec::new();
     if count
+        || !exclude.is_empty()
         || alternate_refs
+        || author.is_some()
+        || committer.is_some()
         || ignore_missing
         || indexed_objects
         || remove_empty
@@ -270,9 +345,30 @@ fn collect_replay_rev_args(
         || objects_edge_aggressive
         || show_signature
         || no_walk
+        || do_walk
         || no_merges
+        || dense
+        || sparse
+        || full_history
+        || children
+        || reflog
+        || !grep.is_empty()
+        || invert_grep
+        || all_match
+        || regexp_ignore_case
+        || basic_regexp
+        || extended_regexp
+        || fixed_strings
+        || perl_regexp
         || max_count.is_some()
+        || max_age.is_some()
         || skip.is_some()
+        || since.is_some()
+        || until.is_some()
+        || max_parents.is_some()
+        || no_max_parents
+        || min_parents.is_some()
+        || no_min_parents
     {
         let _ = ();
     }

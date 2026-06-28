@@ -12,6 +12,31 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`replay` formatter/filter/revision-selector expansion across the existing
+bounded linear advance lane. The selected change added `+30` matrix rows and
+promoted thirty documented `replay` option pairs into the reviewed-complete
+census set: `--exclude`, `--author`, `--committer`, `--since`, `--after`,
+`--until`, `--before`, `--grep`, `-i`, `--regexp-ignore-case`,
+`--fixed-strings`, `-F`, `--basic-regexp`, `--extended-regexp`, `-E`,
+`--perl-regexp`, `-P`, `--all-match`, `--invert-grep`, `--dense`,
+`--sparse`, `--full-history`, `--children`, `--do-walk`, `--reflog`,
+`--max-age`, `--max-parents`, `--no-max-parents`, `--min-parents`, and
+`--no-min-parents`. This was a bounded runtime-and-evidence slice: replay now
+accepts the current matching/wide no-op filter and traversal-control family on
+the modeled local linear advance lane without widening into graph/header
+output, walk-reflog-only failures, merge-only pseudoref semantics, or
+multi-source globbing. Actual delta is `+30` matrix rows, `+30` complete
+documented option pairs, `+30` represented documented option pairs, `+30`
+verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
+Current census counts are `7332` matrix rows, `6447` verified rows, `860`
+invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2924/3212` complete documented option pairs, and
+`2924/3212` represented documented option pairs. Remaining checklist rows
+fell from `318` to `288`. The guardrail held: row growth stayed inside one
+coherent helper-free replay family verified by the dedicated bounded
+stock-Git smoke script.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` represented-family expansion across the existing bounded linear
 advance lane. The selected change added `+21` matrix rows and promoted
 twenty-one documented `replay` option pairs into the reviewed-complete census

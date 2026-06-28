@@ -1424,6 +1424,8 @@ pub enum Command {
         stdin: bool,
         #[arg(long = "count", action = ArgAction::SetTrue)]
         count: bool,
+        #[arg(long = "exclude")]
+        exclude: Vec<String>,
         #[arg(long = "topo-order", action = ArgAction::SetTrue)]
         topo_order: bool,
         #[arg(long = "date-order", action = ArgAction::SetTrue)]
@@ -1432,6 +1434,10 @@ pub enum Command {
         author_date_order: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "author")]
+        author: Option<String>,
+        #[arg(long = "committer")]
+        committer: Option<String>,
         #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
         alternate_refs: bool,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
@@ -1468,12 +1474,73 @@ pub enum Command {
         show_signature: bool,
         #[arg(long = "no-walk", action = ArgAction::SetTrue)]
         no_walk: bool,
+        #[arg(long = "do-walk", action = ArgAction::SetTrue)]
+        do_walk: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
         no_merges: bool,
+        #[arg(long = "dense", action = ArgAction::SetTrue)]
+        dense: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "full-history", action = ArgAction::SetTrue)]
+        full_history: bool,
+        #[arg(long = "children", action = ArgAction::SetTrue)]
+        children: bool,
+        #[arg(long = "reflog", action = ArgAction::SetTrue)]
+        reflog: bool,
+        #[arg(long = "grep")]
+        grep: Vec<String>,
+        #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
+        invert_grep: bool,
+        #[arg(long = "all-match", action = ArgAction::SetTrue)]
+        all_match: bool,
+        #[arg(short = 'i', long = "regexp-ignore-case", action = ArgAction::SetTrue)]
+        regexp_ignore_case: bool,
+        #[arg(
+            long = "basic-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["extended_regexp", "fixed_strings", "perl_regexp"]
+        )]
+        basic_regexp: bool,
+        #[arg(
+            short = 'E',
+            long = "extended-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["basic_regexp", "fixed_strings", "perl_regexp"]
+        )]
+        extended_regexp: bool,
+        #[arg(
+            short = 'F',
+            long = "fixed-strings",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["basic_regexp", "extended_regexp", "perl_regexp"]
+        )]
+        fixed_strings: bool,
+        #[arg(
+            short = 'P',
+            long = "perl-regexp",
+            action = ArgAction::SetTrue,
+            overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
+        )]
+        perl_regexp: bool,
         #[arg(long = "max-count")]
         max_count: Option<String>,
+        #[arg(long = "max-age")]
+        max_age: Option<String>,
         #[arg(long = "skip")]
         skip: Option<usize>,
+        #[arg(long = "since", alias = "after")]
+        since: Option<String>,
+        #[arg(long = "until", alias = "before")]
+        until: Option<String>,
+        #[arg(long = "max-parents")]
+        max_parents: Option<String>,
+        #[arg(long = "no-max-parents", action = ArgAction::SetTrue)]
+        no_max_parents: bool,
+        #[arg(long = "min-parents")]
+        min_parents: Option<String>,
+        #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
+        no_min_parents: bool,
         #[arg(long = "contained", action = ArgAction::SetTrue)]
         contained: bool,
         #[arg(long = "advance")]

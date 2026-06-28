@@ -22,6 +22,55 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`replay` formatter/filter/revision-selector expansion across the existing
+bounded linear advance lane. This batch added thirty exact stock-Git rows and
+promoted thirty documented `replay` option pairs into the reviewed-complete
+census set: `--exclude`, `--author`, `--committer`, `--since`, `--after`,
+`--until`, `--before`, `--grep`, `-i`, `--regexp-ignore-case`,
+`--fixed-strings`, `-F`, `--basic-regexp`, `--extended-regexp`, `-E`,
+`--perl-regexp`, `-P`, `--all-match`, `--invert-grep`, `--dense`,
+`--sparse`, `--full-history`, `--children`, `--do-walk`, `--reflog`,
+`--max-age`, `--max-parents`, `--no-max-parents`, `--min-parents`, and
+`--no-min-parents`. The runtime closure stayed intentionally bounded: this
+slice only widens replay over the current linear `--advance` lane by accepting
+matching/wide no-op filter and traversal-control spellings that leave the
+replay result unchanged on the modeled repository state. It does not widen
+replay into walk-reflog-only invalid lanes, merge-only pseudoref semantics,
+graph/header/object-name output families, multi-source globbing, or broader
+history-shape and formatting surfaces.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
+`GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin bash tools/git-replay-schema-oracle-smoke.sh`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2924 / 3212`
+- represented documented command-option pairs: `2924 / 3212`
+- matrix rows: `7332`
+- verified rows: `6447`
+- invalid-input rows: `860`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `288`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `replay`: `64 / 119` reviewed-complete documented option pairs, `67`
+  written rows, `63` stock-matching rows, `4` invalid-input rows
+
+The next dense helper-free queue can still stay on `replay` if another bounded
+family is available (`55` documented pairs remain), but the global backlog
+head is now `send-email` (`62`), followed by `replay` (`55`), `rebase`
+(`54`), `p4` (`28`), and `svn` (`25`).
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` represented-family expansion across the existing bounded linear
 advance lane. This batch added twenty-one exact stock-Git rows and promoted
 twenty-one documented `replay` option pairs into the reviewed-complete census
