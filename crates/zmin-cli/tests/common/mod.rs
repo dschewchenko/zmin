@@ -12,7 +12,14 @@ static REMOTE_HTTP_HELPER: OnceLock<PathBuf> = OnceLock::new();
 static STOCK_GIT: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn zmin_bin() -> &'static str {
-    option_env!("CARGO_BIN_EXE_zmin").unwrap_or(env!("CARGO_BIN_EXE_zmin"))
+    static ZMIN_BIN: OnceLock<String> = OnceLock::new();
+    ZMIN_BIN.get_or_init(|| {
+        std::env::var("ZMIN_BIN").unwrap_or_else(|_| {
+            option_env!("CARGO_BIN_EXE_zmin")
+                .unwrap_or(env!("CARGO_BIN_EXE_zmin"))
+                .to_owned()
+        })
+    })
 }
 
 pub fn stock_git_bin() -> &'static Path {

@@ -1034,6 +1034,7 @@ struct FastImportParser<'a> {
     pending_line: Option<String>,
     stats: FastImportStats,
     options: FastImportOptions,
+    stream_import_marks_seen: bool,
 }
 
 #[derive(Default)]
@@ -1070,6 +1071,7 @@ impl<'a> FastImportParser<'a> {
             pending_line: None,
             stats: FastImportStats::default(),
             options,
+            stream_import_marks_seen: false,
         }
     }
 
@@ -1080,7 +1082,9 @@ impl<'a> FastImportParser<'a> {
             if line.is_empty() {
                 continue;
             }
-            if line == "blob" {
+            if line.starts_with("feature ") {
+                self.apply_feature_command(&line)?;
+            } else if line == "blob" {
                 self.parse_blob()?;
             } else if let Some(ref_name) = line.strip_prefix("commit ") {
                 self.parse_commit(ref_name)?;
@@ -1107,6 +1111,74 @@ impl<'a> FastImportParser<'a> {
         self.export_marks()?;
         self.export_pack_edges()?;
         self.write_statistics()?;
+        Ok(())
+    }
+
+    fn apply_feature_command(&mut self, line: &str) -> Result<()> {
+        let Some(feature) = line.strip_prefix("feature ") else {
+            return Err(self.unsupported_fast_import_command(line)?);
+        };
+        if feature == "no-relative-marks" {
+            return Ok(());
+        }
+        if let Some(value) = feature.strip_prefix("relative-marks=") {
+            return Err(fast_import_crash_error(
+                &self.repo.git_dir,
+                format!("this version of fast-import does not support feature relative-marks={value}."),
+                None,
+            )?);
+        }
+        if let Some(path) = feature.strip_prefix("export-marks=") {
+            self.ensure_unsafe_fast_import_feature(feature)?;
+            if self.options.export_marks.is_none() {
+                self.options.export_marks = Some(PathBuf::from(path));
+            }
+            return Ok(());
+        }
+        if let Some(path) = feature.strip_prefix("import-marks=") {
+            self.ensure_unsafe_fast_import_feature("import-marks")?;
+            self.apply_stream_import_marks_feature(path, false)?;
+            return Ok(());
+        }
+        if let Some(path) = feature.strip_prefix("import-marks-if-exists=") {
+            self.ensure_unsafe_fast_import_feature("import-marks-if-exists")?;
+            self.apply_stream_import_marks_feature(path, true)?;
+            return Ok(());
+        }
+        Err(self.unsupported_fast_import_command(line)?)
+    }
+
+    fn ensure_unsafe_fast_import_feature(&self, feature: &str) -> Result<()> {
+        if self.options.allow_unsafe_features {
+            return Ok(());
+        }
+        Err(fast_import_crash_error(
+            &self.repo.git_dir,
+            format!("feature '{feature}' forbidden in input without --allow-unsafe-features"),
+            None,
+        )?)
+    }
+
+    fn apply_stream_import_marks_feature(&mut self, path: &str, missing_ok: bool) -> Result<()> {
+        if self.stream_import_marks_seen {
+            return Err(fast_import_crash_error(
+                &self.repo.git_dir,
+                "only one import-marks command allowed per stream".to_owned(),
+                None,
+            )?);
+        }
+        self.stream_import_marks_seen = true;
+        if !self.options.import_marks.is_empty() || !self.options.import_marks_if_exists.is_empty() {
+            return Ok(());
+        }
+        let path = PathBuf::from(path);
+        if missing_ok {
+            if path.exists() {
+                self.load_marks_file(&path)?;
+            }
+        } else {
+            self.load_marks_file(&path)?;
+        }
         Ok(())
     }
 

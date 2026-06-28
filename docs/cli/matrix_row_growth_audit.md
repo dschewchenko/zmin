@@ -9840,3 +9840,74 @@ covers context aliases, regexp-mode aliases, boolean-expression pattern
 spellings, local traversal toggles, output-shape aliases, function-context
 aliases, NUL-delimited filename output, and the bounded binary/pager aliases on
 the current modeled helper-free local lanes.
+
+Actual post-import movement matched the declaration: `+0` behavior rows, `+0`
+closed rows, `+0` open rows, `+0` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+19` complete documented option pairs, `+0` represented documented
+option pairs, `+0` complete command matrices, `+0`
+implemented-but-unverified schema rows, and `-19` remaining checklist rows.
+
+## 2026-06-28 - fast-import stream-feature marks expansion batch
+
+Expected movement:
+
+- behavior rows: `+8`
+- closed rows: `+5`
+- open rows: `+0`
+- invalid-input rows: `+3`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- complete documented option pairs: `+0`
+- represented documented option pairs: `+0`
+- complete command matrices: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Selected variants:
+
+- `fast-import feature export-marks=marks.txt` with `--allow-unsafe-features`
+- `fast-import feature import-marks=one.marks` with `--allow-unsafe-features`
+- `fast-import feature import-marks-if-exists=one.marks` with
+  `--allow-unsafe-features`
+- `fast-import feature no-relative-marks` plus
+  `feature export-marks=marks.txt`
+- `fast-import --import-marks=one.marks` plus stream
+  `feature import-marks=two.marks`
+- `fast-import feature export-marks=marks.txt` without
+  `--allow-unsafe-features`
+- `fast-import feature import-marks=one.marks` without
+  `--allow-unsafe-features`
+- `fast-import feature import-marks-if-exists=one.marks` without
+  `--allow-unsafe-features`
+
+This batch extends the current helper-free local `fast-import` oracle through
+the bounded in-stream marks feature tail instead of widening into new runtime
+surfaces. Rust changes taught the parser to recognize `feature ...` commands
+for the currently modeled stream families, enforce stock-style
+`--allow-unsafe-features` gating, honor CLI `--import-marks*` precedence over
+stream features, and emit the stock-shaped rejection surface for unsupported
+unsafe forms. Test infrastructure also now honors `ZMIN_BIN` in the shared
+integration harness so focused compatibility tests can force the current
+`target/debug/zmin` binary instead of accidentally sampling a stale build.
+
+Focused verification was
+`cargo build -p zmin-cli --bin zmin`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_stream_feature_marks_fail_like_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual post-import movement matched the declaration: `+8` behavior rows, `+5`
+closed rows, `+0` open rows, `+3` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` complete documented option pairs, `+0` represented documented
+option pairs, `+0` complete command matrices, `+0`
+implemented-but-unverified schema rows, and `+0` remaining checklist rows.
