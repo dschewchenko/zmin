@@ -23,6 +23,55 @@ mappings and latest completed slices.
 
 As of 2026-06-28 the latest completed batch is a zero-row-growth
 review-closure promotion across the already represented helper-free local
+`fast-import` surface. This batch added no new behavior rows and instead
+promoted the remaining eighteen documented `fast-import` option pairs into the
+reviewed-complete census set: `--active-branches`,
+`--allow-unsafe-features`, `--big-file-threshold`, `--cat-blob-fd`,
+`--depth`, `--done`, `--export-marks`, `--export-pack-edges`, `--force`,
+`--import-marks`, `--import-marks-if-exists`, `--max-pack-size`,
+`--no-relative-marks`, `--quiet`, `--relative-marks`,
+`--rewrite-submodules-from`, `--rewrite-submodules-to`, and `--stats`. The
+runtime closure stayed intentionally bounded: this slice does not widen
+runtime semantics, add new oracles, or change behavior rows. It proves that
+the current exact evidence already closes the documented helper-free local
+`fast-import` surface across bounded no-op control values, done/progress
+stream framing, marks import/export families, relative-marks path resolution,
+unsafe stream-feature marks lanes, max-pack-size warning behavior, and the
+current rewrite-submodules invalid-input tail.
+
+Focused verification was
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2836 / 3212`
+- represented documented command-option pairs: `2840 / 3212`
+- matrix rows: `7248`
+- verified rows: `6366`
+- invalid-input rows: `857`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `376`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-import`: `19 / 19` reviewed-complete documented option pairs, `93`
+  written rows, `79` stock-matching rows, `14` invalid-input rows
+
+There is no longer any represented-but-not-reviewed-complete command left in
+the current census. The next dense helper-free batch must now shift from
+review promotion back to new represented coverage on partial commands. The
+best next queue should come from the largest safe partial surfaces such as the
+remaining `log` documented tail, then the smaller high-confidence local
+surfaces like `apply`, before dropping into broader new implementation work on
+commands such as `daemon`, `cvsimport`, `p4`, `pack-objects`, `rebase`,
+`send-email`, or `replay`.
+
+As of 2026-06-28 the latest completed batch is a zero-row-growth
+review-closure promotion across the already represented helper-free local
 `help`, `fast-export`, and `rev-list` surfaces. This batch added no new
 behavior rows and instead promoted forty-four existing documented option pairs
 into the reviewed-complete census set: all seventeen documented `help`

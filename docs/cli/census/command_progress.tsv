@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2818	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2836	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2840	3212	documented command-option pairs with at least one behavior row
 behavior_rows_written	7248	7248	current written command option value combination state transport platform rows
@@ -55,7 +55,7 @@ diff-index	112	112	112	100.0	146	146	100.0	146	100.0	0	0	0	yes
 diff-tree	132	132	132	100.0	171	171	100.0	171	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
 fast-export	18	18	18	100.0	64	64	100.0	56	87.5	0	0	8	yes
-fast-import	19	1	19	100.0	93	93	100.0	79	84.9	0	0	14	yes
+fast-import	19	19	19	100.0	93	93	100.0	79	84.9	0	0	14	yes
 fetch	63	63	63	100.0	379	357	94.2	342	90.2	0	0	15	yes
 fetch-pack	18	18	18	100.0	25	25	100.0	23	92.0	0	0	2	yes
 filter-branch	15	15	15	100.0	19	19	100.0	19	100.0	0	0	0	yes
