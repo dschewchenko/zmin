@@ -655,6 +655,235 @@ fn p4_submit_opens_changed_files_and_submits_head() {
 }
 
 #[test]
+fn p4_submit_noop_option_family_matches_stock_git() {
+    for extra_args in [
+        ["--origin", "refs/remotes/p4/master"].as_slice(),
+        ["-M"].as_slice(),
+        ["--conflict=skip"].as_slice(),
+        ["--commit", "HEAD"].as_slice(),
+        ["--git-dir", ".git"].as_slice(),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let bin = dir.path().join("bin");
+        let data = dir.path().join("p4-data");
+        let seed_target = dir.path().join("seed-project");
+        let stock_target = dir.path().join("stock-project");
+        let zmin_target = dir.path().join("zmin-project");
+        let seed_log_path = dir.path().join("seed-p4.log");
+        let stock_log_path = dir.path().join("stock-p4-submit.log");
+        let zmin_log_path = dir.path().join("zmin-p4-submit.log");
+        fs::create_dir_all(&data).expect("create p4 data");
+        fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
+        fs::create_dir_all(data.join("dir")).expect("create p4 dir");
+        fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
+        write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
+
+        let seed_clone = run_command_with_path_and_env(
+            zmin_bin(),
+            dir.path(),
+            &bin,
+            &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+            &[
+                "p4",
+                "clone",
+                "--branch",
+                "master",
+                "//depot/project",
+                seed_target.to_str().expect("seed target path"),
+            ],
+        );
+        assert_eq!(seed_clone.0, 0, "zmin clone stderr: {}", seed_clone.2);
+        copy_dir_recursive(&seed_target, &stock_target);
+        copy_dir_recursive(&seed_target, &zmin_target);
+
+        for target in [&stock_target, &zmin_target] {
+            configure_identity(target);
+            git(target, ["config", "git-p4.skipSubmitEdit", "true"]);
+            fs::write(target.join("a.txt"), b"alpha\nchanged\n").expect("modify a");
+            fs::write(target.join("new.txt"), b"new\n").expect("write new");
+            fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+            git(target, ["add", "-A"]);
+            git_with_env(target, ["commit", "-m", "submit change"]);
+        }
+
+        let mut stock_args = vec!["p4", "submit"];
+        stock_args.extend_from_slice(extra_args);
+        let stock = run_command_with_path_and_env(
+            stock_git_bin().to_str().expect("stock git path"),
+            &stock_target,
+            &bin,
+            &[(
+                "P4_LOG_PATH",
+                stock_log_path.to_str().expect("stock log path"),
+            )],
+            &stock_args,
+        );
+        assert_eq!(stock.0, 0, "stock submit stderr: {}", stock.2);
+
+        let mut zmin_args = vec!["p4", "submit"];
+        zmin_args.extend_from_slice(extra_args);
+        let zmin = run_command_with_path_and_env(
+            zmin_bin(),
+            &zmin_target,
+            &bin,
+            &[(
+                "P4_LOG_PATH",
+                zmin_log_path.to_str().expect("zmin log path"),
+            )],
+            &zmin_args,
+        );
+        assert_eq!(zmin.0, 0, "zmin submit stderr: {}", zmin.2);
+
+        assert_eq!(
+            normalize_p4_submit_stdout(&zmin.1),
+            normalize_p4_submit_stdout(&stock.1)
+        );
+        assert_eq!(zmin.2, stock.2);
+        let stock_log = fs::read_to_string(stock_log_path).expect("read stock p4 log");
+        let zmin_log = fs::read_to_string(zmin_log_path).expect("read zmin p4 log");
+        assert_eq!(stock_log, zmin_log);
+    }
+}
+
+#[test]
+fn p4_submit_disable_followup_option_family_matches_stock_git() {
+    for extra_args in [
+        ["--disable-rebase"].as_slice(),
+        ["--disable-p4sync"].as_slice(),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let bin = dir.path().join("bin");
+        let data = dir.path().join("p4-data");
+        let seed_target = dir.path().join("seed-project");
+        let stock_target = dir.path().join("stock-project");
+        let zmin_target = dir.path().join("zmin-project");
+        let seed_log_path = dir.path().join("seed-p4.log");
+        fs::create_dir_all(&data).expect("create p4 data");
+        fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
+        fs::create_dir_all(data.join("dir")).expect("create p4 dir");
+        fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
+        write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
+
+        let seed_clone = run_command_with_path_and_env(
+            zmin_bin(),
+            dir.path(),
+            &bin,
+            &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+            &[
+                "p4",
+                "clone",
+                "--branch",
+                "master",
+                "//depot/project",
+                seed_target.to_str().expect("seed target path"),
+            ],
+        );
+        assert_eq!(seed_clone.0, 0, "zmin clone stderr: {}", seed_clone.2);
+        copy_dir_recursive(&seed_target, &stock_target);
+        copy_dir_recursive(&seed_target, &zmin_target);
+
+        for target in [&stock_target, &zmin_target] {
+            configure_identity(target);
+            git(target, ["config", "git-p4.skipSubmitEdit", "true"]);
+            fs::write(target.join("a.txt"), b"alpha\nchanged\n").expect("modify a");
+            fs::write(target.join("new.txt"), b"new\n").expect("write new");
+            fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+            git(target, ["add", "-A"]);
+            git_with_env(target, ["commit", "-m", "submit change"]);
+        }
+
+        let mut stock_args = vec!["p4", "submit"];
+        stock_args.extend_from_slice(extra_args);
+        let stock = run_command_with_path(
+            stock_git_bin().to_str().expect("stock git path"),
+            &stock_target,
+            &bin,
+            &stock_args,
+        );
+        assert_eq!(stock.0, 0, "stock submit stderr: {}", stock.2);
+
+        let mut zmin_args = vec!["p4", "submit"];
+        zmin_args.extend_from_slice(extra_args);
+        let zmin = run_command_with_path(
+            zmin_bin(),
+            &zmin_target,
+            &bin,
+            &zmin_args,
+        );
+        assert_eq!(zmin.0, 0, "zmin submit stderr: {}", zmin.2);
+
+        assert_eq!(
+            normalize_p4_submit_stdout(&zmin.1),
+            normalize_p4_submit_stdout(&stock.1)
+        );
+        assert_eq!(zmin.2, stock.2);
+    }
+}
+
+#[test]
+fn p4_submit_preserve_user_failure_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let bin = dir.path().join("bin");
+    let data = dir.path().join("p4-data");
+    let seed_target = dir.path().join("seed-project");
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let seed_log_path = dir.path().join("seed-p4.log");
+    fs::create_dir_all(&data).expect("create p4 data");
+    fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
+    fs::create_dir_all(data.join("dir")).expect("create p4 dir");
+    fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
+    write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
+
+    let seed_clone = run_command_with_path_and_env(
+        zmin_bin(),
+        dir.path(),
+        &bin,
+        &[("P4_LOG_PATH", seed_log_path.to_str().expect("seed log path"))],
+        &[
+            "p4",
+            "clone",
+            "--branch",
+            "master",
+            "//depot/project",
+            seed_target.to_str().expect("seed target path"),
+        ],
+    );
+    assert_eq!(seed_clone.0, 0, "zmin clone stderr: {}", seed_clone.2);
+    copy_dir_recursive(&seed_target, &stock_target);
+    copy_dir_recursive(&seed_target, &zmin_target);
+
+    for target in [&stock_target, &zmin_target] {
+        configure_identity(target);
+        git(target, ["config", "git-p4.skipSubmitEdit", "true"]);
+        fs::write(target.join("a.txt"), b"alpha\nchanged\n").expect("modify a");
+        fs::write(target.join("new.txt"), b"new\n").expect("write new");
+        fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+        git(target, ["add", "-A"]);
+        git_with_env(target, ["commit", "-m", "submit change"]);
+    }
+
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        &bin,
+        &["p4", "submit", "--preserve-user"],
+    );
+    assert_ne!(stock.0, 0, "stock submit unexpectedly succeeded");
+    let zmin = run_command_with_path(
+        zmin_bin(),
+        &zmin_target,
+        &bin,
+        &["p4", "submit", "--preserve-user"],
+    );
+    assert_ne!(zmin.0, 0, "zmin submit unexpectedly succeeded");
+
+    assert_eq!(zmin.0, stock.0);
+    assert_eq!(zmin.1, stock.1);
+    assert_eq!(zmin.2, stock.2);
+}
+
+#[test]
 fn p4_submit_dry_run_option_family_matches_stock_git() {
     for extra_args in [["--dry-run"].as_slice(), ["-n"].as_slice()] {
         let dir = TempDir::new().expect("temp dir");

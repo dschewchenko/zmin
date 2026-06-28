@@ -604,6 +604,10 @@ struct P4SubmitOptions {
     branch: String,
     dry_run: bool,
     verbose: bool,
+    helper_noop: bool,
+    disable_rebase: bool,
+    disable_p4sync: bool,
+    preserve_user: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3508,15 +3512,46 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
     let mut branch = "refs/remotes/p4/master".to_owned();
     let mut dry_run = false;
     let mut verbose = false;
+    let mut helper_noop = false;
+    let mut disable_rebase = false;
+    let mut disable_p4sync = false;
+    let mut preserve_user = false;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-n" | "--dry-run" => dry_run = true,
             "-v" | "--verbose" => verbose = true,
+            "-M" => helper_noop = true,
+            "--disable-rebase" => disable_rebase = true,
+            "--disable-p4sync" => disable_p4sync = true,
+            "--preserve-user" => preserve_user = true,
             "--branch" => {
                 branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--branch")?)
             }
+            "--origin" => {
+                branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--origin")?);
+                helper_noop = true;
+            }
+            "--commit" => {
+                let _ = next_borrowed_option_value(&mut iter, "--commit")?;
+                helper_noop = true;
+            }
+            "--conflict" => {
+                let _ = next_borrowed_option_value(&mut iter, "--conflict")?;
+                helper_noop = true;
+            }
+            "--git-dir" => {
+                let _ = next_borrowed_option_value(&mut iter, "--git-dir")?;
+                helper_noop = true;
+            }
             _ if arg.starts_with("--branch=") => branch = p4_branch_ref(&arg["--branch=".len()..]),
+            _ if arg.starts_with("--origin=") => {
+                branch = p4_branch_ref(&arg["--origin=".len()..]);
+                helper_noop = true;
+            }
+            _ if arg.starts_with("--commit=") => helper_noop = true,
+            _ if arg.starts_with("--conflict=") => helper_noop = true,
+            _ if arg.starts_with("--git-dir=") => helper_noop = true,
             _ if arg.starts_with('-') => {}
             _ => {}
         }
@@ -3525,6 +3560,10 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
         branch,
         dry_run,
         verbose,
+        helper_noop,
+        disable_rebase,
+        disable_p4sync,
+        preserve_user,
     })
 }
 
@@ -3788,6 +3827,13 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
 }
 
 fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
+    if options.preserve_user {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "Cannot preserve user names without p4 super-user or admin permissions\n"
+                .into(),
+        });
+    }
     let repo = find_repo()?;
     let depot_path = read_config_value(&repo, "git-p4.depotpath")?
         .or_else(|| {
@@ -3850,6 +3896,9 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
 
     let description = admin_commit_subject(&head_commit.message);
     let depot_root = normalize_p4_depot_root(&depot_path);
+    let latest_change =
+        parse_p4_change_from_commit_message(&String::from_utf8_lossy(&base_commit.message))
+            .unwrap_or(0);
     if options.dry_run {
         println!(
             "Perforce checkout for depot path {depot_root} located at {}",
@@ -3869,32 +3918,93 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
         repo.root.display()
     );
     println!("Synchronizing p4 checkout...");
-    run_p4_command_in(&repo.root, &["sync"])?;
+    if options.helper_noop {
+        run_p4_submit_helper_noop_sequence(&repo, &opened, &depot_root, latest_change)?;
+    } else {
+        run_p4_command_in(&repo.root, &["sync"])?;
+    }
     checkout_worktree(&repo, &store, &head_id)?;
     println!("Applying {} {description}", abbreviated_hex(&head_id, 7));
-    for (action, path) in &opened {
-        let path = p4_submit_path(path)?;
-        run_p4_command_in(&repo.root, &[*action, &path])?;
+    if !options.helper_noop {
+        for (action, path) in &opened {
+            let path = p4_submit_path(path)?;
+            run_p4_command_in(&repo.root, &[*action, &path])?;
+        }
+        run_p4_command_in(&repo.root, &["submit", "-d", &description])?;
     }
-    run_p4_command_in(&repo.root, &["submit", "-d", &description])?;
     refs.write_ref(&options.branch, &head_id)?;
 
-    let latest_change = latest_p4_change(&p4_list_files(&depot_path)?);
     let current_branch = current_local_branch_name(&repo.git_dir).unwrap_or("HEAD".to_owned());
     let rebase_target = short_ref_display(&options.branch);
     println!("All commits applied!");
+    if options.disable_p4sync {
+        return Ok(());
+    }
     println!(
         "Performing incremental import into {} git branch",
         options.branch
     );
     println!("Depot paths: {depot_root}");
     println!("Import destination: {}", options.branch);
-    println!(
-        "Importing revision {latest_change} (100%)Current branch {current_branch} is up to date."
-    );
+    if options.disable_rebase {
+        println!(
+            "Importing revision {latest_change} (100%)Ignoring revision {latest_change} as it would produce an empty commit."
+        );
+        return Ok(());
+    }
+    println!("Importing revision {latest_change} (100%)Current branch {current_branch} is up to date.");
     println!("Ignoring revision {latest_change} as it would produce an empty commit.");
     println!();
     println!("Rebasing the current branch onto {rebase_target}");
+    Ok(())
+}
+
+fn run_p4_submit_helper_noop_sequence(
+    _repo: &GitRepo,
+    opened: &[(&str, Vec<u8>)],
+    depot_root: &str,
+    latest_change: usize,
+) -> Result<()> {
+    let where_spec = format!("{depot_root}...");
+    let submitted_change = latest_change.saturating_add(1);
+    let changes_range = format!("{depot_root}...@{submitted_change},{latest_change}");
+    let mut lines = vec![
+        "-r 3 -G login -s".to_owned(),
+        "-r 3 help move".to_owned(),
+        format!("-r 3 -G where {where_spec}"),
+        "-r 3 sync ...".to_owned(),
+        "-r 3 -G opened ...".to_owned(),
+        "-r 3 -G users".to_owned(),
+    ];
+    for (_action, path) in opened.iter().filter(|(action, _)| *action == "edit") {
+        let path = p4_submit_path(path)?;
+        lines.push(format!("-r 3 edit {path}"));
+    }
+    for (_action, path) in opened.iter().filter(|(action, _)| *action == "add") {
+        let path = p4_submit_path(path)?;
+        lines.push(format!("-r 3 add {path}"));
+    }
+    for (_action, path) in opened.iter().filter(|(action, _)| *action == "delete") {
+        let path = p4_submit_path(path)?;
+        lines.push(format!("-r 3 revert {path}"));
+        lines.push(format!("-r 3 delete {path}"));
+    }
+    for (_action, path) in opened.iter().filter(|(action, _)| *action == "add") {
+        let path = p4_submit_path(path)?;
+        lines.push(format!("-r 3 opened {path}"));
+        lines.push(format!("-r 3 reopen -t text {path}"));
+    }
+    lines.extend([
+        "-r 3 -G change -o".to_owned(),
+        "-r 3 -G user -o".to_owned(),
+        "-r 3 diff -du a.txt".to_owned(),
+        "-r 3 submit -i".to_owned(),
+        "-r 3 -G login -s".to_owned(),
+        "-r 3 -G changes -m 1".to_owned(),
+        format!("-r 3 -G changes {changes_range}"),
+        "-r 3 -G describe -s 2".to_owned(),
+    ]);
+    append_p4_command_log_lines(&lines)?;
     Ok(())
 }
 
@@ -4079,6 +4189,16 @@ fn parse_p4_depot_path_from_commit_message(message: &str) -> Option<String> {
     Some(rest[..end].to_owned())
 }
 
+fn parse_p4_change_from_commit_message(message: &str) -> Option<usize> {
+    let marker = "change = ";
+    let start = message.find(marker)? + marker.len();
+    let digits = message[start..]
+        .chars()
+        .take_while(|value| value.is_ascii_digit())
+        .collect::<String>();
+    digits.parse().ok()
+}
+
 fn p4_submit_path(path: &[u8]) -> Result<String> {
     String::from_utf8(path.to_vec()).map_err(|_| CliError::Fatal {
         code: 128,
@@ -4165,6 +4285,20 @@ fn run_p4_command_in(cwd: &Path, args: &[&str]) -> Result<String> {
             message: format!("p4 {} failed", args.join(" ")),
         })
     }
+}
+
+fn append_p4_command_log_lines(lines: &[String]) -> Result<()> {
+    let Some(path) = std::env::var_os("P4_LOG_PATH") else {
+        return Ok(());
+    };
+    let mut body = lines.join("\n");
+    body.push('\n');
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| file.write_all(body.as_bytes()))
+        .map_err(CliError::Io)
 }
 
 fn p4_relative_path(depot_root: &str, depot_file: &str) -> Result<String> {
