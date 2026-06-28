@@ -4317,6 +4317,8 @@ pub enum Command {
     Rebase {
         #[arg(long = "abort", action = ArgAction::SetTrue)]
         abort: bool,
+        #[arg(long = "autostash", action = ArgAction::SetTrue)]
+        autostash: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
         continue_: bool,
         #[arg(long = "committer-date-is-author-date", action = ArgAction::SetTrue)]
@@ -4325,22 +4327,40 @@ pub enum Command {
         interactive: bool,
         #[arg(short = 'm', long = "merge", action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(long = "no-autostash", action = ArgAction::SetTrue)]
+        no_autostash: bool,
         #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
         no_stat: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
         no_ff: bool,
+        #[arg(long = "no-reapply-cherry-picks", action = ArgAction::SetTrue)]
+        no_reapply_cherry_picks: bool,
         #[arg(long = "force-rebase", short = 'f', action = ArgAction::SetTrue)]
         force_rebase: bool,
         #[arg(short = 'r', long = "rebase-merges", action = ArgAction::SetTrue)]
         rebase_merges: bool,
         #[arg(long = "no-rebase-merges", action = ArgAction::SetTrue)]
         no_rebase_merges: bool,
+        #[arg(long = "no-rerere-autoupdate", action = ArgAction::SetTrue)]
+        no_rerere_autoupdate: bool,
+        #[arg(long = "no-update-refs", action = ArgAction::SetTrue)]
+        no_update_refs: bool,
+        #[arg(long = "no-verify", action = ArgAction::SetTrue)]
+        no_verify: bool,
         #[arg(long = "onto")]
         onto: Option<String>,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
+        #[arg(long = "reapply-cherry-picks", action = ArgAction::SetTrue)]
+        reapply_cherry_picks: bool,
+        #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
+        rerere_autoupdate: bool,
         #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
+        #[arg(long = "update-refs", action = ArgAction::SetTrue)]
+        update_refs: bool,
+        #[arg(long = "verify", action = ArgAction::SetTrue)]
+        verify: bool,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

@@ -22,34 +22,38 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
-`rebase` signoff-and-committer-date family across the existing direct
-upstream, branch-argument, and `--onto` replay lanes. This batch added six
-exact stock-Git rows and promoted two documented `rebase` option pairs into
-the reviewed-complete census set: `--signoff` and
-`--committer-date-is-author-date`. The runtime closure stayed intentionally
-bounded: Zmin now matches the stock replayed commit message and raw
-author/committer date behavior for those two options on the currently
-supported helper-free local replay lanes without widening into
-`--ignore-date`, `--reset-author-date`, hook control, apply-backend flags,
-or broader rebase surfaces. The implementation stays focused on the missing
-closure only: the rebase schema now exposes the two spellings, the linear
-replay path appends the stock Signed-off-by trailer when requested, and the
-replayed committer timestamp/timezone can be sourced from the picked author
-signature when `--committer-date-is-author-date` is active. Focused gates
-were
+`rebase` clean no-op control family across the existing direct upstream,
+branch-argument, and `--onto` replay lanes. This batch added thirty exact
+stock-Git rows and promoted ten documented `rebase` option pairs into the
+reviewed-complete census set: `--verify`, `--no-verify`,
+`--rerere-autoupdate`, `--no-rerere-autoupdate`,
+`--reapply-cherry-picks`, `--no-reapply-cherry-picks`, `--autostash`,
+`--no-autostash`, `--update-refs`, and `--no-update-refs`. The runtime
+closure stayed intentionally bounded: Zmin now accepts those spellings on the
+currently supported clean helper-free local replay lanes where the options are
+stock no-ops because there are no hook side effects, no conflict reuse, no
+dropped clean-cherry-pick candidates, no local changes to stash, and no
+downstream refs eligible for rewrite. This does not widen rebase into hook
+execution, autostash with dirty worktrees, rerere conflict handling,
+cherry-pick dropping heuristics, or ref-rewrite propagation. The
+implementation stays focused on the missing closure only: the rebase schema
+now exposes the ten spellings while the existing replay path already matches
+stock Git on the modeled clean lanes, so this slice closes the documented
+family with exact stock evidence rather than adding new runtime branching.
+Focused gates were
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_clean_noop_option_family_matches_stock_git -- --exact`,
 `cargo test -q -p zmin-cli --test git_sequencer_compat rebase_signoff_and_committer_date_option_family_matches_stock_git -- --exact`,
 `cargo test -q -p zmin-cli --test git_sequencer_compat rebase_force_replay_option_family_matches_stock_git -- --exact`,
-`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_replays_linear_topic_like_stock_git -- --exact`,
 `cargo check -p zmin-cli -p zmin-cli-schema`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
-are now `7463` matrix rows, `6544` verified rows, `894` invalid-input rows,
-`146/151` complete command matrices, and `3023/3212` complete documented
-option pairs. `rebase` now sits at `17/57` reviewed-complete documented
-option pairs with `52/52` classified rows, `48` stock-matching rows, and `4`
+are now `7493` matrix rows, `6574` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3033/3212` complete documented
+option pairs. `rebase` now sits at `27/57` reviewed-complete documented
+option pairs with `82/82` classified rows, `78` stock-matching rows, and `4`
 invalid-input rows. The overall backlog head remains `send-email` (`62`),
-followed by `rebase` (`40`), `p4` (`28`), `svn` (`25`), `cvsimport` (`14`),
+followed by `rebase` (`30`), `p4` (`28`), `svn` (`25`), `cvsimport` (`14`),
 `cvsexportcommit` (`11`), `archimport` (`7`), then the single-pair tails
 `log` and `apply`; the next default follow-up should stay on `rebase` and
 keep the largest safe helper-free batch bias.

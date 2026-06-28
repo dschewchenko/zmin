@@ -1884,3 +1884,269 @@ fn rebase_signoff_and_committer_date_option_family_matches_stock_git() {
         );
     }
 }
+
+#[test]
+fn rebase_clean_noop_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool); 30] = [
+        ("verify_upstream", &["rebase", "--verify", "origin/main"], false, false),
+        (
+            "no_verify_upstream",
+            &["rebase", "--no-verify", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "rerere_autoupdate_upstream",
+            &["rebase", "--rerere-autoupdate", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_rerere_autoupdate_upstream",
+            &["rebase", "--no-rerere-autoupdate", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "reapply_cherry_picks_upstream",
+            &["rebase", "--reapply-cherry-picks", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_reapply_cherry_picks_upstream",
+            &["rebase", "--no-reapply-cherry-picks", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "autostash_upstream",
+            &["rebase", "--autostash", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_autostash_upstream",
+            &["rebase", "--no-autostash", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "update_refs_upstream",
+            &["rebase", "--update-refs", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_update_refs_upstream",
+            &["rebase", "--no-update-refs", "origin/main"],
+            false,
+            false,
+        ),
+        ("verify_branch", &["rebase", "--verify", "origin/main", "topic"], true, false),
+        (
+            "no_verify_branch",
+            &["rebase", "--no-verify", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "rerere_autoupdate_branch",
+            &["rebase", "--rerere-autoupdate", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "no_rerere_autoupdate_branch",
+            &["rebase", "--no-rerere-autoupdate", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "reapply_cherry_picks_branch",
+            &["rebase", "--reapply-cherry-picks", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "no_reapply_cherry_picks_branch",
+            &["rebase", "--no-reapply-cherry-picks", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "autostash_branch",
+            &["rebase", "--autostash", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "no_autostash_branch",
+            &["rebase", "--no-autostash", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "update_refs_branch",
+            &["rebase", "--update-refs", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "no_update_refs_branch",
+            &["rebase", "--no-update-refs", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "verify_onto",
+            &["rebase", "--verify", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_verify_onto",
+            &["rebase", "--no-verify", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "rerere_autoupdate_onto",
+            &[
+                "rebase",
+                "--rerere-autoupdate",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        (
+            "no_rerere_autoupdate_onto",
+            &[
+                "rebase",
+                "--no-rerere-autoupdate",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        (
+            "reapply_cherry_picks_onto",
+            &[
+                "rebase",
+                "--reapply-cherry-picks",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        (
+            "no_reapply_cherry_picks_onto",
+            &[
+                "rebase",
+                "--no-reapply-cherry-picks",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        (
+            "autostash_onto",
+            &["rebase", "--autostash", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_autostash_onto",
+            &[
+                "rebase",
+                "--no-autostash",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        (
+            "update_refs_onto",
+            &["rebase", "--update-refs", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_update_refs_onto",
+            &[
+                "rebase",
+                "--no-update-refs",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
