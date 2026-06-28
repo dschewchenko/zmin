@@ -1,6 +1,6 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2774	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	2818	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2840	3212	documented command-option pairs with at least one behavior row
 behavior_rows_written	7248	7248	current written command option value combination state transport platform rows
@@ -54,7 +54,7 @@ diff-files	118	118	118	100.0	144	144	100.0	144	100.0	0	0	0	yes
 diff-index	112	112	112	100.0	146	146	100.0	146	100.0	0	0	0	yes
 diff-tree	132	132	132	100.0	171	171	100.0	171	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
-fast-export	18	0	18	100.0	64	64	100.0	56	87.5	0	0	8	yes
+fast-export	18	18	18	100.0	64	64	100.0	56	87.5	0	0	8	yes
 fast-import	19	1	19	100.0	93	93	100.0	79	84.9	0	0	14	yes
 fetch	63	63	63	100.0	379	357	94.2	342	90.2	0	0	15	yes
 fetch-pack	18	18	18	100.0	25	25	100.0	23	92.0	0	0	2	yes
@@ -69,7 +69,7 @@ get-tar-commit-id	0	0	0	0.0	2	2	100.0	1	50.0	0	0	1	yes
 grep	73	73	73	100.0	112	112	100.0	112	100.0	0	0	0	yes
 gui	0	0	0	0.0	1	1	100.0	1	100.0	0	0	0	yes
 hash-object	7	7	7	100.0	17	17	100.0	14	82.4	0	0	3	yes
-help	17	0	17	100.0	18	18	100.0	18	100.0	0	0	0	yes
+help	17	17	17	100.0	18	18	100.0	18	100.0	0	0	0	yes
 hook	2	2	2	100.0	3	3	100.0	3	100.0	0	0	0	yes
 http-backend	0	0	0	0.0	15	15	100.0	14	93.3	0	0	1	yes
 http-fetch	9	9	9	100.0	14	14	100.0	10	71.4	0	0	4	yes
@@ -123,7 +123,7 @@ request-pull	1	1	1	100.0	6	6	100.0	5	83.3	0	0	1	yes
 rerere	0	0	0	0.0	8	8	100.0	7	87.5	0	0	1	yes
 reset	6	6	6	100.0	17	17	100.0	12	70.6	0	0	5	yes
 restore	25	25	25	100.0	100	100	100.0	80	80.0	0	0	20	yes
-rev-list	117	108	117	100.0	169	169	100.0	156	92.3	0	0	13	yes
+rev-list	117	117	117	100.0	169	169	100.0	156	92.3	0	0	13	yes
 rev-parse	51	51	51	100.0	112	112	100.0	103	92.0	0	0	9	yes
 revert	19	19	19	100.0	31	31	100.0	29	93.5	0	0	2	yes
 rm	12	12	12	100.0	50	50	100.0	41	82.0	0	0	9	yes

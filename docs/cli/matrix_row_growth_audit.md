@@ -11,6 +11,26 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-28 the latest completed batch is a zero-row-growth
+review-closure promotion across the already represented `help`,
+`fast-export`, and `rev-list` surfaces. The selected change added `+0`
+matrix rows and promoted forty-four existing documented option pairs into the
+reviewed-complete census set: all `17` documented `help` options, all `18`
+documented `fast-export` options, and the remaining `9` documented
+`rev-list` options. This was an evidence-only closure with no runtime change:
+the exact stock-Git rows already covered the outside-repository help listing
+families, the bounded helper-free local fast-export stream-shaping families,
+and the remaining rev-list bisect/graph/header/object-edge tail. Actual delta
+is `+0` matrix rows, `+44` complete documented option pairs, `+0`
+represented documented option pairs, `+0` verified rows, `+0` invalid-input
+rows, and `+0` complete command matrices. Current census counts are `7248`
+matrix rows, `6366` verified rows, `857` invalid-input rows, `0`
+exact-open rows, `146/151` complete command matrices, `2818/3212` complete
+documented option pairs, and `2840/3212` represented documented option pairs.
+Remaining checklist rows fell from `438` to `394`. This is another
+zero-row-growth closure batch, so the guardrail held exactly: only
+reviewed-complete coverage changed; the evidence-layer denominator did not.
+
 As of 2026-06-28 the latest completed batch is a helper-free local
 `fast-import` repeated marks-file and option-order expansion across the
 existing done-terminated simple commit lane and the current import-marks

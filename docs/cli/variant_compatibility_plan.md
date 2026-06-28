@@ -21,6 +21,58 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-28 the latest completed batch is a zero-row-growth
+review-closure promotion across the already represented helper-free local
+`help`, `fast-export`, and `rev-list` surfaces. This batch added no new
+behavior rows and instead promoted forty-four existing documented option pairs
+into the reviewed-complete census set: all seventeen documented `help`
+options, all eighteen documented `fast-export` options, and the remaining
+nine documented `rev-list` options (`--bisect`, `--bisect-all`,
+`--bisect-vars`, `--cherry`, `--disk-usage`, `--graph`, `--header`,
+`--objects-edge`, and `--objects-edge-aggressive`). The runtime closure stayed
+intentionally bounded: this slice does not widen runtime semantics, add new
+oracles, or change behavior rows. It proves that the current exact evidence
+already closes the documented `help` outside-repository listing surface, the
+bounded helper-free `fast-export` local stream-shaping surface, and the full
+documented `rev-list` helper-free local history-query surface on the current
+modeled lanes.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2818 / 3212`
+- represented documented command-option pairs: `2840 / 3212`
+- matrix rows: `7248`
+- verified rows: `6366`
+- invalid-input rows: `857`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `394`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `help`: `17 / 17` reviewed-complete documented option pairs, `18` written
+  rows, `18` stock-matching rows, `0` invalid-input rows
+- `fast-export`: `18 / 18` reviewed-complete documented option pairs, `64`
+  written rows, `56` stock-matching rows, `8` invalid-input rows
+- `rev-list`: `117 / 117` reviewed-complete documented option pairs, `169`
+  written rows, `156` stock-matching rows, `13` invalid-input rows
+
+The next dense helper-free batch should now return to `fast-import` review
+closure. After this promotion pass, `fast-import` is the largest
+represented-but-not-reviewed-complete documented surface at `1 / 19`
+reviewed-complete documented option pairs with `19 / 19` represented pairs,
+so the next bounded queue should stay on its current exact local oracle:
+submodule rewrite-map tails, wider marks-file value families, and any still
+unreviewed stream-feature combinations beyond the recently closed
+relative-marks and repeated import-marks families.
+
 As of 2026-06-28 the latest completed batch is a helper-free local
 `fast-import` relative-marks path-resolution and repeated stream marks
 rejection expansion across the already modeled done-terminated simple commit
