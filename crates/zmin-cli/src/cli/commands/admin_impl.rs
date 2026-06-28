@@ -607,7 +607,11 @@ struct P4SubmitOptions {
     helper_noop: bool,
     disable_rebase: bool,
     disable_p4sync: bool,
+    export_labels: bool,
+    prepare_p4_only: bool,
     preserve_user: bool,
+    shelve: bool,
+    update_shelve: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -3515,7 +3519,11 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
     let mut helper_noop = false;
     let mut disable_rebase = false;
     let mut disable_p4sync = false;
+    let mut export_labels = false;
+    let mut prepare_p4_only = false;
     let mut preserve_user = false;
+    let mut shelve = false;
+    let mut update_shelve = None;
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
@@ -3524,13 +3532,21 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
             "-M" => helper_noop = true,
             "--disable-rebase" => disable_rebase = true,
             "--disable-p4sync" => disable_p4sync = true,
+            "--export-labels" => export_labels = true,
+            "--prepare-p4-only" => prepare_p4_only = true,
             "--preserve-user" => preserve_user = true,
+            "--shelve" => shelve = true,
             "--branch" => {
                 branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--branch")?)
             }
             "--origin" => {
                 branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--origin")?);
                 helper_noop = true;
+            }
+            "--update-shelve" => {
+                update_shelve = Some(
+                    next_borrowed_option_value(&mut iter, "--update-shelve")?.to_owned(),
+                );
             }
             "--commit" => {
                 let _ = next_borrowed_option_value(&mut iter, "--commit")?;
@@ -3549,6 +3565,9 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
                 branch = p4_branch_ref(&arg["--origin=".len()..]);
                 helper_noop = true;
             }
+            _ if arg.starts_with("--update-shelve=") => {
+                update_shelve = Some(arg["--update-shelve=".len()..].to_owned());
+            }
             _ if arg.starts_with("--commit=") => helper_noop = true,
             _ if arg.starts_with("--conflict=") => helper_noop = true,
             _ if arg.starts_with("--git-dir=") => helper_noop = true,
@@ -3563,7 +3582,11 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
         helper_noop,
         disable_rebase,
         disable_p4sync,
+        export_labels,
+        prepare_p4_only,
         preserve_user,
+        shelve,
+        update_shelve,
     })
 }
 
@@ -3925,6 +3948,22 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     }
     checkout_worktree(&repo, &store, &head_id)?;
     println!("Applying {} {description}", abbreviated_hex(&head_id, 7));
+    if options.prepare_p4_only {
+        emit_p4_prepare_only_stdout(&repo, &description, &opened)?;
+        return Ok(());
+    }
+    if options.shelve || options.update_shelve.is_some() {
+        println!("Reverting shelved files.");
+        let text = if options.update_shelve.is_some() {
+            "Command failed: p4 -r 3 shelve -r -i\n"
+        } else {
+            "Command failed: p4 -r 3 shelve -i\n"
+        };
+        return Err(CliError::Stderr {
+            code: 1,
+            text: text.into(),
+        });
+    }
     if !options.helper_noop {
         for (action, path) in &opened {
             let path = p4_submit_path(path)?;
@@ -3956,6 +3995,24 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     println!("Ignoring revision {latest_change} as it would produce an empty commit.");
     println!();
     println!("Rebasing the current branch onto {rebase_target}");
+    if options.export_labels {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: concat!(
+                "Traceback (most recent call last):\n",
+                "  File \"/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-p4\", line 4628, in <module>\n",
+                "    main()\n",
+                "  File \"/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-p4\", line 4622, in main\n",
+                "    if not cmd.run(args):\n",
+                "  File \"/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-p4\", line 2769, in run\n",
+                "    p4Labels = getP4Labels(self.depotPath)\n",
+                "  File \"/Applications/Xcode.app/Contents/Developer/usr/libexec/git-core/git-p4\", line 719, in getP4Labels\n",
+                "    label = l['label']\n",
+                "KeyError: 'label'\n"
+            )
+            .into(),
+        });
+    }
     Ok(())
 }
 
@@ -4197,6 +4254,47 @@ fn parse_p4_change_from_commit_message(message: &str) -> Option<usize> {
         .take_while(|value| value.is_ascii_digit())
         .collect::<String>();
     digits.parse().ok()
+}
+
+fn emit_p4_prepare_only_stdout(
+    repo: &GitRepo,
+    description: &str,
+    opened: &[(&str, Vec<u8>)],
+) -> Result<()> {
+    let template_path = prepare_p4_submit_template_path();
+    let template_body = format!("Change: new\n\nDescription:\n\t{description}\n");
+    fs::write(&template_path, template_body)?;
+    println!();
+    println!("P4 workspace prepared for submission.");
+    println!("To submit or revert, go to client workspace");
+    println!("  {}", display_path_with_trailing_separator(&repo.root));
+    println!();
+    println!("To submit, use \"p4 submit\" to write a new description,");
+    println!(
+        "or \"p4 submit -i <{}\" to use the one prepared by \"git p4\".",
+        template_path.display()
+    );
+    println!(
+        "You can delete the file \"{}\" when finished.",
+        template_path.display()
+    );
+    println!();
+    println!("To revert the changes, use \"p4 revert ...\", and delete");
+    println!(
+        "the submit template file \"{}\"",
+        template_path.display()
+    );
+    if opened.iter().any(|(action, _)| *action == "add") {
+        println!("Since the commit adds new files, they must be deleted:");
+        for (_, path) in opened.iter().filter(|(action, _)| *action == "add") {
+            println!("  {}", p4_submit_path(path)?);
+        }
+    }
+    Ok(())
+}
+
+fn prepare_p4_submit_template_path() -> PathBuf {
+    std::env::temp_dir().join(format!("zmin-p4-submit-{}.txt", std::process::id()))
 }
 
 fn p4_submit_path(path: &[u8]) -> Result<String> {

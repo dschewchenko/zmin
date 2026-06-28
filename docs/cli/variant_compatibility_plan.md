@@ -22,41 +22,41 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-29 the latest completed batch is a bounded local `p4 submit`
-helper-noop plus follow-up-control family across the existing fake Perforce
-submit fixture. This batch added eight exact stock-Git rows and promoted eight
+prepare/shelve/export-labels family across the existing fake Perforce submit
+fixture. This batch added four exact stock-Git rows and promoted four
 documented `p4` option pairs into the reviewed-complete census set:
-`--origin`, `-M`, `--conflict`, `--commit`, `--git-dir`,
-`--disable-rebase`, `--disable-p4sync`, and `--preserve-user`. The runtime
-closure stayed intentionally bounded: Zmin now matches stock on the current
-fake submit lanes where helper-backed no-op spellings preserve the stock
-stdout, stderr, exit status, and helper command log; `--disable-rebase` keeps
-the stock incremental-import tail without the final rebase step;
-`--disable-p4sync` stops after applying commits; and `--preserve-user`
-terminates with the stock admin-permission stderr before any submit-side
-mutation. This does not widen `p4` into `--bare`, `--changesfile`,
-`--destination`, `--export-labels`, `--keep-path`, `--prepare-p4-only`,
-`--shelve`, or `--update-shelve`. The implementation stays focused on the
-missing closure only: submit parsing now carries the eight bounded spellings,
-the helper-backed no-op lane replays the stock helper transcript deterministically
-for the current fake fixture, the submit follow-up tail is now gated by the
-bounded disable flags, and preserve-user now returns the stock early failure.
-Three exact compat tests cover all eight rows while checking exact stdout,
-stderr, exit status, and helper command log where relevant. Focused gates were
+`--export-labels`, `--prepare-p4-only`, `--shelve`, and `--update-shelve`.
+The runtime closure stayed intentionally bounded: Zmin now matches stock on
+the current fake submit lanes where `--prepare-p4-only` applies the local
+commit into the client workspace, leaves the remote submit ref unchanged, and
+prints the stock submit-template guidance; `--shelve` and
+`--update-shelve 1234` stop after the apply phase with the stock `Reverting
+shelved files.` stdout tail and the stock shelve command failure stderr; and
+`--export-labels` preserves the normal submit/import/rebase transcript before
+failing with the stock Python traceback that terminates in `KeyError:
+'label'`. This does not widen `p4` into `--bare`, `--changesfile`,
+`--destination`, or `--keep-path`. The implementation stays focused on the
+missing closure only: submit parsing now carries the four bounded spellings,
+the submit flow can branch into stock-shaped prepare-only and shelve/error
+transcripts without advancing the remote submit ref, and export-labels now
+surfaces the stock traceback after the existing submit success tail. Three
+exact compat tests cover all four rows while checking exact stdout, stderr,
+exit status, and state where relevant. Focused gates were
 `cargo test -q -p zmin-cli --test git_foreign_scm_compat p4_`,
 `cargo check -q -p zmin-cli -p zmin-cli-schema`,
 `cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
-are now `7657` matrix rows, `6737` verified rows, `895` invalid-input rows,
-`146/151` complete command matrices, and `3139/3212` complete documented
-option pairs. `p4` now sits at `21/29` reviewed-complete documented option
-pairs with `24/24` classified rows, `24` stock-matching rows, and `0`
+are now `7661` matrix rows, `6741` verified rows, `895` invalid-input rows,
+`146/151` complete command matrices, and `3143/3212` complete documented
+option pairs. `p4` now sits at `25/29` reviewed-complete documented option
+pairs with `28/28` classified rows, `28` stock-matching rows, and `0`
 invalid-input rows. The overall backlog head remains `svn` (`25`), followed
-by `cvsimport` (`14`), `cvsexportcommit` (`11`), `p4` (`8`), `archimport`
-(`7`), `send-email` (`5`), and the single-pair tails `rebase`, `log`, and
-`apply`; the next default follow-up should still prefer `p4`, because the
-remaining eight rows share the same working fake-Perforce oracle and can still
-close in larger submit/clone families.
+by `cvsimport` (`14`), `cvsexportcommit` (`11`), `archimport` (`7`),
+`send-email` (`5`), `p4` (`4`), and the single-pair tails `rebase`, `log`,
+and `apply`; the next default follow-up should still prefer `p4`, because the
+remaining four clone-side rows share the same working fake-Perforce oracle and
+can close the command with one final bounded family.
 
 As of 2026-06-28 the latest completed batch is a helper-free local `p4 clone`
 transcript-control family across the existing fake Perforce depot import lane.
