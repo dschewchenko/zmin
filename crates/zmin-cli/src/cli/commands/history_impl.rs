@@ -6363,16 +6363,22 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) no_standard_notes: bool,
     pub(crate) diff_required: bool,
     pub(crate) decorate: Option<&'a str>,
+    pub(crate) decorate_refs: Option<&'a str>,
+    pub(crate) decorate_refs_exclude: Option<&'a str>,
+    pub(crate) no_decorate: bool,
     pub(crate) clear_decorations: bool,
     pub(crate) abbrev_commit: bool,
     pub(crate) no_abbrev_commit: bool,
     pub(crate) objects: bool,
+    pub(crate) objects_edge: bool,
+    pub(crate) objects_edge_aggressive: bool,
     pub(crate) no_object_names: bool,
     pub(crate) indexed_objects: bool,
     pub(crate) unpacked: bool,
     pub(crate) remove_empty: bool,
     pub(crate) ignore_missing: bool,
     pub(crate) filter: Option<String>,
+    pub(crate) full_diff: bool,
     pub(crate) filter_print_omitted: bool,
     pub(crate) filter_provided_objects: bool,
     pub(crate) pickaxe_string: Option<&'a str>,
@@ -6395,6 +6401,11 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
     pub(crate) format: Option<&'a str>,
+    pub(crate) mailmap: bool,
+    pub(crate) no_mailmap: bool,
+    pub(crate) use_mailmap: bool,
+    pub(crate) no_use_mailmap: bool,
+    pub(crate) source: bool,
     pub(crate) max_count: Option<&'a str>,
     pub(crate) since: Option<&'a str>,
     pub(crate) since_as_filter: Option<&'a str>,
@@ -6828,6 +6839,17 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_stdin = options.stdin;
     let _accepted_single_worktree = options.single_worktree;
     let _accepted_no_filter = options.no_filter;
+    let _accepted_decorate_refs = options.decorate_refs;
+    let _accepted_decorate_refs_exclude = options.decorate_refs_exclude;
+    let _accepted_no_decorate = options.no_decorate;
+    let _accepted_objects_edge = options.objects_edge;
+    let _accepted_objects_edge_aggressive = options.objects_edge_aggressive;
+    let _accepted_mailmap = options.mailmap;
+    let _accepted_no_mailmap = options.no_mailmap;
+    let _accepted_use_mailmap = options.use_mailmap;
+    let _accepted_no_use_mailmap = options.no_use_mailmap;
+    let _accepted_source = options.source;
+    let _accepted_full_diff = options.full_diff;
     if options.exclude_promisor_objects {
         return Err(log_unrecognized_argument("--exclude-promisor-objects"));
     }
@@ -9669,16 +9691,22 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         no_standard_notes: false,
         diff_required: false,
         decorate: None,
+        decorate_refs: None,
+        decorate_refs_exclude: None,
+        no_decorate: false,
         clear_decorations: false,
         abbrev_commit: options.abbrev_commit,
         no_abbrev_commit: options.no_abbrev_commit,
         objects: false,
+        objects_edge: false,
+        objects_edge_aggressive: false,
         no_object_names: false,
         indexed_objects: false,
         unpacked: false,
         remove_empty: false,
         ignore_missing: false,
         filter: None,
+        full_diff: false,
         filter_print_omitted: false,
         filter_provided_objects: false,
         pickaxe_string: None,
@@ -9701,6 +9729,11 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         fixed_strings: false,
         perl_regexp: false,
         format: options.format,
+        mailmap: false,
+        no_mailmap: false,
+        use_mailmap: false,
+        no_use_mailmap: false,
+        source: false,
         max_count: None,
         since: None,
         since_as_filter: None,

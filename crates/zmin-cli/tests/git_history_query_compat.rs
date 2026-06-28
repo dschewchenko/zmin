@@ -4033,6 +4033,39 @@ fn log_remaining_documented_tail_matches_stock_git() {
 }
 
 #[test]
+fn log_output_surface_tail_matches_stock_git() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\n", "1700000000 +0000", "one");
+    write_commit_with_date(repo.path(), "a.txt", "two\n", "1700000600 +0000", "two");
+
+    for args in [
+        ["log", "--decorate-refs=refs/heads/main", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--decorate-refs-exclude=refs/tags/*", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--full-diff", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--mailmap", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--no-decorate", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--no-mailmap", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--no-use-mailmap", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--objects-edge", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--objects-edge-aggressive", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--source", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--use-mailmap", "--format=%s", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+
+    assert_eq!(
+        run_zmin_failure_output(repo.path(), &["log", "--disk-usage", "HEAD"]),
+        git_failure_output(repo.path(), &["log", "--disk-usage", "HEAD"])
+    );
+}
+
+#[test]
 fn rev_list_documented_tail_batch_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

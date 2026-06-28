@@ -4146,6 +4146,12 @@ pub enum Command {
             default_missing_value = "short"
         )]
         decorate: Option<String>,
+        #[arg(long = "decorate-refs")]
+        decorate_refs: Option<String>,
+        #[arg(long = "decorate-refs-exclude")]
+        decorate_refs_exclude: Option<String>,
+        #[arg(long = "no-decorate", action = ArgAction::SetTrue)]
+        no_decorate: bool,
         #[arg(long = "clear-decorations", action = ArgAction::SetTrue)]
         clear_decorations: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
@@ -4154,6 +4160,10 @@ pub enum Command {
         no_abbrev_commit: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
         objects: bool,
+        #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
+        objects_edge: bool,
+        #[arg(long = "objects-edge-aggressive", action = ArgAction::SetTrue)]
+        objects_edge_aggressive: bool,
         #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
         no_object_names: bool,
         #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
@@ -4166,6 +4176,8 @@ pub enum Command {
         ignore_missing: bool,
         #[arg(long = "filter")]
         filter: Option<String>,
+        #[arg(long = "full-diff", action = ArgAction::SetTrue)]
+        full_diff: bool,
         #[arg(long = "filter-print-omitted", action = ArgAction::SetTrue)]
         filter_print_omitted: bool,
         #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
@@ -4229,6 +4241,16 @@ pub enum Command {
         perl_regexp: bool,
         #[arg(long = "format")]
         format: Option<String>,
+        #[arg(long = "mailmap", action = ArgAction::SetTrue)]
+        mailmap: bool,
+        #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
+        no_mailmap: bool,
+        #[arg(long = "use-mailmap", action = ArgAction::SetTrue)]
+        use_mailmap: bool,
+        #[arg(long = "no-use-mailmap", action = ArgAction::SetTrue)]
+        no_use_mailmap: bool,
+        #[arg(long = "source", action = ArgAction::SetTrue)]
+        source: bool,
         #[arg(long = "max-count", short = 'n')]
         max_count: Option<String>,
         #[arg(long = "since", alias = "after")]
