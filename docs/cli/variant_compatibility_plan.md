@@ -21,6 +21,31 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded helper-free local
+`rebase --root` completion family across the existing linear and `--onto`
+replay fixtures. This batch added three exact stock-Git rows and promoted the
+final documented `rebase` option pair into the reviewed-complete census set:
+`--root`. The runtime closure stayed intentionally bounded: Zmin now matches
+stock on the current branch root-replay lane, the explicit branch-argument root
+lane, and the explicit `--onto origin/main` root lane, including the stock
+progress stderr, final tree, recent log subjects, current branch, and clean
+status. The `--onto` lane now also matches the stock commit-selection rule that
+skips root-side commits already reachable from the new base, so the bounded
+fixture replays only the two non-ancestor commits instead of replaying the
+shared base commit. This does not change the separate `replay` surface
+directly, but the matching `replaying down from root commit is not supported
+yet!` guards in `history_impl.rs` are now documented in the hard-fail
+inventory instead of remaining unclassified. Focused gates were
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_root_option_family_matches_stock_git -- --exact`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `7668` matrix rows, `6748` verified rows, `895` invalid-input rows,
+`2` remaining-to-fix-or-verify rows, and `131` extension/deferred rows. The
+active backlog is now down to the single-pair tails `apply` and `log`. The
+next default follow-up should close one of those two remaining documented
+single-pair tails.
+
 As of 2026-06-29 the latest completed batch is a stock-oracle deferral closure
 for the remaining documented Perl-backed `git send-email` helper tail:
 `--annotate`, `--compose`, `--quiet`, `--sendmail-cmd`, and `--smtp-ssl`.

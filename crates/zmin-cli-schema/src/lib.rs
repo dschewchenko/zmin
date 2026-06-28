@@ -4400,6 +4400,8 @@ pub enum Command {
         reset_author_date: bool,
         #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
         rerere_autoupdate: bool,
+        #[arg(long = "root", action = ArgAction::SetTrue)]
+        root: bool,
         #[arg(long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
         #[arg(short = 's', long = "strategy")]

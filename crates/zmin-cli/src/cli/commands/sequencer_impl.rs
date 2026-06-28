@@ -1977,6 +1977,7 @@ pub(crate) fn rebase(
     ignore_date: bool,
     apply: bool,
     keep_base: bool,
+    root: bool,
     exec_commands: Vec<String>,
     gpg_sign: Option<String>,
     no_gpg_sign: bool,
@@ -2004,18 +2005,30 @@ pub(crate) fn rebase(
             message: "no rebase in progress".into(),
         });
     }
-    if args.len() > 2 {
+    if (!root && args.len() > 2) || (root && args.len() > 1) {
         return Err(CliError::Fatal {
             code: 129,
-            message: "usage: git rebase [--onto <newbase>] [<upstream> [<branch>]]".into(),
+            message: if root {
+                "usage: git rebase [--onto <newbase>] --root [<branch>]".into()
+            } else {
+                "usage: git rebase [--onto <newbase>] [<upstream> [<branch>]]".into()
+            },
         });
     }
     let repo = find_repo()?;
     let pre_switch_index = read_repo_index(&repo)?;
-    let branch = args.get(1).cloned();
-    let upstream = match args.first().map(String::as_str) {
-        Some(upstream) => upstream.to_owned(),
-        None => rebase_configured_upstream(&repo)?,
+    let branch = if root {
+        args.first().cloned()
+    } else {
+        args.get(1).cloned()
+    };
+    let upstream = if root {
+        None
+    } else {
+        Some(match args.first().map(String::as_str) {
+            Some(upstream) => upstream.to_owned(),
+            None => rebase_configured_upstream(&repo)?,
+        })
     };
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     if !worktree_clean(&repo, &store)? {
@@ -2029,7 +2042,16 @@ pub(crate) fn rebase(
         rebase_switch_branch_without_checkout(&refs, branch)?;
     }
     let head = refs.resolve("HEAD")?;
-    let upstream_id = resolve_commitish(&repo, &store, &upstream)?;
+    let upstream_id = upstream
+        .as_deref()
+        .map(|value| resolve_commitish(&repo, &store, value))
+        .transpose()?;
+    if root && keep_base {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--keep-base' and '--root' cannot be used together".into(),
+        });
+    }
     if keep_base && onto.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -2060,28 +2082,49 @@ pub(crate) fn rebase(
         }
         return Ok(());
     }
-    let new_base = onto.unwrap_or(&upstream);
-    let new_base_id = resolve_commitish(&repo, &store, new_base)?;
+    let new_base_id = onto
+        .map(|value| resolve_commitish(&repo, &store, value))
+        .transpose()?;
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
-    let stat_base_id = if onto.is_some() {
-        best_merge_base_cached(&commit_cache, &upstream_id, &new_base_id)?
-            .unwrap_or_else(|| upstream_id.clone())
+    let stat_base_id = if root {
+        new_base_id.clone().unwrap_or_else(|| head.clone())
+    } else if let (Some(upstream_id), Some(new_base_id)) = (upstream_id.as_ref(), new_base_id.as_ref()) {
+        if onto.is_some() {
+            best_merge_base_cached(&commit_cache, upstream_id, new_base_id)?
+                .unwrap_or_else(|| upstream_id.clone())
+        } else {
+            best_merge_base_cached(&commit_cache, &head, new_base_id)?
+                .unwrap_or_else(|| upstream_id.clone())
+        }
     } else {
-        best_merge_base_cached(&commit_cache, &head, &new_base_id)?
-            .unwrap_or_else(|| upstream_id.clone())
+        head.clone()
     };
-    if onto.is_none() && is_ancestor_commit_cached(&commit_cache, &head, &upstream_id)? {
-        checkout_worktree(&repo, &store, &upstream_id)?;
-        update_head_to_commit(&refs, &upstream_id)?;
+    if !root
+        && onto.is_none()
+        && is_ancestor_commit_cached(&commit_cache, &head, upstream_id.as_ref().expect("upstream id"))?
+    {
+        let upstream_id = upstream_id.as_ref().expect("upstream id");
+        checkout_worktree(&repo, &store, upstream_id)?;
+        update_head_to_commit(&refs, upstream_id)?;
         if !quiet && output_mode == RebaseOutputMode::Normal {
-            println!("Fast-forwarded to {upstream}");
+            println!("Fast-forwarded to {}", upstream.as_deref().expect("upstream"));
         }
         return Ok(());
     }
     let revs = RevListRevs {
         include: vec![head.to_hex()],
-        exclude: vec![upstream_id.to_hex()],
+        exclude: if root {
+            new_base_id
+                .as_ref()
+                .map(|value| vec![value.to_hex()])
+                .unwrap_or_default()
+        } else {
+            upstream_id
+                .as_ref()
+                .map(|value| vec![value.to_hex()])
+                .unwrap_or_default()
+        },
         extra_objects: Vec::new(),
         symmetric_diff: None,
     };
@@ -2106,8 +2149,14 @@ pub(crate) fn rebase(
         commits.reverse();
     }
     let interactive_todo = if interactive {
-        checkout_worktree(&repo, &store, &new_base_id)?;
-        update_head_to_commit(&refs, &new_base_id)?;
+        prepare_rebase_root_start(
+            &repo,
+            &store,
+            &refs,
+            root,
+            new_base_id.as_ref(),
+            &pre_switch_index,
+        )?;
         Some(edit_interactive_rebase_todo(
             &repo,
             &commit_cache,
@@ -2118,8 +2167,14 @@ pub(crate) fn rebase(
         None
     };
     if !interactive {
-        checkout_worktree(&repo, &store, &new_base_id)?;
-        update_head_to_commit(&refs, &new_base_id)?;
+        prepare_rebase_root_start(
+            &repo,
+            &store,
+            &refs,
+            root,
+            new_base_id.as_ref(),
+            &pre_switch_index,
+        )?;
     }
     if preserve_merges {
         return rebase_commits_preserving_merges(
@@ -2127,35 +2182,76 @@ pub(crate) fn rebase(
             &store,
             &refs,
             &commit_cache,
-            &new_base_id,
+            new_base_id.as_ref().unwrap_or(&head),
             commits,
             quiet,
         );
     }
+    let mut pending_root_parent = root.then(|| new_base_id.clone());
     if let Some(todo) = interactive_todo {
         for (index, item) in todo.iter().enumerate() {
             match item.command {
                 RebaseTodoCommand::Pick => {
-                    let mut options = default_sequencer_pick_options(vec![item.commit.to_hex()]);
-                    options.print_summary = false;
-                    sequencer_pick(options)?
+                    if pending_root_parent.is_some()
+                        && commit_cache.read_commit(&item.commit)?.parents.is_empty()
+                    {
+                        rebase_pick_root_commit_with_message(
+                            &repo,
+                            &store,
+                            &commit_cache,
+                            &item.commit,
+                            pending_root_parent.take().flatten().as_ref(),
+                            None,
+                            true,
+                            false,
+                            signoff,
+                            committer_date_is_author_date,
+                            ignore_date,
+                            gpg_sign.clone(),
+                            no_gpg_sign,
+                        )?;
+                    } else {
+                        let mut options = default_sequencer_pick_options(vec![item.commit.to_hex()]);
+                        options.print_summary = false;
+                        sequencer_pick(options)?
+                    }
                 }
                 RebaseTodoCommand::Reword => {
                     let message = edit_rebase_commit_message(&repo, &commit_cache, &item.commit)?;
-                    rebase_pick_commit_with_message(
-                        &repo,
-                        &store,
-                        &commit_cache,
-                        &item.commit,
-                        Some(message),
-                        true,
-                        false,
-                        signoff,
-                        committer_date_is_author_date,
-                        ignore_date,
-                        gpg_sign.clone(),
-                        no_gpg_sign,
-                    )?;
+                    if pending_root_parent.is_some()
+                        && commit_cache.read_commit(&item.commit)?.parents.is_empty()
+                    {
+                        rebase_pick_root_commit_with_message(
+                            &repo,
+                            &store,
+                            &commit_cache,
+                            &item.commit,
+                            pending_root_parent.take().flatten().as_ref(),
+                            Some(message),
+                            true,
+                            false,
+                            signoff,
+                            committer_date_is_author_date,
+                            ignore_date,
+                            gpg_sign.clone(),
+                            no_gpg_sign,
+                        )?;
+                    } else {
+                        rebase_pick_commit_with_message(
+                            &repo,
+                            &store,
+                            &commit_cache,
+                            &item.commit,
+                            Some(message),
+                            true,
+                            false,
+                            signoff,
+                            committer_date_is_author_date,
+                            ignore_date,
+                            gpg_sign.clone(),
+                            no_gpg_sign,
+                        )?;
+                    }
                 }
                 RebaseTodoCommand::Squash => {
                     rebase_squash_commit(&repo, &store, &commit_cache, &item.commit, true)?;
@@ -2164,20 +2260,40 @@ pub(crate) fn rebase(
                     rebase_squash_commit(&repo, &store, &commit_cache, &item.commit, false)?;
                 }
                 RebaseTodoCommand::Edit => {
-                    rebase_pick_commit_with_message(
-                        &repo,
-                        &store,
-                        &commit_cache,
-                        &item.commit,
-                        None,
-                        true,
-                        false,
-                        signoff,
-                        committer_date_is_author_date,
-                        ignore_date,
-                        gpg_sign.clone(),
-                        no_gpg_sign,
-                    )?;
+                    if pending_root_parent.is_some()
+                        && commit_cache.read_commit(&item.commit)?.parents.is_empty()
+                    {
+                        rebase_pick_root_commit_with_message(
+                            &repo,
+                            &store,
+                            &commit_cache,
+                            &item.commit,
+                            pending_root_parent.take().flatten().as_ref(),
+                            None,
+                            true,
+                            false,
+                            signoff,
+                            committer_date_is_author_date,
+                            ignore_date,
+                            gpg_sign.clone(),
+                            no_gpg_sign,
+                        )?;
+                    } else {
+                        rebase_pick_commit_with_message(
+                            &repo,
+                            &store,
+                            &commit_cache,
+                            &item.commit,
+                            None,
+                            true,
+                            false,
+                            signoff,
+                            committer_date_is_author_date,
+                            ignore_date,
+                            gpg_sign.clone(),
+                            no_gpg_sign,
+                        )?;
+                    }
                     write_rebase_edit_state(&repo, &head, &todo[index + 1..])?;
                     eprintln!(
                         "Stopped at {}...  # {}",
@@ -2211,20 +2327,41 @@ pub(crate) fn rebase(
                     eprintln!("Rebasing ({}/{})", current_step, total_steps);
                 }
             }
-            rebased_head = Some(rebase_pick_commit_with_message(
-                &repo,
-                &store,
-                &commit_cache,
-                &commit,
-                None,
-                false,
-                false,
-                signoff,
-                committer_date_is_author_date,
-                ignore_date,
-                gpg_sign.clone(),
-                no_gpg_sign,
-            )?);
+            let picked = commit_cache.read_commit(&commit)?;
+            rebased_head = Some(
+                if pending_root_parent.is_some() && picked.parents.is_empty() {
+                    rebase_pick_root_commit_with_message(
+                        &repo,
+                        &store,
+                        &commit_cache,
+                        &commit,
+                        pending_root_parent.take().flatten().as_ref(),
+                        None,
+                        false,
+                        false,
+                        signoff,
+                        committer_date_is_author_date,
+                        ignore_date,
+                        gpg_sign.clone(),
+                        no_gpg_sign,
+                    )?
+                } else {
+                    rebase_pick_commit_with_message(
+                        &repo,
+                        &store,
+                        &commit_cache,
+                        &commit,
+                        None,
+                        false,
+                        false,
+                        signoff,
+                        committer_date_is_author_date,
+                        ignore_date,
+                        gpg_sign.clone(),
+                        no_gpg_sign,
+                    )?
+                },
+            );
             for exec_command in &exec_commands {
                 if !quiet && !output_mode.suppresses_progress_stderr() {
                     current_step += 1;
@@ -2260,7 +2397,7 @@ pub(crate) fn rebase(
                     &tree_cache,
                     &commit_cache,
                     &stat_base_id,
-                    &new_base_id,
+                    new_base_id.as_ref().unwrap_or(&head),
                 )?,
                 RebaseOutputMode::Verbose => print_rebase_verbose_stdout(
                     &repo,
@@ -2268,7 +2405,7 @@ pub(crate) fn rebase(
                     &tree_cache,
                     &commit_cache,
                     &stat_base_id,
-                    &new_base_id,
+                    new_base_id.as_ref().unwrap_or(&head),
                     &original_head,
                     &rebased_head,
                 )?,
@@ -2861,6 +2998,116 @@ fn rebase_pick_commit_with_message(
     let commit = builder.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
+    if print_summary {
+        println!("[{}] {}", short_object_id(&id), commit_subject(&message));
+    }
+    Ok(id)
+}
+
+fn prepare_rebase_root_start(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    refs: &RefStore,
+    root: bool,
+    new_base_id: Option<&ObjectId>,
+    pre_switch_index: &GitIndex,
+) -> Result<()> {
+    if !root {
+        let Some(new_base_id) = new_base_id else {
+            return Ok(());
+        };
+        checkout_worktree(repo, store, new_base_id)?;
+        update_head_to_commit(refs, new_base_id)?;
+        return Ok(());
+    }
+    if let Some(new_base_id) = new_base_id {
+        checkout_worktree(repo, store, new_base_id)?;
+        update_head_to_commit(refs, new_base_id)?;
+        return Ok(());
+    }
+    let empty_index = GitIndex::new();
+    remove_tracked_paths_missing_from_target(repo, pre_switch_index, &empty_index)?;
+    empty_index.write_to_path(&repo.index_path)?;
+    Ok(())
+}
+
+fn rebase_pick_root_commit_with_message(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    picked_id: &ObjectId,
+    parent_override: Option<&ObjectId>,
+    message_override: Option<Vec<u8>>,
+    update_worktree: bool,
+    print_summary: bool,
+    signoff: bool,
+    committer_date_is_author_date: bool,
+    ignore_date: bool,
+    gpg_sign: Option<String>,
+    no_gpg_sign: bool,
+) -> Result<ObjectId> {
+    let tree_cache = TreeObjectCache::new(store);
+    if update_worktree && !worktree_clean(repo, store)? {
+        return Err(CliError::Fatal {
+            code: 1,
+            message: "local changes would be overwritten".into(),
+        });
+    }
+    let picked = commit_cache.read_commit(picked_id)?;
+    let base_index = GitIndex::new();
+    let patch_index = tree_cache.read_tree_to_index(&picked.tree)?;
+    let current_index = read_repo_index(repo)?;
+    let new_index = apply_tree_delta(&base_index, &patch_index, &current_index)?;
+    remove_tracked_paths_missing_from_target(repo, &current_index, &new_index)?;
+    new_index.write_to_path(&repo.index_path)?;
+    if update_worktree {
+        checkout_index(
+            store,
+            &new_index,
+            &repo.root,
+            CheckoutIndexOptions { force: true },
+        )?;
+        smudge_worktree_filter_entries(repo, &new_index)?;
+    }
+    let tree = write_tree_from_index(store, &new_index)?;
+    let picked_author = signature_from_commit_bytes(&picked.author)?;
+    let author = if ignore_date {
+        let now = chrono::Local::now();
+        Signature::new(
+            picked_author.name.clone(),
+            picked_author.email.clone(),
+            now.timestamp(),
+            now.format("%z").to_string(),
+        )
+        .map_err(CliError::Io)?
+    } else {
+        picked_author
+    };
+    let committer = rebase_replay_committer_signature(
+        repo,
+        &author,
+        committer_date_is_author_date,
+    )?;
+    let mut message = message_override.unwrap_or_else(|| picked.message.clone());
+    if signoff {
+        super::commit_commands::append_commit_signoff(&mut message, &committer)?;
+    }
+    let mut builder = CommitBuilder::new(tree, author, committer).message(message.clone())?;
+    if let Some(parent_id) = parent_override {
+        builder = builder.parent(parent_id.clone());
+    }
+    if !no_gpg_sign {
+        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(
+            repo,
+            &builder,
+            gpg_sign.as_deref(),
+        )? {
+            builder = builder.gpg_signature(signature)?;
+        }
+    }
+    let commit = builder.encode()?;
+    let id = store.write_object(GitObjectKind::Commit, &commit)?;
+    update_head_to_commit(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1), &id)?;
     if print_summary {
         println!("[{}] {}", short_object_id(&id), commit_subject(&message));
     }

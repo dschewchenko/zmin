@@ -2725,6 +2725,73 @@ fn rebase_remaining_helper_free_option_family_matches_stock_git() {
 }
 
 #[test]
+fn rebase_root_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool); 3] = [
+        ("root_current_branch", &["rebase", "--root"], false),
+        ("root_explicit_branch", &["rebase", "--root", "topic"], false),
+        (
+            "root_onto_explicit_branch",
+            &["rebase", "--root", "--onto", "origin/main", "topic"],
+            true,
+        ),
+    ];
+
+    for (name, args, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(zmin_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        } else if name == "root_explicit_branch" {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(zmin_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=5"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=5"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
+
+#[test]
 fn rebase_apply_backend_option_family_matches_stock_git() {
     let cases: [(&str, &[&str], bool, bool); 6] = [
         ("apply_upstream", &["rebase", "--apply", "origin/main"], false, false),
