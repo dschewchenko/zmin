@@ -4317,6 +4317,8 @@ pub enum Command {
     Rebase {
         #[arg(long = "abort", action = ArgAction::SetTrue)]
         abort: bool,
+        #[arg(long = "allow-empty-message", action = ArgAction::SetTrue)]
+        allow_empty_message: bool,
         #[arg(long = "autostash", action = ArgAction::SetTrue)]
         autostash: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
@@ -4325,14 +4327,24 @@ pub enum Command {
         committer_date_is_author_date: bool,
         #[arg(short = 'i', long = "interactive", action = ArgAction::SetTrue)]
         interactive: bool,
+        #[arg(long = "ignore-whitespace", action = ArgAction::SetTrue)]
+        ignore_whitespace: bool,
         #[arg(short = 'm', long = "merge", action = ArgAction::SetTrue)]
         merge: bool,
+        #[arg(long = "fork-point", action = ArgAction::SetTrue)]
+        fork_point: bool,
+        #[arg(long = "keep-empty", action = ArgAction::SetTrue)]
+        keep_empty: bool,
         #[arg(long = "no-autostash", action = ArgAction::SetTrue)]
         no_autostash: bool,
         #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
         no_stat: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
         no_ff: bool,
+        #[arg(long = "no-fork-point", action = ArgAction::SetTrue)]
+        no_fork_point: bool,
+        #[arg(long = "no-keep-empty", action = ArgAction::SetTrue)]
+        no_keep_empty: bool,
         #[arg(long = "no-reapply-cherry-picks", action = ArgAction::SetTrue)]
         no_reapply_cherry_picks: bool,
         #[arg(long = "force-rebase", short = 'f', action = ArgAction::SetTrue)]
@@ -4355,8 +4367,12 @@ pub enum Command {
         reapply_cherry_picks: bool,
         #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
         rerere_autoupdate: bool,
-        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
+        #[arg(long = "signoff", action = ArgAction::SetTrue)]
         signoff: bool,
+        #[arg(short = 's', long = "strategy")]
+        strategy: Option<String>,
+        #[arg(short = 'X', long = "strategy-option")]
+        strategy_option: Vec<String>,
         #[arg(long = "update-refs", action = ArgAction::SetTrue)]
         update_refs: bool,
         #[arg(long = "verify", action = ArgAction::SetTrue)]
