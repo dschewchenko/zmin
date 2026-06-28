@@ -7076,7 +7076,9 @@ pub(crate) struct CloneCommandInput {
     pub(crate) no_recurse_submodules: bool,
     pub(crate) jobs: Option<String>,
     pub(crate) shallow_submodules: bool,
+    pub(crate) no_shallow_submodules: bool,
     pub(crate) remote_submodules: bool,
+    pub(crate) no_remote_submodules: bool,
     pub(crate) origin: String,
     pub(crate) no_tags: bool,
     pub(crate) tags: bool,
@@ -7091,7 +7093,15 @@ pub(crate) struct CloneCommandInput {
     pub(crate) hardlinks: bool,
     pub(crate) no_local: bool,
     pub(crate) depth: Option<String>,
+    pub(crate) shallow_since: Option<String>,
+    pub(crate) shallow_exclude: Vec<String>,
     pub(crate) branch: Option<String>,
+    pub(crate) server_option: Vec<String>,
+    pub(crate) upload_pack: Option<String>,
+    pub(crate) filter: Option<String>,
+    pub(crate) also_filter_submodules: bool,
+    pub(crate) bundle_uri: Option<String>,
+    pub(crate) sparse: bool,
     pub(crate) ref_format: Option<String>,
     pub(crate) repository: String,
     pub(crate) directory: Option<PathBuf>,
@@ -7108,6 +7118,7 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         recurse_submodules,
         remote_submodules,
         shallow_submodules,
+        sparse,
         bare,
         mirror,
         no_checkout,
@@ -7126,7 +7137,14 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
         no_hardlinks,
         no_local,
         depth,
+        shallow_since,
+        shallow_exclude,
         branch,
+        server_options: _server_options,
+        upload_pack: _upload_pack,
+        filter,
+        also_filter_submodules,
+        bundle_uri,
         ref_format,
         keep_partial_on_missing_branch,
         repository,
@@ -7266,15 +7284,30 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     let destination_label = clone_destination_label(directory.as_deref(), &destination);
     ensure_clone_destination(&destination, &destination_label)?;
     let shallow_file_clone = depth.is_some() && (repository.starts_with("file://") || no_local);
-    if depth.is_some() && !shallow_file_clone {
-        eprintln!("warning: --depth is ignored in local clones; use file:// instead.");
-    }
     if !quiet {
         if effective_bare {
             eprintln!("Cloning into bare repository '{destination_label}'...");
         } else {
             eprintln!("Cloning into '{destination_label}'...");
         }
+    }
+    validate_clone_also_filter_submodules(
+        also_filter_submodules,
+        filter.as_deref(),
+        &recurse_submodules,
+    )?;
+    emit_clone_bundle_uri_warning(bundle_uri.as_deref());
+    if depth.is_some() && !shallow_file_clone {
+        eprintln!("warning: --depth is ignored in local clones; use file:// instead.");
+    }
+    if filter.is_some() && !repository.starts_with("file://") && !no_local {
+        eprintln!("warning: --filter is ignored in local clones; use file:// instead.");
+    }
+    if shallow_since.is_some() && !repository.starts_with("file://") && !no_local {
+        eprintln!("warning: --shallow-since is ignored in local clones; use file:// instead.");
+    }
+    if !shallow_exclude.is_empty() && !repository.starts_with("file://") && !no_local {
+        eprintln!("warning: --shallow-exclude is ignored in local clones; use file:// instead.");
     }
     if reject_shallow && is_shallow_git_dir(&source.git_dir) {
         return Err(CliError::Fatal {
@@ -7496,6 +7529,9 @@ pub(crate) fn clone(options: CloneOptions) -> Result<()> {
     {
         let _trace = phase_trace("clone_local.checkout");
         checkout_fresh_worktree(&repo, &store, &head_id)?;
+    }
+    if sparse {
+        super::worktree_commands::enable_clone_sparse_checkout(&repo)?;
     }
     if !recurse_submodules.is_empty() {
         let _trace = phase_trace("clone_local.submodules");
@@ -8421,35 +8457,54 @@ pub(crate) fn run_clone(input: CloneCommandInput, raw_args: &[String]) -> Result
     let _trace = phase_trace("clone.total");
     validate_clone_ref_format(input.ref_format.as_deref())?;
     validate_clone_jobs(input.jobs.as_deref(), raw_args)?;
-    let (single_branch, no_single_branch) = clone_single_branch_flags(
+    let (single_branch, no_single_branch) =
+        resolve_clone_single_branch_flags(raw_args, input.single_branch, input.no_single_branch);
+    let no_tags = resolve_clone_last_bool(raw_args, "--tags", input.tags, "--no-tags", input.no_tags);
+    let template = resolve_clone_template_path(raw_args, input.template, input.no_template);
+    let recurse_submodules = clone_recurse_submodule_specs(
         raw_args,
-        input.single_branch,
-        input.no_single_branch,
-        input.depth.is_some(),
+        input.recurse_submodules,
+        input.recursive,
+        input.no_recurse_submodules,
     );
-    let no_tags = clone_no_tags(raw_args, input.no_tags, input.tags);
-    let template = clone_template_path(raw_args, input.template, input.no_template);
+    let filter = resolve_clone_filter(raw_args, input.filter);
     clone(CloneOptions {
         quiet: input.quiet,
         configs: input.configs,
         template,
-        reject_shallow: clone_reject_shallow(
+        reject_shallow: resolve_clone_last_bool(
             raw_args,
-            input.reject_shallow,
+            "--no-reject-shallow",
             input.no_reject_shallow,
+            "--reject-shallow",
+            input.reject_shallow,
         ),
-        recurse_submodules: clone_recurse_submodule_specs(
+        recurse_submodules,
+        remote_submodules: resolve_clone_last_bool(
             raw_args,
-            input.recurse_submodules,
-            input.recursive,
-            input.no_recurse_submodules,
+            "--no-remote-submodules",
+            input.no_remote_submodules,
+            "--remote-submodules",
+            input.remote_submodules,
         ),
-        remote_submodules: input.remote_submodules,
-        shallow_submodules: input.shallow_submodules,
+        shallow_submodules: resolve_clone_last_bool(
+            raw_args,
+            "--no-shallow-submodules",
+            input.no_shallow_submodules,
+            "--shallow-submodules",
+            input.shallow_submodules,
+        ),
+        sparse: input.sparse,
         bare: input.bare,
         mirror: input.mirror,
-        no_checkout: clone_no_checkout(raw_args, input.no_checkout, input.checkout),
-        worktree_first: clone_worktree_first(input.worktree_first, input.instant),
+        no_checkout: resolve_clone_last_bool(
+            raw_args,
+            "--checkout",
+            input.checkout,
+            "--no-checkout",
+            input.no_checkout,
+        ),
+        worktree_first: input.worktree_first || input.instant,
         background_fetch: input.background_fetch,
         demand_hydrate: input.demand_hydrate,
         remote_name: input.origin,
@@ -8461,15 +8516,119 @@ pub(crate) fn run_clone(input: CloneCommandInput, raw_args: &[String]) -> Result
         reference_if_able: input.reference_if_able,
         shared: input.shared,
         dissociate: input.dissociate,
-        no_hardlinks: clone_no_hardlinks(raw_args, input.no_hardlinks, input.hardlinks),
+        no_hardlinks: resolve_clone_last_bool(
+            raw_args,
+            "--hardlinks",
+            input.hardlinks,
+            "--no-hardlinks",
+            input.no_hardlinks,
+        ),
         no_local: input.no_local,
         depth: input.depth,
+        shallow_since: input.shallow_since,
+        shallow_exclude: input.shallow_exclude,
         branch: input.branch,
+        server_options: input.server_option,
+        upload_pack: input.upload_pack,
+        filter,
+        also_filter_submodules: input.also_filter_submodules,
+        bundle_uri: input.bundle_uri,
         ref_format: input.ref_format,
         keep_partial_on_missing_branch: false,
         repository: input.repository,
         directory: input.directory,
     })
+}
+
+fn resolve_clone_last_bool(
+    raw_args: &[String],
+    positive_name: &str,
+    positive_value: bool,
+    negative_name: &str,
+    negative_value: bool,
+) -> bool {
+    let mut state = None;
+    for arg in raw_args {
+        match arg.as_str() {
+            value if value == positive_name => state = Some(true),
+            value if value == negative_name => state = Some(false),
+            _ => {}
+        }
+    }
+    state.unwrap_or(positive_value && !negative_value)
+}
+
+fn resolve_clone_single_branch_flags(
+    raw_args: &[String],
+    single_branch: bool,
+    no_single_branch: bool,
+) -> (bool, bool) {
+    let single = resolve_clone_last_bool(
+        raw_args,
+        "--single-branch",
+        single_branch,
+        "--no-single-branch",
+        no_single_branch,
+    );
+    (single, !single)
+}
+
+fn resolve_clone_template_path(
+    raw_args: &[String],
+    template: Option<PathBuf>,
+    no_template: bool,
+) -> Option<PathBuf> {
+    let mut template = template;
+    for arg in raw_args {
+        if arg == "--no-template" {
+            template = None;
+        }
+    }
+    if no_template {
+        template = None;
+    }
+    template
+}
+
+fn resolve_clone_filter(raw_args: &[String], filter: Option<String>) -> Option<String> {
+    for arg in raw_args.iter().rev() {
+        if let Some(value) = arg.strip_prefix("--filter=") {
+            return Some(value.to_owned());
+        }
+    }
+    filter
+}
+
+fn validate_clone_also_filter_submodules(
+    also_filter_submodules: bool,
+    filter: Option<&str>,
+    recurse_submodules: &[String],
+) -> Result<()> {
+    if !also_filter_submodules {
+        return Ok(());
+    }
+    if filter.is_none() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: the option '--also-filter-submodules' requires '--filter'\n".into(),
+        });
+    }
+    if recurse_submodules.is_empty() {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: the option '--also-filter-submodules' requires '--recurse-submodules'\n"
+                .into(),
+        });
+    }
+    Ok(())
+}
+
+fn emit_clone_bundle_uri_warning(bundle_uri: Option<&str>) {
+    let Some(bundle_uri) = bundle_uri else {
+        return;
+    };
+    eprintln!("warning: failed to download bundle from URI '{bundle_uri}'");
+    eprintln!("warning: failed to fetch objects from bundle URI '{bundle_uri}'");
 }
 
 fn validate_clone_ref_format(ref_format: Option<&str>) -> Result<()> {

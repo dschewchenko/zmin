@@ -1941,6 +1941,159 @@ fn clone_long_options_and_checkout_order_match_stock_git() {
     }
 }
 
+#[test]
+fn clone_documented_local_tail_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let source = dir.path().join("source");
+    git(
+        dir.path(),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(&source);
+    fs::write(source.join("root.txt"), b"root\n").expect("write root");
+    fs::create_dir_all(source.join("dir/sub")).expect("create nested dir");
+    fs::write(source.join("dir/sub/nested.txt"), b"nested\n").expect("write nested");
+    git(&source, ["add", "-A"]);
+    git_with_env(&source, ["commit", "-m", "main"]);
+
+    let git_root = dir.path().join("git-root");
+    let zmin_root = dir.path().join("zmin-root");
+    fs::create_dir_all(&git_root).expect("create git root");
+    fs::create_dir_all(&zmin_root).expect("create zmin root");
+
+    let assert_success = |name: &str, flags: &[&str], sparse_expected: bool| {
+        let mut git_args_vec = vec!["clone"];
+        git_args_vec.extend_from_slice(flags);
+        git_args_vec.push(source.to_str().expect("source path"));
+        git_args_vec.push(name);
+
+        let mut zmin_args_vec = vec!["clone"];
+        zmin_args_vec.extend_from_slice(flags);
+        zmin_args_vec.push(source.to_str().expect("source path"));
+        zmin_args_vec.push(name);
+
+        assert_eq!(
+            command_output("git", &git_root, &git_args_vec, "git"),
+            command_output(zmin_bin(), &zmin_root, &zmin_args_vec, "zmin")
+        );
+
+        let git_clone = git_root.join(name);
+        let zmin_clone = zmin_root.join(name);
+        assert_eq!(
+            run_zmin(&zmin_clone, ["rev-parse", "HEAD"]),
+            git(&git_clone, ["rev-parse", "HEAD"]),
+            "HEAD mismatch for {flags:?}"
+        );
+        assert_eq!(
+            run_zmin(&zmin_clone, ["status", "--porcelain=v1", "--branch"]),
+            git(&git_clone, ["status", "--porcelain=v1", "--branch"]),
+            "status mismatch for {flags:?}"
+        );
+        assert_eq!(
+            run_zmin(&zmin_clone, ["config", "--get", "remote.origin.url"]),
+            git(&git_clone, ["config", "--get", "remote.origin.url"]),
+            "origin URL mismatch for {flags:?}"
+        );
+        assert_eq!(
+            visible_worktree_files(&zmin_clone),
+            visible_worktree_files(&git_clone),
+            "visible worktree mismatch for {flags:?}"
+        );
+
+        if sparse_expected {
+            for key in ["core.sparseCheckout", "core.sparseCheckoutCone"] {
+                assert_eq!(
+                    run_zmin(&zmin_clone, ["config", "--get", key]),
+                    git(&git_clone, ["config", "--get", key]),
+                    "sparse config mismatch for {key}"
+                );
+            }
+            assert_eq!(
+                fs::read_to_string(zmin_clone.join(".git/info/sparse-checkout"))
+                    .expect("read zmin sparse-checkout"),
+                fs::read_to_string(git_clone.join(".git/info/sparse-checkout"))
+                    .expect("read git sparse-checkout"),
+                "sparse-checkout file mismatch"
+            );
+            assert_eq!(
+                fs::read_to_string(zmin_clone.join(".git/config.worktree"))
+                    .expect("read zmin config.worktree"),
+                fs::read_to_string(git_clone.join(".git/config.worktree"))
+                    .expect("read git config.worktree"),
+                "config.worktree mismatch"
+            );
+        }
+    };
+
+    let assert_failure = |name: &str, flags: &[&str]| {
+        let mut git_args_vec = vec!["clone"];
+        git_args_vec.extend_from_slice(flags);
+        git_args_vec.push(source.to_str().expect("source path"));
+        git_args_vec.push(name);
+
+        let mut zmin_args_vec = vec!["clone"];
+        zmin_args_vec.extend_from_slice(flags);
+        zmin_args_vec.push(source.to_str().expect("source path"));
+        zmin_args_vec.push(name);
+
+        assert_eq!(
+            command_output("git", &git_root, &git_args_vec, "git"),
+            command_output(zmin_bin(), &zmin_root, &zmin_args_vec, "zmin")
+        );
+        assert!(!git_root.join(name).exists(), "git failure should not create {name}");
+        assert!(
+            !zmin_root.join(name).exists(),
+            "zmin failure should not create {name}"
+        );
+    };
+
+    for (name, flags, sparse_expected) in [
+        (
+            "upload-pack-long",
+            ["--upload-pack=git-upload-pack"].as_slice(),
+            false,
+        ),
+        ("upload-pack-short", ["-u", "git-upload-pack"].as_slice(), false),
+        ("server-option", ["--server-option=trace"].as_slice(), false),
+        ("filter", ["--filter=blob:none"].as_slice(), false),
+        ("shallow-since", ["--shallow-since=2024-01-01"].as_slice(), false),
+        ("shallow-exclude", ["--shallow-exclude=main"].as_slice(), false),
+        (
+            "bundle-uri",
+            ["--bundle-uri=file:///tmp/missing.bundle"].as_slice(),
+            false,
+        ),
+        ("no-remote-submodules", ["--no-remote-submodules"].as_slice(), false),
+        (
+            "no-shallow-submodules",
+            ["--no-shallow-submodules"].as_slice(),
+            false,
+        ),
+        (
+            "also-filter-submodules",
+            [
+                "--filter=blob:none",
+                "--recurse-submodules",
+                "--also-filter-submodules",
+            ]
+            .as_slice(),
+            false,
+        ),
+        ("sparse", ["--sparse"].as_slice(), true),
+    ] {
+        assert_success(name, flags, sparse_expected);
+    }
+
+    assert_failure(
+        "also-filter-missing-recurse",
+        ["--filter=blob:none", "--also-filter-submodules"].as_slice(),
+    );
+    assert_failure(
+        "also-filter-missing-filter",
+        ["--recurse-submodules", "--also-filter-submodules"].as_slice(),
+    );
+}
+
 fn canonical_alternates(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     fs::read_to_string(path)
         .expect("read alternates")

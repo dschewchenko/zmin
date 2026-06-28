@@ -22,6 +22,64 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`clone` documented-tail closure across the already modeled local source lane
+with one top-level file plus one nested path and a bounded missing-bundle
+warning fixture. This batch added thirteen exact stock-Git rows and promoted
+the same eleven documented option pairs into the reviewed-complete census set:
+`clone --upload-pack`, `clone -u`, `clone --server-option`,
+`clone --filter`, `clone --also-filter-submodules`,
+`clone --bundle-uri`, `clone --no-remote-submodules`,
+`clone --no-shallow-submodules`, `clone --shallow-since`,
+`clone --shallow-exclude`, and `clone --sparse`.
+The runtime closure stayed intentionally bounded: `clone` now accepts the
+remaining documented helper-free local tail through schema, dispatch, and
+runtime plumbing; preserves stock local warnings for ignored `--filter`,
+`--shallow-since`, and `--shallow-exclude`; matches the stock precondition
+fatals for `--also-filter-submodules` missing `--filter` or
+`--recurse-submodules`; emits the stock missing-bundle warning pair for the
+represented `--bundle-uri` lane; treats `--server-option`, `--upload-pack`,
+`-u`, `--no-remote-submodules`, and `--no-shallow-submodules` as
+stock-compatible no-op acceptance on the current local no-submodule surface;
+and applies stock sparse top-level checkout by writing `config.worktree`,
+sparse-checkout patterns, and sparse config values without widening into full
+network partial-clone, protocol-v2 server-option forwarding, or bundle import
+semantics yet.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_clone_compat clone_documented_local_tail_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(clone|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2771 / 3212`
+- represented documented command-option pairs: `2771 / 3212`
+- matrix rows: `7076`
+- verified rows: `6211`
+- invalid-input rows: `840`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `441`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `clone`: `47 / 47` reviewed-complete documented option pairs,
+  `47 / 47` represented documented option pairs, `109` written rows, `109`
+  classified rows, `97` stock-matching rows, `12` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes the full represented documented `clone` surface on the
+current modeled helper-free local and already-modeled remote lanes without
+widening into protocol-v2 server-option forwarding, network partial-clone
+fetch semantics, or bundle ingestion yet.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `range-diff` documented-tail closure across the already modeled local
 patch-equivalence fixture with one equivalent patch and one changed patch.
 This batch added five exact stock-Git rows and promoted the same five

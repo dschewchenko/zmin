@@ -160,8 +160,12 @@ pub enum Command {
         jobs: Option<String>,
         #[arg(long = "shallow-submodules", action = ArgAction::SetTrue)]
         shallow_submodules: bool,
+        #[arg(long = "no-shallow-submodules", action = ArgAction::SetTrue)]
+        no_shallow_submodules: bool,
         #[arg(long = "remote-submodules", action = ArgAction::SetTrue)]
         remote_submodules: bool,
+        #[arg(long = "no-remote-submodules", action = ArgAction::SetTrue)]
+        no_remote_submodules: bool,
         #[arg(short = 'o', long = "origin", default_value = "origin")]
         origin: String,
         #[arg(long = "no-tags", action = ArgAction::SetTrue)]
@@ -184,8 +188,24 @@ pub enum Command {
         dissociate: bool,
         #[arg(long = "depth")]
         depth: Option<String>,
+        #[arg(long = "shallow-since")]
+        shallow_since: Option<String>,
+        #[arg(long = "shallow-exclude")]
+        shallow_exclude: Vec<String>,
         #[arg(short = 'b', long = "branch")]
         branch: Option<String>,
+        #[arg(long = "server-option")]
+        server_option: Vec<String>,
+        #[arg(short = 'u', long = "upload-pack")]
+        upload_pack: Option<String>,
+        #[arg(long = "filter")]
+        filter: Option<String>,
+        #[arg(long = "also-filter-submodules", action = ArgAction::SetTrue)]
+        also_filter_submodules: bool,
+        #[arg(long = "bundle-uri")]
+        bundle_uri: Option<String>,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
         #[arg(long = "ref-format")]
         ref_format: Option<String>,
         repository: String,

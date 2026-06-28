@@ -6163,6 +6163,18 @@ fn sparse_checkout_set(patterns: &[String]) -> Result<()> {
     apply_sparse_checkout(&repo, patterns)
 }
 
+pub(crate) fn enable_clone_sparse_checkout(repo: &GitRepo) -> Result<()> {
+    let options = SparseCheckoutOptions {
+        cone: Some(true),
+        ..SparseCheckoutOptions::default()
+    };
+    set_config_value(repo, "extensions.worktreeConfig", "true")?;
+    write_clone_sparse_checkout_worktree_config(repo)?;
+    apply_sparse_checkout_config_options(repo, &options)?;
+    write_sparse_checkout_patterns(repo, &[])?;
+    apply_sparse_checkout(repo, &[])
+}
+
 fn sparse_checkout_add(patterns: &[String]) -> Result<()> {
     let repo = find_repo()?;
     ensure_sparse_checkout_enabled(&repo, "no sparse-checkout to add to")?;
@@ -6237,6 +6249,14 @@ fn write_sparse_checkout_patterns(repo: &GitRepo, patterns: &[String]) -> Result
         out.push('\n');
     }
     fs::write(path, out)?;
+    Ok(())
+}
+
+fn write_clone_sparse_checkout_worktree_config(repo: &GitRepo) -> Result<()> {
+    fs::write(
+        repo.git_dir.join("config.worktree"),
+        "[core]\n\tsparseCheckout = true\n\tsparseCheckoutCone = true\n",
+    )?;
     Ok(())
 }
 
@@ -6548,6 +6568,7 @@ fn submodule_add(args: &[String]) -> Result<()> {
             recurse_submodules: Vec::new(),
             remote_submodules: false,
             shallow_submodules: false,
+            sparse: false,
             bare: false,
             mirror: false,
             no_checkout: false,
@@ -6566,7 +6587,14 @@ fn submodule_add(args: &[String]) -> Result<()> {
             no_hardlinks: false,
             no_local: false,
             depth: None,
+            shallow_since: None,
+            shallow_exclude: Vec::new(),
             branch: options.branch.clone(),
+            server_options: Vec::new(),
+            upload_pack: None,
+            filter: None,
+            also_filter_submodules: false,
+            bundle_uri: None,
             ref_format: None,
             keep_partial_on_missing_branch: false,
             repository: options.repository.clone(),
