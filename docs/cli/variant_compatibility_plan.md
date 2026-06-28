@@ -21,8 +21,57 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-28 the latest completed batch is a helper-free local `log`
-output-surface tail closure across the already modeled explicit-format,
+As of 2026-06-28 the latest completed batch is a helper-free local
+`range-diff` documented-tail closure across the already modeled local
+patch-equivalence fixture with one equivalent patch and one changed patch.
+This batch added five exact stock-Git rows and promoted the same five
+documented option pairs into the reviewed-complete census set:
+`range-diff --creation-factor`, `range-diff --left-only`,
+`range-diff --right-only`, `range-diff --notes`, and
+`range-diff --no-notes`.
+The runtime closure stayed intentionally bounded: `range-diff` now accepts the
+remaining documented helper-free toggles through schema and dispatch,
+preserves stock output for `--creation-factor`, `--notes`, and `--no-notes`
+on the current patch-equivalence lane, and matches stock Git left-only and
+right-only filtering by keeping matched rows while suppressing only the
+opposite unmatched tail, without widening into broader note-display or
+creation-factor-sensitive rematching semantics yet.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_mail_series_compat range_diff_documented_tail_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(range-diff|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2760 / 3212`
+- represented documented command-option pairs: `2760 / 3212`
+- matrix rows: `7063`
+- verified rows: `6200`
+- invalid-input rows: `838`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `452`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `range-diff`: `6 / 6` reviewed-complete documented option pairs,
+  `6 / 6` represented documented option pairs, `13` written rows, `13`
+  classified rows, `11` stock-matching rows, `2` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes the full represented documented `range-diff` surface on
+the current helper-free local lane without widening into additional note-rich
+fixtures or creation-factor-sensitive rematching semantics.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
+`log` output-surface tail closure across the already modeled explicit-format,
 two-commit history lane. This batch added twelve exact stock-Git rows and
 promoted the same twelve documented option pairs into the reviewed-complete
 census set: `log --decorate-refs`, `log --decorate-refs-exclude`,
@@ -37,55 +86,6 @@ unchanged `--format=%s HEAD` output where Git does not alter that surface, and
 matches the stock unrecognized-argument fatal for `--disk-usage` without
 widening into graph rendering, follow semantics, line-range tracing, signed
 commit output, or log-size prefix handling yet.
-
-Focused verification was
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_output_surface_tail_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
-and `git diff --check`.
-
-Actual durable readiness/status after this batch:
-
-- complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2755 / 3212`
-- represented documented command-option pairs: `2755 / 3212`
-- matrix rows: `7058`
-- verified rows: `6195`
-- invalid-input rows: `838`
-- open or partial exact rows: `0`
-- remaining to fix or verify rows: `457`
-- implemented but unverified rows: `3`
-
-Per-command position on the touched surface:
-
-- `log`: `126 / 131` reviewed-complete documented option pairs,
-  `126 / 131` represented documented option pairs, `241` written rows, `241`
-  classified rows, `217` stock-matching rows, `24` invalid-input rows, and
-  `0` exact-open rows
-
-This is an implementation-plus-review closure batch rather than a census-only
-promotion: it closes the cheap helper-free `log` explicit-format tail and
-reduces the remaining documented `log` backlog to `--follow`, `--graph`,
-`--log-size`, `--show-signature`, and `-L`, without widening into richer graph,
-signature, line-range, or rename-following semantics yet.
-
-As of 2026-06-28 the previous completed batch is a helper-free local
-`diff-index` combined-tail closure across the already modeled merge-conflict
-worktree lane with unmerged index stages and a tree-ish old side. This batch
-added three exact stock-Git rows and promoted the same three documented option
-pairs into the reviewed-complete census set: `diff-index -c`,
-`diff-index --cc`, and `diff-index --diff-merges`.
-The runtime closure stayed intentionally bounded: `diff-index` now accepts the
-documented combined merge-diff spellings through schema and dispatch, maps the
-represented `--diff-merges=combined` spelling onto the stock combined patch
-surface, and renders the current helper-free unmerged lane with the same
-combined parent ids, zero result object id, patch header form, and conflict
-marker hunk body as stock Git. This finishes the documented `diff-index`
-surface without widening into additional raw/stat combined compositions beyond
-the currently modeled merge-conflict patch lane.
 
 Focused verification was
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,

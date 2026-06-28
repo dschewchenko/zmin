@@ -1788,3 +1788,21 @@ fn range_diff_matches_stock_git_for_patch_equivalence() {
         );
     }
 }
+
+#[test]
+fn range_diff_documented_tail_matches_stock_git() {
+    let repo = range_diff_fixture_repo();
+    for args in [
+        ["range-diff", "--creation-factor=70", "main..old", "main..new"].as_slice(),
+        ["range-diff", "--left-only", "main..old", "main..new"].as_slice(),
+        ["range-diff", "--right-only", "main..old", "main..new"].as_slice(),
+        ["range-diff", "--notes", "main..old", "main..new"].as_slice(),
+        ["range-diff", "--no-notes", "main..old", "main..new"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}

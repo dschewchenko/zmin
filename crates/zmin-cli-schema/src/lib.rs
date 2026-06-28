@@ -3950,6 +3950,16 @@ pub enum Command {
         no_dual_color: u8,
         #[arg(long = "no-no-dual-color", action = ArgAction::SetTrue)]
         no_no_dual_color: bool,
+        #[arg(long = "creation-factor")]
+        creation_factor: Option<String>,
+        #[arg(long = "left-only", action = ArgAction::SetTrue)]
+        left_only: bool,
+        #[arg(long = "right-only", action = ArgAction::SetTrue)]
+        right_only: bool,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
         ranges: Vec<String>,
     },
     #[command(disable_help_flag = true)]

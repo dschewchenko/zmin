@@ -15,8 +15,22 @@ pub(crate) fn dispatch(
         runtime::Command::RangeDiff {
             no_dual_color,
             no_no_dual_color,
+            creation_factor,
+            left_only,
+            right_only,
+            notes,
+            no_notes,
             ranges,
-        } => run_range_diff(no_dual_color > 0, no_no_dual_color, ranges),
+        } => run_range_diff(
+            no_dual_color > 0,
+            no_no_dual_color,
+            creation_factor,
+            left_only,
+            right_only,
+            notes,
+            no_notes,
+            ranges,
+        ),
         runtime::Command::FilterBranch {
             force,
             prune_empty,
@@ -1484,7 +1498,21 @@ pub(crate) fn run_history(
 pub(crate) fn run_range_diff(
     no_dual_color: bool,
     no_no_dual_color: bool,
+    creation_factor: Option<String>,
+    left_only: bool,
+    right_only: bool,
+    notes: bool,
+    no_notes: bool,
     ranges: Vec<String>,
 ) -> std::result::Result<(), runtime::CliError> {
-    super::history_commands::range_diff(no_dual_color, no_no_dual_color, ranges)
+    super::history_commands::range_diff(
+        no_dual_color,
+        no_no_dual_color,
+        creation_factor,
+        left_only,
+        right_only,
+        notes,
+        no_notes,
+        ranges,
+    )
 }

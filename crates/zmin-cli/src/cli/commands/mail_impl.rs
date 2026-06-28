@@ -1324,9 +1324,17 @@ fn render_format_patch_range_diff(previous: &str, current: &str) -> Result<Strin
         format!("{previous}..{previous}"),
         format!("{previous}..{current}"),
     ];
+    let options = super::history_commands::RangeDiffOptions {
+        color: false,
+        creation_factor: None,
+        left_only: false,
+        right_only: false,
+        notes: false,
+        no_notes: false,
+    };
     Ok(format!(
         "Range-diff:\n{}",
-        super::history_commands::render_range_diff_output(&ranges, false)?
+        super::history_commands::render_range_diff_output(&ranges, &options)?
     ))
 }
 

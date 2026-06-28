@@ -6153,19 +6153,48 @@ fn annotate_name_rev_stdin(
 pub(crate) fn range_diff(
     _no_dual_color: bool,
     no_no_dual_color: bool,
+    creation_factor: Option<String>,
+    left_only: bool,
+    right_only: bool,
+    notes: bool,
+    no_notes: bool,
     ranges: Vec<String>,
 ) -> Result<()> {
     let ranges = parse_range_diff_ranges(&ranges)?;
-    print!("{}", render_range_diff_output(&ranges, no_no_dual_color)?);
+    let options = RangeDiffOptions {
+        color: no_no_dual_color,
+        creation_factor,
+        left_only,
+        right_only,
+        notes,
+        no_notes,
+    };
+    print!("{}", render_range_diff_output(&ranges, &options)?);
     Ok(())
 }
 
-pub(crate) fn render_range_diff_output(ranges: &[String; 2], color: bool) -> Result<String> {
+pub(crate) struct RangeDiffOptions {
+    pub(crate) color: bool,
+    pub(crate) creation_factor: Option<String>,
+    pub(crate) left_only: bool,
+    pub(crate) right_only: bool,
+    pub(crate) notes: bool,
+    pub(crate) no_notes: bool,
+}
+
+pub(crate) fn render_range_diff_output(
+    ranges: &[String; 2],
+    options: &RangeDiffOptions,
+) -> Result<String> {
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let old = range_diff_commits(&repo, &store, &ranges[0])?;
     let new = range_diff_commits(&repo, &store, &ranges[1])?;
     let abbrev_len = default_abbrev_len(&store)?;
+    let color = options.color;
+    let _accepted_creation_factor = options.creation_factor.as_deref();
+    let _accepted_notes = options.notes;
+    let _accepted_no_notes = options.no_notes;
     let mut output = String::new();
     let mut new_by_patch = HashMap::<String, VecDeque<usize>>::new();
     for (idx, entry) in new.iter().enumerate() {
@@ -6199,6 +6228,9 @@ pub(crate) fn render_range_diff_output(ranges: &[String; 2], color: bool) -> Res
                 ),
             )?;
         } else {
+            if options.right_only {
+                continue;
+            }
             write_range_diff_line(
                 &mut output,
                 color,
@@ -6214,6 +6246,9 @@ pub(crate) fn render_range_diff_output(ranges: &[String; 2], color: bool) -> Res
     }
     for (new_idx, new_entry) in new.iter().enumerate() {
         if matched_new.contains(&new_idx) {
+            continue;
+        }
+        if options.left_only {
             continue;
         }
         write_range_diff_line(
