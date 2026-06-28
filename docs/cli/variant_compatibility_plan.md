@@ -4563,43 +4563,44 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free local `pack-objects`
-represented-family expansion across the already modeled explicit-basename
-all-refs lane plus the current loose-object stdout lane. Zmin now matches
-stock Git for fourteen more documented `pack-objects` options on the current
-bounded surface: `-q`, `--all-progress-implied`, `--honor-pack-keep`,
-`--include-tag`, `--incremental`, `--keep-true-parents`, `--local`,
-`--no-sparse`, `--non-empty`, `--shallow`, `--sparse`, `--threads`,
-`--unpacked`, and `--window-memory`. The runtime closure stayed intentionally
-bounded: these spellings are accepted and preserve the current local
-pack-integrity lanes without widening into thin packs, filtering, stdin-pack
-selection, max-pack splitting, keep-pack handling, or cruft/unreachable
-semantics yet. Focused gates were
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_pack_integrity_compat pack_objects_unpacked_implies_revs_on_loose_repo_like_stock_git -- --exact --nocapture`,
+The latest completed slice is a helper-free local `replay`
+formatter/output/revision-selector expansion across the existing bounded
+linear `--advance` lane. Zmin now matches stock Git for twenty-six more
+documented `replay` options on the current bounded surface:
+`--abbrev-commit`, `--no-abbrev-commit`, `--encoding`, `--expand-tabs`,
+`--no-expand-tabs`, `--pretty`, `--oneline`, `--format`, `--date`,
+`--relative-date`, `--notes`, `--no-notes`, `--show-notes`,
+`--show-notes-by-default`, `--standard-notes`, `--no-standard-notes`,
+`--quiet`, `--show-linear-break`, `--in-commit-order`, `--since-as-filter`,
+`--simplify-merges`, `--simplify-by-decoration`, `--ancestry-path`,
+`--bisect`, `--exclude-first-parent-only`, and `--exclude-hidden`. The
+runtime closure stayed intentionally bounded: these spellings are accepted on
+the modeled local linear advance lane and preserve the current replay result
+without widening into merge-only pseudoref semantics, walk-reflog-only
+failures, graph/header output families, or multi-source range selection.
+Focused gates were
+`GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin bash tools/git-replay-schema-oracle-smoke.sh`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
-`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-pack-schema-oracle-smoke.sh`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(pack-objects|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
-`git diff --check`.
-Actual delta from the prior daemon batch is `+14` matrix rows, `+14` complete
-documented option pairs, `+14` represented documented option pairs, `+14`
-verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
-Current census counts are `7270` matrix rows, `6388` verified rows, `857`
-invalid-input rows, `0` exact-open rows, `146/151` complete command
-matrices, `2862/3212` complete documented option pairs, and
-`2862/3212` represented documented option pairs. Per-command position on the
-touched surface is now: `pack-objects` `24/40` reviewed-complete documented
-option pairs with `34/34` classified written rows, `28` stock-matching rows,
-`6` invalid-input rows, and `24/40` represented documented option pairs. The
-remaining `pack-objects` tail is now the heavier semantic family:
-`--all-progress`, `--compression`, `--cruft`, `--cruft-expiration`,
-`--delta-islands`, `--exclude-promisor-objects`, `--filter`, `--keep-pack`,
-`--keep-unreachable`, `--max-pack-size`, `--missing`, `--no-filter`,
-`--pack-loose-unreachable`, `--stdin-packs`, `--thin`, and
-`--unpack-unreachable`, so the next default follow-up should weigh another
-denser backlog head against this now-smaller but more semantic tail.
+`tools/git-cli-readiness-status.sh`, and `git diff --check`.
+Actual delta from the prior replay formatter/filter batch is `+26` matrix
+rows, `+26` complete documented option pairs, `+26` represented documented
+option pairs, `+26` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `7358` matrix rows,
+`6473` verified rows, `860` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2950/3212` complete documented option
+pairs, and `2950/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `replay` `90/119`
+reviewed-complete documented option pairs with `93/93` classified written
+rows, `89` stock-matching rows, `4` invalid-input rows, and `90/119`
+represented documented option pairs. The backlog head is now `send-email`
+with `62` remaining documented option pairs, followed by the still-dense
+`replay` tail at `29`, then `rebase` at `54`, `p4` at `28`, and the more
+semantic `pack-objects` tail at `16`, so the next default follow-up should
+again choose the largest safe helper-free batch from the census rather than
+forcing the heavier `pack-objects` semantics.
 
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the

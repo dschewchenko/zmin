@@ -12,6 +12,32 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`replay` formatter/output/revision-selector expansion across the existing
+bounded linear advance lane. The selected change added `+26` matrix rows and
+promoted twenty-six documented `replay` option pairs into the
+reviewed-complete census set: `--abbrev-commit`, `--no-abbrev-commit`,
+`--encoding`, `--expand-tabs`, `--no-expand-tabs`, `--pretty`, `--oneline`,
+`--format`, `--date`, `--relative-date`, `--notes`, `--no-notes`,
+`--show-notes`, `--show-notes-by-default`, `--standard-notes`,
+`--no-standard-notes`, `--quiet`, `--show-linear-break`,
+`--in-commit-order`, `--since-as-filter`, `--simplify-merges`,
+`--simplify-by-decoration`, `--ancestry-path`, `--bisect`,
+`--exclude-first-parent-only`, and `--exclude-hidden`. This was a bounded
+runtime-and-evidence slice: replay now accepts the current formatting and
+revision-selector family on the modeled local linear advance lane without
+widening into graph/header output, walk-reflog-only failures, merge-only
+pseudoref semantics, or multi-source range selection. Actual delta is `+26`
+matrix rows, `+26` complete documented option pairs, `+26` represented
+documented option pairs, `+26` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `7358` matrix rows,
+`6473` verified rows, `860` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2950/3212` complete documented option
+pairs, and `2950/3212` represented documented option pairs. Remaining
+checklist rows fell from `288` to `262`. The guardrail held: row growth stayed
+inside one coherent helper-free replay family verified by the dedicated
+bounded stock-Git smoke script.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` formatter/filter/revision-selector expansion across the existing
 bounded linear advance lane. The selected change added `+30` matrix rows and
 promoted thirty documented `replay` option pairs into the reviewed-complete

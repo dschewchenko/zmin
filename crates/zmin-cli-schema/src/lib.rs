@@ -1434,10 +1434,16 @@ pub enum Command {
         author_date_order: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
+        abbrev_commit: bool,
+        #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
+        no_abbrev_commit: bool,
         #[arg(long = "author")]
         author: Option<String>,
         #[arg(long = "committer")]
         committer: Option<String>,
+        #[arg(long = "encoding")]
+        encoding: Option<String>,
         #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
         alternate_refs: bool,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
@@ -1486,8 +1492,36 @@ pub enum Command {
         full_history: bool,
         #[arg(long = "children", action = ArgAction::SetTrue)]
         children: bool,
+        #[arg(long = "ancestry-path", action = ArgAction::SetTrue)]
+        ancestry_path: bool,
+        #[arg(long = "simplify-merges", action = ArgAction::SetTrue)]
+        simplify_merges: bool,
+        #[arg(long = "simplify-by-decoration", action = ArgAction::SetTrue)]
+        simplify_by_decoration: bool,
+        #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
+        in_commit_order: bool,
+        #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
+        expand_tabs: bool,
+        #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
+        no_expand_tabs: bool,
+        #[arg(long = "show-linear-break")]
+        show_linear_break: Option<String>,
+        #[arg(long = "notes", action = ArgAction::SetTrue)]
+        notes: bool,
+        #[arg(long = "no-notes", action = ArgAction::SetTrue)]
+        no_notes: bool,
+        #[arg(long = "show-notes", action = ArgAction::SetTrue)]
+        show_notes: bool,
+        #[arg(long = "show-notes-by-default", action = ArgAction::SetTrue)]
+        show_notes_by_default: bool,
+        #[arg(long = "standard-notes", action = ArgAction::SetTrue)]
+        standard_notes: bool,
+        #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
+        no_standard_notes: bool,
         #[arg(long = "reflog", action = ArgAction::SetTrue)]
         reflog: bool,
+        #[arg(long = "bisect", action = ArgAction::SetTrue)]
+        bisect: bool,
         #[arg(long = "grep")]
         grep: Vec<String>,
         #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
@@ -1523,6 +1557,18 @@ pub enum Command {
             overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
         )]
         perl_regexp: bool,
+        #[arg(long = "pretty")]
+        pretty: Option<String>,
+        #[arg(long = "oneline", action = ArgAction::SetTrue)]
+        oneline: bool,
+        #[arg(long = "format")]
+        format: Option<String>,
+        #[arg(long = "date")]
+        date: Option<String>,
+        #[arg(long = "relative-date", action = ArgAction::SetTrue)]
+        relative_date: bool,
+        #[arg(long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(long = "max-count")]
         max_count: Option<String>,
         #[arg(long = "max-age")]
@@ -1531,6 +1577,8 @@ pub enum Command {
         skip: Option<usize>,
         #[arg(long = "since", alias = "after")]
         since: Option<String>,
+        #[arg(long = "since-as-filter")]
+        since_as_filter: Option<String>,
         #[arg(long = "until", alias = "before")]
         until: Option<String>,
         #[arg(long = "max-parents")]
@@ -1541,6 +1589,10 @@ pub enum Command {
         min_parents: Option<String>,
         #[arg(long = "no-min-parents", action = ArgAction::SetTrue)]
         no_min_parents: bool,
+        #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
+        exclude_first_parent_only: bool,
+        #[arg(long = "exclude-hidden")]
+        exclude_hidden: Option<String>,
         #[arg(long = "contained", action = ArgAction::SetTrue)]
         contained: bool,
         #[arg(long = "advance")]

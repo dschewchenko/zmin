@@ -76,8 +76,11 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         date_order,
         author_date_order,
         reverse,
+        abbrev_commit,
+        no_abbrev_commit,
         author,
         committer,
+        encoding,
         alternate_refs,
         ignore_missing,
         indexed_objects,
@@ -102,7 +105,21 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         sparse,
         full_history,
         children,
+        ancestry_path,
+        simplify_merges,
+        simplify_by_decoration,
+        in_commit_order,
+        expand_tabs,
+        no_expand_tabs,
+        show_linear_break,
+        notes,
+        no_notes,
+        show_notes,
+        show_notes_by_default,
+        standard_notes,
+        no_standard_notes,
         reflog,
+        bisect,
         grep,
         invert_grep,
         all_match,
@@ -111,15 +128,24 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         extended_regexp,
         fixed_strings,
         perl_regexp,
+        pretty,
+        oneline,
+        format,
+        date,
+        relative_date,
+        quiet,
         max_count,
         max_age,
         skip,
         since,
+        since_as_filter,
         until,
         max_parents,
         no_max_parents,
         min_parents,
         no_min_parents,
+        exclude_first_parent_only,
+        exclude_hidden,
         contained,
         advance,
         onto,
@@ -171,8 +197,11 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             count,
             exclude,
             alternate_refs,
+            abbrev_commit,
+            no_abbrev_commit,
             author,
             committer,
+            encoding,
             ignore_missing,
             indexed_objects,
             remove_empty,
@@ -196,7 +225,21 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             sparse,
             full_history,
             children,
+            ancestry_path,
+            simplify_merges,
+            simplify_by_decoration,
+            in_commit_order,
+            expand_tabs,
+            no_expand_tabs,
+            show_linear_break,
+            notes,
+            no_notes,
+            show_notes,
+            show_notes_by_default,
+            standard_notes,
+            no_standard_notes,
             reflog,
+            bisect,
             grep,
             invert_grep,
             all_match,
@@ -205,15 +248,24 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             extended_regexp,
             fixed_strings,
             perl_regexp,
+            pretty,
+            oneline,
+            format,
+            date,
+            relative_date,
+            quiet,
             max_count,
             max_age,
             skip,
             since,
+            since_as_filter,
             until,
             max_parents,
             no_max_parents,
             min_parents,
             no_min_parents,
+            exclude_first_parent_only,
+            exclude_hidden,
             revision_ranges,
         )?;
     let revs = collect_rev_list_revs(&repo, &store, all, rev_args).map_err(|error| {
@@ -277,8 +329,11 @@ fn collect_replay_rev_args(
     count: bool,
     exclude: Vec<String>,
     alternate_refs: bool,
+    abbrev_commit: bool,
+    no_abbrev_commit: bool,
     author: Option<String>,
     committer: Option<String>,
+    encoding: Option<String>,
     ignore_missing: bool,
     indexed_objects: bool,
     remove_empty: bool,
@@ -302,7 +357,21 @@ fn collect_replay_rev_args(
     sparse: bool,
     full_history: bool,
     children: bool,
+    ancestry_path: bool,
+    simplify_merges: bool,
+    simplify_by_decoration: bool,
+    in_commit_order: bool,
+    expand_tabs: bool,
+    no_expand_tabs: bool,
+    show_linear_break: Option<String>,
+    notes: bool,
+    no_notes: bool,
+    show_notes: bool,
+    show_notes_by_default: bool,
+    standard_notes: bool,
+    no_standard_notes: bool,
     reflog: bool,
+    bisect: bool,
     grep: Vec<String>,
     invert_grep: bool,
     all_match: bool,
@@ -311,23 +380,35 @@ fn collect_replay_rev_args(
     extended_regexp: bool,
     fixed_strings: bool,
     perl_regexp: bool,
+    pretty: Option<String>,
+    oneline: bool,
+    format: Option<String>,
+    date: Option<String>,
+    relative_date: bool,
+    quiet: bool,
     max_count: Option<String>,
     max_age: Option<String>,
     skip: Option<usize>,
     since: Option<String>,
+    since_as_filter: Option<String>,
     until: Option<String>,
     max_parents: Option<String>,
     no_max_parents: bool,
     min_parents: Option<String>,
     no_min_parents: bool,
+    exclude_first_parent_only: bool,
+    exclude_hidden: Option<String>,
     mut revision_ranges: Vec<String>,
 ) -> Result<Vec<String>> {
     let mut rev_args = Vec::new();
     if count
         || !exclude.is_empty()
         || alternate_refs
+        || abbrev_commit
+        || no_abbrev_commit
         || author.is_some()
         || committer.is_some()
+        || encoding.is_some()
         || ignore_missing
         || indexed_objects
         || remove_empty
@@ -351,7 +432,21 @@ fn collect_replay_rev_args(
         || sparse
         || full_history
         || children
+        || ancestry_path
+        || simplify_merges
+        || simplify_by_decoration
+        || in_commit_order
+        || expand_tabs
+        || no_expand_tabs
+        || show_linear_break.is_some()
+        || notes
+        || no_notes
+        || show_notes
+        || show_notes_by_default
+        || standard_notes
+        || no_standard_notes
         || reflog
+        || bisect
         || !grep.is_empty()
         || invert_grep
         || all_match
@@ -360,15 +455,24 @@ fn collect_replay_rev_args(
         || extended_regexp
         || fixed_strings
         || perl_regexp
+        || pretty.is_some()
+        || oneline
+        || format.is_some()
+        || date.is_some()
+        || relative_date
+        || quiet
         || max_count.is_some()
         || max_age.is_some()
         || skip.is_some()
         || since.is_some()
+        || since_as_filter.is_some()
         || until.is_some()
         || max_parents.is_some()
         || no_max_parents
         || min_parents.is_some()
         || no_min_parents
+        || exclude_first_parent_only
+        || exclude_hidden.is_some()
     {
         let _ = ();
     }
