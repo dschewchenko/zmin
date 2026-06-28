@@ -133,16 +133,29 @@ pub struct VerifiedPackIndexMatch {
 pub struct PackEncodeOptions {
     pub window: usize,
     pub depth: usize,
+    pub compression_level: u32,
 }
 
 impl PackEncodeOptions {
+    pub const DEFAULT_COMPRESSION_LEVEL: u32 = 6;
+
     pub const UNDELTIFIED: Self = Self {
         window: 0,
         depth: 0,
+        compression_level: Self::DEFAULT_COMPRESSION_LEVEL,
     };
 
     pub fn delta(window: usize, depth: usize) -> Self {
-        Self { window, depth }
+        Self {
+            window,
+            depth,
+            compression_level: Self::DEFAULT_COMPRESSION_LEVEL,
+        }
+    }
+
+    pub fn with_compression_level(mut self, compression_level: u32) -> Self {
+        self.compression_level = compression_level;
+        self
     }
 }
 
@@ -816,7 +829,7 @@ pub fn encode_pack_from_store_with_options<S: GitObjectStore>(
         let object = store.read_object(id)?;
         let offset = pack.len() as u64;
         if let Some(delta) = best_pack_delta(&object, &encoded, options)? {
-            write_ofs_delta_object(&mut pack, offset, delta.base_offset, &delta.delta)?;
+            write_ofs_delta_object(&mut pack, offset, delta.base_offset, &delta.delta, options)?;
             push_encoded_pack_object(
                 &mut encoded,
                 &mut encoded_content_bytes,
@@ -830,7 +843,7 @@ pub fn encode_pack_from_store_with_options<S: GitObjectStore>(
                 options,
             );
         } else {
-            append_packed_base_object(&mut pack, object.kind, &object.content)?;
+            append_packed_base_object(&mut pack, object.kind, &object.content, options)?;
             push_encoded_pack_object(
                 &mut encoded,
                 &mut encoded_content_bytes,
@@ -869,7 +882,12 @@ fn encode_undeltified_pack_from_store<S: GitObjectStore>(
             ));
         }
         let object = store.read_object(id)?;
-        append_packed_base_object(&mut pack, object.kind, &object.content)?;
+        append_packed_base_object(
+            &mut pack,
+            object.kind,
+            &object.content,
+            PackEncodeOptions::UNDELTIFIED,
+        )?;
     }
     let mut hasher = GitObjectHash::new(algorithm);
     hasher.update(&pack);
@@ -982,7 +1000,7 @@ fn best_pack_delta(
         return Ok(None);
     }
     let mut best = None::<CandidateDelta>;
-    let object_packed_len = packed_base_object_len(object.kind, &object.content)?;
+    let object_packed_len = packed_base_object_len(object.kind, &object.content, options)?;
     let max_delta_len = object
         .content
         .len()
@@ -1010,7 +1028,7 @@ fn best_pack_delta(
             continue;
         };
         let delta = build_replacement_delta(&base.content, &object.content, delta_plan);
-        let packed_len = packed_delta_object_len(base.offset, &delta)?;
+        let packed_len = packed_delta_object_len(base.offset, &delta, options)?;
         let best_packed_len = best
             .as_ref()
             .map_or(object_packed_len, |candidate| candidate.packed_len);
@@ -1052,18 +1070,26 @@ impl Write for CountWriter {
     }
 }
 
-fn packed_base_object_len(kind: GitObjectKind, content: &[u8]) -> io::Result<usize> {
+fn packed_base_object_len(
+    kind: GitObjectKind,
+    content: &[u8],
+    options: PackEncodeOptions,
+) -> io::Result<usize> {
     let mut header = [0_u8; 10];
     let header_len = pack_object_header_bytes(&mut header, kind, content.len() as u64);
     let mut writer = CountWriter::new();
     writer.write_all(&header[..header_len])?;
-    let mut encoder = ZlibEncoder::new(&mut writer, Compression::default());
+    let mut encoder = ZlibEncoder::new(&mut writer, Compression::new(options.compression_level));
     encoder.write_all(content)?;
     let _ = encoder.finish()?;
     Ok(writer.count())
 }
 
-fn packed_delta_object_len(base_offset: u64, delta: &[u8]) -> io::Result<usize> {
+fn packed_delta_object_len(
+    base_offset: u64,
+    delta: &[u8],
+    options: PackEncodeOptions,
+) -> io::Result<usize> {
     let object_offset = base_offset
         .checked_add(1)
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "pack offset overflow"))?;
@@ -1072,7 +1098,7 @@ fn packed_delta_object_len(base_offset: u64, delta: &[u8]) -> io::Result<usize> 
         ofs_delta_header_bytes(&mut header, object_offset, base_offset, delta.len() as u64)?;
     let mut writer = CountWriter::new();
     writer.write_all(&header[..header_len])?;
-    let mut encoder = ZlibEncoder::new(&mut writer, Compression::default());
+    let mut encoder = ZlibEncoder::new(&mut writer, Compression::new(options.compression_level));
     encoder.write_all(delta)?;
     let _ = encoder.finish()?;
     Ok(writer.count())
@@ -1416,7 +1442,7 @@ pub fn write_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
     out: &mut dyn Write,
 ) -> io::Result<()> {
     if !pack_encode_options_allows_delta(options) {
-        return write_undeltified_pack_from_store(store, algorithm, ids, out);
+        return write_undeltified_pack_from_store_with_options(store, algorithm, ids, options, out);
     }
     if store
         .try_write_reusable_pack(algorithm, ids, out)?
@@ -1455,7 +1481,13 @@ fn write_delta_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
         let object = store.read_object(id)?;
         let offset = writer.position();
         if let Some(delta) = best_pack_delta(&object, &encoded, options)? {
-            write_ofs_delta_object_to_writer(&mut writer, offset, delta.base_offset, &delta.delta)?;
+            write_ofs_delta_object_to_writer(
+                &mut writer,
+                offset,
+                delta.base_offset,
+                &delta.delta,
+                options,
+            )?;
             push_encoded_pack_object(
                 &mut encoded,
                 &mut encoded_content_bytes,
@@ -1474,7 +1506,12 @@ fn write_delta_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
                 &mut writer,
                 &mut reusable_entry_buffer,
             )? {
-                write_packed_base_object_to_writer(&mut writer, object.kind, &object.content)?;
+                write_packed_base_object_to_writer(
+                    &mut writer,
+                    object.kind,
+                    &object.content,
+                    options,
+                )?;
             }
             push_encoded_pack_object(
                 &mut encoded,
@@ -1510,6 +1547,22 @@ pub fn write_undeltified_pack_from_store<S: GitObjectStore + GitObjectSink>(
     ids: &[ObjectId],
     out: &mut dyn Write,
 ) -> io::Result<()> {
+    write_undeltified_pack_from_store_with_options(
+        store,
+        algorithm,
+        ids,
+        PackEncodeOptions::UNDELTIFIED,
+        out,
+    )
+}
+
+fn write_undeltified_pack_from_store_with_options<S: GitObjectStore + GitObjectSink>(
+    store: &S,
+    algorithm: GitHashAlgorithm,
+    ids: &[ObjectId],
+    options: PackEncodeOptions,
+    out: &mut dyn Write,
+) -> io::Result<()> {
     let mut writer = PackHashWriter::new(out, algorithm);
     writer.write_all(PACK_MAGIC)?;
     writer.write_all(&PACK_VERSION_2.to_be_bytes())?;
@@ -1536,7 +1589,7 @@ pub fn write_undeltified_pack_from_store<S: GitObjectStore + GitObjectSink>(
             continue;
         }
         let object = store.read_object(id)?;
-        write_packed_base_object_to_writer(&mut writer, object.kind, &object.content)?;
+        write_packed_base_object_to_writer(&mut writer, object.kind, &object.content, options)?;
     }
     let pack_id = writer.finalize();
     out.write_all(pack_id.as_bytes())?;
@@ -3222,7 +3275,12 @@ fn prepend_external_bases_to_pack(
                 "thin pack base object hash mismatch",
             ));
         }
-        append_packed_base_object(&mut repaired, object.kind, &object.content)?;
+        append_packed_base_object(
+            &mut repaired,
+            object.kind,
+            &object.content,
+            PackEncodeOptions::UNDELTIFIED,
+        )?;
     }
     repaired.extend_from_slice(&bytes[12..trailer_start]);
     let mut hasher = GitObjectHash::new(algorithm);
@@ -3284,7 +3342,12 @@ fn write_repaired_thin_pack_to_path(
                 "thin pack base object hash mismatch",
             ));
         }
-        write_packed_base_object_to_writer(&mut writer, object.kind, &object.content)?;
+        write_packed_base_object_to_writer(
+            &mut writer,
+            object.kind,
+            &object.content,
+            PackEncodeOptions::UNDELTIFIED,
+        )?;
     }
     writer.write_all(&bytes[12..trailer_start])?;
     let pack_id = writer.finalize();
@@ -3297,9 +3360,10 @@ fn append_packed_base_object(
     out: &mut Vec<u8>,
     kind: GitObjectKind,
     content: &[u8],
+    options: PackEncodeOptions,
 ) -> io::Result<()> {
     write_pack_object_header(out, kind, content.len() as u64);
-    let mut encoder = ZlibEncoder::new(out, Compression::default());
+    let mut encoder = ZlibEncoder::new(out, Compression::new(options.compression_level));
     encoder.write_all(content)?;
     let _ = encoder.finish()?;
     Ok(())
@@ -3309,11 +3373,12 @@ fn write_packed_base_object_to_writer<W: Write>(
     out: &mut W,
     kind: GitObjectKind,
     content: &[u8],
+    options: PackEncodeOptions,
 ) -> io::Result<()> {
     let mut header = [0_u8; 10];
     let header_len = pack_object_header_bytes(&mut header, kind, content.len() as u64);
     out.write_all(&header[..header_len])?;
-    let mut encoder = ZlibEncoder::new(out, Compression::default());
+    let mut encoder = ZlibEncoder::new(out, Compression::new(options.compression_level));
     encoder.write_all(content)?;
     let _ = encoder.finish()?;
     Ok(())
@@ -3324,9 +3389,10 @@ fn write_ofs_delta_object(
     object_offset: u64,
     base_offset: u64,
     delta: &[u8],
+    options: PackEncodeOptions,
 ) -> io::Result<()> {
     write_ofs_delta_header(out, object_offset, base_offset, delta.len() as u64)?;
-    let mut encoder = ZlibEncoder::new(out, Compression::default());
+    let mut encoder = ZlibEncoder::new(out, Compression::new(options.compression_level));
     encoder.write_all(delta)?;
     let _ = encoder.finish()?;
     Ok(())
@@ -3337,12 +3403,13 @@ fn write_ofs_delta_object_to_writer<W: Write>(
     object_offset: u64,
     base_offset: u64,
     delta: &[u8],
+    options: PackEncodeOptions,
 ) -> io::Result<()> {
     let mut header = [0_u8; 20];
     let header_len =
         ofs_delta_header_bytes(&mut header, object_offset, base_offset, delta.len() as u64)?;
     out.write_all(&header[..header_len])?;
-    let mut encoder = ZlibEncoder::new(out, Compression::default());
+    let mut encoder = ZlibEncoder::new(out, Compression::new(options.compression_level));
     encoder.write_all(delta)?;
     let _ = encoder.finish()?;
     Ok(())

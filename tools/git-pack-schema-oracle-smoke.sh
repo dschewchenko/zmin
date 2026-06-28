@@ -238,10 +238,14 @@ run_pack_objects_exact pack_objects_all_long --all
 run_pack_objects_exact pack_objects_all_quiet_short --all -q
 run_pack_objects_exact pack_objects_all_progress --all --all-progress
 run_pack_objects_exact pack_objects_all_progress_implied --all --all-progress-implied
+run_pack_objects_exact pack_objects_compression_zero --all --compression=0
+run_pack_objects_exact pack_objects_compression_nine --all --compression=9
 run_pack_objects_exact pack_objects_cruft_internal_rev_list --all --cruft
 run_pack_objects_exact pack_objects_cruft_expiration_internal_rev_list --all --cruft-expiration=now
 run_pack_objects_exact pack_objects_delta_islands_noop --all --delta-islands
 run_pack_objects_exact pack_objects_exclude_promisor_objects_noop --all --exclude-promisor-objects
+run_pack_objects_exact pack_objects_filter_blob_none --all --filter=blob:none
+run_pack_objects_exact pack_objects_filter_blob_limit_one --all --filter=blob:limit=1
 run_pack_objects_exact pack_objects_honor_pack_keep --all --honor-pack-keep
 run_pack_objects_exact pack_objects_include_tag_noop --all --include-tag
 run_pack_objects_exact pack_objects_incremental_noop --all --incremental

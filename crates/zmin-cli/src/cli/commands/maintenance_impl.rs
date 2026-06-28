@@ -1823,7 +1823,7 @@ fn write_repack_pack(
             &packed_first_store,
             GitHashAlgorithm::Sha1,
             ids,
-            pack_encode_options(window, depth),
+            pack_encode_options(window, depth, None),
             &mut file,
         )?;
         file.flush()?;
@@ -1873,7 +1873,7 @@ fn write_expire_to_pack(
             &store.packed_first(),
             GitHashAlgorithm::Sha1,
             ids,
-            pack_encode_options(window, depth),
+            pack_encode_options(window, depth, None),
             &mut file,
         )?;
         file.flush()?;

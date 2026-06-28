@@ -22,6 +22,36 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`pack-objects` compression-and-filter tail across the existing explicit
+basename `--all` lane. This batch added four exact stock-Git rows and
+promoted the final two documented `pack-objects` option pairs into the
+reviewed-complete census set: `--compression` and `--filter`. The runtime
+closure stayed intentionally bounded: this slice now matches stock
+explicit-basename pack generation for `--compression=0`,
+`--compression=9`, `--filter=blob:none`, and `--filter=blob:limit=1`,
+including matching stdout, stderr, pack bytes, index bytes, and reverse-index
+bytes on the current helper-free local all-refs lane. The implementation stays
+focused on the missing closure only: `pack-objects` now threads the requested
+compression level through the writer path in `zmin-git-core`, and the
+existing helper-free filter lane is now promoted with exact stock evidence.
+Focused gates were
+`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-pack-schema-oracle-smoke.sh`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-git-core -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7421` matrix rows, `6502` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3009/3212` complete documented
+option pairs. `pack-objects` now sits at `40/40` reviewed-complete documented
+option pairs with `54/54` classified rows, `44` stock-matching rows, and `10`
+invalid-input rows. The overall backlog head remains `send-email` (`62`),
+followed by `rebase` (`54`), `p4` (`28`), `svn` (`25`), `cvsimport` (`14`),
+`cvsexportcommit` (`11`), `archimport` (`7`), then the single-pair tails
+`log` (`1`) and `apply` (`1`); the next default follow-up should shift away
+from `pack-objects` and keep the largest safe helper-free batch bias.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `pack-objects` progress/promisor/missing/thin tail across the existing
 explicit basename `--all` lane. This batch added seven exact stock-Git rows
 and promoted five documented `pack-objects` option pairs into the

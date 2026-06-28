@@ -5184,7 +5184,7 @@ fn upload_pack_build_pack_file(
             &packed_first_store,
             GitHashAlgorithm::Sha1,
             &ids,
-            pack_encode_options(None, None),
+            pack_encode_options(None, None, None),
             &mut file,
         )?;
         file.flush()?;

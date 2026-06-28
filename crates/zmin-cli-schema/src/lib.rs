@@ -463,6 +463,8 @@ pub enum Command {
         pack_loose_unreachable: bool,
         #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
         exclude_promisor_objects: bool,
+        #[arg(long = "filter")]
+        filter: Option<String>,
         #[arg(long = "no-filter", action = ArgAction::SetTrue)]
         no_filter: bool,
         #[arg(
@@ -7429,6 +7431,7 @@ pub struct PackObjectsOptions {
     pub keep_pack: Vec<String>,
     pub pack_loose_unreachable: bool,
     pub exclude_promisor_objects: bool,
+    pub filter: Option<String>,
     pub no_filter: bool,
     pub missing: Option<String>,
     pub thin: bool,

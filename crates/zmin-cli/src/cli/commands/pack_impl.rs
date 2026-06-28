@@ -491,7 +491,7 @@ fn multi_pack_index_repack(
             &packed_first_store,
             GitHashAlgorithm::Sha1,
             &ids,
-            pack_encode_options(None, None),
+            pack_encode_options(None, None, None),
             &mut file,
         )?;
         file.flush()?;
@@ -3921,7 +3921,9 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
     validate_pack_objects_compat_options(&options)?;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let ids = collect_pack_objects_input(&repo, &store, options.revs || options.unpacked, options.all)?;
+    let mut ids =
+        collect_pack_objects_input(&repo, &store, options.revs || options.unpacked, options.all)?;
+    apply_pack_objects_filter(&store, &mut ids, options.filter.as_deref(), options.no_filter)?;
     let packed_first_store = store.packed_first();
     let encode_options = pack_objects_encode_options(&options);
     let index_version = requested_pack_index_version(options.index_version.as_deref())?;
@@ -4012,9 +4014,9 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
     if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
         eprintln!("warning: minimum pack size limit is 1 MiB");
     }
+    let _ = parse_pack_objects_compression(options.compression.as_deref())?;
     let _ = (
         options.quiet,
-        options.compression.as_deref(),
         options.progress,
         options.all_progress,
         options.all_progress_implied,
@@ -4040,6 +4042,7 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
         &options.keep_pack,
         options.pack_loose_unreachable,
         options.exclude_promisor_objects,
+        options.filter.as_deref(),
         options.no_filter,
         options.missing.as_deref(),
         options.thin,
@@ -4114,6 +4117,23 @@ fn parse_pack_size_with_optional_suffix(raw: &str) -> Option<u64> {
     number.parse::<u64>().ok()?.checked_mul(multiplier)
 }
 
+fn parse_pack_objects_compression(raw: Option<&str>) -> Result<Option<u32>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let level = raw.parse::<u32>().map_err(|_| CliError::Fatal {
+        code: 128,
+        message: format!("bad pack compression level '{raw}'"),
+    })?;
+    if level > 9 {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("bad pack compression level '{raw}'"),
+        });
+    }
+    Ok(Some(level))
+}
+
 fn requested_pack_index_version(version: Option<&str>) -> Result<PackIndexVersion> {
     match version {
         None => Ok(PackIndexVersion::V2),
@@ -4155,14 +4175,75 @@ fn bad_pack_index_version(value: &str) -> CliError {
 }
 
 fn pack_objects_encode_options(options: &PackObjectsOptions) -> PackEncodeOptions {
-    pack_encode_options(options.window, options.depth)
+    pack_encode_options(
+        options.window,
+        options.depth,
+        parse_pack_objects_compression(options.compression.as_deref()).ok().flatten(),
+    )
 }
 
 pub(crate) fn pack_encode_options(
     window: Option<usize>,
     depth: Option<usize>,
+    compression: Option<u32>,
 ) -> PackEncodeOptions {
     PackEncodeOptions::delta(window.unwrap_or(10), depth.unwrap_or(50))
+        .with_compression_level(compression.unwrap_or(PackEncodeOptions::DEFAULT_COMPRESSION_LEVEL))
+}
+
+#[derive(Clone, Copy)]
+enum PackObjectsFilter {
+    BlobNone,
+    BlobLimit(usize),
+}
+
+fn parse_pack_objects_filter(raw: &str) -> Result<PackObjectsFilter> {
+    if raw == "blob:none" {
+        return Ok(PackObjectsFilter::BlobNone);
+    }
+    if let Some(limit) = raw.strip_prefix("blob:limit=") {
+        let (number, multiplier) = match limit.as_bytes().last().copied() {
+            Some(b'k') | Some(b'K') => (&limit[..limit.len() - 1], 1024usize),
+            Some(b'm') | Some(b'M') => (&limit[..limit.len() - 1], 1024usize * 1024),
+            Some(b'g') | Some(b'G') => (&limit[..limit.len() - 1], 1024usize * 1024 * 1024),
+            _ => (limit, 1usize),
+        };
+        let parsed = number.parse::<usize>().map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid filter-spec '{raw}'"),
+        })?;
+        let size = parsed.checked_mul(multiplier).ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: format!("invalid filter-spec '{raw}'"),
+        })?;
+        return Ok(PackObjectsFilter::BlobLimit(size));
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!("invalid filter-spec '{raw}'"),
+    })
+}
+
+fn apply_pack_objects_filter(
+    store: &LooseObjectStore,
+    ids: &mut Vec<ObjectId>,
+    raw_filter: Option<&str>,
+    no_filter: bool,
+) -> Result<()> {
+    if no_filter || raw_filter.is_none() {
+        return Ok(());
+    }
+    let filter = parse_pack_objects_filter(raw_filter.expect("checked is_some"))?;
+    ids.retain(|id| {
+        let Ok(Some((kind, size))) = store.object_header_hint(id) else {
+            return false;
+        };
+        match filter {
+            PackObjectsFilter::BlobNone => kind != GitObjectKind::Blob,
+            PackObjectsFilter::BlobLimit(limit) => kind != GitObjectKind::Blob || size <= limit,
+        }
+    });
+    Ok(())
 }
 
 fn collect_pack_objects_input(
@@ -4432,7 +4513,7 @@ fn bundle_create(
             &packed_first_store,
             GitHashAlgorithm::Sha1,
             &ids,
-            pack_encode_options(None, None),
+            pack_encode_options(None, None, None),
             &mut out,
         )?;
         let pack_bytes = out.stream_position()? - pack_start;
