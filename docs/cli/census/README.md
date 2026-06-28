@@ -14,3 +14,4 @@ outputs:
 
 - `reviewed_complete_command_matrices.tsv`
 - `reviewed_complete_doc_option_pairs.tsv`
+- `deferred_doc_option_pairs.tsv`

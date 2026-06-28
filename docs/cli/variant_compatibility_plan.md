@@ -21,6 +21,29 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is a stock-oracle deferral closure
+for the remaining documented `git svn` option surface. This batch did not add
+new stock-matching behavior rows. Instead, it promoted all twenty-five
+previously open `svn` doc-option seed tails into the durable deferral inventory
+because the current local stock helper is unusable: `git svn --version` fails
+before helper startup when Perl tries to load an x86_64 `SVN::_Core` bundle on
+this arm64 host, so no command-level Git `2.47.1` oracle exists for the
+legacy SVN bridge options in this environment. The census now keeps those
+option pairs in `docs/cli/census/deferred_doc_option_pairs.tsv` and surfaces
+them through the extension/deferred layer rather than the active fix-or-verify
+queue. This keeps the active backlog honest without falsely increasing
+reviewed-complete coverage counts. Focused gates were
+`git svn --version`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `7665` matrix rows, `6745` verified rows, `895` invalid-input rows,
+`42` remaining-to-fix-or-verify rows, and `94` extension/deferred rows.
+`svn` now has `0` active remaining rows, while the next active backlog head is
+`cvsimport` (`14`), followed by `cvsexportcommit` (`11`), `archimport` (`7`),
+`send-email` (`5`), and the single-pair tails `rebase`, `log`, and `apply`.
+The next default follow-up should stay on the largest remaining legacy-bridge
+batch, which is now `cvsimport`.
+
 As of 2026-06-29 the latest completed batch is the final bounded local `p4 clone`
 completion family across the existing fake Perforce depot import fixture. This
 batch added four exact stock-Git rows and promoted the final four documented
@@ -5602,12 +5625,13 @@ stock-shaped stdout usage, exits `2`, leaves stderr empty, and records the row
 as `closed` in `p4_v2_47.tsv`.
 
 The latest deferred guard classification is `admin_impl.rs`
-`unsupported svn command`. The current stock-Git oracle environment does not
-ship `git-svn`: `git svn unknown` exits `1` with `git: 'svn' is not a git
-command`. That proves only the local unavailable-command shape, not
-`git-svn` subcommand behavior. Keep this guard out of closed Git compatibility
-counts until a real `git-svn` oracle environment is available or the product
-explicitly scopes the legacy SVN bridge.
+`unsupported svn command`. The current stock-Git oracle environment exposes a
+broken `git-svn` helper: `git svn --version` fails before helper startup
+because Perl loads an x86_64 `SVN::_Core` bundle on this arm64 host. That
+proves only the local broken-helper shape, not `git-svn` subcommand behavior.
+Keep this guard out of closed Git compatibility counts until a real
+`git-svn` oracle environment is available or the product explicitly scopes the
+legacy SVN bridge.
 
 The latest adjacent deferred guard classification is `admin_impl.rs`
 `unsupported archimport option` plus the intentionally unsupported `-o`
@@ -6034,7 +6058,7 @@ keeps the behavior explicitly out of scope.
 | Guard | Classification | Evidence | Next action |
 | --- | --- | --- | --- |
 | `commit_impl.rs` `git gui` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` in `git help -a`, but the broader GUI surface still lacks a durable non-interactive oracle beyond the closed `citool` helper rows | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the remaining GUI surface into current CLI scope |
-| `admin_impl.rs` `unsupported svn command '{command}'` in `git svn` dispatch | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-svn`: `/usr/bin/git svn unknown` exits `1` with `git: 'svn' is not a git command` | revisit only with a real `git-svn` oracle environment or an explicit decision to scope the legacy SVN bridge |
+| `admin_impl.rs` `unsupported svn command '{command}'` in `git svn` dispatch | legacy external bridge deferral, not counted as closed compatibility | local stock `git-svn` helper is unusable on this arm64 host: `git svn --version` fails before helper startup because Perl loads an x86_64 `SVN::_Core` bundle | revisit only with a real `git-svn` oracle environment or an explicit decision to scope the legacy SVN bridge |
 | `admin_impl.rs` `unsupported archimport option '{arg}'` and intentionally unsupported `git archimport -o` mode | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-archimport`: `/usr/bin/git archimport --bad` exits `1` with `git: 'archimport' is not a git command` | revisit only with a real `git-archimport` oracle environment or an explicit decision to scope the legacy GNU Arch bridge |
 | `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |
 | `runtime/primitive_adapters.rs` `unsupported object id length`, `unsupported object type ... for patch render`, `unsupported git object type` and `transport discovery is not supported` | internal primitive-runtime validation, not counted as Git `2.47.1` CLI compatibility | source search shows these guards are reached through `GitPrimitiveRuntime` adapters rather than a `git <command>` entry point; no stock-Git CLI oracle applies to the primitive API contract | cover with dedicated primitive API tests before stabilizing the shared runtime; add a Git matrix row only if a Git-compatible CLI path exposes the behavior |

@@ -173,6 +173,45 @@ def reviewed_complete_option_pairs(root: Path) -> set[tuple[str, str]]:
     }
 
 
+def deferred_doc_option_pairs(
+    root: Path,
+) -> tuple[set[tuple[str, str]], list[dict[str, str]]]:
+    path = root / "docs/cli/census/deferred_doc_option_pairs.tsv"
+    if not path.exists():
+        return set(), []
+    pairs: set[tuple[str, str]] = set()
+    rows: list[dict[str, str]] = []
+    for row in read_tsv(path):
+        command = row.get("command", "")
+        option = row.get("option", "")
+        if not command or not option:
+            continue
+        evidence = row.get("evidence", "")
+        notes = row.get("notes", "")
+        pairs.add((command, option))
+        rows.append(
+            {
+                "item_id": stable_id("deferred-option-doc", [command, option, evidence, notes]),
+                "bucket": "Zmin-only extension or deferred/non-Git-2.47.1 scope",
+                "item_kind": "doc_option_oracle_deferral",
+                "command": command,
+                "option": option,
+                "value": "<deferred>",
+                "combination": "<none>",
+                "repo_state": "<deferred>",
+                "transport": "<deferred>",
+                "platform": "all",
+                "implementation_source": "doc option deferral inventory",
+                "evidence_source": evidence,
+                "evidence_kind": "deferral",
+                "source_detail": str(path.relative_to(root)),
+                "next_action": "revisit only with a real Git 2.47.1 stock-helper oracle or an explicit scope change",
+                "notes": notes,
+            }
+        )
+    return pairs, rows
+
+
 def command_list_from_cache(root: Path, baseline: str) -> list[str]:
     cache_dir = root / "target/git-doc-cache" / baseline
     command_list = cache_dir / "command-list.txt"
@@ -614,6 +653,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
     extension_options = zmin_extension_option_keys(root)
     complete_commands = reviewed_complete_commands(root)
     complete_option_pairs = reviewed_complete_option_pairs(root) & documented_option_pairs
+    deferred_option_pairs, deferred_option_rows = deferred_doc_option_pairs(root)
 
     matrix_options_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
     matrix_primary_by_status: dict[tuple[str, str], Counter[str]] = defaultdict(Counter)
@@ -764,6 +804,8 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
         )
         if (command, spelling) in complete_option_pairs:
             continue
+        if (command, spelling) in deferred_option_pairs:
+            continue
         if statuses["closed"] or statuses["invalid-input"]:
             next_action = "expand remaining values, negations, repeated forms, combinations, states, transports and platforms for this documented option"
             bucket = "not implemented / broken / open"
@@ -824,7 +866,7 @@ def make_census(root: Path, baseline: str, schema_json: Path | None) -> dict[str
                 }
             )
 
-    extension_deferred = zmin_extension_rows(root)
+    extension_deferred = zmin_extension_rows(root) + deferred_option_rows
 
     oracle_inventory_path = root / "docs/cli/existing_oracle_test_inventory.tsv"
     oracle_inventory = read_tsv(oracle_inventory_path)
