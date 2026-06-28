@@ -4711,10 +4711,10 @@ pub enum Command {
         all: u8,
         #[arg(long = "anonymize", action = ArgAction::SetTrue)]
         anonymize: bool,
-        #[arg(long = "anonymize-map", value_hint = ValueHint::FilePath)]
-        anonymize_map: Option<PathBuf>,
+        #[arg(long = "anonymize-map")]
+        anonymize_map: Vec<String>,
         #[arg(long = "progress")]
-        progress: Option<usize>,
+        progress: Option<String>,
         #[arg(long = "signed-tags")]
         signed_tags: Option<String>,
         #[arg(long = "tag-of-filtered-object")]

@@ -22,6 +22,66 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-export` invalid-mode and anonymize-map-token expansion across the
+already modeled helper-free local export lane. This batch added seven exact
+stock-Git rows: invalid value diagnostics for `--progress=bogus`,
+`--signed-tags=bogus`, `--tag-of-filtered-object=bogus`, and
+`--reencode=bogus`, plus bounded anonymize-map token acceptance for
+`--anonymize --anonymize-map=foo --all`,
+`--anonymize --anonymize-map=foo:bar --all`, and repeated
+`--anonymize-map=foo --anonymize-map=bar:baz`.
+The runtime closure stayed intentionally bounded: this slice does not widen
+into map-driven remapping semantics, duplicate positional selection
+permutations, signed tag objects, filtered-object rewrite behavior, or
+non-local/export-filter combinations. It proves that the current helper-free
+local oracle now matches stock Git for the remaining invalid value diagnostics
+on this documented surface and accepts the current bounded anonymize-map token
+forms without widening semantics beyond stock evidence.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_invalid_value_diagnostics_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_anonymize_map_token_forms_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`python3 - <<'PY' ... cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json ... PY`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-export|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2840 / 3212`
+- matrix rows: `7176`
+- verified rows: `6301`
+- invalid-input rows: `850`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-export`: `0 / 18` reviewed-complete documented option pairs,
+  `18 / 18` represented documented option pairs, `55` written rows, `55`
+  classified rows, `47` stock-matching rows, `8` invalid-input rows, and
+  `0` exact-open rows
+
+This remains an implementation-plus-expansion batch rather than a
+reviewed-complete closure: the full documented `fast-export` option spelling
+set is represented with broader exact evidence on the current bounded local
+lanes, but all eighteen options still sit in `doc_option_expansion_required`
+because wider values, combinations, repository states, transports, and
+platform-sensitive lanes are still unmodeled.
+
+The next dense helper-free batch should stay on `fast-export` for further
+review-closure follow-through across the current exact local oracle:
+duplicate positional selection permutations and other remaining bounded local
+value/combination lanes now dominate the helper-free tail after invalid-mode
+and anonymize-map token closure.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `fast-export` selection/progress/marks-order expansion across the already
 modeled helper-free local export lane. This batch added nine exact stock-Git
 rows for bounded permutations that do not require new runtime logic:

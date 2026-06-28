@@ -368,3 +368,37 @@ fn fast_export_selection_progress_and_marks_combinations_match_stock_git() {
         assert_fast_export_matches_stock_git(args, |_, _| {}, &["marks.txt"]);
     }
 }
+
+#[test]
+fn fast_export_invalid_value_diagnostics_match_stock_git() {
+    let repo = seed_fast_export_repo();
+
+    for args in [
+        &["fast-export", "--progress=bogus", "--all"][..],
+        &["fast-export", "--signed-tags=bogus", "--all"],
+        &["fast-export", "--tag-of-filtered-object=bogus", "--all"],
+        &["fast-export", "--reencode=bogus", "--all"],
+    ] {
+        assert_eq!(
+            command_any_output("git", repo.path(), args, "git fast-export invalid value"),
+            command_any_output(zmin_bin(), repo.path(), args, "zmin fast-export invalid value")
+        );
+    }
+}
+
+#[test]
+fn fast_export_anonymize_map_token_forms_match_stock_git() {
+    for args in [
+        &["fast-export", "--anonymize", "--anonymize-map=foo", "--all"][..],
+        &["fast-export", "--anonymize", "--anonymize-map=foo:bar", "--all"],
+        &[
+            "fast-export",
+            "--anonymize",
+            "--anonymize-map=foo",
+            "--anonymize-map=bar:baz",
+            "--all",
+        ],
+    ] {
+        assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
+    }
+}

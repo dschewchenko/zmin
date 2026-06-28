@@ -208,8 +208,8 @@ fn quilt_commit_message(patch_name: &str, description: &str) -> String {
 pub(crate) struct FastExportOptions {
     pub(crate) all: bool,
     pub(crate) anonymize: bool,
-    pub(crate) anonymize_map: Option<PathBuf>,
-    pub(crate) progress: Option<usize>,
+    pub(crate) anonymize_map: Vec<String>,
+    pub(crate) progress: Option<String>,
     pub(crate) signed_tags: Option<String>,
     pub(crate) tag_of_filtered_object: Option<String>,
     pub(crate) reencode: Option<String>,
@@ -317,7 +317,7 @@ fn fast_export_modeled_noop_surface(options: &FastExportOptions) {
         &options.signed_tags,
         &options.tag_of_filtered_object,
         &options.reencode,
-        options.anonymize_map.as_deref(),
+        &options.anonymize_map,
         options.fake_missing_tagger,
         &options.refspec,
         options.reference_excluded_parents,
@@ -328,13 +328,77 @@ fn fast_export_modeled_noop_surface(options: &FastExportOptions) {
 }
 
 fn fast_export_preflight(options: &FastExportOptions) -> Result<()> {
-    if options.anonymize_map.is_some() && !options.anonymize {
+    if !options.anonymize_map.is_empty() && !options.anonymize {
         return Err(CliError::Fatal {
             code: 128,
             message: "the option '--anonymize-map' requires '--anonymize'".into(),
         });
     }
+    let _ = fast_export_progress_step(options.progress.as_deref())?;
+    fast_export_signed_tags_mode(options.signed_tags.as_deref())?;
+    fast_export_tag_of_filtered_mode(options.tag_of_filtered_object.as_deref())?;
+    fast_export_reencode_mode(options.reencode.as_deref())?;
     Ok(())
+}
+
+fn fast_export_progress_step(value: Option<&str>) -> Result<Option<usize>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Err(fast_export_value_error(
+            "option `progress' expects an integer value with an optional k/m/g suffix",
+        ));
+    }
+    let (digits, multiplier) = match value.as_bytes().last().copied() {
+        Some(b'k') | Some(b'K') => (&value[..value.len() - 1], 1024usize),
+        Some(b'm') | Some(b'M') => (&value[..value.len() - 1], 1024usize * 1024),
+        Some(b'g') | Some(b'G') => (&value[..value.len() - 1], 1024usize * 1024 * 1024),
+        _ => (value, 1),
+    };
+    let Ok(base) = digits.parse::<usize>() else {
+        return Err(fast_export_value_error(
+            "option `progress' expects an integer value with an optional k/m/g suffix",
+        ));
+    };
+    Ok(Some(base.saturating_mul(multiplier)))
+}
+
+fn fast_export_signed_tags_mode(value: Option<&str>) -> Result<()> {
+    match value {
+        None => Ok(()),
+        Some("abort" | "verbatim" | "warn" | "warn-strip" | "strip") => Ok(()),
+        Some(value) => Err(fast_export_value_error(format!(
+            "Unknown signed-tags mode: {value}"
+        ))),
+    }
+}
+
+fn fast_export_tag_of_filtered_mode(value: Option<&str>) -> Result<()> {
+    match value {
+        None => Ok(()),
+        Some("abort" | "drop" | "rewrite") => Ok(()),
+        Some(value) => Err(fast_export_value_error(format!(
+            "Unknown tag-of-filtered mode: {value}"
+        ))),
+    }
+}
+
+fn fast_export_reencode_mode(value: Option<&str>) -> Result<()> {
+    match value {
+        None => Ok(()),
+        Some("yes" | "no" | "abort") => Ok(()),
+        Some(value) => Err(fast_export_value_error(format!(
+            "Unknown reencoding mode: {value}"
+        ))),
+    }
+}
+
+fn fast_export_value_error(message: impl Into<String>) -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: format!("error: {}\n", message.into()),
+    }
 }
 
 fn fast_export_refs(repo: &GitRepo, all: bool, refs: Vec<String>) -> Result<Vec<(String, String)>> {
@@ -547,7 +611,7 @@ fn write_fast_export_commit<W: Write>(
         write_fast_export_file_command(out, state, &command, options)?;
     }
     writeln!(out)?;
-    note_fast_export_progress(out, state, options.progress)?;
+    note_fast_export_progress(out, state, fast_export_progress_step(options.progress.as_deref())?)?;
     Ok(())
 }
 
@@ -756,7 +820,7 @@ fn write_fast_export_blob_records<W: Write>(
         if !options.anonymize {
             writeln!(out)?;
         }
-        note_fast_export_progress(out, state, options.progress)?;
+        note_fast_export_progress(out, state, fast_export_progress_step(options.progress.as_deref())?)?;
     }
     Ok(())
 }
