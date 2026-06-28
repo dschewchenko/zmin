@@ -22,6 +22,36 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`pack-objects` bounded-no-op-and-reject family across the existing explicit
+basename `--all` lane. This batch added nine exact stock-Git rows and
+promoted nine documented `pack-objects` option pairs into the
+reviewed-complete census set: `--cruft`, `--cruft-expiration`,
+`--delta-islands`, `--keep-pack`, `--keep-unreachable`,
+`--max-pack-size`, `--pack-loose-unreachable`, `--stdin-packs`, and
+`--unpack-unreachable`. The runtime closure stayed intentionally bounded:
+this slice reproduces the stock internal-rev-list fatals for `--cruft`,
+`--cruft-expiration`, and `--stdin-packs`, and accepts the current explicit
+basename helper-free local lane for the remaining six options without
+widening into compression-level parity, thin-pack generation, filtering,
+promisor-object handling, or missing-object semantics. Focused gates were
+`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-pack-schema-oracle-smoke.sh`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7402` matrix rows, `6485` verified rows, `892` invalid-input rows,
+`146/151` complete command matrices, and `2994/3212` complete documented
+option pairs. `pack-objects` now sits at `33/40` reviewed-complete
+documented option pairs with `43/43` classified rows, `34` stock-matching
+rows, and `9` invalid-input rows. The overall backlog head remains
+`send-email` (`62`), followed by `rebase` (`54`), `p4` (`28`), `svn` (`25`),
+`cvsimport` (`14`), `cvsexportcommit` (`11`), and the remaining
+`pack-objects` tail (`7`); the next default follow-up should keep the
+largest safe helper-free batch bias and shift away from this command unless
+one of its remaining exact families is chosen deliberately.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` formatter/filter/revision-selector expansion across the existing
 bounded linear advance lane. This batch added thirty exact stock-Git rows and
 promoted thirty documented `replay` option pairs into the reviewed-complete

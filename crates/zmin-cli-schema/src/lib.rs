@@ -397,12 +397,16 @@ pub enum Command {
     PackObjects {
         #[arg(short = 'q', action = ArgAction::SetTrue)]
         quiet: bool,
+        #[arg(long = "compression")]
+        compression: Option<String>,
         #[arg(long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
         #[arg(long = "revs", action = ArgAction::SetTrue)]
         revs: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
+        #[arg(long = "stdin-packs", action = ArgAction::SetTrue)]
+        stdin_packs: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(long = "all-progress-implied", action = ArgAction::SetTrue)]
@@ -419,6 +423,14 @@ pub enum Command {
         incremental: bool,
         #[arg(long = "keep-true-parents", action = ArgAction::SetTrue)]
         keep_true_parents: bool,
+        #[arg(long = "delta-islands", action = ArgAction::SetTrue)]
+        delta_islands: bool,
+        #[arg(long = "keep-unreachable", action = ArgAction::SetTrue)]
+        keep_unreachable: bool,
+        #[arg(long = "cruft", action = ArgAction::SetTrue)]
+        cruft: bool,
+        #[arg(long = "cruft-expiration")]
+        cruft_expiration: Option<String>,
         #[arg(long = "local", action = ArgAction::SetTrue)]
         local: bool,
         #[arg(long = "non-empty", action = ArgAction::SetTrue)]
@@ -439,6 +451,14 @@ pub enum Command {
         threads: Vec<usize>,
         #[arg(long = "unpacked", action = ArgAction::SetTrue)]
         unpacked: bool,
+        #[arg(long = "max-pack-size")]
+        max_pack_size: Option<String>,
+        #[arg(long = "unpack-unreachable")]
+        unpack_unreachable: Vec<String>,
+        #[arg(long = "keep-pack")]
+        keep_pack: Vec<String>,
+        #[arg(long = "pack-loose-unreachable", action = ArgAction::SetTrue)]
+        pack_loose_unreachable: bool,
         #[arg(long = "window")]
         window: Option<usize>,
         #[arg(long = "window-memory")]
@@ -7348,9 +7368,11 @@ pub struct IndexPackOptions {
 #[derive(Debug, Clone)]
 pub struct PackObjectsOptions {
     pub quiet: bool,
+    pub compression: Option<String>,
     pub stdout: bool,
     pub revs: bool,
     pub all: bool,
+    pub stdin_packs: bool,
     pub progress: bool,
     pub all_progress_implied: bool,
     pub no_progress: bool,
@@ -7359,6 +7381,10 @@ pub struct PackObjectsOptions {
     pub include_tag: bool,
     pub incremental: bool,
     pub keep_true_parents: bool,
+    pub delta_islands: bool,
+    pub keep_unreachable: bool,
+    pub cruft: bool,
+    pub cruft_expiration: Option<String>,
     pub local: bool,
     pub non_empty: bool,
     pub no_reuse_delta: bool,
@@ -7369,6 +7395,10 @@ pub struct PackObjectsOptions {
     pub delta_base_offset: bool,
     pub threads: Vec<usize>,
     pub unpacked: bool,
+    pub max_pack_size: Option<String>,
+    pub unpack_unreachable: Vec<String>,
+    pub keep_pack: Vec<String>,
+    pub pack_loose_unreachable: bool,
     pub window: Option<usize>,
     pub window_memory: Option<String>,
     pub depth: Option<usize>,

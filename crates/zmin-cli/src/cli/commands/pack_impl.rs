@@ -10,6 +10,7 @@ const MULTI_PACK_INDEX_BITMAP_PLACEHOLDER_LEN: usize = 248;
 const COMMIT_GRAPH_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const FSCK_TREE_ENTRY_NAME_INITIAL_CAPACITY_LIMIT: usize = 8192;
 const INDEX_PACK_STDIN_BUF_CAPACITY: usize = 256 * 1024;
+const MIN_PACK_SIZE_LIMIT_BYTES: u64 = 1 << 20;
 
 fn mktag() -> Result<()> {
     let repo = find_repo()?;
@@ -3985,8 +3986,26 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
 
 fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<()> {
     let _ = requested_pack_index_version(options.index_version.as_deref())?;
+    if options.stdin_packs && (options.all || options.revs) {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: cannot use internal rev list with --stdin-packs\n".into(),
+        });
+    }
+    if (options.cruft || options.cruft_expiration.is_some()) && (options.all || options.revs) {
+        return Err(CliError::Stderr {
+            code: 128,
+            text: "fatal: cannot use internal rev list with --cruft\n".into(),
+        });
+    }
+    let max_pack_size =
+        parse_pack_size_limit(options.max_pack_size.as_deref(), "max-pack-size")?;
+    if max_pack_size.is_some_and(|size| size > 0 && size < MIN_PACK_SIZE_LIMIT_BYTES) {
+        eprintln!("warning: minimum pack size limit is 1 MiB");
+    }
     let _ = (
         options.quiet,
+        options.compression.as_deref(),
         options.progress,
         options.all_progress_implied,
         options.no_progress,
@@ -3994,6 +4013,10 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
         options.include_tag,
         options.incremental,
         options.keep_true_parents,
+        options.delta_islands,
+        options.keep_unreachable,
+        options.cruft,
+        options.cruft_expiration.as_deref(),
         options.local,
         options.non_empty,
         options.no_reuse_delta,
@@ -4003,9 +4026,52 @@ fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<
         options.shallow,
         options.delta_base_offset,
         &options.threads,
+        options.unpack_unreachable.last().map(String::as_str),
+        &options.keep_pack,
+        options.pack_loose_unreachable,
         options.window_memory.as_deref(),
     );
     Ok(())
+}
+
+fn parse_pack_size_limit(raw: Option<&str>, option: &str) -> Result<Option<u64>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let Some(size) = parse_pack_size_with_optional_suffix(raw) else {
+        return Err(CliError::Stderr {
+            code: 129,
+            text: format!(
+                "error: option `{option}' expects a non-negative integer value with an optional k/m/g suffix\n"
+            ),
+        });
+    };
+    Ok(Some(size))
+}
+
+fn parse_pack_size_with_optional_suffix(raw: &str) -> Option<u64> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let split_at = raw
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(raw.len());
+    if split_at == 0 {
+        return None;
+    }
+    let (number, suffix) = raw.split_at(split_at);
+    if suffix.len() > 1 {
+        return None;
+    }
+    let multiplier = match suffix.to_ascii_lowercase().as_str() {
+        "" => 1,
+        "k" => 1024,
+        "m" => 1024 * 1024,
+        "g" => 1024 * 1024 * 1024,
+        _ => return None,
+    };
+    number.parse::<u64>().ok()?.checked_mul(multiplier)
 }
 
 fn requested_pack_index_version(version: Option<&str>) -> Result<PackIndexVersion> {
