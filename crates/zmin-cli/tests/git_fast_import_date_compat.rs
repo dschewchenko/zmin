@@ -555,6 +555,207 @@ done
 }
 
 #[test]
+fn fast_import_repeated_marks_and_order_families_match_stock_git() {
+    let export_stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    for args in [
+        &[
+            "fast-import",
+            "--export-marks=marks.txt",
+            "--export-marks=marks.txt",
+        ][..],
+        &[
+            "fast-import",
+            "--import-marks-if-exists=missing1.marks",
+            "--import-marks-if-exists=missing2.marks",
+        ],
+        &[
+            "fast-import",
+            "--no-relative-marks",
+            "--export-marks=marks.txt",
+        ],
+        &[
+            "fast-import",
+            "--export-marks=marks.txt",
+            "--no-relative-marks",
+        ],
+        &[
+            "fast-import",
+            "--import-marks-if-exists=missing.marks",
+            "--export-marks=out.marks",
+        ],
+        &[
+            "fast-import",
+            "--export-marks=out.marks",
+            "--import-marks-if-exists=missing.marks",
+        ],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, export_stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, export_stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        for path in ["marks.txt", "out.marks"] {
+            let git_path = git_repo.path().join(path);
+            let zmin_path = zmin_repo.path().join(path);
+            assert_eq!(zmin_path.exists(), git_path.exists(), "existence for {args:?} {path}");
+            if git_path.exists() {
+                assert_eq!(
+                    fs::read_to_string(&zmin_path).expect("read zmin marks"),
+                    fs::read_to_string(&git_path).expect("read git marks"),
+                    "marks for {args:?} {path}"
+                );
+            }
+        }
+    }
+
+    for args in [&["fast-import", "--export-marks=one.marks", "--export-marks=two.marks"][..]] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, export_stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, export_stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        for path in ["one.marks", "two.marks"] {
+            let git_path = git_repo.path().join(path);
+            let zmin_path = zmin_repo.path().join(path);
+            assert_eq!(zmin_path.exists(), git_path.exists(), "existence for {args:?} {path}");
+            if git_path.exists() {
+                assert_eq!(
+                    fs::read_to_string(&zmin_path).expect("read zmin marks"),
+                    fs::read_to_string(&git_path).expect("read git marks"),
+                    "marks for {args:?} {path}"
+                );
+            }
+        }
+    }
+
+    let import_stream = "\
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    for args in [
+        &["fast-import", "--import-marks=one.marks", "--import-marks=two.marks"][..],
+        &["fast-import", "--import-marks=two.marks", "--import-marks=one.marks"],
+        &[
+            "fast-import",
+            "--import-marks-if-exists=one.marks",
+            "--import-marks-if-exists=two.marks",
+        ],
+        &[
+            "fast-import",
+            "--import-marks-if-exists=two.marks",
+            "--import-marks-if-exists=one.marks",
+        ],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_blob_one = command_with_stdin_output(
+            "git",
+            git_repo.path(),
+            &["hash-object", "-w", "--stdin"],
+            "hello\n",
+        )
+        .1
+        .trim()
+        .to_owned();
+        let git_blob_two = command_with_stdin_output(
+            "git",
+            git_repo.path(),
+            &["hash-object", "-w", "--stdin"],
+            "world\n",
+        )
+        .1
+        .trim()
+        .to_owned();
+        let zmin_blob_one = command_with_stdin_output(
+            "git",
+            zmin_repo.path(),
+            &["hash-object", "-w", "--stdin"],
+            "hello\n",
+        )
+        .1
+        .trim()
+        .to_owned();
+        let zmin_blob_two = command_with_stdin_output(
+            "git",
+            zmin_repo.path(),
+            &["hash-object", "-w", "--stdin"],
+            "world\n",
+        )
+        .1
+        .trim()
+        .to_owned();
+        assert_eq!(git_blob_one, zmin_blob_one, "blob one for {args:?}");
+        assert_eq!(git_blob_two, zmin_blob_two, "blob two for {args:?}");
+        fs::write(
+            git_repo.path().join("one.marks"),
+            format!(":1 {git_blob_one}\n"),
+        )
+        .expect("write git one.marks");
+        fs::write(
+            git_repo.path().join("two.marks"),
+            format!(":1 {git_blob_two}\n"),
+        )
+        .expect("write git two.marks");
+        fs::write(
+            zmin_repo.path().join("one.marks"),
+            format!(":1 {zmin_blob_one}\n"),
+        )
+        .expect("write zmin one.marks");
+        fs::write(
+            zmin_repo.path().join("two.marks"),
+            format!(":1 {zmin_blob_two}\n"),
+        )
+        .expect("write zmin two.marks");
+
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, import_stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, import_stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+}
+
+#[test]
 fn fast_import_done_flag_requires_done_terminator_like_stock_git() {
     let git_repo = git_init();
     let zmin_repo = git_init();

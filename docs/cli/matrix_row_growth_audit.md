@@ -11,7 +11,34 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
-As of 2026-06-28 the next batch is a helper-free local `fast-import` repeated-option acceptance expansion across the already modeled raw timestamp commit lane and the current done-terminated simple commit lane. The selected rows add `+16` exact stock-Git rows for repeated documented forms that stock Git accepts on the current bounded local oracle: `--date-format=(raw,raw-permissive)` in both orders, repeated `--stats`/`--quiet` with order-sensitive last-mode behavior, repeated `--force`, repeated `--done`, repeated `--allow-unsafe-features`, repeated `--active-branches=(0,2)`, repeated `--depth=(1,2)`, repeated `--big-file-threshold=2`, repeated `--cat-blob-fd=(0,9)`, and repeated `--max-pack-size=(1,2m)` in both orders. The runtime closure stays intentionally narrow: this slice only removes clap-level rejection for repeated helper-free fast-import flags and values, resolves the effective runtime value from the current command line, and preserves stock warning/statistics behavior for repeated numeric `--max-pack-size` forms. Expected delta is `+16` matrix rows, `+0` complete documented option pairs, `+0` complete command matrices, `+16` verified rows, `+0` invalid-input rows, and `+0` represented documented option pairs. Current census counts will be refreshed after verification.
+As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-import` repeated marks-file and option-order expansion across the
+existing done-terminated simple commit lane and the current import-marks
+preload lane with prewritten helper blobs. The selected change added `+11`
+exact stock-Git rows for repeated and reordered marks-file forms:
+repeated `--export-marks` to the same path, repeated `--export-marks` with a
+trailing different path, repeated missing `--import-marks-if-exists`, both
+orders of `--no-relative-marks` with `--export-marks`, both orders of
+`--import-marks-if-exists=missing.marks` with `--export-marks=out.marks`,
+repeated `--import-marks` with duplicate mark ids in both orders, and
+repeated `--import-marks-if-exists` with duplicate mark ids in both orders.
+The runtime closure stayed intentionally narrow: this slice only removes
+clap-level rejection for repeated marks-file command-line options, preserves
+stock trailing export target selection, and preloads repeated
+`--import-marks*` files in order so duplicate mark ids obey stock
+last-file-wins behavior. Actual delta is `+11` matrix rows, `+0` complete
+documented option pairs, `+0` represented documented option pairs, `+11`
+verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
+Current census counts are `7226` matrix rows, `6351` verified rows, `850`
+invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2774/3212` complete documented option pairs, and
+`2840/3212` represented documented option pairs. `fast-import` now sits at
+`19/19` represented documented option pairs with `71/71` classified rows, but
+only `1/19` reviewed-complete documented option pairs. This remains an
+expansion batch rather than a reviewed-complete closure because the newly
+closed rows widen exact evidence on the current bounded local oracle without
+exhausting the broader values, combinations, in-stream features, state, and
+transport tails for the documented marks surface.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
 `rev-list` represented-tail expansion across the existing two-commit local

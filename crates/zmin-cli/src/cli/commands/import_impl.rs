@@ -242,8 +242,8 @@ pub(crate) struct FastImportOptions {
     pub(crate) cat_blob_fd: Option<String>,
     pub(crate) export_marks: Option<PathBuf>,
     pub(crate) export_pack_edges: Option<PathBuf>,
-    pub(crate) import_marks: Option<PathBuf>,
-    pub(crate) import_marks_if_exists: Option<PathBuf>,
+    pub(crate) import_marks: Vec<PathBuf>,
+    pub(crate) import_marks_if_exists: Vec<PathBuf>,
     pub(crate) max_pack_size: Option<String>,
     pub(crate) max_pack_size_warning: Option<String>,
     pub(crate) no_relative_marks: bool,
@@ -1111,13 +1111,13 @@ impl<'a> FastImportParser<'a> {
     }
 
     fn preload_marks(&mut self) -> Result<()> {
-        if let Some(path) = self.options.import_marks.clone() {
+        for path in self.options.import_marks.clone() {
             self.load_marks_file(&path)?;
         }
-        if let Some(path) = self.options.import_marks_if_exists.clone()
-            && path.exists()
-        {
-            self.load_marks_file(&path)?;
+        for path in self.options.import_marks_if_exists.clone() {
+            if path.exists() {
+                self.load_marks_file(&path)?;
+            }
         }
         Ok(())
     }

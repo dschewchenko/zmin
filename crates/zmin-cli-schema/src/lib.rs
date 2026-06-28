@@ -4770,14 +4770,14 @@ pub enum Command {
         big_file_threshold: Vec<String>,
         #[arg(long = "cat-blob-fd", action = ArgAction::Append)]
         cat_blob_fd: Vec<String>,
-        #[arg(long = "export-marks", value_hint = ValueHint::FilePath)]
-        export_marks: Option<PathBuf>,
+        #[arg(long = "export-marks", value_hint = ValueHint::FilePath, action = ArgAction::Append)]
+        export_marks: Vec<PathBuf>,
         #[arg(long = "export-pack-edges", value_hint = ValueHint::FilePath)]
         export_pack_edges: Option<PathBuf>,
-        #[arg(long = "import-marks", value_hint = ValueHint::FilePath)]
-        import_marks: Option<PathBuf>,
-        #[arg(long = "import-marks-if-exists", value_hint = ValueHint::FilePath)]
-        import_marks_if_exists: Option<PathBuf>,
+        #[arg(long = "import-marks", value_hint = ValueHint::FilePath, action = ArgAction::Append)]
+        import_marks: Vec<PathBuf>,
+        #[arg(long = "import-marks-if-exists", value_hint = ValueHint::FilePath, action = ArgAction::Append)]
+        import_marks_if_exists: Vec<PathBuf>,
         #[arg(long = "max-pack-size", action = ArgAction::Append)]
         max_pack_size: Vec<String>,
         #[arg(long = "no-relative-marks", action = ArgAction::SetTrue)]

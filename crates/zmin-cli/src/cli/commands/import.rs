@@ -106,7 +106,9 @@ pub(crate) fn dispatch(
                     &big_file_threshold,
                 ),
                 cat_blob_fd: super::import_commands::resolve_fast_import_last_value(&cat_blob_fd),
-                export_marks,
+                export_marks: super::import_commands::resolve_fast_import_last_value(
+                    &export_marks,
+                ),
                 export_pack_edges,
                 import_marks,
                 import_marks_if_exists,

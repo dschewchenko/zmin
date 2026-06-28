@@ -22,28 +22,27 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
-`fast-import` repeated-option acceptance expansion across the already modeled
-done-terminated simple commit lane and the current raw timestamp commit lane.
-This batch added sixteen exact stock-Git rows for repeated documented option
-families that stock Git accepts on the current bounded local oracle:
-repeated `--date-format` with `(raw, raw-permissive)` in both orders,
-repeated `--stats` / `--quiet` with order-sensitive last-mode behavior,
-repeated `--force`, repeated `--done`, repeated
-`--allow-unsafe-features`, repeated `--active-branches=(0,2)`,
-repeated `--depth=(1,2)`, repeated `--big-file-threshold=2`,
-repeated `--cat-blob-fd=(0,9)`, and repeated `--max-pack-size=(1,2m)` in
-both orders.
+`fast-import` repeated marks-file and option-order expansion across the
+already modeled done-terminated simple commit lane and the current
+import-marks preload lane with prewritten helper blobs. This batch added
+eleven exact stock-Git rows for repeated and reordered marks-file forms:
+repeated `--export-marks` to the same path, repeated `--export-marks` with a
+trailing different path, repeated missing `--import-marks-if-exists`,
+both orders of `--no-relative-marks` with `--export-marks`,
+both orders of `--import-marks-if-exists=missing.marks` with
+`--export-marks=out.marks`, repeated `--import-marks` with duplicate mark ids
+in both orders, and repeated `--import-marks-if-exists` with duplicate mark
+ids in both orders.
 The runtime closure stayed intentionally bounded: this slice does not widen
-into malformed raw timestamp parsing, cat-blob traffic, unsafe stream
-features, relative-marks semantics, submodule rewrite maps, larger
-pack/branch scaling behavior, or repeated marks-file semantics. It proves that
+into `--relative-marks` semantics, in-stream `feature import-marks*`
+commands, submodule rewrite maps, or transport-sensitive lanes. It proves that
 the current helper-free local oracle now matches stock Git for the repeated
-flag/value acceptance tail on the documented `fast-import` surface, including
-the observed `--quiet`/`--stats` last-mode behavior and the stock warning
-shape for repeated numeric `--max-pack-size` forms.
+marks-file command-line tail on the documented `fast-import` surface,
+including trailing export target selection and stock last-file-wins behavior
+when multiple preload files define the same mark id.
 
 Focused verification was
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_repeated_option_families_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_repeated_marks_and_order_families_match_stock_git -- --exact --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
@@ -58,8 +57,8 @@ Actual durable readiness/status after this batch:
 - complete command matrices: `146 / 151`
 - complete documented command-option pairs: `2774 / 3212`
 - represented documented command-option pairs: `2840 / 3212`
-- matrix rows: `7215`
-- verified rows: `6340`
+- matrix rows: `7226`
+- verified rows: `6351`
 - invalid-input rows: `850`
 - open or partial exact rows: `0`
 - remaining to fix or verify rows: `438`
@@ -68,8 +67,8 @@ Actual durable readiness/status after this batch:
 Per-command position on the touched surface:
 
 - `fast-import`: `1 / 19` reviewed-complete documented option pairs,
-  `19 / 19` represented documented option pairs, `60` written rows, `60`
-  classified rows, `53` stock-matching rows, `7` invalid-input rows, and
+  `19 / 19` represented documented option pairs, `71` written rows, `71`
+  classified rows, `64` stock-matching rows, `7` invalid-input rows, and
   `0` exact-open rows
 
 This remains an implementation-plus-expansion batch rather than a
@@ -82,8 +81,9 @@ unmodeled.
 
 The next dense helper-free batch should stay on `fast-import` for further
 review-closure follow-through across the current exact local oracle:
-remaining bounded marks-file order and repeated file-option lanes now dominate
-the helper-free tail after this repeated flag/value family closure.
+remaining bounded marks-path resolution and in-stream `feature import-marks*`
+follow-through now dominate the helper-free tail after this repeated
+command-line marks family closure.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
 `fast-export` duplicate and mixed positional-selection expansion across the
