@@ -316,3 +316,23 @@ fn fast_export_anonymize_map_requires_anonymize_like_stock_git() {
         )
     );
 }
+
+#[test]
+fn fast_export_documented_value_families_match_stock_git() {
+    for args in [
+        &["fast-export", "--signed-tags=abort", "--all"][..],
+        &["fast-export", "--signed-tags=verbatim", "--all"],
+        &["fast-export", "--signed-tags=warn-strip", "--all"],
+        &["fast-export", "--signed-tags=strip", "--all"],
+        &["fast-export", "--tag-of-filtered-object=abort", "--all"],
+        &["fast-export", "--tag-of-filtered-object=rewrite", "--all"],
+        &["fast-export", "--reencode=no", "--all"],
+        &["fast-export", "--reencode=abort", "--all"],
+        &["fast-export", "--progress=2", "--all"],
+        &["fast-export", "--use-done-feature", "--progress=2", "--all"],
+        &["fast-export", "--no-data", "--show-original-ids", "--all"],
+        &["fast-export", "--full-tree", "--show-original-ids", "--all"],
+    ] {
+        assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
+    }
+}

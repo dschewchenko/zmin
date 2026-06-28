@@ -22,6 +22,69 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-export` documented value-family expansion across the already modeled
+two-commit nested-path helper-free local lane, the current no-tag and
+unfiltered acceptance lanes, and the current original-oid/progress framing
+combinations. This batch added twelve exact stock-Git rows across three
+documented value families and three bounded combinations:
+`fast-export --signed-tags=(abort|verbatim|warn-strip|strip)`,
+`--tag-of-filtered-object=(abort|rewrite)`, `--reencode=(no|abort)`,
+`--progress=2`, `--use-done-feature --progress=2`,
+`--no-data --show-original-ids`, and `--full-tree --show-original-ids`.
+The runtime closure stayed intentionally bounded: on the current no-tag lane
+the remaining `--signed-tags` values are stock-compatible no-op acceptances;
+on the current unfiltered lane the remaining
+`--tag-of-filtered-object` values are stock-compatible no-op acceptances; on
+the current UTF-8 no-encoding-header lane `--reencode=no` and
+`--reencode=abort` preserve stock output; and the progress/original-oid
+combinations now have explicit exact evidence on the current helper-free
+local stream surfaces. This slice intentionally does not widen into signed
+tag objects, filtered-object rewrite behavior, encoded commit-message
+fixtures, or non-local/export-filter combinations yet.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_documented_value_families_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`python3 - <<'PY' ... cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json ... PY`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-export|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2840 / 3212`
+- matrix rows: `7160`
+- verified rows: `6289`
+- invalid-input rows: `846`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-export`: `0 / 18` reviewed-complete documented option pairs,
+  `18 / 18` represented documented option pairs, `39` written rows, `39`
+  classified rows, `35` stock-matching rows, `4` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-expansion batch rather than a reviewed-complete
+closure: the full documented `fast-export` option spelling set is now
+represented with exact stock evidence on the current bounded local lanes, but
+all eighteen options still sit in `doc_option_expansion_required` because
+wider values, combinations, repository states, transports, and
+platform-sensitive lanes are still unmodeled.
+
+The next dense helper-free batch should stay on `fast-export` for further
+review-closure follow-through across the current exact local oracle:
+`--all`/positional selection permutations, marks/refspec combinations,
+anonymize-map token forms, and any remaining invalid value lanes can all be
+expanded without reopening schema work.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `fast-export` schema-gap tail expansion across the already modeled
 one-commit local lane, the two-commit nested-path stream lane, and the
 current exact-output marks/import-export lane. This batch added three exact
@@ -37,50 +100,6 @@ matches stock as a no-op companion on that same bounded lane when paired with
 with the same stock precondition fatal. This slice intentionally does not
 widen into tag anonymization, map-driven remapping semantics, broader ref
 families, or non-local/export-filter combinations yet.
-
-Focused verification was
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_anonymize_option_family_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_anonymize_map_requires_anonymize_like_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
-`python3 - <<'PY' ... cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json ... PY`,
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(fast-export|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
-and `git diff --check`.
-
-Actual durable readiness/status after this batch:
-
-- complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2774 / 3212`
-- represented documented command-option pairs: `2840 / 3212`
-- matrix rows: `7148`
-- verified rows: `6277`
-- invalid-input rows: `846`
-- open or partial exact rows: `0`
-- remaining to fix or verify rows: `438`
-- implemented but unverified rows: `3`
-
-Per-command position on the touched surface:
-
-- `fast-export`: `0 / 18` reviewed-complete documented option pairs,
-  `18 / 18` represented documented option pairs, `27` written rows, `27`
-  classified rows, `23` stock-matching rows, `4` invalid-input rows, and
-  `0` exact-open rows
-
-This is an implementation-plus-expansion batch rather than a reviewed-complete
-closure: the full documented `fast-export` option spelling set is now
-represented with exact stock evidence on the current bounded local lanes, but
-all eighteen options still sit in `doc_option_expansion_required` because
-wider values, combinations, repository states, transports, and
-platform-sensitive lanes are still unmodeled.
-
-The next dense helper-free batch should stay on `fast-export` for
-review-closure follow-through across adjacent local option/value families:
-`--all`/positional selection permutations, progress cadence, no-data and
-use-done-feature combinations, anonymize precondition/value lanes, and
-marks/refspec interactions can all be expanded from the current exact local
-oracle without reopening schema work.
 
 As of 2026-06-28 the previous completed batch is a helper-free local
 `fast-import` schema-gap tail expansion across the already modeled

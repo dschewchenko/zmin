@@ -3,12 +3,12 @@ complete_command_matrices	146	151	only commands whose full behavior matrix is fi
 complete_doc_option_pairs	2774	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
 doc_option_pairs_represented_by_rows	2840	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	7148	7148	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	6277	7148	closed written rows only
-behavior_rows_classified	7123	7148	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	7148	written rows with incomplete parity
-behavior_rows_open	0	7148	written rows not implemented or not matching yet
-invalid_input_rows	846	7148	rows where stock Git rejects the input
+behavior_rows_written	7160	7160	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	6289	7160	closed written rows only
+behavior_rows_classified	7135	7160	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	7160	written rows with incomplete parity
+behavior_rows_open	0	7160	written rows not implemented or not matching yet
+invalid_input_rows	846	7160	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -54,7 +54,7 @@ diff-files	118	118	118	100.0	144	144	100.0	144	100.0	0	0	0	yes
 diff-index	112	112	112	100.0	146	146	100.0	146	100.0	0	0	0	yes
 diff-tree	132	132	132	100.0	171	171	100.0	171	100.0	0	0	0	yes
 difftool	19	19	19	100.0	21	21	100.0	21	100.0	0	0	0	yes
-fast-export	18	0	18	100.0	27	27	100.0	23	85.2	0	0	4	yes
+fast-export	18	0	18	100.0	39	39	100.0	35	89.7	0	0	4	yes
 fast-import	19	1	19	100.0	30	30	100.0	23	76.7	0	0	7	yes
 fetch	63	63	63	100.0	379	357	94.2	342	90.2	0	0	15	yes
 fetch-pack	18	18	18	100.0	25	25	100.0	23	92.0	0	0	2	yes
