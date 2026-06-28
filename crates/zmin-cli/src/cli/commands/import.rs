@@ -76,16 +76,18 @@ pub(crate) fn dispatch(
             depth,
             big_file_threshold,
             cat_blob_fd,
-            export_marks,
+            export_marks: _export_marks,
             export_pack_edges,
-            import_marks,
-            import_marks_if_exists,
+            import_marks: _import_marks,
+            import_marks_if_exists: _import_marks_if_exists,
             max_pack_size,
             no_relative_marks,
-            relative_marks,
+            relative_marks: _relative_marks,
             rewrite_submodules_from,
             rewrite_submodules_to,
         } => {
+            let marks_resolution =
+                super::import_commands::resolve_fast_import_marks_resolution(raw_args);
             let date_format = super::import_commands::resolve_fast_import_last_value(&date_format);
             let (quiet, stats) =
                 super::import_commands::resolve_fast_import_stats_mode(raw_args, quiet > 0, stats > 0);
@@ -106,17 +108,16 @@ pub(crate) fn dispatch(
                     &big_file_threshold,
                 ),
                 cat_blob_fd: super::import_commands::resolve_fast_import_last_value(&cat_blob_fd),
-                export_marks: super::import_commands::resolve_fast_import_last_value(
-                    &export_marks,
-                ),
+                export_marks: marks_resolution.export_marks,
                 export_pack_edges,
-                import_marks,
-                import_marks_if_exists,
+                import_marks: marks_resolution.import_marks,
+                import_marks_if_exists: marks_resolution.import_marks_if_exists,
                 max_pack_size,
                 max_pack_size_warning:
                     super::import_commands::resolve_fast_import_max_pack_size_warning(raw_args),
                 no_relative_marks,
-                relative_marks,
+                relative_marks_enabled: marks_resolution.relative_marks_enabled,
+                relative_marks_invalid_value: marks_resolution.relative_marks_invalid_value,
                 rewrite_submodules_from,
                 rewrite_submodules_to,
             })

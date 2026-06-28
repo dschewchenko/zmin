@@ -4782,8 +4782,8 @@ pub enum Command {
         max_pack_size: Vec<String>,
         #[arg(long = "no-relative-marks", action = ArgAction::SetTrue)]
         no_relative_marks: bool,
-        #[arg(long = "relative-marks")]
-        relative_marks: Option<String>,
+        #[arg(long = "relative-marks", num_args = 0..=1, default_missing_value = "", action = ArgAction::Append)]
+        relative_marks: Vec<String>,
         #[arg(long = "rewrite-submodules-from")]
         rewrite_submodules_from: Option<String>,
         #[arg(long = "rewrite-submodules-to")]

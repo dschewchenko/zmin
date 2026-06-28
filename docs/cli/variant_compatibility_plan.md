@@ -22,6 +22,78 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-import` relative-marks path-resolution and repeated stream marks
+rejection expansion across the already modeled done-terminated simple commit
+lane, import-marks preload lane, and bounded stream-feature tail. This batch
+added fourteen exact stock-Git rows: five command-line `--relative-marks`
+path-resolution rows covering relative export, non-retroactive import,
+relative import, missing `import-marks-if-exists`, and interwoven
+`--relative-marks` / `--no-relative-marks` export last-one-wins behavior;
+five in-stream `feature relative-marks` / `feature no-relative-marks` rows
+covering relative export, relative import, non-retroactive import, missing
+`feature import-marks-if-exists`, and repeated export last-one-wins behavior;
+plus four invalid-input rows for repeated or conflicting stream
+`feature import-marks*` commands, including the case where a command-line
+`--import-marks` preload still does not suppress the repeated-stream fatal.
+The runtime closure stayed intentionally bounded: this slice does not widen
+into submodule rewrite maps, transport-sensitive lanes, or broader stream
+feature families beyond marks-path toggles and the existing import-marks
+rejection rule. It proves that the current helper-free local oracle now
+matches stock Git for the documented relative-marks path semantics on the
+current marks-file surface, including command-line and stream toggle ordering,
+non-retroactive import path resolution, relative `.git/info/fast-import`
+lookup, export target selection, and the stock capitalized repeated-stream
+`Only one import-marks command allowed per stream` fatal.
+
+Focused verification was
+`cargo build -p zmin-cli --bin zmin`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_relative_marks_path_resolution_matches_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_relative_marks_stream_features_match_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_stream_feature_marks_fail_like_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2840 / 3212`
+- matrix rows: `7248`
+- verified rows: `6366`
+- invalid-input rows: `857`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-import`: `1 / 19` reviewed-complete documented option pairs,
+  `19 / 19` represented documented option pairs, `93` written rows, `93`
+  classified rows, `79` stock-matching rows, `14` invalid-input rows, and
+  `0` exact-open rows
+
+This remains an implementation-plus-expansion batch rather than a
+reviewed-complete closure: the full documented `fast-import` option spelling
+set is represented with broader exact evidence on the current bounded helper-
+free local lanes, but eighteen documented option pairs still sit in
+`doc_option_expansion_required` because wider values, combinations, stream
+shapes, repository states, transports, and platform-sensitive lanes are still
+unmodeled.
+
+The next dense helper-free batch should stay on `fast-import` for further
+review-closure follow-through across the current exact local oracle:
+the remaining bounded tail is now mostly the submodule rewrite map family plus
+any still-unmodeled stream-feature surfaces outside marks-path toggles, while
+the relative-marks and repeated stream import-marks lanes no longer dominate
+the helper-free queue.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `fast-import` stream-feature marks expansion across the already modeled
 done-terminated simple commit lane and the current import-marks preload lane
 with prewritten helper blobs. This batch added eight exact stock-Git rows for

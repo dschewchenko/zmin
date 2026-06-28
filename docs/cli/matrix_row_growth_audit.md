@@ -9911,3 +9911,74 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+0` complete documented option pairs, `+0` represented documented
 option pairs, `+0` complete command matrices, `+0`
 implemented-but-unverified schema rows, and `+0` remaining checklist rows.
+
+## 2026-06-28 - fast-import relative-marks path-resolution and repeated stream marks batch
+
+Expected movement:
+
+- behavior rows: `+14`
+- closed rows: `+10`
+- open rows: `+0`
+- invalid-input rows: `+4`
+- represented oracle functions: `+0`
+- missing-or-unclassified oracle functions: `+0`
+- commands with rows: `+0`
+- complete documented option pairs: `+0`
+- represented documented option pairs: `+0`
+- complete command matrices: `+0`
+- implemented-but-unverified schema rows: `+0`
+- remaining checklist rows: `+0`
+- Rust behavior changes: yes
+
+Selected variants:
+
+- `fast-import --relative-marks --export-marks=marks.txt`
+- `fast-import --import-marks=plain.marks --relative-marks`
+- `fast-import --relative-marks --import-marks=rel/child.marks`
+- `fast-import --relative-marks --import-marks-if-exists=missing.marks`
+- `fast-import --relative-marks --export-marks=out.marks --no-relative-marks --export-marks=tail.marks`
+- `feature relative-marks` plus `feature export-marks=marks.txt`
+- `feature relative-marks` plus `feature import-marks=rel/child.marks`
+- `feature import-marks=plain.marks` plus `feature relative-marks`
+- `feature relative-marks` plus `feature import-marks-if-exists=missing.marks`
+- `feature relative-marks`, `feature export-marks=one.marks`,
+  `feature no-relative-marks`, `feature export-marks=two.marks`
+- repeated `feature import-marks=one.marks` then `feature import-marks=two.marks`
+- `feature import-marks=one.marks` then `feature import-marks-if-exists=two.marks`
+- repeated `feature import-marks-if-exists=one.marks` then
+  `feature import-marks-if-exists=two.marks`
+- CLI `--import-marks=one.marks` plus repeated stream `feature import-marks=*`
+
+This batch closes the previously deferred helper-free relative-marks tail on
+the current `fast-import` oracle. Rust changes switch the schema surface from a
+required-value `--relative-marks` parser to stock-compatible flag behavior
+while still preserving the stock invalid attached-value crash lane for
+`--relative-marks=rel`. Command-line marks path resolution now walks raw args
+in order so `--relative-marks` / `--no-relative-marks` toggle only subsequent
+marks-file options, while stream `feature relative-marks` and
+`feature no-relative-marks` update parser state for subsequent marks features.
+The export side now creates parent directories like stock Git and repeated
+stream `feature export-marks=` follows stock last-one-wins behavior. The
+existing repeated stream import-marks guard was tightened to match stock's
+capitalized fatal text exactly.
+
+Focused verification was
+`cargo build -p zmin-cli --bin zmin`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_relative_marks_path_resolution_matches_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_relative_marks_stream_features_match_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_stream_feature_marks_fail_like_stock_git -- --exact --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
+`ZMIN_BIN=/Users/dschewchenko/work/private/skron-git/target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual post-import movement matched the declaration: `+14` behavior rows, `+10`
+closed rows, `+0` open rows, `+4` invalid-input rows, `+0` represented oracle
+functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
+rows, `+0` complete documented option pairs, `+0` represented documented
+option pairs, `+0` complete command matrices, `+0`
+implemented-but-unverified schema rows, and `+0` remaining checklist rows.

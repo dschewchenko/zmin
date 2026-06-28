@@ -1042,6 +1042,26 @@ fn fast_import_stream_feature_marks_fail_like_stock_git() {
             "feature import-marks-if-exists=one.marks\n",
             "fatal: feature 'import-marks-if-exists' forbidden in input without --allow-unsafe-features",
         ),
+        (
+            &["fast-import", "--allow-unsafe-features"],
+            "feature import-marks=one.marks\nfeature import-marks=two.marks\n",
+            "fatal: Only one import-marks command allowed per stream",
+        ),
+        (
+            &["fast-import", "--allow-unsafe-features"],
+            "feature import-marks=one.marks\nfeature import-marks-if-exists=two.marks\n",
+            "fatal: Only one import-marks command allowed per stream",
+        ),
+        (
+            &["fast-import", "--allow-unsafe-features"],
+            "feature import-marks-if-exists=one.marks\nfeature import-marks-if-exists=two.marks\n",
+            "fatal: Only one import-marks command allowed per stream",
+        ),
+        (
+            &["fast-import", "--allow-unsafe-features", "--import-marks=one.marks"],
+            "feature import-marks=one.marks\nfeature import-marks=two.marks\n",
+            "fatal: Only one import-marks command allowed per stream",
+        ),
     ] {
         let git_repo = git_init();
         let zmin_repo = git_init();
@@ -1059,6 +1079,482 @@ fn fast_import_stream_feature_marks_fail_like_stock_git() {
             "stderr for {args:?} / {stream:?}"
         );
     }
+}
+
+#[test]
+fn fast_import_relative_marks_path_resolution_matches_stock_git() {
+    let import_stream = "\
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    let inline_stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--relative-marks", "--export-marks=marks.txt"],
+        inline_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--relative-marks", "--export-marks=marks.txt"],
+        inline_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join(".git/info/fast-import/marks.txt"))
+            .expect("read zmin relative marks"),
+        fs::read_to_string(git_repo.path().join(".git/info/fast-import/marks.txt"))
+            .expect("read git relative marks")
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_blob = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    let zmin_blob = command_with_stdin_output(
+        "git",
+        zmin_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    fs::write(git_repo.path().join("plain.marks"), format!(":1 {git_blob}\n")).expect("write git plain");
+    fs::write(zmin_repo.path().join("plain.marks"), format!(":1 {zmin_blob}\n")).expect("write zmin plain");
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--import-marks=plain.marks", "--relative-marks"],
+        import_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--import-marks=plain.marks", "--relative-marks"],
+        import_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_blob = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    let zmin_blob = command_with_stdin_output(
+        "git",
+        zmin_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    fs::create_dir_all(git_repo.path().join(".git/info/fast-import/rel")).expect("mkdir git rel");
+    fs::create_dir_all(zmin_repo.path().join(".git/info/fast-import/rel")).expect("mkdir zmin rel");
+    fs::write(
+        git_repo.path().join(".git/info/fast-import/rel/child.marks"),
+        format!(":1 {git_blob}\n"),
+    )
+    .expect("write git child");
+    fs::write(
+        zmin_repo.path().join(".git/info/fast-import/rel/child.marks"),
+        format!(":1 {zmin_blob}\n"),
+    )
+    .expect("write zmin child");
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--relative-marks", "--import-marks=rel/child.marks"],
+        import_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--relative-marks", "--import-marks=rel/child.marks"],
+        import_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &[
+            "fast-import",
+            "--relative-marks",
+            "--import-marks-if-exists=missing.marks",
+        ],
+        inline_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &[
+            "fast-import",
+            "--relative-marks",
+            "--import-marks-if-exists=missing.marks",
+        ],
+        inline_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &[
+            "fast-import",
+            "--relative-marks",
+            "--export-marks=out.marks",
+            "--no-relative-marks",
+            "--export-marks=tail.marks",
+        ],
+        inline_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &[
+            "fast-import",
+            "--relative-marks",
+            "--export-marks=out.marks",
+            "--no-relative-marks",
+            "--export-marks=tail.marks",
+        ],
+        inline_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join("tail.marks")).expect("read zmin tail"),
+        fs::read_to_string(git_repo.path().join("tail.marks")).expect("read git tail")
+    );
+}
+
+#[test]
+fn fast_import_relative_marks_stream_features_match_stock_git() {
+    let relative_export_stream = "\
+feature relative-marks
+feature export-marks=marks.txt
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        relative_export_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        relative_export_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join(".git/info/fast-import/marks.txt"))
+            .expect("read zmin relative feature marks"),
+        fs::read_to_string(git_repo.path().join(".git/info/fast-import/marks.txt"))
+            .expect("read git relative feature marks")
+    );
+
+    let relative_import_stream = "\
+feature relative-marks
+feature import-marks=rel/child.marks
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_blob = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    let zmin_blob = command_with_stdin_output(
+        "git",
+        zmin_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    fs::create_dir_all(git_repo.path().join(".git/info/fast-import/rel")).expect("mkdir git feature rel");
+    fs::create_dir_all(zmin_repo.path().join(".git/info/fast-import/rel")).expect("mkdir zmin feature rel");
+    fs::write(
+        git_repo.path().join(".git/info/fast-import/rel/child.marks"),
+        format!(":1 {git_blob}\n"),
+    )
+    .expect("write git feature child");
+    fs::write(
+        zmin_repo.path().join(".git/info/fast-import/rel/child.marks"),
+        format!(":1 {zmin_blob}\n"),
+    )
+    .expect("write zmin feature child");
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        relative_import_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        relative_import_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+
+    let non_retroactive_stream = "\
+feature import-marks=plain.marks
+feature relative-marks
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_blob = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    let zmin_blob = command_with_stdin_output(
+        "git",
+        zmin_repo.path(),
+        &["hash-object", "-w", "--stdin"],
+        "hello\n",
+    )
+    .1
+    .trim()
+    .to_owned();
+    fs::write(git_repo.path().join("plain.marks"), format!(":1 {git_blob}\n")).expect("write git feature plain");
+    fs::write(zmin_repo.path().join("plain.marks"), format!(":1 {zmin_blob}\n")).expect("write zmin feature plain");
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        non_retroactive_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        non_retroactive_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+
+    let missing_if_exists_stream = "\
+feature relative-marks
+feature import-marks-if-exists=missing.marks
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        missing_if_exists_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        missing_if_exists_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+        git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"])
+    );
+
+    let toggle_export_stream = "\
+feature relative-marks
+feature export-marks=one.marks
+feature no-relative-marks
+feature export-marks=two.marks
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+    let git_repo = git_init();
+    let zmin_repo = git_init();
+    let git_output = command_with_stdin_output(
+        "git",
+        git_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        toggle_export_stream,
+    );
+    let zmin_output = command_with_stdin_output(
+        zmin_bin(),
+        zmin_repo.path(),
+        &["fast-import", "--allow-unsafe-features"],
+        toggle_export_stream,
+    );
+    assert_eq!(zmin_output.0, git_output.0);
+    assert_eq!(zmin_output.1, git_output.1);
+    assert_eq!(
+        normalize_fast_import_statistics_stderr(&zmin_output.2),
+        normalize_fast_import_statistics_stderr(&git_output.2)
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_repo.path().join("two.marks")).expect("read zmin two.marks"),
+        fs::read_to_string(git_repo.path().join("two.marks")).expect("read git two.marks")
+    );
 }
 
 #[test]

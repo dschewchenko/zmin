@@ -247,9 +247,18 @@ pub(crate) struct FastImportOptions {
     pub(crate) max_pack_size: Option<String>,
     pub(crate) max_pack_size_warning: Option<String>,
     pub(crate) no_relative_marks: bool,
-    pub(crate) relative_marks: Option<String>,
+    pub(crate) relative_marks_enabled: bool,
+    pub(crate) relative_marks_invalid_value: Option<String>,
     pub(crate) rewrite_submodules_from: Option<String>,
     pub(crate) rewrite_submodules_to: Option<String>,
+}
+
+pub(crate) struct FastImportMarksResolution {
+    pub(crate) export_marks: Option<PathBuf>,
+    pub(crate) import_marks: Vec<PathBuf>,
+    pub(crate) import_marks_if_exists: Vec<PathBuf>,
+    pub(crate) relative_marks_enabled: bool,
+    pub(crate) relative_marks_invalid_value: Option<String>,
 }
 
 pub(crate) fn fast_export(options: FastExportOptions) -> Result<()> {
@@ -970,8 +979,57 @@ pub(crate) fn resolve_fast_import_max_pack_size_warning(raw_args: &[String]) -> 
     warning_value
 }
 
+pub(crate) fn resolve_fast_import_marks_resolution(raw_args: &[String]) -> FastImportMarksResolution {
+    let mut relative_marks_enabled = false;
+    let mut relative_marks_invalid_value = None;
+    let mut export_marks = None;
+    let mut import_marks = Vec::new();
+    let mut import_marks_if_exists = Vec::new();
+    for arg in raw_args.iter().skip(1) {
+        if arg == "--relative-marks" {
+            relative_marks_enabled = true;
+            continue;
+        }
+        if arg == "--no-relative-marks" {
+            relative_marks_enabled = false;
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--relative-marks=") {
+            relative_marks_invalid_value = Some(value.to_owned());
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--export-marks=") {
+            export_marks = Some(resolve_fast_import_marks_path(value, relative_marks_enabled));
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--import-marks=") {
+            import_marks.push(resolve_fast_import_marks_path(value, relative_marks_enabled));
+            continue;
+        }
+        if let Some(value) = arg.strip_prefix("--import-marks-if-exists=") {
+            import_marks_if_exists
+                .push(resolve_fast_import_marks_path(value, relative_marks_enabled));
+        }
+    }
+    FastImportMarksResolution {
+        export_marks,
+        import_marks,
+        import_marks_if_exists,
+        relative_marks_enabled,
+        relative_marks_invalid_value,
+    }
+}
+
+fn resolve_fast_import_marks_path(path: &str, relative_marks_enabled: bool) -> PathBuf {
+    if relative_marks_enabled {
+        Path::new(".git").join("info").join("fast-import").join(path)
+    } else {
+        PathBuf::from(path)
+    }
+}
+
 fn fast_import_preflight(git_dir: &Path, options: &FastImportOptions) -> Result<()> {
-    if let Some(value) = options.relative_marks.as_deref() {
+    if let Some(value) = options.relative_marks_invalid_value.as_deref() {
         return Err(fast_import_crash_error(
             git_dir,
             format!("unknown option --relative-marks={value}"),
@@ -1035,6 +1093,7 @@ struct FastImportParser<'a> {
     stats: FastImportStats,
     options: FastImportOptions,
     stream_import_marks_seen: bool,
+    relative_marks_enabled: bool,
 }
 
 #[derive(Default)]
@@ -1056,6 +1115,7 @@ impl<'a> FastImportParser<'a> {
         date_format: FastImportDateFormat,
         options: FastImportOptions,
     ) -> Self {
+        let relative_marks_enabled = options.relative_marks_enabled;
         Self {
             input,
             cursor: 0,
@@ -1072,6 +1132,7 @@ impl<'a> FastImportParser<'a> {
             stats: FastImportStats::default(),
             options,
             stream_import_marks_seen: false,
+            relative_marks_enabled,
         }
     }
 
@@ -1119,6 +1180,11 @@ impl<'a> FastImportParser<'a> {
             return Err(self.unsupported_fast_import_command(line)?);
         };
         if feature == "no-relative-marks" {
+            self.relative_marks_enabled = false;
+            return Ok(());
+        }
+        if feature == "relative-marks" {
+            self.relative_marks_enabled = true;
             return Ok(());
         }
         if let Some(value) = feature.strip_prefix("relative-marks=") {
@@ -1130,9 +1196,8 @@ impl<'a> FastImportParser<'a> {
         }
         if let Some(path) = feature.strip_prefix("export-marks=") {
             self.ensure_unsafe_fast_import_feature(feature)?;
-            if self.options.export_marks.is_none() {
-                self.options.export_marks = Some(PathBuf::from(path));
-            }
+            self.options.export_marks =
+                Some(resolve_fast_import_marks_path(path, self.relative_marks_enabled));
             return Ok(());
         }
         if let Some(path) = feature.strip_prefix("import-marks=") {
@@ -1163,7 +1228,7 @@ impl<'a> FastImportParser<'a> {
         if self.stream_import_marks_seen {
             return Err(fast_import_crash_error(
                 &self.repo.git_dir,
-                "only one import-marks command allowed per stream".to_owned(),
+                "Only one import-marks command allowed per stream".to_owned(),
                 None,
             )?);
         }
@@ -1171,7 +1236,7 @@ impl<'a> FastImportParser<'a> {
         if !self.options.import_marks.is_empty() || !self.options.import_marks_if_exists.is_empty() {
             return Ok(());
         }
-        let path = PathBuf::from(path);
+        let path = resolve_fast_import_marks_path(path, self.relative_marks_enabled);
         if missing_ok {
             if path.exists() {
                 self.load_marks_file(&path)?;
@@ -1224,6 +1289,9 @@ impl<'a> FastImportParser<'a> {
         let mut out = Vec::new();
         for (mark, id) in marks {
             writeln!(&mut out, ":{mark} {id}")?;
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
         }
         fs::write(path, out)?;
         Ok(())
