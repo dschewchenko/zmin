@@ -1916,6 +1916,18 @@ pub enum Command {
     },
     #[command(name = "cvsserver", disable_help_flag = true)]
     Cvsserver {
+        #[arg(long = "base-path")]
+        base_path: Option<String>,
+        #[arg(long = "strict-paths", action = ArgAction::SetTrue)]
+        strict_paths: bool,
+        #[arg(long = "export-all", action = ArgAction::SetTrue)]
+        export_all: bool,
+        #[arg(short = 'V', long = "version", action = ArgAction::SetTrue)]
+        version: bool,
+        #[arg(short = 'h', action = ArgAction::SetTrue)]
+        help_short: bool,
+        #[arg(short = 'H', action = ArgAction::SetTrue)]
+        help_short_alt: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },

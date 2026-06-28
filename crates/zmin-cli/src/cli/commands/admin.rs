@@ -146,7 +146,23 @@ pub(crate) fn dispatch(
         runtime::Command::Hooks { command } => super::admin_commands::managed_hooks(command),
         runtime::Command::ShI18n { args } => super::admin_commands::sh_i18n_command(args),
         runtime::Command::ShSetup { args } => super::admin_commands::sh_setup_command(args),
-        runtime::Command::Cvsserver { args } => super::admin_commands::cvsserver_command(args),
+        runtime::Command::Cvsserver {
+            base_path,
+            strict_paths,
+            export_all,
+            version,
+            help_short,
+            help_short_alt,
+            args,
+        } => super::admin_commands::cvsserver_command(
+            base_path,
+            strict_paths,
+            export_all,
+            version,
+            help_short,
+            help_short_alt,
+            args,
+        ),
         runtime::Command::Cvsexportcommit { args } => {
             super::admin_commands::cvsexportcommit_command(args)
         }

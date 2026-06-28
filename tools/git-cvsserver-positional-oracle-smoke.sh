@@ -8,27 +8,39 @@ case "$ZMIN_BIN" in
   *) ZMIN_BIN="$PWD/$ZMIN_BIN" ;;
 esac
 
-tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zmin-cvsserver-oracle.XXXXXX")"
-cleanup() {
-  rm -rf "$tmpdir"
-}
-trap cleanup EXIT
+python3 - "$GIT_BIN" "$ZMIN_BIN" <<'PY'
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
-set +e
-(
-  cd "$tmpdir"
-  "$GIT_BIN" cvsserver unknown
-) >"$tmpdir/git.out" 2>"$tmpdir/git.err"
-git_exit=$?
-(
-  cd "$tmpdir"
-  "$ZMIN_BIN" cvsserver unknown
-) >"$tmpdir/zmin.out" 2>"$tmpdir/zmin.err"
-zmin_exit=$?
-set -e
+git_bin = sys.argv[1]
+zmin_bin = sys.argv[2]
+root = Path(tempfile.mkdtemp(prefix="zmin-cvsserver-oracle-"))
 
-test "$git_exit" = 0
-test "$zmin_exit" = 0
-cmp -s "$tmpdir/git.out" "$tmpdir/zmin.out"
-cmp -s "$tmpdir/git.err" "$tmpdir/zmin.err"
-printf 'cvsserver_positional_unknown_noop\tok\texit=%s\n' "$git_exit"
+cases = [
+    ("cvsserver_positional_unknown_noop", 0, ["unknown"]),
+    ("cvsserver_export_all_requires_directory", 255, ["--export-all"]),
+    ("cvsserver_strict_paths_noop", 0, ["--strict-paths"]),
+    ("cvsserver_base_path_noop", 0, ["--base-path", "/tmp/base"]),
+    ("cvsserver_help_short_noop", 0, ["-h"]),
+    ("cvsserver_help_short_alt_noop", 0, ["-H"]),
+]
+
+for name, expected_exit, args in cases:
+    git = subprocess.run([git_bin, "cvsserver", *args], cwd=root, capture_output=True)
+    zmin = subprocess.run([zmin_bin, "cvsserver", *args], cwd=root, capture_output=True)
+    if git.returncode != expected_exit:
+        raise SystemExit(f"{name}: stock git exit {git.returncode} != expected {expected_exit}")
+    if zmin.returncode != expected_exit:
+        raise SystemExit(f"{name}: zmin exit {zmin.returncode} != expected {expected_exit}")
+    if (git.returncode, git.stdout, git.stderr) != (zmin.returncode, zmin.stdout, zmin.stderr):
+        raise SystemExit(
+            f"{name}: mismatch\n"
+            f"git stdout={git.stdout!r}\n"
+            f"zmin stdout={zmin.stdout!r}\n"
+            f"git stderr={git.stderr!r}\n"
+            f"zmin stderr={zmin.stderr!r}"
+        )
+    print(f"{name}\tok\texit={expected_exit}")
+PY

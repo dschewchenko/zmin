@@ -156,8 +156,24 @@ pub(crate) fn sh_setup_command(args: Vec<String>) -> Result<()> {
     sh_setup(args)
 }
 
-pub(crate) fn cvsserver_command(args: Vec<String>) -> Result<()> {
-    cvsserver(args)
+pub(crate) fn cvsserver_command(
+    base_path: Option<String>,
+    strict_paths: bool,
+    export_all: bool,
+    version: bool,
+    help_short: bool,
+    help_short_alt: bool,
+    args: Vec<String>,
+) -> Result<()> {
+    cvsserver(
+        base_path,
+        strict_paths,
+        export_all,
+        version,
+        help_short,
+        help_short_alt,
+        args,
+    )
 }
 
 pub(crate) fn cvsexportcommit_command(args: Vec<String>) -> Result<()> {
@@ -2207,17 +2223,34 @@ fn sh_setup(args: Vec<String>) -> Result<()> {
     Ok(())
 }
 
-fn cvsserver(args: Vec<String>) -> Result<()> {
-    if args
-        .first()
-        .is_some_and(|arg| arg == "--version" || arg == "-V")
-    {
+fn cvsserver(
+    base_path: Option<String>,
+    strict_paths: bool,
+    export_all: bool,
+    version: bool,
+    help_short: bool,
+    help_short_alt: bool,
+    args: Vec<String>,
+) -> Result<()> {
+    if version {
         println!("git-cvsserver version {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    if args.first().is_some_and(|arg| arg == "-h" || arg == "-H") {
+    if help_short || help_short_alt {
         return Ok(());
     }
+    if export_all
+        && args
+            .iter()
+            .all(|arg| arg == "server" || arg == "pserver")
+    {
+        return Err(CliError::Stderr {
+            code: 255,
+            text: "--export-all can only be used together with an explicit '<directory>...' list\n"
+                .into(),
+        });
+    }
+    let _ = (base_path, strict_paths);
 
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;

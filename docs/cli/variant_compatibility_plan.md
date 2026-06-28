@@ -22,6 +22,35 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`cvsserver` parser-and-empty-lane closure across the current `/usr/bin/git`
+outside-repository surface. This batch added five exact stock-Git rows and
+promoted five documented `cvsserver` option pairs into the reviewed-complete
+census set: `--base-path`, `--export-all`, `--strict-paths`, `-h`, and `-H`.
+The runtime closure stayed intentionally bounded: this slice matches the
+current local `/usr/bin/git` parser lane where `--export-all` without an
+explicit allowed-directory list fails with exact stderr and exit `255`, while
+`--base-path`, `--strict-paths`, `-h`, and `-H` exit `0` with empty stdout and
+stderr on the empty outside-repository lane. It does not widen into long-help
+manpage rendering or exact `git-cvsserver` version-banner parity. Focused
+gates were
+`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-cvsserver-positional-oracle-smoke.sh`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7407` matrix rows, `6489` verified rows, `893` invalid-input rows,
+`146/151` complete command matrices, and `2999/3212` complete documented
+option pairs. `cvsserver` now sits at `5/8` reviewed-complete documented
+option pairs with `6/6` classified rows, `5` stock-matching rows, and `1`
+invalid-input row. The overall backlog head remains `send-email` (`62`),
+followed by `rebase` (`54`), `p4` (`28`), `svn` (`25`), `cvsimport` (`14`),
+`cvsexportcommit` (`11`), `archimport` (`7`), `pack-objects` (`7`), and the
+remaining `cvsserver` tail (`3`); the next default follow-up should keep the
+largest safe helper-free batch bias and shift away from this command unless
+the remaining `--help`/version surface is chosen deliberately.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `pack-objects` bounded-no-op-and-reject family across the existing explicit
 basename `--all` lane. This batch added nine exact stock-Git rows and
 promoted nine documented `pack-objects` option pairs into the
