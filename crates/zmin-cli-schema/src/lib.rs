@@ -1432,6 +1432,48 @@ pub enum Command {
         author_date_order: bool,
         #[arg(long = "reverse", action = ArgAction::SetTrue)]
         reverse: bool,
+        #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
+        alternate_refs: bool,
+        #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
+        ignore_missing: bool,
+        #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
+        indexed_objects: bool,
+        #[arg(long = "remove-empty", action = ArgAction::SetTrue)]
+        remove_empty: bool,
+        #[arg(long = "single-worktree", action = ArgAction::SetTrue)]
+        single_worktree: bool,
+        #[arg(long = "unpacked", action = ArgAction::SetTrue)]
+        unpacked: bool,
+        #[arg(long = "first-parent", action = ArgAction::SetTrue)]
+        first_parent: bool,
+        #[arg(long = "right-only", action = ArgAction::SetTrue)]
+        right_only: bool,
+        #[arg(long = "left-right", action = ArgAction::SetTrue)]
+        left_right: bool,
+        #[arg(long = "cherry", action = ArgAction::SetTrue)]
+        cherry: bool,
+        #[arg(long = "cherry-pick", action = ArgAction::SetTrue)]
+        cherry_pick: bool,
+        #[arg(long = "cherry-mark", action = ArgAction::SetTrue)]
+        cherry_mark: bool,
+        #[arg(long = "parents", action = ArgAction::SetTrue)]
+        parents: bool,
+        #[arg(long = "objects", action = ArgAction::SetTrue)]
+        objects: bool,
+        #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
+        objects_edge: bool,
+        #[arg(long = "objects-edge-aggressive", action = ArgAction::SetTrue)]
+        objects_edge_aggressive: bool,
+        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+        show_signature: bool,
+        #[arg(long = "no-walk", action = ArgAction::SetTrue)]
+        no_walk: bool,
+        #[arg(long = "no-merges", action = ArgAction::SetTrue)]
+        no_merges: bool,
+        #[arg(long = "max-count")]
+        max_count: Option<String>,
+        #[arg(long = "skip")]
+        skip: Option<usize>,
         #[arg(long = "contained", action = ArgAction::SetTrue)]
         contained: bool,
         #[arg(long = "advance")]

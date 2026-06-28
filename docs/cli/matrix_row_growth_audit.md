@@ -12,6 +12,30 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`replay` represented-family expansion across the existing bounded linear
+advance lane. The selected change added `+21` matrix rows and promoted
+twenty-one documented `replay` option pairs into the reviewed-complete census
+set: `--alternate-refs`, `--cherry`, `--cherry-mark`, `--cherry-pick`,
+`--first-parent`, `--ignore-missing`, `--indexed-objects`, `--left-right`,
+`--max-count`, `--no-merges`, `--no-walk`, `--objects`,
+`--objects-edge`, `--objects-edge-aggressive`, `--parents`,
+`--remove-empty`, `--right-only`, `--show-signature`,
+`--single-worktree`, `--skip`, and `--unpacked`. This was a bounded
+runtime-and-evidence slice: replay now accepts the current rev-list-derived
+no-op selector family on the modeled local linear advance lane without
+widening into formatting, grep, history-shape rewriting, merge replay, or
+multi-branch update semantics. Actual delta is `+21` matrix rows, `+21`
+complete documented option pairs, `+21` represented documented option pairs,
+`+21` verified rows, `+0` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `7302` matrix rows, `6417` verified rows,
+`860` invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2894/3212` complete documented option pairs, and
+`2894/3212` represented documented option pairs. Remaining checklist rows
+fell from `339` to `318`. The guardrail held: row growth stayed inside one
+coherent helper-free replay option family verified by the dedicated bounded
+stock-Git smoke script.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` rev-walk option-family expansion across the existing bounded linear
 advance lane plus one stdin-fed range lane. The selected change added `+11`
 matrix rows and promoted eleven documented `replay` option pairs into the

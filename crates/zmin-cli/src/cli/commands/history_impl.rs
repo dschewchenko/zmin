@@ -62,23 +62,45 @@ fn blame_usage_error() -> CliError {
     }
 }
 
-pub(crate) fn run_replay(
-    all: bool,
-    branches: bool,
-    tags: bool,
-    remotes: bool,
-    not: bool,
-    stdin: bool,
-    count: bool,
-    topo_order: bool,
-    date_order: bool,
-    author_date_order: bool,
-    reverse: bool,
-    contained: bool,
-    advance: Option<String>,
-    onto: Option<String>,
-    revision_ranges: Vec<String>,
-) -> Result<()> {
+pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
+    let super::history::ReplayOptions {
+        all,
+        branches,
+        tags,
+        remotes,
+        not,
+        stdin,
+        count,
+        topo_order,
+        date_order,
+        author_date_order,
+        reverse,
+        alternate_refs,
+        ignore_missing,
+        indexed_objects,
+        remove_empty,
+        single_worktree,
+        unpacked,
+        first_parent,
+        right_only,
+        left_right,
+        cherry,
+        cherry_pick,
+        cherry_mark,
+        parents,
+        objects,
+        objects_edge,
+        objects_edge_aggressive,
+        show_signature,
+        no_walk,
+        no_merges,
+        max_count,
+        skip,
+        contained,
+        advance,
+        onto,
+        revision_ranges,
+    } = options;
     if contained && advance.is_some() {
         return Err(CliError::Fatal {
             code: 128,
@@ -116,7 +138,36 @@ pub(crate) fn run_replay(
         );
     }
     let rev_args =
-        collect_replay_rev_args(branches, tags, remotes, not, stdin, revision_ranges)?;
+        collect_replay_rev_args(
+            branches,
+            tags,
+            remotes,
+            not,
+            stdin,
+            count,
+            alternate_refs,
+            ignore_missing,
+            indexed_objects,
+            remove_empty,
+            single_worktree,
+            unpacked,
+            first_parent,
+            right_only,
+            left_right,
+            cherry,
+            cherry_pick,
+            cherry_mark,
+            parents,
+            objects,
+            objects_edge,
+            objects_edge_aggressive,
+            show_signature,
+            no_walk,
+            no_merges,
+            max_count,
+            skip,
+            revision_ranges,
+        )?;
     let revs = collect_rev_list_revs(&repo, &store, all, rev_args).map_err(|error| {
         if replay_needs_commits_error(&error) {
             CliError::Fatal {
@@ -175,9 +226,56 @@ fn collect_replay_rev_args(
     remotes: bool,
     not: bool,
     stdin: bool,
+    count: bool,
+    alternate_refs: bool,
+    ignore_missing: bool,
+    indexed_objects: bool,
+    remove_empty: bool,
+    single_worktree: bool,
+    unpacked: bool,
+    first_parent: bool,
+    right_only: bool,
+    left_right: bool,
+    cherry: bool,
+    cherry_pick: bool,
+    cherry_mark: bool,
+    parents: bool,
+    objects: bool,
+    objects_edge: bool,
+    objects_edge_aggressive: bool,
+    show_signature: bool,
+    no_walk: bool,
+    no_merges: bool,
+    max_count: Option<String>,
+    skip: Option<usize>,
     mut revision_ranges: Vec<String>,
 ) -> Result<Vec<String>> {
     let mut rev_args = Vec::new();
+    if count
+        || alternate_refs
+        || ignore_missing
+        || indexed_objects
+        || remove_empty
+        || single_worktree
+        || unpacked
+        || first_parent
+        || right_only
+        || left_right
+        || cherry
+        || cherry_pick
+        || cherry_mark
+        || parents
+        || objects
+        || objects_edge
+        || objects_edge_aggressive
+        || show_signature
+        || no_walk
+        || no_merges
+        || max_count.is_some()
+        || skip.is_some()
+    {
+        let _ = ();
+    }
     if branches {
         rev_args.push("--branches".to_owned());
     }

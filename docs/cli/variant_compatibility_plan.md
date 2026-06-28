@@ -22,25 +22,24 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
-represented-family expansion across the helper-free local `replay`
-rev-walk surface on the existing bounded linear advance lane plus one
-stdin-fed range lane. This batch added eleven exact stock-Git rows and
-promoted eleven documented `replay` option pairs into the reviewed-complete
-census set: `--all`, `--author-date-order`, `--branches`, `--count`,
-`--date-order`, `--not`, `--remotes`, `--reverse`, `--stdin`, `--tags`,
-and `--topo-order`. The runtime closure stayed intentionally bounded: this
-slice does not widen replay into author/committer filtering, formatting,
-grep, history-shape rewriting, merge-commit replay, or ref-update policy
-surfaces. It only threads the current rev-walk selection/no-op family into
-the existing linear replay path, preserves stock warning passthrough for the
-modeled ordering flags, accepts the current stdin-fed range lane, and matches
-stock invalid-input handling for multi-source `--branches` / `--all`
-advance and the bounded `--not` empty-selection lane.
+`replay` represented-family expansion across the existing bounded linear
+advance lane. This batch added twenty-one exact stock-Git rows and promoted
+twenty-one documented `replay` option pairs into the reviewed-complete census
+set: `--alternate-refs`, `--cherry`, `--cherry-mark`, `--cherry-pick`,
+`--first-parent`, `--ignore-missing`, `--indexed-objects`, `--left-right`,
+`--max-count`, `--no-merges`, `--no-walk`, `--objects`,
+`--objects-edge`, `--objects-edge-aggressive`, `--parents`,
+`--remove-empty`, `--right-only`, `--show-signature`,
+`--single-worktree`, `--skip`, and `--unpacked`. The runtime closure stayed
+intentionally bounded: this slice only widens replay over the currently
+modeled linear advance lane by accepting the current rev-list-derived no-op
+selector family and the bounded `--max-count=1` / `--skip=0` value forms. It
+does not widen replay into grep/formatting surfaces, merge replay,
+multi-branch ref updates, or broader history-shape semantics.
 
 Focused verification was
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
 `GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin bash tools/git-replay-schema-oracle-smoke.sh`,
-`GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_admin_tools_compat replay_matches_stock_git_for_linear_range -- --exact --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
@@ -49,22 +48,22 @@ and `git diff --check`.
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2873 / 3212`
-- represented documented command-option pairs: `2873 / 3212`
-- matrix rows: `7281`
-- verified rows: `6396`
+- complete documented command-option pairs: `2894 / 3212`
+- represented documented command-option pairs: `2894 / 3212`
+- matrix rows: `7302`
+- verified rows: `6417`
 - invalid-input rows: `860`
 - open or partial exact rows: `0`
-- remaining to fix or verify rows: `339`
+- remaining to fix or verify rows: `318`
 - implemented but unverified rows: `3`
 
 Per-command position on the touched surface:
 
-- `replay`: `13 / 119` reviewed-complete documented option pairs, `16`
-  written rows, `12` stock-matching rows, `4` invalid-input rows
+- `replay`: `34 / 119` reviewed-complete documented option pairs, `37`
+  written rows, `33` stock-matching rows, `4` invalid-input rows
 
 The next dense helper-free queue can stay on `replay` while the current
-rev-walk/documented tail is still large (`106` remaining documented pairs),
+rev-walk/documented tail is still large (`85` remaining documented pairs),
 but the alternative backlog heads remain `send-email` (`62`), `rebase`
 (`54`), `p4` (`28`), and the heavier semantic `pack-objects` tail (`16`).
 
