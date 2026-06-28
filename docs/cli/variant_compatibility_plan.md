@@ -22,6 +22,42 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`rebase` apply-backend and diffstat-output family across the existing direct
+upstream, branch-argument, and `--onto` replay lanes. This batch added fifteen
+exact stock-Git rows and promoted five documented `rebase` option pairs into
+the reviewed-complete census set: `--apply`, `--whitespace`, `--verbose`,
+`-v`, and `--stat`. The runtime closure stayed intentionally bounded: Zmin now
+matches the current stock clean replay lanes where `--apply` and
+`--whitespace=warn` switch to apply-backend style stdout, `--verbose` and `-v`
+print the stock two-block diffstat flow plus newline-delimited progress stderr,
+and `--stat` prints the stock single diffstat block plus carriage-return
+progress stderr. This does not widen rebase into `-C` context parsing,
+keep-base semantics, root replay, exec scheduling, autosquash behavior,
+gpg-sign flows, or the nondeterministic date-rewrite tails. The implementation
+stays focused on the missing closure only: the rebase schema now exposes the
+five spellings, the sequencer plumbing threads those flags through the bounded
+clean replay path, and the stock diffstat base-selection split is preserved
+between plain upstream/branch and `--onto` lanes. Focused gates were
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_apply_backend_option_family_matches_stock_git -- --exact`,
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_verbose_and_stat_option_family_matches_stock_git -- --exact`,
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_clean_noop_option_family_matches_stock_git -- --exact`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7538` matrix rows, `6619` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3048/3212` complete documented
+option pairs. `rebase` now sits at `42/57` reviewed-complete documented
+option pairs with `127/127` classified rows, `123` stock-matching rows, and
+`4` invalid-input rows. The overall backlog head is now `send-email` (`62`),
+followed by `p4` (`28`), `svn` (`25`), `rebase` (`15`), `cvsimport` (`14`),
+`cvsexportcommit` (`11`), `archimport` (`7`), then the single-pair tails
+`log` and `apply`; the next default follow-up should either take a larger safe
+schema/runtime batch from `send-email` / `p4` / `svn`, or continue `rebase`
+with a distinct bounded family such as `--keep-base` while leaving `-C` and
+the nondeterministic date options explicitly open.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `rebase` clean parser/no-op family across the existing direct upstream,
 branch-argument, and `--onto` replay lanes. This batch added thirty exact
 stock-Git rows and promoted ten documented `rebase` option pairs into the

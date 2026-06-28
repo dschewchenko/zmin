@@ -2402,3 +2402,181 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
         );
     }
 }
+
+#[test]
+fn rebase_apply_backend_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool); 6] = [
+        ("apply_upstream", &["rebase", "--apply", "origin/main"], false, false),
+        (
+            "apply_branch",
+            &["rebase", "--apply", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "apply_onto",
+            &["rebase", "--apply", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "whitespace_warn_upstream",
+            &["rebase", "--whitespace=warn", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "whitespace_warn_branch",
+            &["rebase", "--whitespace=warn", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "whitespace_warn_onto",
+            &["rebase", "--whitespace=warn", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
+
+#[test]
+fn rebase_verbose_and_stat_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool); 9] = [
+        (
+            "verbose_upstream",
+            &["rebase", "--verbose", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "verbose_branch",
+            &["rebase", "--verbose", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "verbose_onto",
+            &["rebase", "--verbose", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        ("v_upstream", &["rebase", "-v", "origin/main"], false, false),
+        ("v_branch", &["rebase", "-v", "origin/main", "topic"], true, false),
+        (
+            "v_onto",
+            &["rebase", "-v", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        ("stat_upstream", &["rebase", "--stat", "origin/main"], false, false),
+        (
+            "stat_branch",
+            &["rebase", "--stat", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "stat_onto",
+            &["rebase", "--stat", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}

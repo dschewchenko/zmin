@@ -1024,6 +1024,11 @@ fn rebase_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()>
             false,
             false,
             false,
+            false,
+            None,
+            false,
+            false,
+            None,
         )
     })
 }

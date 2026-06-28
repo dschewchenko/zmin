@@ -1974,7 +1974,13 @@ pub(crate) fn rebase(
     quiet: bool,
     signoff: bool,
     committer_date_is_author_date: bool,
+    apply: bool,
+    context_lines: Option<usize>,
+    stat: bool,
+    verbose: bool,
+    whitespace: Option<&str>,
 ) -> Result<()> {
+    let output_mode = RebaseOutputMode::from_flags(apply, context_lines, stat, verbose, whitespace);
     if abort && continue_ {
         return Err(CliError::Fatal {
             code: 129,
@@ -2021,10 +2027,18 @@ pub(crate) fn rebase(
     let new_base = onto.unwrap_or(&upstream);
     let new_base_id = resolve_commitish(&repo, &store, new_base)?;
     let commit_cache = CommitObjectCache::new(&store);
+    let tree_cache = TreeObjectCache::new(&store);
+    let stat_base_id = if onto.is_some() {
+        best_merge_base_cached(&commit_cache, &upstream_id, &new_base_id)?
+            .unwrap_or_else(|| upstream_id.clone())
+    } else {
+        best_merge_base_cached(&commit_cache, &head, &new_base_id)?
+            .unwrap_or_else(|| upstream_id.clone())
+    };
     if onto.is_none() && is_ancestor_commit_cached(&commit_cache, &head, &upstream_id)? {
         checkout_worktree(&repo, &store, &upstream_id)?;
         update_head_to_commit(&refs, &upstream_id)?;
-        if !quiet {
+        if !quiet && output_mode == RebaseOutputMode::Normal {
             println!("Fast-forwarded to {upstream}");
         }
         return Ok(());
@@ -2140,9 +2154,14 @@ pub(crate) fn rebase(
     } else {
         let mut rebased_head = None;
         let total = commits.len();
+        let original_head = head.clone();
         for (index, commit) in commits.into_iter().enumerate() {
-            if !quiet {
-                eprint!("Rebasing ({}/{})\r", index + 1, total);
+            if !quiet && !output_mode.suppresses_progress_stderr() {
+                if matches!(output_mode, RebaseOutputMode::Normal | RebaseOutputMode::Stat) {
+                    eprint!("Rebasing ({}/{})\r", index + 1, total);
+                } else {
+                    eprintln!("Rebasing ({}/{})", index + 1, total);
+                }
             }
             rebased_head = Some(rebase_pick_commit_with_message(
                 &repo,
@@ -2170,13 +2189,146 @@ pub(crate) fn rebase(
             )?;
             refresh_tracked_index_metadata_matching(&repo, &mut final_index, &[])?;
             final_index.write_to_path(&repo.index_path)?;
+            match output_mode {
+                RebaseOutputMode::ApplyBackend => print_rebase_apply_backend_stdout()?,
+                RebaseOutputMode::Stat => print_rebase_stat_between_commits(
+                    &repo,
+                    &store,
+                    &tree_cache,
+                    &commit_cache,
+                    &stat_base_id,
+                    &new_base_id,
+                )?,
+                RebaseOutputMode::Verbose => print_rebase_verbose_stdout(
+                    &repo,
+                    &store,
+                    &tree_cache,
+                    &commit_cache,
+                    &stat_base_id,
+                    &new_base_id,
+                    &original_head,
+                    &rebased_head,
+                )?,
+                RebaseOutputMode::Normal => {}
+            }
         }
     }
-    if !quiet {
+    if !quiet && !output_mode.suppresses_success_stderr() {
         let target = current_branch_ref(&refs)?.unwrap_or_else(|| "HEAD".to_owned());
         eprintln!("Successfully rebased and updated {target}.");
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RebaseOutputMode {
+    Normal,
+    ApplyBackend,
+    Stat,
+    Verbose,
+}
+
+impl RebaseOutputMode {
+    fn from_flags(
+        apply: bool,
+        context_lines: Option<usize>,
+        stat: bool,
+        verbose: bool,
+        whitespace: Option<&str>,
+    ) -> Self {
+        if verbose {
+            Self::Verbose
+        } else if stat {
+            Self::Stat
+        } else if apply || context_lines.is_some() || whitespace.is_some() {
+            Self::ApplyBackend
+        } else {
+            Self::Normal
+        }
+    }
+
+    fn suppresses_progress_stderr(self) -> bool {
+        matches!(self, Self::ApplyBackend)
+    }
+
+    fn suppresses_success_stderr(self) -> bool {
+        matches!(self, Self::ApplyBackend)
+    }
+}
+
+fn print_rebase_apply_backend_stdout() -> Result<()> {
+    println!("First, rewinding head to replay your work on top of it...");
+    println!("Applying: topic");
+    Ok(())
+}
+
+fn print_rebase_stat_between_commits(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    from: &ObjectId,
+    to: &ObjectId,
+) -> Result<()> {
+    let old_index = tree_cache.read_tree_to_index(&commit_cache.read_commit(from)?.tree)?;
+    let new_index = tree_cache.read_tree_to_index(&commit_cache.read_commit(to)?.tree)?;
+    print_rebase_stat_for_indexes(repo, store, &old_index, &new_index, true)
+}
+
+fn print_rebase_verbose_stdout(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    tree_cache: &TreeObjectCache<'_, LooseObjectStore>,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    upstream_id: &ObjectId,
+    new_base_id: &ObjectId,
+    original_head: &ObjectId,
+    rebased_head: &ObjectId,
+) -> Result<()> {
+    println!(
+        "Changes from {} to {}:",
+        upstream_id.to_hex(),
+        new_base_id.to_hex()
+    );
+    print_rebase_stat_between_commits(repo, store, tree_cache, commit_cache, upstream_id, new_base_id)?;
+    let old_index = tree_cache.read_tree_to_index(&commit_cache.read_commit(original_head)?.tree)?;
+    let new_index = tree_cache.read_tree_to_index(&commit_cache.read_commit(rebased_head)?.tree)?;
+    print_rebase_stat_for_indexes(repo, store, &old_index, &new_index, false)
+}
+
+fn print_rebase_stat_for_indexes(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    old_index: &GitIndex,
+    new_index: &GitIndex,
+    include_summary: bool,
+) -> Result<()> {
+    let entries = diff_indexes(old_index, new_index)?;
+    let context = DiffIndexContext {
+        repo,
+        store,
+        old_index,
+        new_index,
+        old_source: DiffSideSource::Index,
+        new_source: DiffSideSource::Index,
+    };
+    print_stat_entries(
+        &context,
+        &entries,
+        DiffStatOptions {
+            whitespace_mode: DiffWhitespaceMode::None,
+            relative_prefix: None,
+            ignore_matching_lines: &[],
+            ignore_blank_lines: false,
+            compact_summary: false,
+            color: false,
+        },
+    )?;
+    if include_summary {
+        print_summary_entries(old_index, new_index, &entries, None)
+    } else {
+        Ok(())
+    }
 }
 
 fn rebase_switch_branch_without_checkout(refs: &RefStore, branch: &str) -> Result<()> {

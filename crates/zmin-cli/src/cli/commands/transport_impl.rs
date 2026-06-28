@@ -11948,6 +11948,11 @@ fatal: the remote end hung up unexpectedly\n"
             quiet,
             false,
             false,
+            false,
+            None,
+            false,
+            false,
+            None,
         );
     }
     if !ff_only

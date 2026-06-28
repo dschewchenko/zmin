@@ -4317,6 +4317,8 @@ pub enum Command {
     Rebase {
         #[arg(long = "abort", action = ArgAction::SetTrue)]
         abort: bool,
+        #[arg(long = "apply", action = ArgAction::SetTrue)]
+        apply: bool,
         #[arg(long = "allow-empty-message", action = ArgAction::SetTrue)]
         allow_empty_message: bool,
         #[arg(long = "autostash", action = ArgAction::SetTrue)]
@@ -4373,10 +4375,16 @@ pub enum Command {
         strategy: Option<String>,
         #[arg(short = 'X', long = "strategy-option")]
         strategy_option: Vec<String>,
+        #[arg(long = "stat", action = ArgAction::SetTrue)]
+        stat: bool,
         #[arg(long = "update-refs", action = ArgAction::SetTrue)]
         update_refs: bool,
+        #[arg(short = 'v', long = "verbose", action = ArgAction::SetTrue)]
+        verbose: bool,
         #[arg(long = "verify", action = ArgAction::SetTrue)]
         verify: bool,
+        #[arg(long = "whitespace")]
+        whitespace: Option<String>,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

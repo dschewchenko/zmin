@@ -100,6 +100,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Rerere { args } => super::sequencer_commands::rerere(args),
         runtime::Command::Rebase {
             abort,
+            apply,
             allow_empty_message: _allow_empty_message,
             autostash: _autostash,
             continue_,
@@ -128,8 +129,11 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             signoff,
             strategy: _strategy,
             strategy_option: _strategy_option,
+            stat,
             update_refs: _update_refs,
+            verbose,
             verify: _verify,
+            whitespace,
             args,
         } => super::sequencer_commands::rebase(
             abort,
@@ -141,6 +145,11 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             quiet,
             signoff,
             committer_date_is_author_date,
+            apply,
+            None,
+            stat,
+            verbose,
+            whitespace.as_deref(),
         ),
         _ => unreachable!("non-sequencer command dispatched to sequencer"),
     }
