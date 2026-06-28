@@ -3,8 +3,9 @@ mod common;
 use tempfile::TempDir;
 
 use common::{
-    clone_repo_fixture, command_any_output, command_output_with_env, configure_identity, git,
-    git_init, git_with_env, run_zmin, run_zmin_with_env, write_file, zmin_bin,
+    clone_repo_fixture, command_any_output, command_failure_output_with_env, command_output_with_env,
+    configure_identity, git, git_init, git_with_env, run_zmin, run_zmin_with_env, write_file,
+    zmin_bin,
 };
 
 const SEQUENCER_ENV: [(&str, &str); 6] = [
@@ -2583,6 +2584,133 @@ fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
             git(git_repo.path(), ["log", "-1", "--format=%G?"]),
             "{name} signature status"
         );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
+
+#[test]
+fn rebase_remaining_helper_free_option_family_matches_stock_git() {
+    enum RebaseEnv {
+        Default,
+        ReplayDates,
+    }
+
+    let cases: [(&str, &[&str], bool, bool, RebaseEnv, bool); 15] = [
+        ("keep_base_upstream", &["rebase", "--keep-base", "origin/main"], false, false, RebaseEnv::Default, false),
+        ("keep_base_branch", &["rebase", "--keep-base", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
+        (
+            "keep_base_with_onto_invalid",
+            &["rebase", "--keep-base", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+            RebaseEnv::Default,
+            false,
+        ),
+        (
+            "reset_author_date_upstream",
+            &["rebase", "--reset-author-date", "origin/main"],
+            false,
+            false,
+            RebaseEnv::ReplayDates,
+            true,
+        ),
+        (
+            "reset_author_date_branch",
+            &["rebase", "--reset-author-date", "origin/main", "topic"],
+            true,
+            false,
+            RebaseEnv::ReplayDates,
+            true,
+        ),
+        (
+            "reset_author_date_onto",
+            &["rebase", "--reset-author-date", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+            RebaseEnv::ReplayDates,
+            true,
+        ),
+        ("exec_upstream", &["rebase", "--exec", "true", "origin/main"], false, false, RebaseEnv::Default, false),
+        ("exec_branch", &["rebase", "--exec", "true", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
+        ("exec_onto", &["rebase", "--exec", "true", "--onto", "origin/main", "origin/oldbase", "topic"], false, true, RebaseEnv::Default, false),
+        ("short_exec_upstream", &["rebase", "-x", "true", "origin/main"], false, false, RebaseEnv::Default, false),
+        ("short_exec_branch", &["rebase", "-x", "true", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
+        ("short_exec_onto", &["rebase", "-x", "true", "--onto", "origin/main", "origin/oldbase", "topic"], false, true, RebaseEnv::Default, false),
+        ("context_lines_upstream", &["rebase", "-C", "1", "origin/main"], false, false, RebaseEnv::Default, false),
+        ("context_lines_branch", &["rebase", "-C", "1", "origin/main", "topic"], true, false, RebaseEnv::Default, false),
+        ("context_lines_onto", &["rebase", "-C", "1", "--onto", "origin/main", "origin/oldbase", "topic"], false, true, RebaseEnv::Default, false),
+    ];
+
+    for (name, args, checkout_main, onto_fixture, env_kind, compare_dates) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let env = match env_kind {
+            RebaseEnv::Default => SEQUENCER_ENV.as_slice(),
+            RebaseEnv::ReplayDates => REBASE_REPLAY_DATE_ENV.as_slice(),
+        };
+        let expect_failure = name == "keep_base_with_onto_invalid";
+        let git_output = if expect_failure {
+            command_failure_output_with_env("git", git_repo.path(), args, env, "git")
+        } else {
+            command_output_with_env("git", git_repo.path(), args, env, "git")
+        };
+        let zmin_output = if expect_failure {
+            command_failure_output_with_env(zmin_bin(), zmin_repo.path(), args, env, "zmin")
+        } else {
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, env, "zmin")
+        };
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        if compare_dates {
+            assert_eq!(
+                git(
+                    zmin_repo.path(),
+                    ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+                ),
+                git(
+                    git_repo.path(),
+                    ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+                ),
+                "{name} dates"
+            );
+        }
         assert_eq!(
             git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
             git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),

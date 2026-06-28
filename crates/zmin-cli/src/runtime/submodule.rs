@@ -1026,6 +1026,8 @@ fn rebase_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()>
             false,
             false,
             false,
+            false,
+            Vec::new(),
             None,
             false,
             None,

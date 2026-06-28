@@ -4329,8 +4329,12 @@ pub enum Command {
         continue_: bool,
         #[arg(long = "committer-date-is-author-date", action = ArgAction::SetTrue)]
         committer_date_is_author_date: bool,
+        #[arg(short = 'C')]
+        context_lines: Option<usize>,
         #[arg(long = "empty")]
         empty: Option<String>,
+        #[arg(long = "exec")]
+        exec: Vec<String>,
         #[arg(
             short = 'S',
             long = "gpg-sign",
@@ -4350,6 +4354,8 @@ pub enum Command {
         merge: bool,
         #[arg(long = "fork-point", action = ArgAction::SetTrue)]
         fork_point: bool,
+        #[arg(long = "keep-base", action = ArgAction::SetTrue)]
+        keep_base: bool,
         #[arg(long = "keep-empty", action = ArgAction::SetTrue)]
         keep_empty: bool,
         #[arg(long = "no-autosquash", action = ArgAction::SetTrue)]
@@ -4390,6 +4396,8 @@ pub enum Command {
         reapply_cherry_picks: bool,
         #[arg(long = "reschedule-failed-exec", action = ArgAction::SetTrue)]
         reschedule_failed_exec: bool,
+        #[arg(long = "reset-author-date", action = ArgAction::SetTrue)]
+        reset_author_date: bool,
         #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
         rerere_autoupdate: bool,
         #[arg(long = "signoff", action = ArgAction::SetTrue)]
@@ -4408,6 +4416,8 @@ pub enum Command {
         verify: bool,
         #[arg(long = "whitespace")]
         whitespace: Option<String>,
+        #[arg(short = 'x')]
+        short_exec: Vec<String>,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

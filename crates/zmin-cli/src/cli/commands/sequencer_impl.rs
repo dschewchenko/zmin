@@ -1976,6 +1976,8 @@ pub(crate) fn rebase(
     committer_date_is_author_date: bool,
     ignore_date: bool,
     apply: bool,
+    keep_base: bool,
+    exec_commands: Vec<String>,
     gpg_sign: Option<String>,
     no_gpg_sign: bool,
     context_lines: Option<usize>,
@@ -2009,6 +2011,7 @@ pub(crate) fn rebase(
         });
     }
     let repo = find_repo()?;
+    let pre_switch_index = read_repo_index(&repo)?;
     let branch = args.get(1).cloned();
     let upstream = match args.first().map(String::as_str) {
         Some(upstream) => upstream.to_owned(),
@@ -2027,6 +2030,36 @@ pub(crate) fn rebase(
     }
     let head = refs.resolve("HEAD")?;
     let upstream_id = resolve_commitish(&repo, &store, &upstream)?;
+    if keep_base && onto.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--keep-base' and '--onto' cannot be used together".into(),
+        });
+    }
+    if keep_base {
+        let commit_cache = CommitObjectCache::new(&store);
+        let tree_cache = TreeObjectCache::new(&store);
+        let target_commit = commit_cache.read_commit(&head)?;
+        let mut target_index = tree_cache.read_tree_to_index(&target_commit.tree)?;
+        remove_tracked_paths_missing_from_target(&repo, &pre_switch_index, &target_index)?;
+        checkout_index(
+            &store,
+            &target_index,
+            &repo.root,
+            CheckoutIndexOptions { force: true },
+        )?;
+        smudge_worktree_filter_entries(&repo, &target_index)?;
+        refresh_tracked_index_metadata_matching(&repo, &mut target_index, &[])?;
+        target_index.write_to_path(&repo.index_path)?;
+        let branch_name = current_branch_ref(&refs)
+            .map(|name| name.map(|value| branch_display_name(&value)))
+            .unwrap_or_else(|_| Some("HEAD".to_owned()))
+            .unwrap_or_else(|| "HEAD".to_owned());
+        if !quiet {
+            println!("Current branch {branch_name} is up to date.");
+        }
+        return Ok(());
+    }
     let new_base = onto.unwrap_or(&upstream);
     let new_base_id = resolve_commitish(&repo, &store, new_base)?;
     let commit_cache = CommitObjectCache::new(&store);
@@ -2162,14 +2195,20 @@ pub(crate) fn rebase(
         }
     } else {
         let mut rebased_head = None;
-        let total = commits.len();
+        let total_steps = if exec_commands.is_empty() {
+            commits.len()
+        } else {
+            commits.len() * (exec_commands.len() + 1)
+        };
+        let mut current_step = 0usize;
         let original_head = head.clone();
-        for (index, commit) in commits.into_iter().enumerate() {
+        for commit in commits {
             if !quiet && !output_mode.suppresses_progress_stderr() {
+                current_step += 1;
                 if matches!(output_mode, RebaseOutputMode::Normal | RebaseOutputMode::Stat) {
-                    eprint!("Rebasing ({}/{})\r", index + 1, total);
+                    eprint!("Rebasing ({}/{})\r", current_step, total_steps);
                 } else {
-                    eprintln!("Rebasing ({}/{})", index + 1, total);
+                    eprintln!("Rebasing ({}/{})", current_step, total_steps);
                 }
             }
             rebased_head = Some(rebase_pick_commit_with_message(
@@ -2186,6 +2225,18 @@ pub(crate) fn rebase(
                 gpg_sign.clone(),
                 no_gpg_sign,
             )?);
+            for exec_command in &exec_commands {
+                if !quiet && !output_mode.suppresses_progress_stderr() {
+                    current_step += 1;
+                    if matches!(output_mode, RebaseOutputMode::Normal | RebaseOutputMode::Stat) {
+                        eprint!("Rebasing ({}/{})\r", current_step, total_steps);
+                    } else {
+                        eprintln!("Rebasing ({}/{})", current_step, total_steps);
+                    }
+                }
+                eprintln!("Executing: {exec_command}");
+                run_rebase_exec_command(&repo, exec_command)?;
+            }
         }
         if let Some(rebased_head) = rebased_head {
             let checkout_metadata = WorktreeCheckoutMetadata {
@@ -2230,6 +2281,23 @@ pub(crate) fn rebase(
         eprintln!("Successfully rebased and updated {target}.");
     }
     Ok(())
+}
+
+fn run_rebase_exec_command(repo: &GitRepo, command: &str) -> Result<()> {
+    let status = std::process::Command::new(crate::runtime::git_shell_command_path())
+        .arg("-c")
+        .arg(command)
+        .current_dir(&repo.root)
+        .status()
+        .map_err(CliError::Io)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Fatal {
+            code: status.code().unwrap_or(1),
+            message: format!("execution failed: {command}"),
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

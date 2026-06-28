@@ -22,6 +22,44 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local `rebase`
+remaining non-root control family across the existing upstream,
+branch-argument, and `--onto` replay lanes. This batch added fifteen exact
+stock-Git rows and promoted five documented `rebase` option pairs into the
+reviewed-complete census set: `--keep-base`, `--reset-author-date`,
+`--exec`, `-x`, and `-C`. The runtime closure stayed intentionally bounded:
+Zmin now matches stock on the current helper-free lanes where `--keep-base`
+leaves the topic branch unchanged when it still sits on the merge-base,
+`--keep-base` combined with `--onto` returns the stock fatal incompatibility,
+`--reset-author-date` follows the stock author-date rewrite behavior already
+shared with the bounded ignore-date replay path, `--exec true` and `-x true`
+append the stock helper-free exec step to each replayed commit, and `-C 1`
+stays on the apply-backend lane with stock-equivalent stdout/stderr and final
+state. This does not widen `rebase` into root replay yet; `--root` remains
+the only uncovered documented `rebase` option pair. The implementation stays
+focused on the missing closure only: the rebase schema now exposes the five
+spellings, helper-free replay now supports bounded keep-base no-op detection,
+bounded exec-step execution, and apply-backend context-line parsing, and one
+exact compat test covers all fifteen rows while checking exact stdout, stderr,
+exit status, tree, recent log subjects, raw dates where relevant, current
+branch, and clean status. Focused gates were
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_remaining_helper_free_option_family_matches_stock_git -- --exact`,
+`cargo test -q -p zmin-cli --test git_sequencer_compat rebase_extended_clean_metadata_option_family_matches_stock_git -- --exact`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7641` matrix rows, `6721` verified rows, `895` invalid-input rows,
+`146/151` complete command matrices, and `3123/3212` complete documented
+option pairs. `rebase` now sits at `56/57` reviewed-complete documented
+option pairs with `169/169` classified rows, `164` stock-matching rows, and
+`5` invalid-input rows. The overall backlog head is now `svn` (`25`),
+followed by `p4` (`24`), `cvsimport` (`14`), `cvsexportcommit` (`11`),
+`archimport` (`7`), `send-email` (`5`), and the single-pair tails
+`rebase`, `log`, and `apply`; the next default follow-up should either finish
+the final `rebase --root` tail or switch back to one of the larger
+foreign-SCM queues.
+
+As of 2026-06-28 the latest completed batch is a helper-free local `rebase`
 extended clean metadata family across the existing upstream, branch-argument,
 and `--onto` replay lanes. This batch added twenty-seven exact stock-Git rows
 and promoted nine documented `rebase` option pairs into the
