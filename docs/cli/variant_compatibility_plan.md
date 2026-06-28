@@ -4563,37 +4563,36 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free local `replay` tail closure across
-the existing bounded linear `--advance` lane. Zmin now matches stock Git for
-the final five documented `replay` option pairs on the current bounded
-surface: `--glob`, `--left-only`, `--merges`, `--min-age`, and `-n`. The
-runtime closure stayed intentionally bounded: this slice adds the stock
-multiple-source advance fatal for `--glob`, the stock quiet empty-selection
-failure lane for `--left-only`, `--merges`, and `--min-age`, and the stock
-short `-n` not-an-integer fatal when the explicit revision range is consumed as
-the max-count value. It does not widen replay into general multi-source
-selection, broader history-shape semantics, or full rev-list parity beyond the
-modeled local advance lane. Focused gates were
-`GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin bash tools/git-replay-schema-oracle-smoke.sh`,
+The latest completed slice is a helper-free local `daemon` tail closure across
+the existing git:// localhost serving lane. Zmin now matches stock Git for the
+final six documented `daemon` option pairs on the current bounded surface:
+`--access-hook`, `--detach`, `--group`, `--interpolated-path`, `--user`, and
+`--user-path`. The runtime closure stayed intentionally bounded: this slice
+accepts `--access-hook`, `--detach`, and `--user-path` on the current export-all
+lane, reproduces the stock startup fatals for `--group` and `--user`, and
+reproduces the stock access-denied request lane for `--interpolated-path` on a
+static `/remote.git` request. It does not widen into actual privilege dropping,
+hook-driven authorization, or generalized interpolated-path expansion beyond the
+modeled helper-free local serving lane. Focused gates were
+`GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin bash tools/git-daemon-schema-oracle-smoke.sh`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`, and `git diff --check`.
-Actual delta from the prior replay invalid/reject-and-no-op batch is `+5`
-matrix rows, `+5` complete documented option pairs, `+5` represented
-documented option pairs, `+0` verified rows, `+5` invalid-input rows, and `+0`
-complete command matrices. Current census counts are `7387` matrix rows,
-`6475` verified rows, `887` invalid-input rows, `0` exact-open rows,
-`146/151` complete command matrices, `2979/3212` complete documented option
-pairs, and `2979/3212` represented documented option pairs. Per-command
-position on the touched surface is now: `replay` `119/119`
-reviewed-complete documented option pairs with `122/122` classified written
-rows, `91` stock-matching rows, and `31` invalid-input rows. The overall
-backlog head remains `send-email` with `62` remaining documented option pairs,
-followed by `rebase` at `54`, `p4` at `28`, `svn` at `25`, and
-`pack-objects` at `16`; the next default follow-up should shift away from
-replay continuity and choose the largest still-safe helper-free batch from the
+Actual delta from the prior replay tail batch is `+6` matrix rows, `+6`
+complete documented option pairs, `+6` represented documented option pairs,
+`+4` verified rows, `+2` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `7393` matrix rows, `6479` verified rows,
+`889` invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2985/3212` complete documented option pairs, and `2985/3212`
+represented documented option pairs. Per-command position on the touched
+surface is now: `daemon` `27/27` reviewed-complete documented option pairs
+with `28/28` classified written rows, `25` stock-matching rows, and `3`
+invalid-input rows. The overall backlog head remains `send-email` with `62`
+remaining documented option pairs, followed by `rebase` at `54`, `p4` at
+`28`, `svn` at `25`, and `pack-objects` at `16`; the next default follow-up
+should keep the largest safe helper-free batch bias and shift to one of those
 remaining families.
 
 The latest completed slice is a helper-free local `pull`/`merge`

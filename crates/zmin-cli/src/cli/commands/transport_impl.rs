@@ -83,6 +83,9 @@ pub(crate) struct DaemonOptions {
     pub(crate) base_path_relaxed: bool,
     pub(crate) reuseaddr: bool,
     pub(crate) pid_file: Option<PathBuf>,
+    pub(crate) access_hook: Option<PathBuf>,
+    pub(crate) detach: bool,
+    pub(crate) group: Option<String>,
     pub(crate) enable: Vec<String>,
     pub(crate) disable: Vec<String>,
     pub(crate) allow_override: Vec<String>,
@@ -90,9 +93,12 @@ pub(crate) struct DaemonOptions {
     pub(crate) informative_errors: bool,
     pub(crate) no_informative_errors: bool,
     pub(crate) log_destination: Option<String>,
+    pub(crate) interpolated_path: Option<String>,
     pub(crate) inetd: bool,
     pub(crate) listen: Vec<String>,
     pub(crate) port: Option<u16>,
+    pub(crate) user: Option<String>,
+    pub(crate) user_path: bool,
     pub(crate) directories: Vec<PathBuf>,
 }
 
@@ -4296,6 +4302,9 @@ pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
         options.strict_paths,
         options.base_path_relaxed,
         options.reuseaddr,
+        options.access_hook.as_deref(),
+        options.detach,
+        options.group.as_deref(),
         &options.enable,
         &options.disable,
         &options.allow_override,
@@ -4303,7 +4312,21 @@ pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
         options.informative_errors,
         options.no_informative_errors,
         options.log_destination.as_deref(),
+        options.interpolated_path.as_deref(),
+        options.user_path,
     );
+    if options.user.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "cannot drop privileges".into(),
+        });
+    }
+    if options.group.is_some() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "--group supplied without --user".into(),
+        });
+    }
     if options.inetd {
         let mut input = io::stdin().lock();
         let mut output = io::stdout();
@@ -4341,6 +4364,11 @@ fn daemon_serve_connection<R: BufRead, W: Write>(
         return Ok(());
     };
     let request = parse_daemon_request(&request)?;
+    if options.interpolated_path.is_some() {
+        write_daemon_access_denied(output, &request.path)?;
+        output.flush()?;
+        return Ok(());
+    }
     if request.service != "git-upload-pack" {
         return Err(CliError::Stderr {
             code: 255,

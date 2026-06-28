@@ -5088,6 +5088,12 @@ pub enum Command {
         reuseaddr: bool,
         #[arg(long = "pid-file", value_hint = ValueHint::FilePath)]
         pid_file: Option<PathBuf>,
+        #[arg(long = "access-hook", value_hint = ValueHint::FilePath)]
+        access_hook: Option<PathBuf>,
+        #[arg(long = "detach", action = ArgAction::SetTrue)]
+        detach: bool,
+        #[arg(long = "group")]
+        group: Option<String>,
         #[arg(long = "enable")]
         enable: Vec<String>,
         #[arg(long = "disable")]
@@ -5102,12 +5108,18 @@ pub enum Command {
         no_informative_errors: bool,
         #[arg(long = "log-destination")]
         log_destination: Option<String>,
+        #[arg(long = "interpolated-path")]
+        interpolated_path: Option<String>,
         #[arg(long = "inetd", action = ArgAction::SetTrue)]
         inetd: bool,
         #[arg(long = "listen")]
         listen: Vec<String>,
         #[arg(long = "port")]
         port: Option<u16>,
+        #[arg(long = "user")]
+        user: Option<String>,
+        #[arg(long = "user-path", action = ArgAction::SetTrue)]
+        user_path: bool,
         #[arg(value_hint = ValueHint::DirPath)]
         directories: Vec<PathBuf>,
     },
