@@ -336,3 +336,35 @@ fn fast_export_documented_value_families_match_stock_git() {
         assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
     }
 }
+
+#[test]
+fn fast_export_selection_progress_and_marks_combinations_match_stock_git() {
+    for args in [
+        &["fast-export", "main"][..],
+        &["fast-export", "refs/heads/main"],
+        &["fast-export", "--all", "HEAD"],
+        &["fast-export", "--all", "refs/heads/main"],
+        &["fast-export", "--progress=0", "--all"],
+        &["fast-export", "--progress=3", "--all"],
+        &["fast-export", "--use-done-feature", "--progress=0", "--all"],
+    ] {
+        assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
+    }
+
+    for args in [
+        &[
+            "fast-export",
+            "--import-marks-if-exists=missing.marks",
+            "--export-marks=marks.txt",
+            "--all",
+        ][..],
+        &[
+            "fast-export",
+            "--export-marks=marks.txt",
+            "--import-marks-if-exists=missing.marks",
+            "--all",
+        ],
+    ] {
+        assert_fast_export_matches_stock_git(args, |_, _| {}, &["marks.txt"]);
+    }
+}
