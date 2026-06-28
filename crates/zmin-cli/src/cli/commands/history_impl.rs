@@ -82,6 +82,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         committer,
         encoding,
         alternate_refs,
+        glob,
         ignore_missing,
         indexed_objects,
         remove_empty,
@@ -92,6 +93,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         boundary,
         first_parent,
         right_only,
+        left_only,
         left_right,
         cherry,
         cherry_pick,
@@ -159,6 +161,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         no_filter,
         max_count,
         max_age,
+        min_age,
         skip,
         since,
         since_as_filter,
@@ -168,6 +171,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         min_parents,
         no_min_parents,
         exclude_first_parent_only,
+        merges,
         exclude_hidden,
         contained,
         advance,
@@ -187,6 +191,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             text: replay_usage_error("exactly one of --onto, --advance, or --revert is required"),
         });
     }
+    let parsed_max_count = parse_log_max_count(max_count.as_deref())?;
     if revision_ranges.is_empty() && !stdin {
         return Err(CliError::Stderr {
             code: 129,
@@ -210,6 +215,8 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             "warning: some rev walking options will be overridden as 'reverse' bit in 'struct rev_info' will be forced"
         );
     }
+    let empty_selection_lane = replay_has_empty_selection_lane(left_only, merges, min_age.as_deref());
+    let glob_multiple_sources = advance.is_some() && glob.is_some();
     let rev_args =
         collect_replay_rev_args(
             branches,
@@ -220,6 +227,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             count,
             exclude,
             alternate_refs,
+            glob,
             abbrev_commit,
             no_abbrev_commit,
             author,
@@ -235,6 +243,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             boundary,
             first_parent,
             right_only,
+            left_only,
             left_right,
             cherry,
             cherry_pick,
@@ -300,8 +309,9 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             show_pulls,
             timestamp,
             no_filter,
-            max_count,
+            parsed_max_count,
             max_age,
+            min_age,
             skip,
             since,
             since_as_filter,
@@ -310,6 +320,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             no_max_parents,
             min_parents,
             no_min_parents,
+            merges,
             exclude_first_parent_only,
             exclude_hidden,
             revision_ranges,
@@ -400,6 +411,18 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             });
         }
     }
+    if glob_multiple_sources {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "cannot advance target with multiple sources because ordering would be ill-defined".into(),
+        });
+    }
+    if empty_selection_lane {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: String::new(),
+        });
+    }
     let revs = collect_rev_list_revs(&repo, &store, all, rev_args).map_err(|error| {
         if replay_needs_commits_error(&error) {
             CliError::Fatal {
@@ -465,6 +488,7 @@ fn collect_replay_rev_args(
     count: bool,
     exclude: Vec<String>,
     alternate_refs: bool,
+    glob: Option<String>,
     abbrev_commit: bool,
     no_abbrev_commit: bool,
     author: Option<String>,
@@ -480,6 +504,7 @@ fn collect_replay_rev_args(
     boundary: bool,
     first_parent: bool,
     right_only: bool,
+    left_only: bool,
     left_right: bool,
     cherry: bool,
     cherry_pick: bool,
@@ -545,8 +570,9 @@ fn collect_replay_rev_args(
     show_pulls: bool,
     timestamp: bool,
     no_filter: bool,
-    max_count: Option<String>,
+    max_count: Option<usize>,
     max_age: Option<String>,
+    min_age: Option<String>,
     skip: Option<usize>,
     since: Option<String>,
     since_as_filter: Option<String>,
@@ -555,6 +581,7 @@ fn collect_replay_rev_args(
     no_max_parents: bool,
     min_parents: Option<String>,
     no_min_parents: bool,
+    merges: bool,
     exclude_first_parent_only: bool,
     exclude_hidden: Option<String>,
     mut revision_ranges: Vec<String>,
@@ -563,6 +590,7 @@ fn collect_replay_rev_args(
     if count
         || !exclude.is_empty()
         || alternate_refs
+        || glob.is_some()
         || abbrev_commit
         || no_abbrev_commit
         || author.is_some()
@@ -578,6 +606,7 @@ fn collect_replay_rev_args(
         || boundary
         || first_parent
         || right_only
+        || left_only
         || left_right
         || cherry
         || cherry_pick
@@ -645,6 +674,7 @@ fn collect_replay_rev_args(
         || quiet
         || max_count.is_some()
         || max_age.is_some()
+        || min_age.is_some()
         || skip.is_some()
         || since.is_some()
         || since_as_filter.is_some()
@@ -653,6 +683,7 @@ fn collect_replay_rev_args(
         || no_max_parents
         || min_parents.is_some()
         || no_min_parents
+        || merges
         || exclude_first_parent_only
         || exclude_hidden.is_some()
     {
@@ -705,6 +736,14 @@ fn replay_usage_error(message: &str) -> String {
          \x20   --ref <branch>        reference to update with result\n\
          \x20   --ref-action <mode>   control ref update behavior (update|print)\n"
     )
+}
+
+fn replay_has_empty_selection_lane(
+    left_only: bool,
+    merges: bool,
+    min_age: Option<&str>,
+) -> bool {
+    left_only || merges || min_age.is_some()
 }
 
 fn replay_commit_chain(

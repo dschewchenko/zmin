@@ -1446,6 +1446,8 @@ pub enum Command {
         encoding: Option<String>,
         #[arg(long = "alternate-refs", action = ArgAction::SetTrue)]
         alternate_refs: bool,
+        #[arg(long = "glob")]
+        glob: Option<String>,
         #[arg(long = "ignore-missing", action = ArgAction::SetTrue)]
         ignore_missing: bool,
         #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
@@ -1466,6 +1468,8 @@ pub enum Command {
         first_parent: bool,
         #[arg(long = "right-only", action = ArgAction::SetTrue)]
         right_only: bool,
+        #[arg(long = "left-only", action = ArgAction::SetTrue)]
+        left_only: bool,
         #[arg(long = "left-right", action = ArgAction::SetTrue)]
         left_right: bool,
         #[arg(long = "cherry", action = ArgAction::SetTrue)]
@@ -1616,9 +1620,12 @@ pub enum Command {
         #[arg(long = "no-filter", action = ArgAction::SetTrue)]
         no_filter: bool,
         #[arg(long = "max-count")]
+        #[arg(short = 'n')]
         max_count: Option<String>,
         #[arg(long = "max-age")]
         max_age: Option<String>,
+        #[arg(long = "min-age")]
+        min_age: Option<String>,
         #[arg(long = "skip")]
         skip: Option<usize>,
         #[arg(long = "since", alias = "after")]
@@ -1637,6 +1644,8 @@ pub enum Command {
         no_min_parents: bool,
         #[arg(long = "exclude-first-parent-only", action = ArgAction::SetTrue)]
         exclude_first_parent_only: bool,
+        #[arg(long = "merges", action = ArgAction::SetTrue)]
+        merges: bool,
         #[arg(long = "exclude-hidden")]
         exclude_hidden: Option<String>,
         #[arg(long = "contained", action = ArgAction::SetTrue)]
