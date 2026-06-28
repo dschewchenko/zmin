@@ -1150,3 +1150,143 @@ fn rebase_onto_replays_topic_like_stock_git() {
     );
     assert_eq!(git(zmin_repo.path(), ["status", "--short"]), "");
 }
+
+#[test]
+fn rebase_merge_backend_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool); 12] = [
+        ("merge_short_upstream", &["rebase", "-m", "origin/main"], false, false),
+        ("merge_long_upstream", &["rebase", "--merge", "origin/main"], false, false),
+        ("no_stat_short_upstream", &["rebase", "-n", "origin/main"], false, false),
+        ("no_stat_long_upstream", &["rebase", "--no-stat", "origin/main"], false, false),
+        ("merge_short_branch", &["rebase", "-m", "origin/main", "topic"], true, false),
+        ("merge_long_branch", &["rebase", "--merge", "origin/main", "topic"], true, false),
+        ("no_stat_short_branch", &["rebase", "-n", "origin/main", "topic"], true, false),
+        ("no_stat_long_branch", &["rebase", "--no-stat", "origin/main", "topic"], true, false),
+        (
+            "merge_short_onto",
+            &["rebase", "-m", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "merge_long_onto",
+            &["rebase", "--merge", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_stat_short_onto",
+            &["rebase", "-n", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_stat_long_onto",
+            &["rebase", "--no-stat", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(zmin_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
+
+#[test]
+fn rebase_quiet_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool); 6] = [
+        ("quiet_short_upstream", &["rebase", "-q", "origin/main"], false, false),
+        ("quiet_long_upstream", &["rebase", "--quiet", "origin/main"], false, false),
+        ("quiet_short_branch", &["rebase", "-q", "origin/main", "topic"], true, false),
+        ("quiet_long_branch", &["rebase", "--quiet", "origin/main", "topic"], true, false),
+        (
+            "quiet_short_onto",
+            &["rebase", "-q", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "quiet_long_onto",
+            &["rebase", "--quiet", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(zmin_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}

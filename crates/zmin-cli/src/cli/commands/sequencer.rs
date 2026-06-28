@@ -102,7 +102,10 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             abort,
             continue_,
             interactive,
+            merge: _merge,
+            no_stat: _no_stat,
             onto,
+            quiet,
             args,
         } => super::sequencer_commands::rebase(
             abort,
@@ -111,6 +114,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             args,
             false,
             interactive,
+            quiet,
         ),
         _ => unreachable!("non-sequencer command dispatched to sequencer"),
     }

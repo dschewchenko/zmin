@@ -11945,6 +11945,7 @@ fatal: the remote end hung up unexpectedly\n"
             vec![target],
             pull_rebase_mode == PullRebaseMode::RebaseMerges,
             pull_rebase_mode == PullRebaseMode::Interactive,
+            quiet,
         );
     }
     if !ff_only

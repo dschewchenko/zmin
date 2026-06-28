@@ -1499,6 +1499,7 @@ pub(crate) fn sequencer_command(options: SequencerCommandOptions<'_>) -> Result<
         strategy_option: options.strategy_option,
         gpg_sign: options.gpg_sign,
         no_gpg_sign: options.no_gpg_sign,
+        print_summary: true,
         commits: options.commits,
     })
 }
@@ -1524,6 +1525,7 @@ pub(crate) struct SequencerPickOptions {
     pub(crate) strategy_option: Vec<String>,
     pub(crate) gpg_sign: Option<String>,
     pub(crate) no_gpg_sign: bool,
+    pub(crate) print_summary: bool,
     pub(crate) commits: Vec<String>,
 }
 
@@ -1549,6 +1551,7 @@ fn default_sequencer_pick_options(commits: Vec<String>) -> SequencerPickOptions 
         strategy_option: Vec::new(),
         gpg_sign: None,
         no_gpg_sign: false,
+        print_summary: true,
         commits,
     }
 }
@@ -1674,16 +1677,18 @@ pub(crate) fn sequencer_pick(options: SequencerPickOptions) -> Result<()> {
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     fs::write(repo.git_dir.join("AUTO_MERGE"), tree.to_hex() + "\n")?;
-    print_sequencer_commit_summary(
-        &repo,
-        &store,
-        &id,
-        &message,
-        &author,
-        &current_head.tree,
-        &tree,
-        !options.revert || !options.edit || options.no_edit,
-    )?;
+    if options.print_summary {
+        print_sequencer_commit_summary(
+            &repo,
+            &store,
+            &id,
+            &message,
+            &author,
+            &current_head.tree,
+            &tree,
+            !options.revert || !options.edit || options.no_edit,
+        )?;
+    }
     Ok(())
 }
 
@@ -1966,6 +1971,7 @@ pub(crate) fn rebase(
     args: Vec<String>,
     preserve_merges: bool,
     interactive: bool,
+    quiet: bool,
 ) -> Result<()> {
     if abort && continue_ {
         return Err(CliError::Fatal {
@@ -2016,7 +2022,9 @@ pub(crate) fn rebase(
     if onto.is_none() && is_ancestor_commit_cached(&commit_cache, &head, &upstream_id)? {
         checkout_worktree(&repo, &store, &upstream_id)?;
         update_head_to_commit(&refs, &upstream_id)?;
-        println!("Fast-forwarded to {upstream}");
+        if !quiet {
+            println!("Fast-forwarded to {upstream}");
+        }
         return Ok(());
     }
     let revs = RevListRevs {
@@ -2058,7 +2066,9 @@ pub(crate) fn rebase(
         for (index, item) in todo.iter().enumerate() {
             match item.command {
                 RebaseTodoCommand::Pick => {
-                    sequencer_pick(default_sequencer_pick_options(vec![item.commit.to_hex()]))?
+                    let mut options = default_sequencer_pick_options(vec![item.commit.to_hex()]);
+                    options.print_summary = false;
+                    sequencer_pick(options)?
                 }
                 RebaseTodoCommand::Reword => {
                     let message = edit_rebase_commit_message(&repo, &commit_cache, &item.commit)?;
@@ -2069,6 +2079,7 @@ pub(crate) fn rebase(
                         &item.commit,
                         Some(message),
                         true,
+                        false,
                     )?;
                 }
                 RebaseTodoCommand::Squash => {
@@ -2085,6 +2096,7 @@ pub(crate) fn rebase(
                         &item.commit,
                         None,
                         true,
+                        false,
                     )?;
                     write_rebase_edit_state(&repo, &head, &todo[index + 1..])?;
                     eprintln!(
@@ -2103,13 +2115,18 @@ pub(crate) fn rebase(
         }
     } else {
         let mut rebased_head = None;
-        for commit in commits {
+        let total = commits.len();
+        for (index, commit) in commits.into_iter().enumerate() {
+            if !quiet {
+                eprint!("Rebasing ({}/{})\r", index + 1, total);
+            }
             rebased_head = Some(rebase_pick_commit_with_message(
                 &repo,
                 &store,
                 &commit_cache,
                 &commit,
                 None,
+                false,
                 false,
             )?);
         }
@@ -2129,7 +2146,10 @@ pub(crate) fn rebase(
             final_index.write_to_path(&repo.index_path)?;
         }
     }
-    println!("Successfully rebased and updated HEAD.");
+    if !quiet {
+        let target = current_branch_ref(&refs)?.unwrap_or_else(|| "HEAD".to_owned());
+        eprintln!("Successfully rebased and updated {target}.");
+    }
     Ok(())
 }
 
@@ -2322,7 +2342,9 @@ fn rebase_continue() -> Result<()> {
     for item in items {
         match item.command {
             RebaseTodoCommand::Pick | RebaseTodoCommand::Edit => {
-                sequencer_pick(default_sequencer_pick_options(vec![item.commit.to_hex()]))?;
+                let mut options = default_sequencer_pick_options(vec![item.commit.to_hex()]);
+                options.print_summary = false;
+                sequencer_pick(options)?;
             }
             RebaseTodoCommand::Reword => {
                 let message = edit_rebase_commit_message(&repo, &commit_cache, &item.commit)?;
@@ -2333,6 +2355,7 @@ fn rebase_continue() -> Result<()> {
                     &item.commit,
                     Some(message),
                     true,
+                    false,
                 )?;
             }
             RebaseTodoCommand::Squash => {
@@ -2501,6 +2524,7 @@ fn rebase_pick_commit_with_message(
     picked_id: &ObjectId,
     message_override: Option<Vec<u8>>,
     update_worktree: bool,
+    print_summary: bool,
 ) -> Result<ObjectId> {
     let tree_cache = TreeObjectCache::new(store);
     if update_worktree && !worktree_clean(repo, store)? {
@@ -2542,7 +2566,9 @@ fn rebase_pick_commit_with_message(
         .encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
-    println!("[{}] {}", short_object_id(&id), commit_subject(&message));
+    if print_summary {
+        println!("[{}] {}", short_object_id(&id), commit_subject(&message));
+    }
     Ok(id)
 }
 

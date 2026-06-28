@@ -4321,8 +4321,14 @@ pub enum Command {
         continue_: bool,
         #[arg(short = 'i', long = "interactive", action = ArgAction::SetTrue)]
         interactive: bool,
+        #[arg(short = 'm', long = "merge", action = ArgAction::SetTrue)]
+        merge: bool,
+        #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
+        no_stat: bool,
         #[arg(long = "onto")]
         onto: Option<String>,
+        #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

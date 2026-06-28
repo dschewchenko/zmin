@@ -22,6 +22,39 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`rebase` merge-backend/no-stat/quiet family across the existing direct
+upstream, branch-argument, and `--onto` replay lanes. This batch added
+eighteen exact stock-Git rows and promoted six documented `rebase` option
+pairs into the reviewed-complete census set: `--merge`, `--no-stat`,
+`--quiet`, `-m`, `-n`, and `-q`. The runtime closure stayed intentionally
+bounded: Zmin now accepts the explicit merge-backend spellings and the
+quiet/no-stat output-control spellings on the currently supported helper-free
+local `rebase` lanes without widening into `--rebase-merges`, `--stat`,
+`--verbose`, autosquash, autostash, or other broader rebase surfaces. The
+implementation stays focused on the missing closure only: the rebase schema
+now exposes those spellings, the replay path suppresses pick summaries during
+rebase, and successful merge-backend replays now emit stock-compatible
+progress/final diagnostics on stderr while `--quiet` stays silent. Focused
+gates were
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -q -p zmin-cli --test git_sequencer_compat rebase_merge_backend_option_family_matches_stock_git -- --exact`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -q -p zmin-cli --test git_sequencer_compat rebase_quiet_option_family_matches_stock_git -- --exact`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -q -p zmin-cli --test git_sequencer_compat rebase_replays_linear_topic_like_stock_git -- --exact`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -q -p zmin-cli --test git_submodule_compat submodule_update_merge_rebase_and_dissociate_match_stock_git -- --exact`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -q -p zmin-cli --test git_transport_local_compat pull_rebase_merges_local_remote_preserves_merge_topology_like_stock_git -- --exact`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7439` matrix rows, `6520` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3015/3212` complete documented
+option pairs. `rebase` now sits at `9/57` reviewed-complete documented
+option pairs with `28/28` classified rows, `24` stock-matching rows, and `4`
+invalid-input rows. The overall backlog head remains `send-email` (`62`),
+followed by `rebase` (`48`), `p4` (`28`), `svn` (`25`), `cvsimport` (`14`),
+`cvsexportcommit` (`11`), `archimport` (`7`), then the single-pair tails
+`log` and `apply`; the next default follow-up should stay on `rebase` and
+keep the largest safe helper-free batch bias.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `pack-objects` compression-and-filter tail across the existing explicit
 basename `--all` lane. This batch added four exact stock-Git rows and
 promoted the final two documented `pack-objects` option pairs into the
