@@ -11,6 +11,8 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-28 the next batch is a helper-free local `fast-import` repeated-option acceptance expansion across the already modeled raw timestamp commit lane and the current done-terminated simple commit lane. The selected rows add `+16` exact stock-Git rows for repeated documented forms that stock Git accepts on the current bounded local oracle: `--date-format=(raw,raw-permissive)` in both orders, repeated `--stats`/`--quiet` with order-sensitive last-mode behavior, repeated `--force`, repeated `--done`, repeated `--allow-unsafe-features`, repeated `--active-branches=(0,2)`, repeated `--depth=(1,2)`, repeated `--big-file-threshold=2`, repeated `--cat-blob-fd=(0,9)`, and repeated `--max-pack-size=(1,2m)` in both orders. The runtime closure stays intentionally narrow: this slice only removes clap-level rejection for repeated helper-free fast-import flags and values, resolves the effective runtime value from the current command line, and preserves stock warning/statistics behavior for repeated numeric `--max-pack-size` forms. Expected delta is `+16` matrix rows, `+0` complete documented option pairs, `+0` complete command matrices, `+16` verified rows, `+0` invalid-input rows, and `+0` represented documented option pairs. Current census counts will be refreshed after verification.
+
 As of 2026-06-28 the latest completed batch is a helper-free local
 `rev-list` represented-tail expansion across the existing two-commit local
 history lane, the patch-equivalent symmetric-difference lane, and the current

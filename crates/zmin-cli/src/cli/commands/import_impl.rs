@@ -245,6 +245,7 @@ pub(crate) struct FastImportOptions {
     pub(crate) import_marks: Option<PathBuf>,
     pub(crate) import_marks_if_exists: Option<PathBuf>,
     pub(crate) max_pack_size: Option<String>,
+    pub(crate) max_pack_size_warning: Option<String>,
     pub(crate) no_relative_marks: bool,
     pub(crate) relative_marks: Option<String>,
     pub(crate) rewrite_submodules_from: Option<String>,
@@ -928,6 +929,7 @@ fn fast_import_modeled_noop_surface(options: &FastImportOptions) {
         options.depth.as_deref(),
         options.big_file_threshold.as_deref(),
         options.cat_blob_fd.as_deref(),
+        options.max_pack_size.as_deref(),
         options.no_relative_marks,
     );
 }
@@ -950,6 +952,22 @@ pub(crate) fn resolve_fast_import_stats_mode(
         Some("stats") => (false, true),
         _ => (quiet, stats),
     }
+}
+
+pub(crate) fn resolve_fast_import_last_value<T: Clone>(values: &[T]) -> Option<T> {
+    values.last().cloned()
+}
+
+pub(crate) fn resolve_fast_import_max_pack_size_warning(raw_args: &[String]) -> Option<String> {
+    let mut warning_value = None;
+    for arg in raw_args.iter().skip(1) {
+        if let Some(value) = arg.strip_prefix("--max-pack-size=")
+            && value.as_bytes().iter().all(|byte| byte.is_ascii_digit())
+        {
+            warning_value = Some(value.to_owned());
+        }
+    }
+    warning_value
 }
 
 fn fast_import_preflight(git_dir: &Path, options: &FastImportOptions) -> Result<()> {
@@ -1477,9 +1495,7 @@ impl<'a> FastImportParser<'a> {
             return Ok(());
         }
         let mut err = io::stderr().lock();
-        if let Some(value) = self.options.max_pack_size.as_deref()
-            && value.as_bytes().iter().all(|byte| byte.is_ascii_digit())
-        {
+        if let Some(value) = self.options.max_pack_size_warning.as_deref() {
             writeln!(
                 err,
                 "warning: max-pack-size is now in bytes, assuming --max-pack-size={value}m"

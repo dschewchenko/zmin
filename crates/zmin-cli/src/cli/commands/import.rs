@@ -86,24 +86,33 @@ pub(crate) fn dispatch(
             rewrite_submodules_from,
             rewrite_submodules_to,
         } => {
+            let date_format = super::import_commands::resolve_fast_import_last_value(&date_format);
             let (quiet, stats) =
-                super::import_commands::resolve_fast_import_stats_mode(raw_args, quiet, stats);
+                super::import_commands::resolve_fast_import_stats_mode(raw_args, quiet > 0, stats > 0);
+            let max_pack_size =
+                super::import_commands::resolve_fast_import_last_value(&max_pack_size);
             super::import_commands::fast_import(super::import_commands::FastImportOptions {
                 date_format,
                 quiet,
                 stats,
-                force,
-                done,
-                allow_unsafe_features,
-                active_branches,
-                depth,
-                big_file_threshold,
-                cat_blob_fd,
+                force: force > 0,
+                done: done > 0,
+                allow_unsafe_features: allow_unsafe_features > 0,
+                active_branches: super::import_commands::resolve_fast_import_last_value(
+                    &active_branches,
+                ),
+                depth: super::import_commands::resolve_fast_import_last_value(&depth),
+                big_file_threshold: super::import_commands::resolve_fast_import_last_value(
+                    &big_file_threshold,
+                ),
+                cat_blob_fd: super::import_commands::resolve_fast_import_last_value(&cat_blob_fd),
                 export_marks,
                 export_pack_edges,
                 import_marks,
                 import_marks_if_exists,
                 max_pack_size,
+                max_pack_size_warning:
+                    super::import_commands::resolve_fast_import_max_pack_size_warning(raw_args),
                 no_relative_marks,
                 relative_marks,
                 rewrite_submodules_from,

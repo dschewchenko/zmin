@@ -871,3 +871,131 @@ done
         );
     }
 }
+
+#[test]
+fn fast_import_repeated_option_families_match_stock_git() {
+    let raw_date_stream = "\
+commit refs/heads/main
+author A U Thor <author@example.test> 0 +0000
+committer C O Mitter <committer@example.test> 1 +0000
+data <<EOF
+raw date
+EOF
+M 100644 inline a.txt
+data <<EOF
+contents
+EOF
+";
+    for args in [
+        &["fast-import", "--date-format=raw", "--date-format=raw-permissive"][..],
+        &["fast-import", "--date-format=raw-permissive", "--date-format=raw"],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, raw_date_stream);
+        let zmin_output =
+            command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, raw_date_stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+
+    let stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    for args in [
+        &["fast-import", "--done", "--done"][..],
+        &["fast-import", "--force", "--force"],
+        &["fast-import", "--allow-unsafe-features", "--allow-unsafe-features"],
+        &["fast-import", "--active-branches=0", "--active-branches=2"],
+        &["fast-import", "--active-branches=2", "--active-branches=0"],
+        &["fast-import", "--depth=1", "--depth=2"],
+        &["fast-import", "--depth=2", "--depth=1"],
+        &["fast-import", "--big-file-threshold=1", "--big-file-threshold=2"],
+        &["fast-import", "--cat-blob-fd=9", "--cat-blob-fd=0"],
+        &["fast-import", "--cat-blob-fd=0", "--cat-blob-fd=9"],
+        &["fast-import", "--stats", "--quiet", "--stats"],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+
+    for args in [&["fast-import", "--quiet", "--stats", "--quiet"][..]] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(zmin_output.2, git_output.2, "stderr for {args:?}");
+        assert!(zmin_output.2.is_empty(), "quiet should suppress stats for {args:?}");
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+
+    for args in [
+        &["fast-import", "--max-pack-size=1", "--max-pack-size=2m"][..],
+        &["fast-import", "--max-pack-size=2m", "--max-pack-size=1"],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_warning_and_statistics_stderr(
+                &zmin_output.2,
+                "warning: max-pack-size is now in bytes, assuming --max-pack-size=1m"
+            ),
+            normalize_fast_import_warning_and_statistics_stderr(
+                &git_output.2,
+                "warning: max-pack-size is now in bytes, assuming --max-pack-size=1m"
+            ),
+            "stderr for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+}

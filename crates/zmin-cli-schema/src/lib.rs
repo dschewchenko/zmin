@@ -4750,26 +4750,26 @@ pub enum Command {
         refs: Vec<String>,
     },
     FastImport {
-        #[arg(long = "date-format")]
-        date_format: Option<String>,
-        #[arg(long = "quiet", action = ArgAction::SetTrue)]
-        quiet: bool,
-        #[arg(long = "stats", action = ArgAction::SetTrue)]
-        stats: bool,
-        #[arg(long = "force", action = ArgAction::SetTrue)]
-        force: bool,
-        #[arg(long = "done", action = ArgAction::SetTrue)]
-        done: bool,
-        #[arg(long = "allow-unsafe-features", action = ArgAction::SetTrue)]
-        allow_unsafe_features: bool,
-        #[arg(long = "active-branches")]
-        active_branches: Option<String>,
-        #[arg(long = "depth")]
-        depth: Option<String>,
-        #[arg(long = "big-file-threshold")]
-        big_file_threshold: Option<String>,
-        #[arg(long = "cat-blob-fd")]
-        cat_blob_fd: Option<String>,
+        #[arg(long = "date-format", action = ArgAction::Append)]
+        date_format: Vec<String>,
+        #[arg(long = "quiet", action = ArgAction::Count)]
+        quiet: u8,
+        #[arg(long = "stats", action = ArgAction::Count)]
+        stats: u8,
+        #[arg(long = "force", action = ArgAction::Count)]
+        force: u8,
+        #[arg(long = "done", action = ArgAction::Count)]
+        done: u8,
+        #[arg(long = "allow-unsafe-features", action = ArgAction::Count)]
+        allow_unsafe_features: u8,
+        #[arg(long = "active-branches", action = ArgAction::Append)]
+        active_branches: Vec<String>,
+        #[arg(long = "depth", action = ArgAction::Append)]
+        depth: Vec<String>,
+        #[arg(long = "big-file-threshold", action = ArgAction::Append)]
+        big_file_threshold: Vec<String>,
+        #[arg(long = "cat-blob-fd", action = ArgAction::Append)]
+        cat_blob_fd: Vec<String>,
         #[arg(long = "export-marks", value_hint = ValueHint::FilePath)]
         export_marks: Option<PathBuf>,
         #[arg(long = "export-pack-edges", value_hint = ValueHint::FilePath)]
@@ -4778,8 +4778,8 @@ pub enum Command {
         import_marks: Option<PathBuf>,
         #[arg(long = "import-marks-if-exists", value_hint = ValueHint::FilePath)]
         import_marks_if_exists: Option<PathBuf>,
-        #[arg(long = "max-pack-size")]
-        max_pack_size: Option<String>,
+        #[arg(long = "max-pack-size", action = ArgAction::Append)]
+        max_pack_size: Vec<String>,
         #[arg(long = "no-relative-marks", action = ArgAction::SetTrue)]
         no_relative_marks: bool,
         #[arg(long = "relative-marks")]
