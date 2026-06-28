@@ -5,9 +5,9 @@ use std::io::{BufRead, Read, Write};
 use std::path::Path;
 
 use common::{
-    configure_identity, git, git_args, git_init, git_with_env, git_with_stdin, git_with_stdin_args,
-    read_named_files, run_zmin, run_zmin_args, run_zmin_with_stdin, run_zmin_with_stdin_args,
-    write_file,
+    command_output, configure_identity, git, git_args, git_init, git_with_env, git_with_stdin,
+    git_with_stdin_args, read_named_files, run_zmin, run_zmin_args, run_zmin_with_stdin,
+    run_zmin_with_stdin_args, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -197,6 +197,25 @@ fn serve_fake_imap(
             writeln!(writer, "{tag} BAD unsupported\r").expect("bad response");
         }
     }
+}
+
+fn normalize_send_email_patch_output(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .lines()
+        .map(|line| {
+            if line.starts_with("Date: ") {
+                return "Date: <normalized-date>".to_owned();
+            }
+            if line.starts_with("Message-ID: ") {
+                return "Message-ID: <normalized-message-id>".to_owned();
+            }
+            if line.starts_with("X-Mailer: ") {
+                return "X-Mailer: <normalized-x-mailer>".to_owned();
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -692,6 +711,60 @@ fn send_email_sends_patch_to_configured_smtp_server() {
     assert!(message.contains("To: receiver@example.test"));
     assert!(message.contains("Subject: [PATCH"));
     assert!(message.contains("diff --git"));
+}
+
+#[test]
+fn send_email_override_option_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    let patch = git(repo.path(), ["format-patch", "-1"]);
+    let patch = patch.trim().to_owned();
+    let server = FakeSmtpServer::new(2);
+    let port = server.port.to_string();
+    git(repo.path(), ["config", "sendemail.smtpserver", "ignored.example.test"]);
+    git(repo.path(), ["config", "sendemail.smtpserverport", "2525"]);
+    git(repo.path(), ["config", "sendemail.from", "sender@example.test"]);
+    git(repo.path(), ["config", "sendemail.to", "receiver@example.test"]);
+
+    let smtp_port_arg = format!("--smtp-server-port={port}");
+    let args = [
+        "send-email",
+        "--suppress-cc=author",
+        "--from=bench@example.test",
+        "--to=to1@example.test",
+        "--cc=cc1@example.test",
+        "--bcc=bcc1@example.test",
+        "--reply-to=reply@example.test",
+        "--subject=Custom subject",
+        "--smtp-server=127.0.0.1",
+        smtp_port_arg.as_str(),
+        patch.as_str(),
+    ];
+
+    let stock = command_output("git", repo.path(), &args, "git send-email");
+    let zmin = command_output(zmin_bin(), repo.path(), &args, "zmin send-email");
+
+    assert_eq!(stock.0, zmin.0);
+    assert_eq!(stock.2, zmin.2);
+    assert_eq!(
+        normalize_send_email_patch_output(&stock.1),
+        normalize_send_email_patch_output(&zmin.1)
+    );
+
+    let messages = server.sent_messages();
+    assert_eq!(messages.len(), 2);
+    let stock_message = String::from_utf8_lossy(&messages[0]).to_string();
+    let zmin_message = String::from_utf8_lossy(&messages[1]).to_string();
+    assert_eq!(
+        normalize_send_email_patch_output(&stock_message),
+        normalize_send_email_patch_output(&zmin_message)
+    );
 }
 
 #[test]

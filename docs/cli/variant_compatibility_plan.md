@@ -22,6 +22,41 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`send-email` explicit SMTP/recipient override family across the existing
+fake-SMTP patch-sending lane. This batch added nine exact stock-Git rows and
+promoted nine documented `send-email` option pairs into the reviewed-complete
+census set: `--bcc`, `--cc`, `--from`, `--reply-to`, `--smtp-server`,
+`--smtp-server-port`, `--subject`, `--suppress-cc`, and `--to`. The runtime
+closure stayed intentionally bounded: Zmin now matches the current stock
+single-patch local SMTP lane where command-line sender, primary recipients,
+Cc/Bcc envelope expansion, Reply-To, and SMTP endpoint overrides replace the
+config-backed defaults while `--suppress-cc=author` disables patch-author
+auto-cc expansion and `--subject` is accepted without changing the stock patch
+subject. This does not widen send-email into compose mode, confirm/validate
+policy, header/alias command execution, threading controls, sendmail fallback,
+or authentication/TLS option families. The implementation stays focused on the
+missing closure only: the send-email schema now exposes the nine spellings, the
+patch-sending path renders the stock-shaped outgoing header block for this
+bounded lane, and the exact compat test normalizes only dynamic Date,
+Message-ID, and X-Mailer lines while comparing stock-vs-Zmin SMTP transcript
+stdout and captured message payloads. Focused gates were
+`cargo test -q -p zmin-cli --test git_mail_tools_compat -- --exact`,
+`cargo check -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7547` matrix rows, `6628` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3057/3212` complete documented
+option pairs. `send-email` now sits at `11/64` reviewed-complete documented
+option pairs with `27/27` classified rows, `26` stock-matching rows, and `1`
+invalid-input row. The overall backlog head remains `send-email` (`53`),
+followed by `p4` (`28`), `svn` (`25`), `rebase` (`15`), `cvsimport` (`14`),
+`cvsexportcommit` (`11`), `archimport` (`7`), then the single-pair tails
+`log` and `apply`; the next default follow-up should keep the large-batch bias
+and either continue another bounded helper-free `send-email` family or switch
+to the still-larger foreign-SCM schema clusters if they prove safer.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `rebase` apply-backend and diffstat-output family across the existing direct
 upstream, branch-argument, and `--onto` replay lanes. This batch added fifteen
 exact stock-Git rows and promoted five documented `rebase` option pairs into

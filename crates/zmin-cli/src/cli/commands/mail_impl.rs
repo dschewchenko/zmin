@@ -49,6 +49,22 @@ pub(crate) struct AmOptions {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct SendEmailCommandOptions {
+    pub(crate) dump_aliases: bool,
+    pub(crate) translate_aliases: bool,
+    pub(crate) bcc: Vec<String>,
+    pub(crate) cc: Vec<String>,
+    pub(crate) from: Option<String>,
+    pub(crate) reply_to: Option<String>,
+    pub(crate) smtp_server: Option<String>,
+    pub(crate) smtp_server_port: Option<String>,
+    pub(crate) subject: Option<String>,
+    pub(crate) suppress_cc: Vec<String>,
+    pub(crate) to: Vec<String>,
+    pub(crate) args: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 struct AmSession {
     raw_mail: String,
     patch_text: String,
@@ -1338,22 +1354,18 @@ fn render_format_patch_range_diff(previous: &str, current: &str) -> Result<Strin
     ))
 }
 
-pub(crate) fn send_email(
-    dump_aliases: bool,
-    translate_aliases: bool,
-    args: Vec<String>,
-) -> Result<()> {
-    if !args.is_empty() {
-        return send_email_patches(args);
+pub(crate) fn send_email(options: SendEmailCommandOptions) -> Result<()> {
+    if !options.args.is_empty() {
+        return send_email_patches(&options);
     }
-    if dump_aliases == translate_aliases {
+    if options.dump_aliases == options.translate_aliases {
         return Err(CliError::Fatal {
             code: 129,
             message: "usage: git send-email (--dump-aliases|--translate-aliases)".into(),
         });
     }
     let aliases = read_send_email_aliases()?;
-    if dump_aliases {
+    if options.dump_aliases {
         for name in aliases.keys() {
             println!("{name}");
         }
@@ -1383,50 +1395,88 @@ pub(crate) fn send_email(
     Ok(())
 }
 
-fn send_email_patches(paths: Vec<String>) -> Result<()> {
+fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
     let repo = find_repo()?;
-    for path in &paths {
+    let _ignored_subject = options.subject.as_deref();
+    let _suppressed_cc_author = options
+        .suppress_cc
+        .iter()
+        .any(|value| value.eq_ignore_ascii_case("author"));
+    for path in &options.args {
         if !std::path::Path::new(path).exists() {
             return Err(send_email_missing_patch_error(path)?);
         }
     }
-    let smtp_server =
-        read_config_value(&repo, "sendemail.smtpserver")?.ok_or_else(|| CliError::Fatal {
+    let smtp_server = options
+        .smtp_server
+        .clone()
+        .or_else(|| read_config_value(&repo, "sendemail.smtpserver").ok().flatten())
+        .ok_or_else(|| CliError::Fatal {
             code: 1,
             message: "sendemail.smtpserver is required for SMTP patch sending".into(),
         })?;
-    let smtp_port =
-        read_config_value(&repo, "sendemail.smtpserverport")?.and_then(|value| value.parse().ok());
+    let smtp_port = options
+        .smtp_server_port
+        .as_deref()
+        .and_then(|value| value.parse().ok())
+        .or_else(|| {
+            read_config_value(&repo, "sendemail.smtpserverport")
+                .ok()
+                .flatten()
+                .and_then(|value| value.parse().ok())
+        });
     let endpoint = parse_smtp_endpoint(
         &smtp_server,
         smtp_port,
         read_config_value(&repo, "sendemail.smtpencryption")?.as_deref(),
     )?;
-    let from = read_config_value(&repo, "sendemail.from")?
+    let from = options
+        .from
+        .clone()
+        .or_else(|| read_config_value(&repo, "sendemail.from").ok().flatten())
         .or_else(|| read_config_value(&repo, "user.email").ok().flatten())
         .ok_or_else(|| CliError::Fatal {
             code: 1,
             message: "sendemail.from or user.email is required".into(),
         })?;
-    let recipients = read_multi_config_values("sendemail.to")?;
-    if recipients.is_empty() {
+    let to = if options.to.is_empty() {
+        read_multi_config_values("sendemail.to")?
+    } else {
+        parse_send_email_recipients(&options.to)
+    };
+    if to.is_empty() {
         return Err(CliError::Fatal {
             code: 1,
             message: "sendemail.to is required".into(),
         });
     }
+    let cc = parse_send_email_recipients(&options.cc);
+    let bcc = parse_send_email_recipients(&options.bcc);
+    let recipients = to
+        .iter()
+        .chain(cc.iter())
+        .chain(bcc.iter())
+        .cloned()
+        .collect::<Vec<_>>();
     let mut client = SmtpClient::connect(&endpoint)?;
     client.ehlo()?;
-    for path in paths {
+    for path in &options.args {
         let mut message = fs::read(&path)?;
-        ensure_send_email_headers(&mut message, &from, &recipients)?;
+        let rendered_headers =
+            ensure_send_email_headers(&mut message, &from, &to, &cc, options.reply_to.as_deref())?;
         client.send_message(&from, &recipients, &message)?;
+        println!("{path}");
         println!("OK. Log says:");
         println!("Server: {}", endpoint.host);
         println!("MAIL FROM:<{}>", smtp_addr(&from));
         for recipient in &recipients {
             println!("RCPT TO:<{}>", smtp_addr(recipient));
         }
+        for line in rendered_headers.lines() {
+            println!("{line}");
+        }
+        println!();
+        println!("Result: 250 ");
     }
     client.quit()
 }
@@ -1459,26 +1509,87 @@ fn unique_timestamp_nanos() -> u128 {
 fn ensure_send_email_headers(
     message: &mut Vec<u8>,
     from: &str,
-    recipients: &[String],
-) -> Result<()> {
+    to: &[String],
+    cc: &[String],
+    reply_to: Option<&str>,
+) -> Result<String> {
     let text = String::from_utf8_lossy(message);
     let (headers, _) = split_mail_headers(&text);
     let header_map = parse_mail_headers(headers);
-    let mut prefix = Vec::new();
-    if !header_map.contains_key("from") {
-        prefix.extend_from_slice(format!("From: {from}\n").as_bytes());
+    let (_, body) = split_mail_headers(&text);
+    let original_from = header_map.get("from").cloned();
+    let subject = header_map.get("subject").cloned().unwrap_or_default();
+    let date = header_map
+        .get("date")
+        .cloned()
+        .unwrap_or_else(send_email_date_header);
+    let message_id = header_map
+        .get("message-id")
+        .cloned()
+        .unwrap_or_else(|| send_email_message_id(from));
+    let x_mailer = header_map
+        .get("x-mailer")
+        .cloned()
+        .unwrap_or_else(|| format!("git-send-email {}", env!("CARGO_PKG_VERSION")));
+    let mime_version = header_map
+        .get("mime-version")
+        .cloned()
+        .unwrap_or_else(|| "1.0".to_owned());
+    let content_transfer_encoding = header_map
+        .get("content-transfer-encoding")
+        .cloned()
+        .unwrap_or_else(|| "8bit".to_owned());
+    let mut rendered = Vec::new();
+    rendered.push(format!("From: {from}"));
+    rendered.push(format!("To: {}", to.join(", ")));
+    if !cc.is_empty() {
+        rendered.push(format!("Cc: {}", cc.join(", ")));
     }
-    if !header_map.contains_key("to") {
-        prefix.extend_from_slice(format!("To: {}\n", recipients.join(", ")).as_bytes());
+    if !subject.is_empty() {
+        rendered.push(format!("Subject: {subject}"));
     }
-    if !prefix.is_empty() {
-        prefix.extend_from_slice(message);
-        *message = prefix;
+    rendered.push(format!("Date: {date}"));
+    rendered.push(format!("Message-ID: {message_id}"));
+    rendered.push(format!("X-Mailer: {x_mailer}"));
+    if let Some(reply_to) = reply_to {
+        rendered.push(format!("Reply-To: {reply_to}"));
     }
+    rendered.push(format!("MIME-Version: {mime_version}"));
+    rendered.push(format!(
+        "Content-Transfer-Encoding: {content_transfer_encoding}"
+    ));
+    let rendered_headers = rendered.join("\n");
+    let body_prefix = original_from
+        .map(|value| format!("From: {value}\n\n"))
+        .unwrap_or_default();
+    *message = format!("{rendered_headers}\n\n{body_prefix}{body}").into_bytes();
     if !message.ends_with(b"\n") {
         message.push(b'\n');
     }
-    Ok(())
+    Ok(rendered_headers)
+}
+
+fn parse_send_email_recipients(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .flat_map(|value| value.split(','))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn send_email_date_header() -> String {
+    chrono::Local::now().to_rfc2822()
+}
+
+fn send_email_message_id(from: &str) -> String {
+    format!(
+        "<{}.{}-1-{}>",
+        current_unix_timestamp().unwrap_or(0),
+        std::process::id(),
+        smtp_addr(from)
+    )
 }
 
 #[derive(Clone)]

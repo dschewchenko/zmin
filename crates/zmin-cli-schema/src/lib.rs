@@ -5024,6 +5024,24 @@ pub enum Command {
         dump_aliases: bool,
         #[arg(long = "translate-aliases", action = ArgAction::SetTrue)]
         translate_aliases: bool,
+        #[arg(long = "bcc")]
+        bcc: Vec<String>,
+        #[arg(long = "cc")]
+        cc: Vec<String>,
+        #[arg(long = "from")]
+        from: Option<String>,
+        #[arg(long = "reply-to")]
+        reply_to: Option<String>,
+        #[arg(long = "smtp-server")]
+        smtp_server: Option<String>,
+        #[arg(long = "smtp-server-port")]
+        smtp_server_port: Option<String>,
+        #[arg(long = "subject")]
+        subject: Option<String>,
+        #[arg(long = "suppress-cc")]
+        suppress_cc: Vec<String>,
+        #[arg(long = "to")]
+        to: Vec<String>,
         args: Vec<String>,
     },
     ImapSend {
