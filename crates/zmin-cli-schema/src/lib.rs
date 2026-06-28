@@ -4081,6 +4081,8 @@ pub enum Command {
         parents: bool,
         #[arg(long = "first-parent", action = ArgAction::SetTrue)]
         first_parent: bool,
+        #[arg(long = "follow", action = ArgAction::SetTrue)]
+        follow: bool,
         #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
         no_diff_merges: bool,
         #[arg(long = "diff-merges")]
@@ -4190,6 +4192,8 @@ pub enum Command {
         abbrev_commit: bool,
         #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
         no_abbrev_commit: bool,
+        #[arg(long = "graph", action = ArgAction::SetTrue)]
+        graph: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
         objects: bool,
         #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
@@ -4273,6 +4277,10 @@ pub enum Command {
         perl_regexp: bool,
         #[arg(long = "format")]
         format: Option<String>,
+        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+        show_signature: bool,
+        #[arg(long = "log-size", action = ArgAction::SetTrue)]
+        log_size: bool,
         #[arg(long = "mailmap", action = ArgAction::SetTrue)]
         mailmap: bool,
         #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]

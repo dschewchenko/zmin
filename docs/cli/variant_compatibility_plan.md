@@ -21,39 +21,38 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-28 the latest completed batch is a helper-free local
-`rev-list` represented-tail expansion across the already modeled two-commit
-local history lane, the patch-equivalent symmetric-difference lane, and the
-current helper-free raw-output surface. This batch added nine exact stock-Git
-rows and promoted the same nine documented option pairs into the represented
-census set: `rev-list --bisect`, `--bisect-all`, `--bisect-vars`,
-`--cherry`, `--disk-usage`, `--graph`, `--header`, `--objects-edge`, and
-`--objects-edge-aggressive`.
-The runtime closure stayed intentionally bounded: `rev-list` now accepts and
-matches stock Git for the current helper-free midpoint and distance reporting
-lanes, plain `--cherry` symmetric-difference marker output, commit-only
-`--disk-usage` byte totals on the loose-object local lane, raw `--header`
-records with stock NUL separators, linear `--graph` prefix output, and the
-current no-excluded-edge `--objects-edge*` object listing lane by treating
-those spellings as the bounded stock object-walk surface already modeled here.
+As of 2026-06-28 the latest completed batch is a helper-free local `log`
+represented-tail expansion across the already modeled unsigned two-commit
+linear lane and the current non-rename single-path history lane. This batch
+added four exact stock-Git rows and promoted four documented option pairs into
+the represented census set: `log --follow`, `--graph`, `--log-size`, and
+`--show-signature`.
+The runtime closure stayed intentionally bounded: `--follow` is accepted on
+the current helper-free non-rename single-path lane and preserves stock output
+there; `--show-signature` preserves stock output on the current unsigned local
+lane; `--graph` matches the current stock helper-free linear lane by prefixing
+each rendered commit row with a single graph marker; and `--log-size` matches
+the current stock explicit-format lane by printing the message-size prelude
+before each rendered commit. This slice intentionally does not widen into
+rename following or `-L` line-history tracing yet.
 
 Focused verification was
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_left_right_cherry_boundary_family_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat rev_list_documented_tail_batch_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_documented_unsigned_tail_batch_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(rev-list|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
 and `git diff --check`.
 
 Actual durable readiness/status after this batch:
 
 - complete command matrices: `146 / 151`
 - complete documented command-option pairs: `2774 / 3212`
-- represented documented command-option pairs: `2783 / 3212`
-- matrix rows: `7088`
-- verified rows: `6222`
+- represented documented command-option pairs: `2803 / 3212`
+- matrix rows: `7109`
+- verified rows: `6243`
 - invalid-input rows: `841`
 - open or partial exact rows: `0`
 - remaining to fix or verify rows: `438`
@@ -61,16 +60,16 @@ Actual durable readiness/status after this batch:
 
 Per-command position on the touched surface:
 
-- `rev-list`: `108 / 117` reviewed-complete documented option pairs,
-  `117 / 117` represented documented option pairs, `169` written rows, `169`
-  classified rows, `156` stock-matching rows, `13` invalid-input rows, and
+- `log`: `126 / 131` reviewed-complete documented option pairs,
+  `130 / 131` represented documented option pairs, `245` written rows, `245`
+  classified rows, `221` stock-matching rows, `24` invalid-input rows, and
   `0` exact-open rows
 
 This is an implementation-plus-expansion batch rather than a reviewed-complete
-closure: it converts the remaining `rev-list` schema gaps into exact stock-Git
-evidence on bounded helper-free lanes, but those nine documented options still
-sit in `doc_option_expansion_required` because wider value, combination, and
-state coverage is still unmodeled.
+closure: the four new `log` spellings now have exact stock-Git evidence on the
+current bounded helper-free lanes, but they still sit in
+`doc_option_expansion_required` because wider value, combination, and state
+coverage is still unmodeled, and `log -L` remains outside schema.
 
 As of 2026-06-28 the previous completed batch is a helper-free local
 `show` / `rev-parse` / `index-pack` documented-tail closure across already
@@ -3936,46 +3935,40 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free local `fast-export`
-represented-family expansion across the already modeled one-commit local lane,
-the two-commit nested-path stream lane, and the marks-file exact-output lane.
-Zmin now matches stock Git for sixteen documented `fast-export` options on the
-current bounded surface: `--export-marks`, `--fake-missing-tagger`,
-`--full-tree`, `--import-marks`, `--mark-tags`, `--no-data`, `--progress`,
-`--reencode`, `--reference-excluded-parents`, `--refspec`,
-`--show-original-ids`, `--signed-tags`, `--tag-of-filtered-object`,
-`--use-done-feature`, `-C`, and `-M`. The runtime closure stayed
-intentionally bounded: no-tag, no-copy, no-rename, identity-refspec, and
-missing-import-marks-if-exists lanes are accepted as stock-compatible no-op
-surfaces; the exact-output lane now matches stock `fast-export` for changed
-path emission between commits instead of always replaying the full tree;
-`--full-tree` adds stock `deleteall` framing; `--show-original-ids`,
-`--use-done-feature`, `--no-data`, `--progress=1`, `--export-marks`, and
-`--import-marks` each match the stock stream shape on the current local
-fixtures without widening into anonymized output or generalized mark reuse.
-Focused gates were
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_documented_option_batch_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+The latest completed slice is a helper-free local `log` represented-tail
+expansion across the already modeled unsigned two-commit linear lane and the
+current non-rename single-path history lane. Zmin now matches stock Git for
+four more documented `log` options on the current bounded surface:
+`--follow`, `--graph`, `--log-size`, and `--show-signature`. The runtime
+closure stayed intentionally bounded: `--follow` is accepted on the current
+helper-free non-rename single-path lane and preserves stock output there;
+`--show-signature` preserves stock output on the current unsigned local lane;
+`--graph` matches the current stock helper-free linear lane by prefixing each
+rendered commit row with a single graph marker; and `--log-size` matches the
+current stock explicit-format lane by printing the message-size prelude before
+each rendered commit. This slice intentionally does not widen into rename
+following or `-L` line-history tracing yet. Focused gates were
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_documented_unsigned_tail_batch_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(fast-export|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
 `git diff --check`.
-Actual delta from the prior `rev-list` represented-tail expansion is `+17`
-matrix rows, `+0` complete documented option pairs, `+16` represented
-documented option pairs, `+17` verified rows, `+0` invalid-input rows, and
-`+0` complete command matrices. Current census counts are `7105` matrix rows,
-`6239` verified rows, `841` invalid-input rows, `0` exact-open rows,
+Actual delta from the prior `fast-export` represented-family expansion is `+4`
+matrix rows, `+0` complete documented option pairs, `+4` represented
+documented option pairs, `+4` verified rows, `+0` invalid-input rows, and
+`+0` complete command matrices. Current census counts are `7109` matrix rows,
+`6243` verified rows, `841` invalid-input rows, `0` exact-open rows,
 `146/151` complete command matrices, `2774/3212` complete documented option
-pairs, and `2799/3212` represented documented option pairs. Per-command
-position on the touched surface is now: `fast-export` `0/18` reviewed-complete
-documented option pairs with `24/24` classified written rows, `21`
-stock-matching rows, `3` invalid-input rows, and `16/18` represented
-documented option pairs. The next default follow-up should either finish the
-cheap reviewed-complete closure candidates (`log` plus maybe `apply`) or
-decide whether the remaining `fast-export` anonymize family deserves a second
-modeled batch before returning to the larger backlog head.
+pairs, and `2803/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `log` `126/131` reviewed-complete
+documented option pairs with `245/245` classified written rows, `221`
+stock-matching rows, `24` invalid-input rows, and `130/131` represented
+documented option pairs. The only remaining `log` gap is `-L`, so the next
+default follow-up should decide whether to take the heavier line-history lane
+or switch back to a different high-throughput backlog head.
 
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the

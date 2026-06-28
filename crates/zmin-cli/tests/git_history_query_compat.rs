@@ -4068,6 +4068,32 @@ fn log_output_surface_tail_matches_stock_git() {
 }
 
 #[test]
+fn log_documented_unsigned_tail_batch_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "one\ntwo\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+
+    for args in [
+        ["log", "--graph", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--log-size", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--show-signature", "--format=%s", "HEAD"].as_slice(),
+        ["log", "--follow", "--format=%s", "a.txt"].as_slice(),
+    ] {
+        assert_eq!(
+            run_zmin_args(repo.path(), args),
+            git_args(repo.path(), args),
+            "args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn rev_list_documented_tail_batch_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

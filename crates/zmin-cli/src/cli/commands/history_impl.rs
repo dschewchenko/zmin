@@ -6352,6 +6352,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) no_merges: bool,
     pub(crate) parents: bool,
     pub(crate) first_parent: bool,
+    pub(crate) follow: bool,
     pub(crate) no_diff_merges: bool,
     pub(crate) diff_merges: Option<&'a str>,
     pub(crate) separate_merges: bool,
@@ -6405,6 +6406,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) clear_decorations: bool,
     pub(crate) abbrev_commit: bool,
     pub(crate) no_abbrev_commit: bool,
+    pub(crate) graph: bool,
     pub(crate) objects: bool,
     pub(crate) objects_edge: bool,
     pub(crate) objects_edge_aggressive: bool,
@@ -6437,6 +6439,8 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
     pub(crate) format: Option<&'a str>,
+    pub(crate) show_signature: bool,
+    pub(crate) log_size: bool,
     pub(crate) mailmap: bool,
     pub(crate) no_mailmap: bool,
     pub(crate) use_mailmap: bool,
@@ -6875,11 +6879,13 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_stdin = options.stdin;
     let _accepted_single_worktree = options.single_worktree;
     let _accepted_no_filter = options.no_filter;
+    let _accepted_follow = options.follow;
     let _accepted_decorate_refs = options.decorate_refs;
     let _accepted_decorate_refs_exclude = options.decorate_refs_exclude;
     let _accepted_no_decorate = options.no_decorate;
     let _accepted_objects_edge = options.objects_edge;
     let _accepted_objects_edge_aggressive = options.objects_edge_aggressive;
+    let _accepted_show_signature = options.show_signature;
     let _accepted_mailmap = options.mailmap;
     let _accepted_no_mailmap = options.no_mailmap;
     let _accepted_use_mailmap = options.use_mailmap;
@@ -7103,6 +7109,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let _accepted_show_pulls = options.show_pulls;
     let _accepted_simplify_merges = options.simplify_merges;
     let _accepted_children = options.children;
+    let _accepted_graph = options.graph;
     let _accepted_objects = options.objects;
     let _accepted_filter = options.filter.as_deref();
     let history_order = options.history_order();
@@ -7414,6 +7421,12 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             date_mode,
             options.standard_notes && !options.show_notes,
         )?;
+        if options.log_size {
+            writeln!(out, "log size {}", log_message_size(commit.message.as_slice()))?;
+        }
+        if options.graph {
+            out.write_all(b"* ")?;
+        }
         out.write_all(rendered.as_bytes())?;
         let root_patch_separator =
             options.root && commit.parents.is_empty() && format.separates_patch();
@@ -7464,6 +7477,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn log_message_size(message: &[u8]) -> usize {
+    let mut len = message.len();
+    while len > 0 && message[len - 1] == b'\n' {
+        len -= 1;
+    }
+    len
 }
 
 fn log_merge_diff_enabled(
@@ -9691,6 +9712,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         no_merges: false,
         parents: false,
         first_parent: options.first_parent,
+        follow: false,
         no_diff_merges: false,
         diff_merges: None,
         separate_merges: options.separate_merges,
@@ -9751,6 +9773,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         clear_decorations: false,
         abbrev_commit: options.abbrev_commit,
         no_abbrev_commit: options.no_abbrev_commit,
+        graph: false,
         objects: false,
         objects_edge: false,
         objects_edge_aggressive: false,
@@ -9783,6 +9806,8 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         fixed_strings: false,
         perl_regexp: false,
         format: options.format,
+        show_signature: options.show_signature,
+        log_size: false,
         mailmap: false,
         no_mailmap: false,
         use_mailmap: false,
