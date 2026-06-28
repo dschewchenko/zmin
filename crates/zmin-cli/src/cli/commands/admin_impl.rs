@@ -42,6 +42,10 @@ pub(crate) fn not_ready_current_git_command(name: &str, _args: Vec<String>) -> R
     })
 }
 
+pub(crate) fn help_command(args: Vec<String>) -> Result<()> {
+    passthrough_stock_git_command("help", &args)
+}
+
 pub(crate) fn hook(command: HookCommand) -> Result<()> {
     match command {
         HookCommand::Run {
@@ -192,6 +196,95 @@ pub(crate) struct InstawebCommandOptions {
 
 pub(crate) fn instaweb_command(options: InstawebCommandOptions) -> Result<()> {
     instaweb(options)
+}
+
+fn passthrough_stock_git_command(command: &str, args: &[String]) -> Result<()> {
+    let output = ProcessCommand::new(stock_git_binary())
+        .arg(command)
+        .args(args)
+        .output()
+        .map_err(CliError::Io)?;
+    std::io::stdout()
+        .lock()
+        .write_all(&output.stdout)
+        .map_err(CliError::Io)?;
+    std::io::stderr()
+        .lock()
+        .write_all(&output.stderr)
+        .map_err(CliError::Io)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(CliError::Exit(output.status.code().unwrap_or(1)))
+    }
+}
+
+fn stock_git_binary() -> &'static Path {
+    static STOCK_GIT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
+}
+
+fn resolve_stock_git_binary() -> PathBuf {
+    for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
+        if let Ok(value) = std::env::var(key)
+            && !value.trim().is_empty()
+        {
+            let path = PathBuf::from(value);
+            if is_stock_git_binary(&path) {
+                return path;
+            }
+        }
+    }
+    for candidate in stock_git_candidates() {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
+        }
+    }
+    for candidate in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+    {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
+        }
+    }
+    PathBuf::from("/usr/bin/git")
+}
+
+fn stock_git_candidates() -> Vec<PathBuf> {
+    #[cfg(windows)]
+    {
+        vec![
+            PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+            PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![PathBuf::from("/usr/bin/git"), PathBuf::from("/bin/git")]
+    }
+}
+
+fn stock_git_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["git.exe", "git"]
+    } else {
+        vec!["git"]
+    }
+}
+
+fn is_stock_git_binary(path: &Path) -> bool {
+    let Ok(output) = ProcessCommand::new(path).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 fn hook_run(

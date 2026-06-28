@@ -21,7 +21,62 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
-As of 2026-06-28 the latest completed batch is a helper-free local
+As of 2026-06-28 the latest completed batch is a helper-free top-level `help`
+represented-family expansion across the current outside-repository local list
+and viewer-selection lanes. This batch added seventeen exact stock-Git rows
+and promoted the full documented `help` option spelling set into the
+represented census set: `help -a`, `--all`, `-g`, `--guides`, `-c`,
+`--config`, `-m`, `--man`, `-i`, `--info`, `-w`, `--web`,
+`--user-interfaces`, `--developer-interfaces`, `--no-aliases`,
+`--no-external-commands`, and `--verbose`.
+The runtime closure stayed intentionally bounded: top-level `help` is now
+schema-covered and passed through to stock Git before clap parsing, which
+preserves exact stock stdout, stderr, and exit status on the current
+documented local help surfaces; `-a`/`--all`, `-g`/`--guides`,
+`-c`/`--config`, the viewer-selection forms, and the user/developer
+interface listings all match stock Git outside a repository; and
+`--no-aliases`, `--no-external-commands`, and `--verbose` are represented on
+their documented `--all` listing lane. This slice intentionally does not
+widen into invalid naked `--no-aliases` / `--no-external-commands` rejection
+lanes, command-topic rendering, or broader environment-sensitive pager and
+viewer permutations yet.
+
+Focused verification was
+`cargo test -p zmin-cli --test git_help_compat help_documented_option_family_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_help_compat -- --nocapture`,
+`python3 - <<'PY' ... cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json ... PY`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(help|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2831 / 3212`
+- matrix rows: `7138`
+- verified rows: `6271`
+- invalid-input rows: `842`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `help`: `0 / 17` reviewed-complete documented option pairs,
+  `17 / 17` represented documented option pairs, `18` written rows, `18`
+  classified rows, `18` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-expansion batch rather than a reviewed-complete
+closure: the full documented `help` spelling set is now schema-covered and
+represented with exact stock evidence on the current bounded local lanes, but
+all seventeen options still sit in `doc_option_expansion_required` because
+wider combinations, naked invalid forms, topic arguments, and environment-
+sensitive viewer permutations are still unmodeled.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `fast-import` represented-family expansion across the already modeled
 done-terminated simple commit lane, the current marks-file preload/export
 lane, and the current stock crash-shape rejection lane. This batch added
@@ -42,97 +97,6 @@ done-terminated stream and the stock `fatal: stream ends early` crash-shape
 rejection when the terminator is missing. This slice intentionally does not
 widen into relative-marks, export-pack-edges, max-pack-size, depth, or
 submodule-rewrite semantics yet.
-
-Focused verification was
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_documented_option_surface_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_marks_options_match_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat fast_import_done_flag_requires_done_terminator_like_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_date_compat -- --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(fast-import|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
-and `git diff --check`.
-
-Actual durable readiness/status after this batch:
-
-- complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2774 / 3212`
-- represented documented command-option pairs: `2814 / 3212`
-- matrix rows: `7121`
-- verified rows: `6254`
-- invalid-input rows: `842`
-- open or partial exact rows: `0`
-- remaining to fix or verify rows: `438`
-- implemented but unverified rows: `3`
-
-Per-command position on the touched surface:
-
-- `fast-import`: `1 / 19` reviewed-complete documented option pairs,
-  `12 / 19` represented documented option pairs, `23` written rows, `23`
-  classified rows, `19` stock-matching rows, `4` invalid-input rows, and
-  `0` exact-open rows
-
-This is an implementation-plus-expansion batch rather than a reviewed-complete
-closure: the new `fast-import` spellings now have exact stock-Git evidence on
-the current bounded helper-free lanes, but they still sit in
-`doc_option_expansion_required` because wider value, combination, and state
-coverage is still unmodeled, and the remaining schema gaps are `--depth`,
-`--export-pack-edges`, `--max-pack-size`, `--no-relative-marks`,
-`--relative-marks`, `--rewrite-submodules-from`, and
-`--rewrite-submodules-to`.
-
-As of 2026-06-28 the previous completed batch is a helper-free local `log`
-represented-tail expansion across the already modeled unsigned two-commit
-linear lane and the current non-rename single-path history lane. This batch
-added four exact stock-Git rows and promoted four documented option pairs into
-the represented census set: `log --follow`, `--graph`, `--log-size`, and
-`--show-signature`.
-The runtime closure stayed intentionally bounded: `--follow` is accepted on
-the current helper-free non-rename single-path lane and preserves stock output
-there; `--show-signature` preserves stock output on the current unsigned local
-lane; `--graph` matches the current stock helper-free linear lane by prefixing
-each rendered commit row with a single graph marker; and `--log-size` matches
-the current stock explicit-format lane by printing the message-size prelude
-before each rendered commit. This slice intentionally does not widen into
-rename following or `-L` line-history tracing yet.
-
-Focused verification was
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_documented_unsigned_tail_batch_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
-`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
-`tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
-and `git diff --check`.
-
-Actual durable readiness/status after this batch:
-
-- complete command matrices: `146 / 151`
-- complete documented command-option pairs: `2774 / 3212`
-- represented documented command-option pairs: `2803 / 3212`
-- matrix rows: `7109`
-- verified rows: `6243`
-- invalid-input rows: `841`
-- open or partial exact rows: `0`
-- remaining to fix or verify rows: `438`
-- implemented but unverified rows: `3`
-
-Per-command position on the touched surface:
-
-- `log`: `126 / 131` reviewed-complete documented option pairs,
-  `130 / 131` represented documented option pairs, `245` written rows, `245`
-  classified rows, `221` stock-matching rows, `24` invalid-input rows, and
-  `0` exact-open rows
-
-This is an implementation-plus-expansion batch rather than a reviewed-complete
-closure: the four new `log` spellings now have exact stock-Git evidence on the
-current bounded helper-free lanes, but they still sit in
-`doc_option_expansion_required` because wider value, combination, and state
-coverage is still unmodeled, and `log -L` remains outside schema.
 
 As of 2026-06-28 the previous completed batch is a helper-free local
 `show` / `rev-parse` / `index-pack` documented-tail closure across already

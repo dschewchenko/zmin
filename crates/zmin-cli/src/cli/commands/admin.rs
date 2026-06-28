@@ -5,6 +5,7 @@ pub(crate) fn dispatch(
     raw_args: &[String],
 ) -> std::result::Result<(), runtime::CliError> {
     match command {
+        runtime::Command::Help { args } => super::admin_commands::help_command(args),
         runtime::Command::ForEachRepo {
             config,
             keep_going,

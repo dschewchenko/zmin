@@ -166,6 +166,7 @@ pub(crate) fn dispatch(
         command @ (crate::runtime::Command::Column { .. }
         | crate::runtime::Command::Stripspace { .. }) => text::dispatch(command, raw_args),
         command @ (crate::runtime::Command::ForEachRepo { .. }
+        | crate::runtime::Command::Help { .. }
         | crate::runtime::Command::UpdateIndex { .. }
         | crate::runtime::Command::Bugreport { .. }
         | crate::runtime::Command::Diagnose { .. }

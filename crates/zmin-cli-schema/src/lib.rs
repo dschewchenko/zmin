@@ -36,7 +36,8 @@ pub enum CompatFormat {
 #[command(
     name = "zmin",
     version,
-    about = "Thin Git-compatible CLI over zmin-git-core"
+    about = "Thin Git-compatible CLI over zmin-git-core",
+    disable_help_subcommand = true
 )]
 pub struct Args {
     #[command(subcommand)]
@@ -307,6 +308,10 @@ pub enum Command {
         human_readable: u8,
         #[arg(long = "no-human-readable", overrides_with = "human_readable", action = ArgAction::Count)]
         no_human_readable: u8,
+    },
+    Help {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     UnpackFile {
         object: String,

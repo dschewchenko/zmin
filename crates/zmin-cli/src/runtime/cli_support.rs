@@ -579,7 +579,93 @@ fn validate_help_invocation_before_clap(args: &[String]) -> Result<()> {
             text: "No manual entry for gitunknown\n".into(),
         });
     }
+    if args.first().map(String::as_str) == Some("help") {
+        let output = std::process::Command::new(stock_git_binary())
+            .args(args)
+            .output()
+            .map_err(CliError::Io)?;
+        std::io::stdout()
+            .lock()
+            .write_all(&output.stdout)
+            .map_err(CliError::Io)?;
+        std::io::stderr()
+            .lock()
+            .write_all(&output.stderr)
+            .map_err(CliError::Io)?;
+        return Err(CliError::Exit(output.status.code().unwrap_or(1)));
+    }
     Ok(())
+}
+
+fn stock_git_binary() -> &'static std::path::Path {
+    static STOCK_GIT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    STOCK_GIT.get_or_init(resolve_stock_git_binary).as_path()
+}
+
+fn resolve_stock_git_binary() -> std::path::PathBuf {
+    for key in ["ZMIN_STOCK_GIT", "GIT_BIN"] {
+        if let Ok(value) = std::env::var(key)
+            && !value.trim().is_empty()
+        {
+            let path = std::path::PathBuf::from(value);
+            if is_stock_git_binary(&path) {
+                return path;
+            }
+        }
+    }
+    for candidate in stock_git_candidates() {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
+        }
+    }
+    for candidate in std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
+        .flat_map(|dir| stock_git_names().into_iter().map(move |name| dir.join(name)))
+    {
+        if is_stock_git_binary(&candidate) {
+            return candidate;
+        }
+    }
+    std::path::PathBuf::from("/usr/bin/git")
+}
+
+fn stock_git_candidates() -> Vec<std::path::PathBuf> {
+    #[cfg(windows)]
+    {
+        vec![
+            std::path::PathBuf::from(r"C:\Program Files\Git\cmd\git.exe"),
+            std::path::PathBuf::from(r"C:\Program Files\Git\bin\git.exe"),
+            std::path::PathBuf::from(r"C:\Program Files (x86)\Git\cmd\git.exe"),
+            std::path::PathBuf::from(r"C:\Program Files (x86)\Git\bin\git.exe"),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![
+            std::path::PathBuf::from("/usr/bin/git"),
+            std::path::PathBuf::from("/bin/git"),
+        ]
+    }
+}
+
+fn stock_git_names() -> Vec<&'static str> {
+    if cfg!(windows) {
+        vec!["git.exe", "git"]
+    } else {
+        vec!["git"]
+    }
+}
+
+fn is_stock_git_binary(path: &std::path::Path) -> bool {
+    let Ok(output) = std::process::Command::new(path).arg("--version").output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    version.starts_with("git version ") && !version.contains("zmin")
 }
 
 fn validate_unavailable_foreign_helper_invocation_before_clap(args: &[String]) -> Result<()> {
