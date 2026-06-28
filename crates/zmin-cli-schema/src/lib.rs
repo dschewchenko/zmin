@@ -395,6 +395,8 @@ pub enum Command {
         max_input_size: Vec<String>,
     },
     PackObjects {
+        #[arg(short = 'q', action = ArgAction::SetTrue)]
+        quiet: bool,
         #[arg(long = "stdout", action = ArgAction::SetTrue)]
         stdout: bool,
         #[arg(long = "revs", action = ArgAction::SetTrue)]
@@ -403,18 +405,44 @@ pub enum Command {
         all: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
+        #[arg(long = "all-progress-implied", action = ArgAction::SetTrue)]
+        all_progress_implied: bool,
         #[arg(long = "no-progress", action = ArgAction::SetTrue)]
         no_progress: bool,
         #[arg(long = "index-version")]
         index_version: Option<String>,
+        #[arg(long = "honor-pack-keep", action = ArgAction::SetTrue)]
+        honor_pack_keep: bool,
+        #[arg(long = "include-tag", action = ArgAction::SetTrue)]
+        include_tag: bool,
+        #[arg(long = "incremental", action = ArgAction::SetTrue)]
+        incremental: bool,
+        #[arg(long = "keep-true-parents", action = ArgAction::SetTrue)]
+        keep_true_parents: bool,
+        #[arg(long = "local", action = ArgAction::SetTrue)]
+        local: bool,
+        #[arg(long = "non-empty", action = ArgAction::SetTrue)]
+        non_empty: bool,
         #[arg(long = "no-reuse-delta", action = ArgAction::SetTrue)]
         no_reuse_delta: bool,
         #[arg(long = "no-reuse-object", action = ArgAction::SetTrue)]
         no_reuse_object: bool,
+        #[arg(long = "sparse", action = ArgAction::SetTrue)]
+        sparse: bool,
+        #[arg(long = "no-sparse", action = ArgAction::SetTrue)]
+        no_sparse: bool,
+        #[arg(long = "shallow", action = ArgAction::SetTrue)]
+        shallow: bool,
         #[arg(long = "delta-base-offset", action = ArgAction::SetTrue)]
         delta_base_offset: bool,
+        #[arg(long = "threads")]
+        threads: Vec<usize>,
+        #[arg(long = "unpacked", action = ArgAction::SetTrue)]
+        unpacked: bool,
         #[arg(long = "window")]
         window: Option<usize>,
+        #[arg(long = "window-memory")]
+        window_memory: Option<String>,
         #[arg(long = "depth")]
         depth: Option<usize>,
         #[arg(value_hint = ValueHint::FilePath)]
@@ -7069,16 +7097,30 @@ pub struct IndexPackOptions {
 
 #[derive(Debug, Clone)]
 pub struct PackObjectsOptions {
+    pub quiet: bool,
     pub stdout: bool,
     pub revs: bool,
     pub all: bool,
     pub progress: bool,
+    pub all_progress_implied: bool,
     pub no_progress: bool,
     pub index_version: Option<String>,
+    pub honor_pack_keep: bool,
+    pub include_tag: bool,
+    pub incremental: bool,
+    pub keep_true_parents: bool,
+    pub local: bool,
+    pub non_empty: bool,
     pub no_reuse_delta: bool,
     pub no_reuse_object: bool,
+    pub sparse: bool,
+    pub no_sparse: bool,
+    pub shallow: bool,
     pub delta_base_offset: bool,
+    pub threads: Vec<usize>,
+    pub unpacked: bool,
     pub window: Option<usize>,
+    pub window_memory: Option<String>,
     pub depth: Option<usize>,
     pub base_name: Option<PathBuf>,
 }

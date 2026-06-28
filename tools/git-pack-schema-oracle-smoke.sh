@@ -235,6 +235,19 @@ run_repack_gap() {
 }
 
 run_pack_objects_exact pack_objects_all_long --all
+run_pack_objects_exact pack_objects_all_quiet_short --all -q
+run_pack_objects_exact pack_objects_all_progress_implied --all --all-progress-implied
+run_pack_objects_exact pack_objects_honor_pack_keep --all --honor-pack-keep
+run_pack_objects_exact pack_objects_include_tag_noop --all --include-tag
+run_pack_objects_exact pack_objects_incremental_noop --all --incremental
+run_pack_objects_exact pack_objects_keep_true_parents_noop --all --keep-true-parents
+run_pack_objects_exact pack_objects_local_noop --all --local
+run_pack_objects_exact pack_objects_non_empty --all --non-empty
+run_pack_objects_exact pack_objects_shallow_noop --all --shallow
+run_pack_objects_exact pack_objects_sparse_noop --all --sparse
+run_pack_objects_exact pack_objects_no_sparse_noop --all --no-sparse
+run_pack_objects_exact pack_objects_threads_one --all --threads=1
+run_pack_objects_exact pack_objects_window_memory_zero --all --window-memory=0
 run_index_pack_exact index_pack_output_short -o out.idx
 run_index_pack_exact index_pack_verbose_short -v
 run_repack_exact repack_quiet_long --quiet

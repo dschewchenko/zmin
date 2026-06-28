@@ -3920,7 +3920,7 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
     validate_pack_objects_compat_options(&options)?;
     let repo = find_repo()?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let ids = collect_pack_objects_input(&repo, &store, options.revs, options.all)?;
+    let ids = collect_pack_objects_input(&repo, &store, options.revs || options.unpacked, options.all)?;
     let packed_first_store = store.packed_first();
     let encode_options = pack_objects_encode_options(&options);
     let index_version = requested_pack_index_version(options.index_version.as_deref())?;
@@ -3986,11 +3986,24 @@ pub(crate) fn pack_objects(options: PackObjectsOptions) -> Result<()> {
 fn validate_pack_objects_compat_options(options: &PackObjectsOptions) -> Result<()> {
     let _ = requested_pack_index_version(options.index_version.as_deref())?;
     let _ = (
+        options.quiet,
         options.progress,
+        options.all_progress_implied,
         options.no_progress,
+        options.honor_pack_keep,
+        options.include_tag,
+        options.incremental,
+        options.keep_true_parents,
+        options.local,
+        options.non_empty,
         options.no_reuse_delta,
         options.no_reuse_object,
+        options.sparse,
+        options.no_sparse,
+        options.shallow,
         options.delta_base_offset,
+        &options.threads,
+        options.window_memory.as_deref(),
     );
     Ok(())
 }

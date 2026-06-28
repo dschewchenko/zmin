@@ -4468,38 +4468,43 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free local `daemon`
-represented-family expansion across the already modeled git-daemon listen,
-export, timeout, inetd, and path-serving lane. Zmin now matches stock Git for
-eight more documented `daemon` options on the current bounded surface:
-`--enable`, `--disable`, `--allow-override`, `--forbid-override`,
-`--informative-errors`, `--no-informative-errors`, `--log-destination`, and
-`--syslog`. The runtime closure stayed intentionally bounded: these options
-are accepted and threaded through the current local git-daemon serving path,
-but this slice does not widen into `--detach`, user/group switching,
-interpolated paths, access hooks, or other process-management semantics yet.
-Focused gates were
+The latest completed slice is a helper-free local `pack-objects`
+represented-family expansion across the already modeled explicit-basename
+all-refs lane plus the current loose-object stdout lane. Zmin now matches
+stock Git for fourteen more documented `pack-objects` options on the current
+bounded surface: `-q`, `--all-progress-implied`, `--honor-pack-keep`,
+`--include-tag`, `--incremental`, `--keep-true-parents`, `--local`,
+`--no-sparse`, `--non-empty`, `--shallow`, `--sparse`, `--threads`,
+`--unpacked`, and `--window-memory`. The runtime closure stayed intentionally
+bounded: these spellings are accepted and preserve the current local
+pack-integrity lanes without widening into thin packs, filtering, stdin-pack
+selection, max-pack splitting, keep-pack handling, or cruft/unreachable
+semantics yet. Focused gates were
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_pack_integrity_compat pack_objects_unpacked_implies_revs_on_loose_repo_like_stock_git -- --exact --nocapture`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
-`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-daemon-schema-oracle-smoke.sh`,
+`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-pack-schema-oracle-smoke.sh`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(daemon|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(pack-objects|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
 `git diff --check`.
-Actual delta from the prior review-closure batches is `+8` matrix rows, `+8`
-complete documented option pairs, `+8` represented documented option pairs,
-`+8` verified rows, `+0` invalid-input rows, and `+0` complete command
-matrices. Current census counts are `7256` matrix rows, `6374` verified rows,
-`857` invalid-input rows, `0` exact-open rows, `146/151` complete command
-matrices, `2848/3212` complete documented option pairs, and
-`2848/3212` represented documented option pairs. Per-command position on the
-touched surface is now: `daemon` `21/27` reviewed-complete documented option
-pairs with `22/22` classified written rows, `21` stock-matching rows, `1`
-invalid-input row, and `21/27` represented documented option pairs. The
-remaining `daemon` tail is now the narrower process-management family:
-`--access-hook`, `--detach`, `--group`, `--interpolated-path`, `--user`, and
-`--user-path`, so the next default follow-up should switch back to a denser
-high-throughput backlog head unless one of those six unlocks a broader batch.
+Actual delta from the prior daemon batch is `+14` matrix rows, `+14` complete
+documented option pairs, `+14` represented documented option pairs, `+14`
+verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
+Current census counts are `7270` matrix rows, `6388` verified rows, `857`
+invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2862/3212` complete documented option pairs, and
+`2862/3212` represented documented option pairs. Per-command position on the
+touched surface is now: `pack-objects` `24/40` reviewed-complete documented
+option pairs with `34/34` classified written rows, `28` stock-matching rows,
+`6` invalid-input rows, and `24/40` represented documented option pairs. The
+remaining `pack-objects` tail is now the heavier semantic family:
+`--all-progress`, `--compression`, `--cruft`, `--cruft-expiration`,
+`--delta-islands`, `--exclude-promisor-objects`, `--filter`, `--keep-pack`,
+`--keep-unreachable`, `--max-pack-size`, `--missing`, `--no-filter`,
+`--pack-loose-unreachable`, `--stdin-packs`, `--thin`, and
+`--unpack-unreachable`, so the next default follow-up should weigh another
+denser backlog head against this now-smaller but more semantic tail.
 
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the

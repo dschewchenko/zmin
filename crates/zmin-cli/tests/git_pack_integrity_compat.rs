@@ -2305,6 +2305,37 @@ fn pack_objects_stdout_writes_pack_readable_by_stock_git() {
 }
 
 #[test]
+fn pack_objects_unpacked_implies_revs_on_loose_repo_like_stock_git() {
+    let source = git_init();
+    configure_identity(source.path());
+    write_file(source.path(), "a.txt", "one\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "one"]);
+    write_file(source.path(), "a.txt", "two\n");
+    write_file(source.path(), "b.txt", "bee\n");
+    git(source.path(), ["add", "-A"]);
+    git_with_env(source.path(), ["commit", "-m", "two"]);
+
+    let args = ["pack-objects", "--stdout", "--unpacked"];
+    let git_pack = command_stdout_bytes_with_stdin("git", source.path(), &args, b"HEAD\n");
+    let zmin_pack = command_stdout_bytes_with_stdin(zmin_bin(), source.path(), &args, b"HEAD\n");
+    let git_target = git_init();
+    let zmin_target = git_init();
+    git_with_stdin_bytes(git_target.path(), ["unpack-objects", "-q"], &git_pack);
+    git_with_stdin_bytes(zmin_target.path(), ["unpack-objects", "-q"], &zmin_pack);
+
+    let objects = git(source.path(), ["rev-list", "--objects", "HEAD"]);
+    for line in objects.lines() {
+        let id = line.split_whitespace().next().expect("object id");
+        assert_eq!(
+            command_stdout_bytes("git", zmin_target.path(), &["cat-file", "-p", id]),
+            command_stdout_bytes("git", git_target.path(), &["cat-file", "-p", id]),
+            "object content for {id}"
+        );
+    }
+}
+
+#[test]
 fn pack_objects_progress_flags_write_stock_readable_pack() {
     let source = git_init();
     configure_identity(source.path());

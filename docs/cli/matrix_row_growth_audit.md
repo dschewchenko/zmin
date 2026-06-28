@@ -11,6 +11,28 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-28 the latest completed batch is a helper-free local
+`pack-objects` represented-family expansion across the existing explicit-
+basename all-refs lane plus the current loose-object stdout lane. The selected
+change added `+14` matrix rows and promoted fourteen documented
+`pack-objects` option pairs into the reviewed-complete census set: `-q`,
+`--all-progress-implied`, `--honor-pack-keep`, `--include-tag`,
+`--incremental`, `--keep-true-parents`, `--local`, `--no-sparse`,
+`--non-empty`, `--shallow`, `--sparse`, `--threads`, `--unpacked`, and
+`--window-memory`. This was a bounded runtime-and-evidence slice: the parser
+and pack command wiring now accept the current no-op/implied local option
+family without widening into thin-pack generation, filter selection,
+keep-pack, cruft/unreachable handling, or max-pack splitting. Actual delta is
+`+14` matrix rows, `+14` complete documented option pairs, `+14`
+represented documented option pairs, `+14` verified rows, `+0`
+invalid-input rows, and `+0` complete command matrices. Current census counts
+are `7270` matrix rows, `6388` verified rows, `857` invalid-input rows, `0`
+exact-open rows, `146/151` complete command matrices, `2862/3212` complete
+documented option pairs, and `2862/3212` represented documented option pairs.
+Remaining checklist rows fell from `364` to `350`. The guardrail held: the
+new rows came from one coherent helper-free documented option family with
+existing stock-Git evidence, not from a broad oracle import.
+
 As of 2026-06-28 the latest completed batch is a zero-row-growth
 represented-family expansion across the already represented `daemon`
 surface. The selected change added `+8` matrix rows and promoted eight
