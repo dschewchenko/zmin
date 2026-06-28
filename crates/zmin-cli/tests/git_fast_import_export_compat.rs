@@ -402,3 +402,20 @@ fn fast_export_anonymize_map_token_forms_match_stock_git() {
         assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
     }
 }
+
+#[test]
+fn fast_export_duplicate_and_mixed_positional_selection_match_stock_git() {
+    for args in [
+        &["fast-export", "HEAD", "HEAD"][..],
+        &["fast-export", "main", "main"],
+        &["fast-export", "refs/heads/main", "refs/heads/main"],
+        &["fast-export", "HEAD", "main"],
+        &["fast-export", "main", "HEAD"],
+        &["fast-export", "HEAD", "refs/heads/main"],
+        &["fast-export", "refs/heads/main", "HEAD"],
+        &["fast-export", "main", "refs/heads/main"],
+        &["fast-export", "refs/heads/main", "main"],
+    ] {
+        assert_fast_export_matches_stock_git(args, |_, _| {}, &[]);
+    }
+}

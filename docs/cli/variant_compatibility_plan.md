@@ -22,6 +22,61 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`fast-export` duplicate and mixed positional-selection expansion across the
+already modeled helper-free local export lane. This batch added nine exact
+stock-Git rows for bounded duplicate and mixed ref-target permutations:
+`HEAD HEAD`, `main main`, `refs/heads/main refs/heads/main`, `HEAD main`,
+`main HEAD`, `HEAD refs/heads/main`, `refs/heads/main HEAD`,
+`main refs/heads/main`, and `refs/heads/main main`.
+The runtime closure stayed intentionally bounded: this slice does not widen
+into multi-ref export semantics across distinct tips, tag/ref mixtures,
+filtered exports, or transport-sensitive lanes. It proves that on the current
+single-branch helper-free local oracle stock Git collapses duplicate and mixed
+positional forms that resolve to the same branch tip into one export stream,
+and Zmin now matches that collapse without emitting an extra trailing reset.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat fast_export_duplicate_and_mixed_positional_selection_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_fast_import_export_compat -- --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`python3 - <<'PY' ... cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json ... PY`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(fast-export|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2840 / 3212`
+- matrix rows: `7185`
+- verified rows: `6310`
+- invalid-input rows: `850`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `fast-export`: `0 / 18` reviewed-complete documented option pairs,
+  `18 / 18` represented documented option pairs, `64` written rows, `64`
+  classified rows, `56` stock-matching rows, `8` invalid-input rows, and
+  `0` exact-open rows
+
+This remains an implementation-plus-expansion batch rather than a
+reviewed-complete closure: the full documented `fast-export` option spelling
+set is represented with broader exact evidence on the current bounded local
+lanes, but all eighteen options still sit in `doc_option_expansion_required`
+because wider values, combinations, repository states, transports, and
+platform-sensitive lanes are still unmodeled.
+
+The next dense helper-free batch should stay on `fast-export` for further
+review-closure follow-through across the current exact local oracle:
+remaining bounded local value and combination lanes beyond duplicate
+same-target selection now dominate the helper-free tail.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `fast-export` invalid-mode and anonymize-map-token expansion across the
 already modeled helper-free local export lane. This batch added seven exact
 stock-Git rows: invalid value diagnostics for `--progress=bogus`,

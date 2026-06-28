@@ -413,18 +413,20 @@ fn fast_export_refs(repo: &GitRepo, all: bool, refs: Vec<String>) -> Result<Vec<
     } else if refs.is_empty() {
         vec![current_branch_ref(&ref_store)?.unwrap_or_else(|| "HEAD".to_owned())]
     } else {
-        refs.into_iter()
-            .map(|name| {
-                let resolved = if name == "HEAD" {
-                    current_branch_ref(&ref_store)?.unwrap_or(name)
-                } else if name.starts_with("refs/") {
-                    name
-                } else {
-                    format!("refs/heads/{name}")
-                };
-                Ok(resolved)
-            })
-            .collect::<Result<Vec<_>>>()?
+        let mut resolved_refs = Vec::new();
+        for name in refs {
+            let resolved = if name == "HEAD" {
+                current_branch_ref(&ref_store)?.unwrap_or(name)
+            } else if name.starts_with("refs/") {
+                name
+            } else {
+                format!("refs/heads/{name}")
+            };
+            if !resolved_refs.contains(&resolved) {
+                resolved_refs.push(resolved);
+            }
+        }
+        resolved_refs
     };
     names
         .into_iter()
