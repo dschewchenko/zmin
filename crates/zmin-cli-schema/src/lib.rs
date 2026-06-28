@@ -1456,6 +1456,12 @@ pub enum Command {
         single_worktree: bool,
         #[arg(long = "unpacked", action = ArgAction::SetTrue)]
         unpacked: bool,
+        #[arg(long = "bisect-all", action = ArgAction::SetTrue)]
+        bisect_all: bool,
+        #[arg(long = "bisect-vars", action = ArgAction::SetTrue)]
+        bisect_vars: bool,
+        #[arg(long = "boundary", action = ArgAction::SetTrue)]
+        boundary: bool,
         #[arg(long = "first-parent", action = ArgAction::SetTrue)]
         first_parent: bool,
         #[arg(long = "right-only", action = ArgAction::SetTrue)]
@@ -1478,12 +1484,16 @@ pub enum Command {
         objects_edge_aggressive: bool,
         #[arg(long = "show-signature", action = ArgAction::SetTrue)]
         show_signature: bool,
+        #[arg(short = 'g', long = "walk-reflogs", action = ArgAction::SetTrue)]
+        walk_reflogs: bool,
         #[arg(long = "no-walk", action = ArgAction::SetTrue)]
         no_walk: bool,
         #[arg(long = "do-walk", action = ArgAction::SetTrue)]
         do_walk: bool,
         #[arg(long = "no-merges", action = ArgAction::SetTrue)]
         no_merges: bool,
+        #[arg(long = "merge", action = ArgAction::SetTrue)]
+        merge: bool,
         #[arg(long = "dense", action = ArgAction::SetTrue)]
         dense: bool,
         #[arg(long = "sparse", action = ArgAction::SetTrue)]
@@ -1500,12 +1510,20 @@ pub enum Command {
         simplify_by_decoration: bool,
         #[arg(long = "in-commit-order", action = ArgAction::SetTrue)]
         in_commit_order: bool,
+        #[arg(long = "commit-header", action = ArgAction::SetTrue)]
+        commit_header: bool,
+        #[arg(long = "no-commit-header", action = ArgAction::SetTrue)]
+        no_commit_header: bool,
+        #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
+        disk_usage: bool,
         #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
         expand_tabs: bool,
         #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
         no_expand_tabs: bool,
         #[arg(long = "show-linear-break")]
         show_linear_break: Option<String>,
+        #[arg(long = "header", action = ArgAction::SetTrue)]
+        header: bool,
         #[arg(long = "notes", action = ArgAction::SetTrue)]
         notes: bool,
         #[arg(long = "no-notes", action = ArgAction::SetTrue)]
@@ -1522,6 +1540,8 @@ pub enum Command {
         reflog: bool,
         #[arg(long = "bisect", action = ArgAction::SetTrue)]
         bisect: bool,
+        #[arg(long = "grep-reflog")]
+        grep_reflog: Vec<String>,
         #[arg(long = "grep")]
         grep: Vec<String>,
         #[arg(long = "invert-grep", action = ArgAction::SetTrue)]
@@ -1567,8 +1587,34 @@ pub enum Command {
         date: Option<String>,
         #[arg(long = "relative-date", action = ArgAction::SetTrue)]
         relative_date: bool,
+        #[arg(long = "graph", action = ArgAction::SetTrue)]
+        graph: bool,
+        #[arg(long = "object-names", action = ArgAction::SetTrue)]
+        object_names: bool,
+        #[arg(long = "no-object-names", action = ArgAction::SetTrue)]
+        no_object_names: bool,
+        #[arg(long = "exclude-promisor-objects", action = ArgAction::SetTrue)]
+        exclude_promisor_objects: bool,
+        #[arg(long = "filter")]
+        filter: Option<String>,
+        #[arg(long = "filter-print-omitted", action = ArgAction::SetTrue)]
+        filter_print_omitted: bool,
+        #[arg(long = "filter-provided-objects", action = ArgAction::SetTrue)]
+        filter_provided_objects: bool,
+        #[arg(long = "progress")]
+        progress: Option<String>,
+        #[arg(long = "missing")]
+        missing: Option<String>,
+        #[arg(long = "use-bitmap-index", action = ArgAction::SetTrue)]
+        use_bitmap_index: bool,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
+        #[arg(long = "show-pulls", action = ArgAction::SetTrue)]
+        show_pulls: bool,
+        #[arg(long = "timestamp", action = ArgAction::SetTrue)]
+        timestamp: bool,
+        #[arg(long = "no-filter", action = ArgAction::SetTrue)]
+        no_filter: bool,
         #[arg(long = "max-count")]
         max_count: Option<String>,
         #[arg(long = "max-age")]

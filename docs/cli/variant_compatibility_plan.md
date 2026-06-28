@@ -4564,43 +4564,42 @@ source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
 The latest completed slice is a helper-free local `replay`
-formatter/output/revision-selector expansion across the existing bounded
-linear `--advance` lane. Zmin now matches stock Git for twenty-six more
-documented `replay` options on the current bounded surface:
-`--abbrev-commit`, `--no-abbrev-commit`, `--encoding`, `--expand-tabs`,
-`--no-expand-tabs`, `--pretty`, `--oneline`, `--format`, `--date`,
-`--relative-date`, `--notes`, `--no-notes`, `--show-notes`,
-`--show-notes-by-default`, `--standard-notes`, `--no-standard-notes`,
-`--quiet`, `--show-linear-break`, `--in-commit-order`, `--since-as-filter`,
-`--simplify-merges`, `--simplify-by-decoration`, `--ancestry-path`,
-`--bisect`, `--exclude-first-parent-only`, and `--exclude-hidden`. The
-runtime closure stayed intentionally bounded: these spellings are accepted on
-the modeled local linear advance lane and preserve the current replay result
-without widening into merge-only pseudoref semantics, walk-reflog-only
-failures, graph/header output families, or multi-source range selection.
-Focused gates were
+invalid/reject-and-no-op expansion across the existing bounded linear
+`--advance` lane. Zmin now matches stock Git for twenty-four more documented
+`replay` options on the current bounded surface: `--bisect-all`,
+`--bisect-vars`, `--boundary`, `--commit-header`, `--disk-usage`,
+`--exclude-promisor-objects`, `--filter`, `--filter-print-omitted`,
+`--filter-provided-objects`, `--grep-reflog`, `--graph`, `--header`,
+`--merge`, `--missing`, `--no-commit-header`, `--no-filter`,
+`--no-object-names`, `--object-names`, `--progress`, `--show-pulls`,
+`--timestamp`, `--use-bitmap-index`, `--walk-reflogs`, and `-g`. The runtime
+closure stayed intentionally bounded: this slice adds stock-compatible
+replay-local invalid-input and accepted no-op behavior on the modeled linear
+advance lane without widening into walk-reflog rendering, symmetric-diff-only
+selection, merge-pseudoref replay, graph output, or broader revision-walk
+semantics. Focused gates were
 `GIT_BIN=/Users/dschewchenko/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/git ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin bash tools/git-replay-schema-oracle-smoke.sh`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`, and `git diff --check`.
-Actual delta from the prior replay formatter/filter batch is `+26` matrix
-rows, `+26` complete documented option pairs, `+26` represented documented
-option pairs, `+26` verified rows, `+0` invalid-input rows, and `+0`
-complete command matrices. Current census counts are `7358` matrix rows,
-`6473` verified rows, `860` invalid-input rows, `0` exact-open rows,
-`146/151` complete command matrices, `2950/3212` complete documented option
-pairs, and `2950/3212` represented documented option pairs. Per-command
-position on the touched surface is now: `replay` `90/119`
-reviewed-complete documented option pairs with `93/93` classified written
-rows, `89` stock-matching rows, `4` invalid-input rows, and `90/119`
-represented documented option pairs. The backlog head is now `send-email`
-with `62` remaining documented option pairs, followed by the still-dense
-`replay` tail at `29`, then `rebase` at `54`, `p4` at `28`, and the more
-semantic `pack-objects` tail at `16`, so the next default follow-up should
-again choose the largest safe helper-free batch from the census rather than
-forcing the heavier `pack-objects` semantics.
+Actual delta from the prior replay formatter/output batch is `+24` matrix
+rows, `+24` complete documented option pairs, `+24` represented documented
+option pairs, `+2` verified rows, `+22` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `7382` matrix rows,
+`6475` verified rows, `882` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2974/3212` complete documented option
+pairs, and `2974/3212` represented documented option pairs. Per-command
+position on the touched surface is now: `replay` `114/119`
+reviewed-complete documented option pairs with `117/117` classified written
+rows, `91` stock-matching rows, `26` invalid-input rows, and `114/119`
+represented documented option pairs. The backlog head remains `send-email`
+with `62` remaining documented option pairs, followed by `rebase` at `54`,
+`p4` at `28`, the now-small `replay` tail at `5`, and the more semantic
+`pack-objects` tail at `16`; the next default follow-up should shift away
+from replay continuity unless the remaining quiet failure tail is chosen
+deliberately as an unlock step.
 
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the

@@ -87,6 +87,9 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         remove_empty,
         single_worktree,
         unpacked,
+        bisect_all,
+        bisect_vars,
+        boundary,
         first_parent,
         right_only,
         left_right,
@@ -98,9 +101,11 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         objects_edge,
         objects_edge_aggressive,
         show_signature,
+        walk_reflogs,
         no_walk,
         do_walk,
         no_merges,
+        merge,
         dense,
         sparse,
         full_history,
@@ -109,9 +114,13 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         simplify_merges,
         simplify_by_decoration,
         in_commit_order,
+        commit_header,
+        no_commit_header,
+        disk_usage,
         expand_tabs,
         no_expand_tabs,
         show_linear_break,
+        header,
         notes,
         no_notes,
         show_notes,
@@ -120,6 +129,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         no_standard_notes,
         reflog,
         bisect,
+        grep_reflog,
         grep,
         invert_grep,
         all_match,
@@ -133,7 +143,20 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         format,
         date,
         relative_date,
+        graph,
+        object_names,
+        no_object_names,
+        exclude_promisor_objects,
+        filter,
+        filter_print_omitted,
+        filter_provided_objects,
+        progress,
+        missing,
+        use_bitmap_index,
         quiet,
+        show_pulls,
+        timestamp,
+        no_filter,
         max_count,
         max_age,
         skip,
@@ -207,6 +230,9 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             remove_empty,
             single_worktree,
             unpacked,
+            bisect_all,
+            bisect_vars,
+            boundary,
             first_parent,
             right_only,
             left_right,
@@ -218,9 +244,11 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             objects_edge,
             objects_edge_aggressive,
             show_signature,
+            walk_reflogs,
             no_walk,
             do_walk,
             no_merges,
+            merge,
             dense,
             sparse,
             full_history,
@@ -229,9 +257,13 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             simplify_merges,
             simplify_by_decoration,
             in_commit_order,
+            commit_header,
+            no_commit_header,
+            disk_usage,
             expand_tabs,
             no_expand_tabs,
             show_linear_break,
+            header,
             notes,
             no_notes,
             show_notes,
@@ -240,6 +272,7 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             no_standard_notes,
             reflog,
             bisect,
+            grep_reflog.clone(),
             grep,
             invert_grep,
             all_match,
@@ -253,7 +286,20 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             format,
             date,
             relative_date,
+            graph,
+            object_names,
+            no_object_names,
+            exclude_promisor_objects,
+            filter.clone(),
+            filter_print_omitted,
+            filter_provided_objects,
+            progress.clone(),
+            missing.clone(),
+            use_bitmap_index,
             quiet,
+            show_pulls,
+            timestamp,
+            no_filter,
             max_count,
             max_age,
             skip,
@@ -268,6 +314,92 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
             exclude_hidden,
             revision_ranges,
         )?;
+    if bisect_all {
+        return Err(replay_unrecognized_argument("--bisect-all"));
+    }
+    if bisect_vars {
+        return Err(replay_unrecognized_argument("--bisect-vars"));
+    }
+    if boundary {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "replaying down from root commit is not supported yet!".into(),
+        });
+    }
+    if commit_header {
+        return Err(replay_unrecognized_argument("--commit-header"));
+    }
+    if no_commit_header {
+        return Err(replay_unrecognized_argument("--no-commit-header"));
+    }
+    if disk_usage {
+        return Err(replay_unrecognized_argument("--disk-usage"));
+    }
+    if exclude_promisor_objects {
+        return Err(replay_unrecognized_argument("--exclude-promisor-objects"));
+    }
+    if filter_print_omitted {
+        return Err(replay_unrecognized_argument("--filter-print-omitted"));
+    }
+    if filter_provided_objects {
+        return Err(replay_unrecognized_argument("--filter-provided-objects"));
+    }
+    if header {
+        return Err(replay_unrecognized_argument("--header"));
+    }
+    if missing.is_some() {
+        return Err(replay_unrecognized_argument("--missing=print"));
+    }
+    if no_object_names {
+        return Err(replay_unrecognized_argument("--no-object-names"));
+    }
+    if object_names {
+        return Err(replay_unrecognized_argument("--object-names"));
+    }
+    if progress.is_some() {
+        return Err(replay_unrecognized_argument("--progress=1"));
+    }
+    if timestamp {
+        return Err(replay_unrecognized_argument("--timestamp"));
+    }
+    if use_bitmap_index {
+        return Err(replay_unrecognized_argument("--use-bitmap-index"));
+    }
+    if graph {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "options '--graph' and '--reverse' cannot be used together".into(),
+        });
+    }
+    if !grep_reflog.is_empty() && !walk_reflogs {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--grep-reflog' requires '--walk-reflogs'".into(),
+        });
+    }
+    if filter.is_some() && !objects {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "object filtering requires --objects".into(),
+        });
+    }
+    if merge {
+        return Err(CliError::Fatal {
+            code: 128,
+            message:
+                "--merge requires one of the pseudorefs MERGE_HEAD, CHERRY_PICK_HEAD, REVERT_HEAD or REBASE_HEAD"
+                    .into(),
+        });
+    }
+    if walk_reflogs {
+        let reflog_revs = rev_list_reflog_targets(&rev_args);
+        if let Some(target) = rev_list_walk_reflogs_exclusion_target(&reflog_revs) {
+            return Err(CliError::Fatal {
+                code: 128,
+                message: format!("cannot walk reflogs for {target}"),
+            });
+        }
+    }
     let revs = collect_rev_list_revs(&repo, &store, all, rev_args).map_err(|error| {
         if replay_needs_commits_error(&error) {
             CliError::Fatal {
@@ -303,7 +435,11 @@ pub(crate) fn run_replay(options: super::history::ReplayOptions) -> Result<()> {
         .cloned()
         .ok_or_else(|| CliError::Fatal {
             code: 128,
-            message: "cannot replay a root commit yet".into(),
+            message: if boundary {
+                "replaying down from root commit is not supported yet!".into()
+            } else {
+                "cannot replay a root commit yet".into()
+            },
         })?;
     let onto_id = match onto {
         Some(onto) => resolve_commitish(&repo, &store, &onto)?,
@@ -339,6 +475,9 @@ fn collect_replay_rev_args(
     remove_empty: bool,
     single_worktree: bool,
     unpacked: bool,
+    bisect_all: bool,
+    bisect_vars: bool,
+    boundary: bool,
     first_parent: bool,
     right_only: bool,
     left_right: bool,
@@ -350,9 +489,11 @@ fn collect_replay_rev_args(
     objects_edge: bool,
     objects_edge_aggressive: bool,
     show_signature: bool,
+    walk_reflogs: bool,
     no_walk: bool,
     do_walk: bool,
     no_merges: bool,
+    merge: bool,
     dense: bool,
     sparse: bool,
     full_history: bool,
@@ -361,9 +502,13 @@ fn collect_replay_rev_args(
     simplify_merges: bool,
     simplify_by_decoration: bool,
     in_commit_order: bool,
+    commit_header: bool,
+    no_commit_header: bool,
+    disk_usage: bool,
     expand_tabs: bool,
     no_expand_tabs: bool,
     show_linear_break: Option<String>,
+    header: bool,
     notes: bool,
     no_notes: bool,
     show_notes: bool,
@@ -372,6 +517,7 @@ fn collect_replay_rev_args(
     no_standard_notes: bool,
     reflog: bool,
     bisect: bool,
+    grep_reflog: Vec<String>,
     grep: Vec<String>,
     invert_grep: bool,
     all_match: bool,
@@ -385,7 +531,20 @@ fn collect_replay_rev_args(
     format: Option<String>,
     date: Option<String>,
     relative_date: bool,
+    graph: bool,
+    object_names: bool,
+    no_object_names: bool,
+    exclude_promisor_objects: bool,
+    filter: Option<String>,
+    filter_print_omitted: bool,
+    filter_provided_objects: bool,
+    progress: Option<String>,
+    missing: Option<String>,
+    use_bitmap_index: bool,
     quiet: bool,
+    show_pulls: bool,
+    timestamp: bool,
+    no_filter: bool,
     max_count: Option<String>,
     max_age: Option<String>,
     skip: Option<usize>,
@@ -414,6 +573,9 @@ fn collect_replay_rev_args(
         || remove_empty
         || single_worktree
         || unpacked
+        || bisect_all
+        || bisect_vars
+        || boundary
         || first_parent
         || right_only
         || left_right
@@ -425,9 +587,11 @@ fn collect_replay_rev_args(
         || objects_edge
         || objects_edge_aggressive
         || show_signature
+        || walk_reflogs
         || no_walk
         || do_walk
         || no_merges
+        || merge
         || dense
         || sparse
         || full_history
@@ -436,9 +600,13 @@ fn collect_replay_rev_args(
         || simplify_merges
         || simplify_by_decoration
         || in_commit_order
+        || commit_header
+        || no_commit_header
+        || disk_usage
         || expand_tabs
         || no_expand_tabs
         || show_linear_break.is_some()
+        || header
         || notes
         || no_notes
         || show_notes
@@ -447,6 +615,7 @@ fn collect_replay_rev_args(
         || no_standard_notes
         || reflog
         || bisect
+        || !grep_reflog.is_empty()
         || !grep.is_empty()
         || invert_grep
         || all_match
@@ -460,6 +629,19 @@ fn collect_replay_rev_args(
         || format.is_some()
         || date.is_some()
         || relative_date
+        || graph
+        || object_names
+        || no_object_names
+        || exclude_promisor_objects
+        || filter.is_some()
+        || filter_print_omitted
+        || filter_provided_objects
+        || progress.is_some()
+        || missing.is_some()
+        || use_bitmap_index
+        || show_pulls
+        || timestamp
+        || no_filter
         || quiet
         || max_count.is_some()
         || max_age.is_some()
@@ -2861,6 +3043,13 @@ fn log_unrecognized_argument(option: &str) -> CliError {
     CliError::Fatal {
         code: 128,
         message: format!("unrecognized argument: {option}"),
+    }
+}
+
+fn replay_unrecognized_argument(option: &str) -> CliError {
+    CliError::Stderr {
+        code: 128,
+        text: format!("error: unrecognized argument: {option}\n"),
     }
 }
 

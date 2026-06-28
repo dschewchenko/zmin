@@ -12,6 +12,33 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`replay` invalid/reject-and-no-op expansion across the existing bounded
+linear advance lane. The selected change added `+24` matrix rows and promoted
+twenty-four documented `replay` option pairs into the reviewed-complete
+census set: `--bisect-all`, `--bisect-vars`, `--boundary`,
+`--commit-header`, `--disk-usage`, `--exclude-promisor-objects`,
+`--filter`, `--filter-print-omitted`, `--filter-provided-objects`,
+`--grep-reflog`, `--graph`, `--header`, `--merge`, `--missing`,
+`--no-commit-header`, `--no-filter`, `--no-object-names`,
+`--object-names`, `--progress`, `--show-pulls`, `--timestamp`,
+`--use-bitmap-index`, `--walk-reflogs`, and `-g`. This was a bounded
+runtime-and-evidence slice: replay now matches the current stock-Git
+unrecognized-argument, requires-walk-reflogs, requires-objects,
+reverse-conflict, pseudoref-required, cannot-walk-reflogs, and root-replay
+fatal lanes, plus the accepted `--show-pulls` and `--no-filter` no-op lanes,
+without widening into walk-reflog rendering, quiet empty-selection failures,
+or broader revision-walk semantics. Actual delta is `+24` matrix rows, `+24`
+complete documented option pairs, `+24` represented documented option pairs,
+`+2` verified rows, `+22` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `7382` matrix rows, `6475` verified
+rows, `882` invalid-input rows, `0` exact-open rows, `146/151` complete
+command matrices, `2974/3212` complete documented option pairs, and
+`2974/3212` represented documented option pairs. Remaining checklist rows
+fell from `262` to `240`. The guardrail held: row growth stayed inside one
+coherent bounded replay family verified by the dedicated stock-Git smoke
+script instead of widening into a new helper-heavy command surface.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` formatter/output/revision-selector expansion across the existing
 bounded linear advance lane. The selected change added `+26` matrix rows and
 promoted twenty-six documented `replay` option pairs into the
