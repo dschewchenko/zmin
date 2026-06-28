@@ -1,14 +1,14 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	3126	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	3131	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	3126	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	7644	7644	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	6724	7644	closed written rows only
-behavior_rows_classified	7619	7644	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	7644	written rows with incomplete parity
-behavior_rows_open	0	7644	written rows not implemented or not matching yet
-invalid_input_rows	895	7644	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	3131	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	7649	7649	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	6729	7649	closed written rows only
+behavior_rows_classified	7624	7649	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	7649	written rows with incomplete parity
+behavior_rows_open	0	7649	written rows not implemented or not matching yet
+invalid_input_rows	895	7649	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -99,7 +99,7 @@ multi-pack-index	9	9	9	100.0	29	29	100.0	22	75.9	0	0	7	yes
 mv	7	7	7	100.0	32	32	100.0	32	100.0	0	0	0	yes
 name-rev	8	8	8	100.0	11	11	100.0	11	100.0	0	0	0	yes
 notes	28	28	28	100.0	69	69	100.0	60	87.0	0	0	9	yes
-p4	29	8	8	27.6	11	11	100.0	11	100.0	0	0	0	yes
+p4	29	13	13	44.8	16	16	100.0	16	100.0	0	0	0	yes
 pack-objects	40	40	40	100.0	54	54	100.0	44	81.5	0	0	10	yes
 pack-redundant	3	3	3	100.0	5	5	100.0	5	100.0	0	0	0	yes
 pack-refs	5	5	5	100.0	8	8	100.0	8	100.0	0	0	0	yes

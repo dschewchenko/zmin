@@ -22,6 +22,43 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local `p4 clone`
+helper-sensitive failure plus local-ref family across the existing fake
+Perforce depot fixture. This batch added five exact stock-Git rows and
+promoted five documented `p4` option pairs into the reviewed-complete census
+set: `--detect-branches`, `--detect-labels`, `--import-labels`,
+`--import-local`, and `--use-client-spec`. The runtime closure stayed
+intentionally bounded: Zmin now matches stock on the current fake Perforce
+clone lanes where missing branch, label, and client metadata terminate with
+the stock-shaped helper-sensitive `KeyError` stderr and matching stock
+preludes, while `--import-local` follows the stock local-ref import lane into
+`refs/heads/p4/master` with matching stdout, stderr, current branch, commit
+message, and imported ref hash. This does not widen `p4` into submit-side
+verbose trace parity, label export, keep-path or destination rewrites,
+prepare-p4-only flows, or any of the remaining helper-backed lanes. The
+implementation stays focused on the missing closure only: clone parsing now
+carries the five bounded spellings, helper-sensitive failures are surfaced via
+stock-shaped stderr without falling through to the normal import path, and the
+import-local path now mirrors the stock local-ref commit layout used by the
+current fake helper. Two exact compat tests cover all five rows while checking
+exact stdout, stderr, exit status, clean repository state, current branch, and
+imported local ref parity where relevant. Focused gates were
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat p4_`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7649` matrix rows, `6729` verified rows, `895` invalid-input rows,
+`146/151` complete command matrices, and `3131/3212` complete documented
+option pairs. `p4` now sits at `13/29` reviewed-complete documented option
+pairs with `16/16` classified rows, `16` stock-matching rows, and `0`
+invalid-input rows. The overall backlog head remains `svn` (`25`), followed
+by `p4` (`16`), `cvsimport` (`14`), `cvsexportcommit` (`11`), `archimport`
+(`7`), `send-email` (`5`), and the single-pair tails `rebase`, `log`, and
+`apply`; the next default follow-up should stay on `p4`, because it still has
+the largest helper-free oracle surface among the lanes with a working local
+stock command.
+
+As of 2026-06-28 the latest completed batch is a helper-free local `p4 clone`
 transcript-control family across the existing fake Perforce depot import lane.
 This batch added three exact stock-Git rows and promoted three documented
 `p4` option pairs into the reviewed-complete census set: `--silent`,

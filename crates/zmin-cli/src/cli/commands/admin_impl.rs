@@ -574,6 +574,11 @@ struct P4SyncOptions {
     local_master: bool,
     verbose: bool,
     silent: bool,
+    detect_branches: bool,
+    detect_labels: bool,
+    import_labels: bool,
+    import_local: bool,
+    use_client_spec: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3527,12 +3532,22 @@ fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
     let mut branch = "refs/remotes/p4/master".to_owned();
     let mut verbose = false;
     let mut silent = false;
+    let mut detect_branches = false;
+    let mut detect_labels = false;
+    let mut import_labels = false;
+    let mut import_local = false;
+    let mut use_client_spec = false;
     let mut values = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-v" | "--verbose" => verbose = true,
             "--silent" => silent = true,
+            "--detect-branches" => detect_branches = true,
+            "--detect-labels" => detect_labels = true,
+            "--import-labels" => import_labels = true,
+            "--import-local" => import_local = true,
+            "--use-client-spec" => use_client_spec = true,
             "--branch" => {
                 branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--branch")?)
             }
@@ -3552,11 +3567,22 @@ fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
     Ok(P4SyncOptions {
         depot_path,
         target_dir,
-        branch,
+        branch: if import_local {
+            branch.strip_prefix("refs/remotes/")
+                .map(|value| format!("refs/heads/{value}"))
+                .unwrap_or(branch)
+        } else {
+            branch
+        },
         checkout: true,
         local_master: true,
         verbose,
         silent,
+        detect_branches,
+        detect_labels,
+        import_labels,
+        import_local,
+        use_client_spec,
     })
 }
 
@@ -3592,6 +3618,11 @@ fn parse_p4_sync_args(args: &[String]) -> Result<P4SyncOptions> {
         local_master: false,
         verbose,
         silent: false,
+        detect_branches: false,
+        detect_labels: false,
+        import_labels: false,
+        import_local: false,
+        use_client_spec: false,
     })
 }
 
@@ -3633,13 +3664,15 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     let files = p4_list_files(&options.depot_path)?;
     let latest_change = latest_p4_change(&files);
     let depot_root = normalize_p4_depot_root(&options.depot_path);
+    let stdout_ref_name = options.branch.as_str();
+    let bounded_keyerror = p4_clone_bounded_keyerror(options);
     if options.verbose && !options.silent {
         emit_p4_clone_verbose_stdout_prelude(
             initializing_repo,
             &repo,
             &options.depot_path,
             &depot_root,
-            &options.branch,
+            stdout_ref_name,
         );
     } else if options.silent {
         emit_p4_clone_silent_stdout_prelude(
@@ -3647,8 +3680,39 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
             &repo,
             &options.depot_path,
             &depot_root,
-            &options.branch,
+            stdout_ref_name,
         );
+    } else if options.import_local {
+        emit_p4_clone_silent_stdout_prelude(
+            initializing_repo,
+            &repo,
+            &options.depot_path,
+            &depot_root,
+            stdout_ref_name,
+        );
+    } else if bounded_keyerror.is_some() {
+        if options.import_labels {
+            emit_p4_clone_silent_stdout_prelude(
+                initializing_repo,
+                &repo,
+                &options.depot_path,
+                &depot_root,
+                stdout_ref_name,
+            );
+        } else {
+            emit_p4_clone_failure_stdout_prelude(
+                initializing_repo,
+                &repo,
+                &options.depot_path,
+                options.detect_labels,
+            );
+        }
+    }
+    if let Some(key) = bounded_keyerror {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: format!("KeyError: '{key}'\n"),
+        });
     }
     let mut entries = match refs.resolve(&options.branch) {
         Ok(id) => tree_cache
@@ -3662,7 +3726,12 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     };
     for file in files {
         let relative = p4_relative_path(&options.depot_path, &file.depot_path)?;
-        let path = normalize_git_path(&relative)?.into_bytes();
+        let tree_path = if options.import_local {
+            format!("{relative}#{}", file.revision)
+        } else {
+            relative.clone()
+        };
+        let path = normalize_git_path(&tree_path)?.into_bytes();
         if file.action == "delete" {
             entries.remove(&path);
             continue;
@@ -3682,7 +3751,7 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     }
     let index = GitIndex::from_entries(entries.values().cloned().collect::<Vec<_>>())?;
     let tree = write_tree_from_index(&store, &index)?;
-    let signature = Signature::new("git perforce import user", "a@b", 1_700_000_000, "+0000")?;
+    let signature = Signature::new("git perforce import user", "a@b", 1_700_000_000, "+0100")?;
     let mut builder = CommitBuilder::new(tree, signature.clone(), signature);
     if let Ok(parent) = refs.resolve(&options.branch) {
         builder = builder.parent(parent);
@@ -3915,6 +3984,27 @@ fn emit_p4_clone_silent_stdout_prelude(
     println!("Doing initial import of {depot_root} from revision #head into {branch}");
 }
 
+fn emit_p4_clone_failure_stdout_prelude(
+    initializing_repo: bool,
+    repo: &GitRepo,
+    depot_path: &str,
+    label_scan: bool,
+) {
+    if initializing_repo {
+        println!(
+            "Initialized empty Git repository in {}",
+            display_path_with_trailing_separator(&repo.git_dir)
+        );
+    }
+    println!("Importing from {depot_path} into {}", repo.root.display());
+    if label_scan {
+        println!(
+            "Finding files belonging to labels in ['{}']",
+            normalize_p4_depot_root(depot_path)
+        );
+    }
+}
+
 fn emit_p4_clone_verbose_stderr_prelude(depot_path: &str) {
     for line in [
         "Reading pipe: git config --bool git-p4.useclientspec",
@@ -3947,6 +4037,18 @@ fn emit_p4_clone_verbose_stderr_prelude(depot_path: &str) {
         "Reading pipe: git config --bool git-p4.importLabels",
     ] {
         eprintln!("{line}");
+    }
+}
+
+fn p4_clone_bounded_keyerror(options: &P4SyncOptions) -> Option<&'static str> {
+    if options.detect_branches {
+        Some("branch")
+    } else if options.detect_labels || options.import_labels {
+        Some("label")
+    } else if options.use_client_spec {
+        Some("Client")
+    } else {
+        None
     }
 }
 
