@@ -12,6 +12,26 @@ starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
 As of 2026-06-28 the latest completed batch is a zero-row-growth
+represented-family expansion across the already represented `daemon`
+surface. The selected change added `+8` matrix rows and promoted eight
+documented `daemon` option pairs into the reviewed-complete census set:
+`--enable`, `--disable`, `--allow-override`, `--forbid-override`,
+`--informative-errors`, `--no-informative-errors`, `--log-destination`, and
+`--syslog`. This was a bounded runtime-and-evidence slice: the daemon parser
+and transport command wiring now accept the service-toggle and logging family
+without widening into process-management semantics such as detach, user/group
+switching, interpolated paths, or access hooks. Actual delta is `+8` matrix
+rows, `+8` complete documented option pairs, `+8` represented documented
+option pairs, `+8` verified rows, `+0` invalid-input rows, and `+0`
+complete command matrices. Current census counts are `7256` matrix rows,
+`6374` verified rows, `857` invalid-input rows, `0` exact-open rows,
+`146/151` complete command matrices, `2848/3212` complete documented option
+pairs, and `2848/3212` represented documented option pairs. Remaining
+checklist rows fell from `372` to `364`. The guardrail still held: row growth
+stayed proportional to one coherent documented option family, not to a broad
+oracle import.
+
+As of 2026-06-28 the latest completed batch is a zero-row-growth
 review-closure promotion across the already represented `fast-import`
 surface. The selected change added `+0` matrix rows and promoted the
 remaining `18` documented `fast-import` option pairs into the

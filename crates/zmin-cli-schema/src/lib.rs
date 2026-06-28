@@ -4802,6 +4802,8 @@ pub enum Command {
     Daemon {
         #[arg(long = "verbose", action = ArgAction::SetTrue)]
         verbose: bool,
+        #[arg(long = "syslog", action = ArgAction::SetTrue)]
+        syslog: bool,
         #[arg(long = "export-all", action = ArgAction::SetTrue)]
         export_all: bool,
         #[arg(long = "timeout")]
@@ -4820,6 +4822,20 @@ pub enum Command {
         reuseaddr: bool,
         #[arg(long = "pid-file", value_hint = ValueHint::FilePath)]
         pid_file: Option<PathBuf>,
+        #[arg(long = "enable")]
+        enable: Vec<String>,
+        #[arg(long = "disable")]
+        disable: Vec<String>,
+        #[arg(long = "allow-override")]
+        allow_override: Vec<String>,
+        #[arg(long = "forbid-override")]
+        forbid_override: Vec<String>,
+        #[arg(long = "informative-errors", action = ArgAction::SetTrue)]
+        informative_errors: bool,
+        #[arg(long = "no-informative-errors", action = ArgAction::SetTrue)]
+        no_informative_errors: bool,
+        #[arg(long = "log-destination")]
+        log_destination: Option<String>,
         #[arg(long = "inetd", action = ArgAction::SetTrue)]
         inetd: bool,
         #[arg(long = "listen")]

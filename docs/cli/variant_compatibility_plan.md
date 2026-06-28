@@ -4468,40 +4468,38 @@ one small checklist item from `remaining_to_fix_or_verify.tsv`, declare the
 source bucket and expected row/status delta in
 `docs/cli/matrix_row_growth_audit.md`, and only then edit matrices or code.
 
-The latest completed slice is a helper-free local `log` represented-tail
-expansion across the already modeled unsigned two-commit linear lane and the
-current non-rename single-path history lane. Zmin now matches stock Git for
-four more documented `log` options on the current bounded surface:
-`--follow`, `--graph`, `--log-size`, and `--show-signature`. The runtime
-closure stayed intentionally bounded: `--follow` is accepted on the current
-helper-free non-rename single-path lane and preserves stock output there;
-`--show-signature` preserves stock output on the current unsigned local lane;
-`--graph` matches the current stock helper-free linear lane by prefixing each
-rendered commit row with a single graph marker; and `--log-size` matches the
-current stock explicit-format lane by printing the message-size prelude before
-each rendered commit. This slice intentionally does not widen into rename
-following or `-L` line-history tracing yet. Focused gates were
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_documented_unsigned_tail_batch_matches_stock_git -- --exact --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat -- --nocapture`,
-`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+The latest completed slice is a helper-free local `daemon`
+represented-family expansion across the already modeled git-daemon listen,
+export, timeout, inetd, and path-serving lane. Zmin now matches stock Git for
+eight more documented `daemon` options on the current bounded surface:
+`--enable`, `--disable`, `--allow-override`, `--forbid-override`,
+`--informative-errors`, `--no-informative-errors`, `--log-destination`, and
+`--syslog`. The runtime closure stayed intentionally bounded: these options
+are accepted and threaded through the current local git-daemon serving path,
+but this slice does not widen into `--detach`, user/group switching,
+interpolated paths, access hooks, or other process-management semantics yet.
+Focused gates were
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo build -p zmin-cli --bin zmin`,
+`ZMIN_BIN=/private/tmp/skron-codex-target/debug/zmin tools/git-daemon-schema-oracle-smoke.sh`,
 `CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
 `python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
 `tools/git-cli-readiness-status.sh`,
-`tools/git-compat-command-summary.sh --tsv | rg '^(log|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
+`tools/git-compat-command-summary.sh --tsv | rg '^(daemon|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^doc_option_pairs_represented_by_rows\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`, and
 `git diff --check`.
-Actual delta from the prior `fast-export` represented-family expansion is `+4`
-matrix rows, `+0` complete documented option pairs, `+4` represented
-documented option pairs, `+4` verified rows, `+0` invalid-input rows, and
-`+0` complete command matrices. Current census counts are `7109` matrix rows,
-`6243` verified rows, `841` invalid-input rows, `0` exact-open rows,
-`146/151` complete command matrices, `2774/3212` complete documented option
-pairs, and `2803/3212` represented documented option pairs. Per-command
-position on the touched surface is now: `log` `126/131` reviewed-complete
-documented option pairs with `245/245` classified written rows, `221`
-stock-matching rows, `24` invalid-input rows, and `130/131` represented
-documented option pairs. The only remaining `log` gap is `-L`, so the next
-default follow-up should decide whether to take the heavier line-history lane
-or switch back to a different high-throughput backlog head.
+Actual delta from the prior review-closure batches is `+8` matrix rows, `+8`
+complete documented option pairs, `+8` represented documented option pairs,
+`+8` verified rows, `+0` invalid-input rows, and `+0` complete command
+matrices. Current census counts are `7256` matrix rows, `6374` verified rows,
+`857` invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2848/3212` complete documented option pairs, and
+`2848/3212` represented documented option pairs. Per-command position on the
+touched surface is now: `daemon` `21/27` reviewed-complete documented option
+pairs with `22/22` classified written rows, `21` stock-matching rows, `1`
+invalid-input row, and `21/27` represented documented option pairs. The
+remaining `daemon` tail is now the narrower process-management family:
+`--access-hook`, `--detach`, `--group`, `--interpolated-path`, `--user`, and
+`--user-path`, so the next default follow-up should switch back to a denser
+high-throughput backlog head unless one of those six unlocks a broader batch.
 
 The latest completed slice is a helper-free local `pull`/`merge`
 commit-mode closure across the explicit local no-rebase merge lane and the

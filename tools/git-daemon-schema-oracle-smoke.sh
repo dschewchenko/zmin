@@ -165,6 +165,14 @@ run_server_case daemon_listen
 run_server_case daemon_max_connections --max-connections=8
 run_server_case daemon_pid_file "--pid-file=$pid_file"
 test -s "$pid_file"
+run_server_case daemon_enable_upload_pack --enable=upload-pack
+run_server_case daemon_disable_receive_pack --disable=receive-pack
+run_server_case daemon_allow_override_upload_pack --allow-override=upload-pack
+run_server_case daemon_forbid_override_upload_pack --forbid-override=upload-pack
+run_server_case daemon_informative_errors --informative-errors
+run_server_case daemon_no_informative_errors --no-informative-errors
+run_server_case daemon_log_destination_stderr --log-destination=stderr
+run_server_case daemon_syslog --syslog
 run_server_case daemon_port
 run_server_case daemon_reuseaddr --reuseaddr
 run_server_rejection_case daemon_strict_paths --strict-paths

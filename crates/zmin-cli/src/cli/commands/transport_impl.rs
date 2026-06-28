@@ -73,6 +73,7 @@ pub(crate) struct UploadPackOptions {
 #[derive(Debug, Clone)]
 pub(crate) struct DaemonOptions {
     pub(crate) verbose: bool,
+    pub(crate) syslog: bool,
     pub(crate) export_all: bool,
     pub(crate) timeout: Option<u64>,
     pub(crate) init_timeout: Option<u64>,
@@ -82,6 +83,13 @@ pub(crate) struct DaemonOptions {
     pub(crate) base_path_relaxed: bool,
     pub(crate) reuseaddr: bool,
     pub(crate) pid_file: Option<PathBuf>,
+    pub(crate) enable: Vec<String>,
+    pub(crate) disable: Vec<String>,
+    pub(crate) allow_override: Vec<String>,
+    pub(crate) forbid_override: Vec<String>,
+    pub(crate) informative_errors: bool,
+    pub(crate) no_informative_errors: bool,
+    pub(crate) log_destination: Option<String>,
     pub(crate) inetd: bool,
     pub(crate) listen: Vec<String>,
     pub(crate) port: Option<u16>,
@@ -4281,12 +4289,20 @@ fn write_upload_pack_advertisement_for_repo<W: Write>(
 
 pub(crate) fn daemon(options: DaemonOptions) -> Result<()> {
     let _ = (
+        options.syslog,
         options.timeout,
         options.init_timeout,
         options.max_connections,
         options.strict_paths,
         options.base_path_relaxed,
         options.reuseaddr,
+        &options.enable,
+        &options.disable,
+        &options.allow_override,
+        &options.forbid_override,
+        options.informative_errors,
+        options.no_informative_errors,
+        options.log_destination.as_deref(),
     );
     if options.inetd {
         let mut input = io::stdin().lock();
