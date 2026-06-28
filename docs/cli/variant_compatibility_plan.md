@@ -22,6 +22,28 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-29 the latest completed batch is a stock-oracle deferral closure
+for the remaining documented Perl-backed `git send-email` helper tail:
+`--annotate`, `--compose`, `--quiet`, `--sendmail-cmd`, and `--smtp-ssl`.
+This batch did not add new stock-matching behavior rows. Instead, it promoted
+the five open doc-option seed tails into the durable deferral inventory because
+the current local stock Git was built with `NO_PERL=1`: `git send-email -h`
+fails before helper dispatch, so no subcommand-level Git `2.47.1` oracle
+exists for these remaining `send-email` options in this environment. The
+census now keeps those option pairs in
+`docs/cli/census/deferred_doc_option_pairs.tsv` and surfaces them through the
+extension/deferred layer rather than the active fix-or-verify queue. This
+keeps the active backlog honest without falsely increasing reviewed-complete
+coverage counts. Focused gates were `git send-email -h`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `7665` matrix rows, `6745` verified rows, `895` invalid-input rows,
+`5` remaining-to-fix-or-verify rows, and `131` extension/deferred rows. The
+active backlog is now down to the single-pair tails `apply`, `log`, `rebase`,
+plus the two unclassified source guards. The next default follow-up should move
+to `rebase --root`, because the remaining documented option pair and both
+unclassified guards all converge on the same root-replay code path.
+
+As of 2026-06-29 the latest completed batch is a stock-oracle deferral closure
 for the remaining documented Perl-backed legacy helper surface:
 `git cvsimport`, `git cvsexportcommit`, and `git archimport`. This batch did
 not add new stock-matching behavior rows. Instead, it promoted thirty-two open
