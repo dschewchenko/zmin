@@ -4325,6 +4325,10 @@ pub enum Command {
         merge: bool,
         #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
         no_stat: bool,
+        #[arg(long = "no-ff", action = ArgAction::SetTrue)]
+        no_ff: bool,
+        #[arg(long = "force-rebase", short = 'f', action = ArgAction::SetTrue)]
+        force_rebase: bool,
         #[arg(short = 'r', long = "rebase-merges", action = ArgAction::SetTrue)]
         rebase_merges: bool,
         #[arg(long = "no-rebase-merges", action = ArgAction::SetTrue)]
