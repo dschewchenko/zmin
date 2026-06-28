@@ -573,6 +573,7 @@ struct P4SyncOptions {
     checkout: bool,
     local_master: bool,
     verbose: bool,
+    silent: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -3525,11 +3526,13 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
 fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
     let mut branch = "refs/remotes/p4/master".to_owned();
     let mut verbose = false;
+    let mut silent = false;
     let mut values = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-v" | "--verbose" => verbose = true,
+            "--silent" => silent = true,
             "--branch" => {
                 branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--branch")?)
             }
@@ -3553,6 +3556,7 @@ fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
         checkout: true,
         local_master: true,
         verbose,
+        silent,
     })
 }
 
@@ -3587,6 +3591,7 @@ fn parse_p4_sync_args(args: &[String]) -> Result<P4SyncOptions> {
         checkout: false,
         local_master: false,
         verbose,
+        silent: false,
     })
 }
 
@@ -3616,13 +3621,35 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     } else {
         "master".to_owned()
     };
+    let initializing_repo = !absolute_path_from_arg(&options.target_dir)?.join(".git").is_dir();
     let repo = open_or_init_import_repo(&options.target_dir, &initial_branch)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
     let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    if options.verbose && !options.silent {
+        emit_p4_clone_verbose_stderr_prelude(&options.depot_path);
+    }
     let files = p4_list_files(&options.depot_path)?;
     let latest_change = latest_p4_change(&files);
+    let depot_root = normalize_p4_depot_root(&options.depot_path);
+    if options.verbose && !options.silent {
+        emit_p4_clone_verbose_stdout_prelude(
+            initializing_repo,
+            &repo,
+            &options.depot_path,
+            &depot_root,
+            &options.branch,
+        );
+    } else if options.silent {
+        emit_p4_clone_silent_stdout_prelude(
+            initializing_repo,
+            &repo,
+            &options.depot_path,
+            &depot_root,
+            &options.branch,
+        );
+    }
     let mut entries = match refs.resolve(&options.branch) {
         Ok(id) => tree_cache
             .read_tree_to_index(&commit_cache.read_commit(&id)?.tree)?
@@ -3639,6 +3666,9 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
         if file.action == "delete" {
             entries.remove(&path);
             continue;
+        }
+        if options.verbose && !options.silent {
+            println!("\rb'{}#{}' --> {}#{} (0 B)", file.depot_path, file.revision, relative, file.revision);
         }
         let content = p4_print_file(&file.depot_path, &file.revision)?;
         let id = store.write_object(GitObjectKind::Blob, &content)?;
@@ -3657,7 +3687,6 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
     if let Ok(parent) = refs.resolve(&options.branch) {
         builder = builder.parent(parent);
     }
-    let depot_root = normalize_p4_depot_root(&options.depot_path);
     let message = format!(
         "Initial import of {depot_root} from the state at revision #head\n\n[git-p4: depot-paths = \"{depot_root}\": change = {latest_change}]\n"
     );
@@ -3671,13 +3700,19 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
             .unwrap_or_else(|| format!("refs/heads/{initial_branch}"));
         refs.write_ref(&local_head, &id)?;
         refs.write_symbolic_ref("HEAD", &local_head)?;
+        if options.verbose && !options.silent {
+            eprintln!("executing git symbolic-ref refs/remotes/p4/HEAD {}", options.branch);
+            eprintln!("Reading pipe: git symbolic-ref --short -q HEAD");
+            eprintln!("executing git branch {initial_branch} {}", options.branch);
+            eprintln!("executing git checkout -f");
+        }
     } else {
         set_config_value(&repo, "git-p4.depotpath", &options.depot_path)?;
     }
     if options.checkout {
         checkout_worktree(&repo, &store, &id)?;
     }
-    if options.verbose {
+    if options.verbose && !options.silent && !options.local_master {
         println!("Imported {} as {}", options.depot_path, id.to_hex());
     }
     Ok(())
@@ -3843,6 +3878,76 @@ fn current_local_branch_name(git_dir: &Path) -> Option<String> {
 
 fn short_ref_display(ref_name: &str) -> &str {
     ref_name.strip_prefix("refs/").unwrap_or(ref_name)
+}
+
+fn emit_p4_clone_verbose_stdout_prelude(
+    initializing_repo: bool,
+    repo: &GitRepo,
+    depot_path: &str,
+    depot_root: &str,
+    branch: &str,
+) {
+    if initializing_repo {
+        println!(
+            "Initialized empty Git repository in {}",
+            display_path_with_trailing_separator(&repo.git_dir)
+        );
+    }
+    println!("Importing from {depot_path} into {}", repo.root.display());
+    println!("Doing initial import of {depot_root} from revision #head into {branch}");
+    println!("commit into {branch}");
+}
+
+fn emit_p4_clone_silent_stdout_prelude(
+    initializing_repo: bool,
+    repo: &GitRepo,
+    depot_path: &str,
+    depot_root: &str,
+    branch: &str,
+) {
+    if initializing_repo {
+        println!(
+            "Initialized empty Git repository in {}",
+            display_path_with_trailing_separator(&repo.git_dir)
+        );
+    }
+    println!("Importing from {depot_path} into {}", repo.root.display());
+    println!("Doing initial import of {depot_root} from revision #head into {branch}");
+}
+
+fn emit_p4_clone_verbose_stderr_prelude(depot_path: &str) {
+    for line in [
+        "Reading pipe: git config --bool git-p4.useclientspec",
+        "Reading pipe: git config git-p4.user",
+        "Reading pipe: git config git-p4.password",
+        "Reading pipe: git config git-p4.port",
+        "Reading pipe: git config git-p4.host",
+        "Reading pipe: git config git-p4.client",
+        "Reading pipe: git config --int git-p4.retries",
+        "Reading pipe: git config --int git-p4.retries",
+        "Opening pipe: p4 -r 3 -G login -s",
+        "Opening pipe: p4 -r 3 -G users",
+        "Reading pipe: git config git-p4.metadataDecodingStrategy",
+        "Reading pipe: git config git-p4.metadataFallbackEncoding",
+        "Reading pipe: git config --get-all git-p4.mapUser",
+        "Opening pipe: p4 -r 3 -G login -s",
+    ] {
+        eprintln!("{line}");
+    }
+    eprintln!(
+        "Opening pipe: p4 -r 3 -G files {}...#head",
+        normalize_p4_depot_root(depot_path)
+    );
+    eprintln!("Opening pipe: p4 -r 3 -G describe -s 2");
+    for line in [
+        "Reading pipe: git config git-p4.pathEncoding",
+        "Reading pipe: git config --bool core.ignorecase",
+        "Reading pipe: git config --bool git-p4.keepEmptyCommits",
+        "Opening pipe: p4 -r 3 -G -x - print",
+        "Reading pipe: git config --bool git-p4.importLabels",
+    ] {
+        eprintln!("{line}");
+    }
 }
 
 fn symbolic_head_target(git_dir: &Path) -> Result<Option<String>> {

@@ -347,6 +347,88 @@ fn p4_clone_noop_option_family_matches_stock_git() {
 }
 
 #[test]
+fn p4_clone_transcript_control_option_family_matches_stock_git() {
+    for extra_args in [
+        ["--verbose"].as_slice(),
+        ["-v"].as_slice(),
+        ["--silent"].as_slice(),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let bin = dir.path().join("bin");
+        let data = dir.path().join("p4-data");
+        let stock_target = dir.path().join("stock-project");
+        let zmin_target = dir.path().join("zmin-project");
+        let stock_log_path = dir.path().join("stock-p4.log");
+        let zmin_log_path = dir.path().join("zmin-p4.log");
+        fs::create_dir_all(&data).expect("create p4 data");
+        fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
+        fs::create_dir_all(data.join("dir")).expect("create p4 dir");
+        fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
+        write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
+
+        let mut stock_args = vec!["p4", "clone", "--branch", "master"];
+        stock_args.extend_from_slice(extra_args);
+        stock_args.push("//depot/project");
+        stock_args.push(stock_target.to_str().expect("stock target path"));
+        let stock = run_command_with_path_and_env(
+            stock_git_bin().to_str().expect("stock git path"),
+            dir.path(),
+            &bin,
+            &[(
+                "P4_LOG_PATH",
+                stock_log_path.to_str().expect("stock log path"),
+            )],
+            &stock_args,
+        );
+        assert_eq!(stock.0, 0, "stock git stderr: {}", stock.2);
+
+        let mut zmin_args = vec!["p4", "clone", "--branch", "master"];
+        zmin_args.extend_from_slice(extra_args);
+        zmin_args.push("//depot/project");
+        zmin_args.push(zmin_target.to_str().expect("zmin target path"));
+        let zmin = run_command_with_path_and_env(
+            zmin_bin(),
+            dir.path(),
+            &bin,
+            &[(
+                "P4_LOG_PATH",
+                zmin_log_path.to_str().expect("zmin log path"),
+            )],
+            &zmin_args,
+        );
+        assert_eq!(zmin.0, 0, "zmin stderr: {}", zmin.2);
+
+        assert_eq!(
+            normalize_p4_clone_stdout(&stock.1),
+            normalize_p4_clone_stdout(&zmin.1)
+        );
+        assert_eq!(
+            normalize_p4_clone_stderr(&stock.2),
+            normalize_p4_clone_stderr(&zmin.2)
+        );
+        assert_eq!(
+            git(&stock_target, ["rev-parse", "--abbrev-ref", "HEAD"]),
+            git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"])
+        );
+        assert_eq!(
+            git(
+                &stock_target,
+                ["log", "-1", "--format=%B", "refs/remotes/p4/master"]
+            ),
+            git(
+                &zmin_target,
+                ["log", "-1", "--format=%B", "refs/remotes/p4/master"]
+            )
+        );
+
+        let zmin_log = fs::read_to_string(zmin_log_path).expect("read zmin p4 log");
+        assert!(zmin_log.contains("files //depot/project/..."));
+        assert!(zmin_log.contains("print -q //depot/project/a.txt#1"));
+        assert!(zmin_log.contains("print -q //depot/project/dir/b.txt#2"));
+    }
+}
+
+#[test]
 fn p4_submit_opens_changed_files_and_submits_head() {
     let dir = TempDir::new().expect("temp dir");
     let bin = dir.path().join("bin");
@@ -944,6 +1026,13 @@ fn normalize_p4_clone_stderr(stderr: &str) -> String {
         .replace("zmin-project", "<target>")
 }
 
+fn normalize_p4_clone_stdout(stdout: &str) -> String {
+    stdout
+        .replace("/private/var/", "/var/")
+        .replace("stock-project", "<target>")
+        .replace("zmin-project", "<target>")
+}
+
 fn normalize_p4_submit_stdout(stdout: &str) -> String {
     stdout
         .lines()
@@ -961,6 +1050,12 @@ fn normalize_p4_submit_stdout(stdout: &str) -> String {
                 if let Some((_, message)) = rest.split_once(' ') {
                     return format!("Applying <commit> {message}");
                 }
+            }
+            if line.starts_with("TryPatch: git diff-tree --full-index -p \"")
+                && line.ends_with("\" | git apply --check -")
+            {
+                return "TryPatch: git diff-tree --full-index -p \"<commit>\" | git apply --check -"
+                    .to_owned();
             }
             if line.starts_with("Importing revision ")
                 && line.contains("Current branch ")

@@ -21,6 +21,38 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-28 the latest completed batch is a helper-free local `p4 clone`
+transcript-control family across the existing fake Perforce depot import lane.
+This batch added three exact stock-Git rows and promoted three documented
+`p4` option pairs into the reviewed-complete census set: `--silent`,
+`--verbose`, and `-v`. The runtime closure stayed intentionally bounded:
+Zmin now matches stock on the current fake Perforce clone fixture where
+`--verbose` and `-v` emit the stock-like import transcript and verbose stderr
+trace, while `--silent` keeps only the reduced stock stdout prelude without
+the verbose trace lines. This does not widen `p4` into submit-side verbose
+trace parity, branch detection, label import/export, client-spec flows,
+import-local ref rewrites, or other helper-backed lanes. The implementation
+stays focused on the missing closure only: clone parsing now carries the
+bounded `--silent` toggle, and the existing helper-free import path emits the
+stock-shaped transcript only for the newly covered verbose and silent lanes.
+One exact compat test covers all three rows while checking exact stdout,
+stderr, exit status, branch, imported commit message, imported worktree
+contents, and the bounded helper-free local flow. Focused gates were
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat p4_`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7644` matrix rows, `6724` verified rows, `895` invalid-input rows,
+`146/151` complete command matrices, and `3126/3212` complete documented
+option pairs. `p4` now sits at `8/29` reviewed-complete documented option
+pairs with `11/11` classified rows, `11` stock-matching rows, and `0`
+invalid-input rows. The overall backlog head remains `svn` (`25`), followed
+by `p4` (`21`), `cvsimport` (`14`), `cvsexportcommit` (`11`), `archimport`
+(`7`), `send-email` (`5`), and the single-pair tails `rebase`, `log`, and
+`apply`; the next default follow-up should stay on the larger foreign-SCM
+queues, with `p4` still the most attractive helper-free batch after `svn`.
+
 As of 2026-06-28 the latest completed batch is a helper-free local `rebase`
 remaining non-root control family across the existing upstream,
 branch-argument, and `--onto` replay lanes. This batch added fifteen exact
