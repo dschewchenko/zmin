@@ -3745,18 +3745,21 @@ fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
     }
 
     let description = admin_commit_subject(&head_commit.message);
-    for (action, path) in &opened {
-        let path = p4_submit_path(path)?;
-        if options.dry_run {
-            println!("p4 {action} {path}");
-        }
-    }
+    let depot_root = normalize_p4_depot_root(&depot_path);
     if options.dry_run {
-        println!("p4 submit -d {description}");
+        println!(
+            "Perforce checkout for depot path {depot_root} located at {}",
+            display_path_with_trailing_separator(&repo.root)
+        );
+        println!(
+            "Would synchronize p4 checkout in {}",
+            display_path_with_trailing_separator(&repo.root)
+        );
+        println!("Would apply");
+        println!("  {} {description}", abbreviated_hex(&head_id, 7));
         return Ok(());
     }
 
-    let depot_root = normalize_p4_depot_root(&depot_path);
     println!(
         "Perforce checkout for depot path {depot_root} located at {}",
         repo.root.display()
@@ -3810,6 +3813,14 @@ fn normalize_p4_depot_root(path: &str) -> String {
     } else {
         format!("{path}/")
     }
+}
+
+fn display_path_with_trailing_separator(path: &Path) -> String {
+    let mut rendered = path.display().to_string();
+    if !rendered.ends_with(std::path::MAIN_SEPARATOR) {
+        rendered.push(std::path::MAIN_SEPARATOR);
+    }
+    rendered
 }
 
 fn latest_p4_change(files: &[P4File]) -> usize {

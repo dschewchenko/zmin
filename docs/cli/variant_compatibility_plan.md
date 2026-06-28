@@ -22,6 +22,40 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`p4` bounded-clone and dry-run preview family across the existing fake
+Perforce clone and submit lanes. This batch added four exact stock-Git rows
+and promoted four documented `p4` option pairs into the reviewed-complete
+census set: `--changes-block-size`, `--max-changes`, `--dry-run`, and `-n`.
+The runtime closure stayed intentionally bounded: Zmin now matches the current
+stock fake-depot clone lane where `--changes-block-size=1` and
+`--max-changes=1` do not alter the imported branch/message outcome, and it now
+matches the stock submit preview lane where `git p4 submit --dry-run` and
+`git p4 submit -n` report the stock preview text without mutating p4 or Git
+state. This does not widen `p4` into verbose tracing, import-local namespace
+changes, branch/label discovery, shelving flows, or client-spec-backed depot
+mapping. The implementation stays focused on the missing closure only: the
+existing clone parser continues to accept the bounded clone knobs on the
+current fake depot lane, `p4 submit` now renders the stock dry-run preview
+contract instead of mutating the fake depot, and two focused exact compat
+tests exercise the four spellings on the represented lanes. Focused gates were
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat p4_clone_noop_option_family_matches_stock_git -- --exact`,
+`cargo test -q -p zmin-cli --test git_foreign_scm_compat p4_submit_dry_run_option_family_matches_stock_git -- --exact`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7578` matrix rows, `6659` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3088/3212` complete documented
+option pairs. `p4` now sits at `5/29` reviewed-complete documented option
+pairs with `8/8` classified rows and `8` stock-matching rows. The overall
+backlog head is now `send-email` (`26`), followed by `svn` (`25`), `p4`
+(`24`), `rebase` (`15`), `cvsimport` (`14`), `cvsexportcommit` (`11`),
+`archimport` (`7`), then the single-pair tails `log` and `apply`; the next
+default follow-up should re-evaluate whether another dense helper-free
+`send-email` family exists before spending more cycles on the now more
+helper-heavy `p4` tail.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `send-email` metadata/control no-op family across the existing fake-SMTP
 patch-sending lane. This batch added sixteen exact stock-Git rows and promoted
 sixteen documented `send-email` option pairs into the reviewed-complete census
