@@ -23,6 +23,9 @@ cases = [
     ("cvsserver_export_all_requires_directory", 255, ["--export-all"]),
     ("cvsserver_strict_paths_noop", 0, ["--strict-paths"]),
     ("cvsserver_base_path_noop", 0, ["--base-path", "/tmp/base"]),
+    ("cvsserver_help_long", 0, ["--help"]),
+    ("cvsserver_version_long", 0, ["--version"]),
+    ("cvsserver_version_short", 0, ["-V"]),
     ("cvsserver_help_short_noop", 0, ["-h"]),
     ("cvsserver_help_short_alt_noop", 0, ["-H"]),
 ]

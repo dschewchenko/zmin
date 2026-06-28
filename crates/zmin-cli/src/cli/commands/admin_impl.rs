@@ -161,6 +161,7 @@ pub(crate) fn cvsserver_command(
     strict_paths: bool,
     export_all: bool,
     version: bool,
+    help_long: bool,
     help_short: bool,
     help_short_alt: bool,
     args: Vec<String>,
@@ -170,6 +171,7 @@ pub(crate) fn cvsserver_command(
         strict_paths,
         export_all,
         version,
+        help_long,
         help_short,
         help_short_alt,
         args,
@@ -2228,13 +2230,16 @@ fn cvsserver(
     strict_paths: bool,
     export_all: bool,
     version: bool,
+    help_long: bool,
     help_short: bool,
     help_short_alt: bool,
     args: Vec<String>,
 ) -> Result<()> {
     if version {
-        println!("git-cvsserver version {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
+        return passthrough_stock_git_command("cvsserver", &["--version".to_owned()]);
+    }
+    if help_long {
+        return passthrough_stock_git_command("cvsserver", &["--help".to_owned()]);
     }
     if help_short || help_short_alt {
         return Ok(());

@@ -1924,6 +1924,8 @@ pub enum Command {
         export_all: bool,
         #[arg(short = 'V', long = "version", action = ArgAction::SetTrue)]
         version: bool,
+        #[arg(long = "help", action = ArgAction::SetTrue)]
+        help_long: bool,
         #[arg(short = 'h', action = ArgAction::SetTrue)]
         help_short: bool,
         #[arg(short = 'H', action = ArgAction::SetTrue)]

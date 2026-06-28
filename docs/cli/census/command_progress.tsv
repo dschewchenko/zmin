@@ -1,14 +1,14 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	2999	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	3002	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	2999	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	7407	7407	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	6489	7407	closed written rows only
-behavior_rows_classified	7382	7407	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	7407	written rows with incomplete parity
-behavior_rows_open	0	7407	written rows not implemented or not matching yet
-invalid_input_rows	893	7407	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	3002	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	7410	7410	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	6492	7410	closed written rows only
+behavior_rows_classified	7385	7410	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	7410	written rows with incomplete parity
+behavior_rows_open	0	7410	written rows not implemented or not matching yet
+invalid_input_rows	893	7410	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
@@ -45,7 +45,7 @@ credential-cache	2	2	2	100.0	6	6	100.0	6	100.0	0	0	0	yes
 credential-store	1	1	1	100.0	12	12	100.0	8	66.7	0	0	4	yes
 cvsexportcommit	12	1	1	8.3	2	2	100.0	2	100.0	0	0	0	no
 cvsimport	20	6	6	30.0	3	3	100.0	3	100.0	0	0	0	no
-cvsserver	8	5	5	62.5	6	6	100.0	5	83.3	0	0	1	yes
+cvsserver	8	8	8	100.0	9	9	100.0	8	88.9	0	0	1	yes
 daemon	27	27	27	100.0	28	28	100.0	25	89.3	0	0	3	yes
 describe	14	14	14	100.0	19	19	100.0	19	100.0	0	0	0	yes
 diagnose	5	5	5	100.0	5	5	100.0	5	100.0	0	0	0	yes
