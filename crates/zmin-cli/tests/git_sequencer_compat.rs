@@ -16,6 +16,15 @@ const SEQUENCER_ENV: [(&str, &str); 6] = [
     ("GIT_COMMITTER_DATE", "1700000000 +0000"),
 ];
 
+const REBASE_REPLAY_DATE_ENV: [(&str, &str); 6] = [
+    ("GIT_AUTHOR_NAME", "Bench"),
+    ("GIT_AUTHOR_EMAIL", "bench@example.test"),
+    ("GIT_AUTHOR_DATE", "1700000000 +0000"),
+    ("GIT_COMMITTER_NAME", "Bench"),
+    ("GIT_COMMITTER_EMAIL", "bench@example.test"),
+    ("GIT_COMMITTER_DATE", "1800000000 +0000"),
+];
+
 fn normalize_rebase_progress(output: (i32, String, String)) -> (i32, String, String) {
     let mut segments = Vec::new();
     let mut saw_progress = false;
@@ -1703,6 +1712,166 @@ fn rebase_force_replay_option_family_matches_stock_git() {
             git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
             "{name} log"
         );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
+
+#[test]
+fn rebase_signoff_and_committer_date_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool, Option<&str>, Option<&str>); 6] = [
+        (
+            "signoff_upstream",
+            &["rebase", "--signoff", "origin/main"],
+            false,
+            false,
+            Some("topic\n\nSigned-off-by: Bench <bench@example.test>"),
+            Some("1700000000 +0000|1800000000 +0000"),
+        ),
+        (
+            "committer_date_upstream",
+            &["rebase", "--committer-date-is-author-date", "origin/main"],
+            false,
+            false,
+            Some("topic"),
+            Some("1700000000 +0000|1700000000 +0000"),
+        ),
+        (
+            "signoff_branch",
+            &["rebase", "--signoff", "origin/main", "topic"],
+            true,
+            false,
+            Some("topic\n\nSigned-off-by: Bench <bench@example.test>"),
+            Some("1700000000 +0000|1800000000 +0000"),
+        ),
+        (
+            "committer_date_branch",
+            &["rebase", "--committer-date-is-author-date", "origin/main", "topic"],
+            true,
+            false,
+            Some("topic"),
+            Some("1700000000 +0000|1700000000 +0000"),
+        ),
+        (
+            "signoff_onto",
+            &[
+                "rebase",
+                "--signoff",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+            Some("topic\n\nSigned-off-by: Bench <bench@example.test>"),
+            Some("1700000000 +0000|1800000000 +0000"),
+        ),
+        (
+            "committer_date_onto",
+            &[
+                "rebase",
+                "--committer-date-is-author-date",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+            Some("topic"),
+            Some("1700000000 +0000|1700000000 +0000"),
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture, expected_body, expected_dates) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env(
+            "git",
+            git_repo.path(),
+            args,
+            &REBASE_REPLAY_DATE_ENV,
+            "git",
+        );
+        let zmin_output = command_output_with_env(
+            zmin_bin(),
+            zmin_repo.path(),
+            args,
+            &REBASE_REPLAY_DATE_ENV,
+            "zmin",
+        );
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--format=%B"]),
+            git(git_repo.path(), ["log", "-1", "--format=%B"]),
+            "{name} body"
+        );
+        if let Some(expected_body) = expected_body {
+            assert_eq!(
+                git(zmin_repo.path(), ["log", "-1", "--format=%B"]),
+                expected_body,
+                "{name} expected body"
+            );
+        }
+        assert_eq!(
+            git(
+                zmin_repo.path(),
+                ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+            ),
+            git(
+                git_repo.path(),
+                ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+            ),
+            "{name} dates"
+        );
+        if let Some(expected_dates) = expected_dates {
+            assert_eq!(
+                git(
+                    zmin_repo.path(),
+                    ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+                ),
+                expected_dates,
+                "{name} expected dates"
+            );
+        }
         assert_eq!(
             git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
             git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),

@@ -4319,6 +4319,8 @@ pub enum Command {
         abort: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
         continue_: bool,
+        #[arg(long = "committer-date-is-author-date", action = ArgAction::SetTrue)]
+        committer_date_is_author_date: bool,
         #[arg(short = 'i', long = "interactive", action = ArgAction::SetTrue)]
         interactive: bool,
         #[arg(short = 'm', long = "merge", action = ArgAction::SetTrue)]
@@ -4337,6 +4339,8 @@ pub enum Command {
         onto: Option<String>,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
+        #[arg(short = 's', long = "signoff", action = ArgAction::SetTrue)]
+        signoff: bool,
         #[arg(value_hint = ValueHint::AnyPath, allow_hyphen_values = true)]
         args: Vec<String>,
     },

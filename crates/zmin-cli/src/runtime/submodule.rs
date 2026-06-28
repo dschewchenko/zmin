@@ -1014,7 +1014,17 @@ fn merge_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> 
 
 fn rebase_submodule_gitlink(path: &std::path::Path, id: &ObjectId) -> Result<()> {
     with_submodule_current_dir(path, || {
-        rebase(false, false, None, vec![id.to_hex()], false, false, false)
+        rebase(
+            false,
+            false,
+            None,
+            vec![id.to_hex()],
+            false,
+            false,
+            false,
+            false,
+            false,
+        )
     })
 }
 

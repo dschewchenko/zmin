@@ -1972,6 +1972,8 @@ pub(crate) fn rebase(
     preserve_merges: bool,
     interactive: bool,
     quiet: bool,
+    signoff: bool,
+    committer_date_is_author_date: bool,
 ) -> Result<()> {
     if abort && continue_ {
         return Err(CliError::Fatal {
@@ -2098,6 +2100,8 @@ pub(crate) fn rebase(
                         Some(message),
                         true,
                         false,
+                        signoff,
+                        committer_date_is_author_date,
                     )?;
                 }
                 RebaseTodoCommand::Squash => {
@@ -2115,6 +2119,8 @@ pub(crate) fn rebase(
                         None,
                         true,
                         false,
+                        signoff,
+                        committer_date_is_author_date,
                     )?;
                     write_rebase_edit_state(&repo, &head, &todo[index + 1..])?;
                     eprintln!(
@@ -2146,6 +2152,8 @@ pub(crate) fn rebase(
                 None,
                 false,
                 false,
+                signoff,
+                committer_date_is_author_date,
             )?);
         }
         if let Some(rebased_head) = rebased_head {
@@ -2374,6 +2382,8 @@ fn rebase_continue() -> Result<()> {
                     Some(message),
                     true,
                     false,
+                    false,
+                    false,
                 )?;
             }
             RebaseTodoCommand::Squash => {
@@ -2543,6 +2553,8 @@ fn rebase_pick_commit_with_message(
     message_override: Option<Vec<u8>>,
     update_worktree: bool,
     print_summary: bool,
+    signoff: bool,
+    committer_date_is_author_date: bool,
 ) -> Result<ObjectId> {
     let tree_cache = TreeObjectCache::new(store);
     if update_worktree && !worktree_clean(repo, store)? {
@@ -2576,8 +2588,15 @@ fn rebase_pick_commit_with_message(
         return Err(CliError::Message("nothing to commit".into()));
     }
     let author = signature_from_commit_bytes(&picked.author)?;
-    let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
-    let message = message_override.unwrap_or_else(|| picked.message.clone());
+    let committer = rebase_replay_committer_signature(
+        repo,
+        &author,
+        committer_date_is_author_date,
+    )?;
+    let mut message = message_override.unwrap_or_else(|| picked.message.clone());
+    if signoff {
+        super::commit_commands::append_commit_signoff(&mut message, &committer)?;
+    }
     let commit = CommitBuilder::new(tree, author, committer)
         .parent(head_id)
         .message(message.clone())?
@@ -2588,6 +2607,24 @@ fn rebase_pick_commit_with_message(
         println!("[{}] {}", short_object_id(&id), commit_subject(&message));
     }
     Ok(id)
+}
+
+fn rebase_replay_committer_signature(
+    repo: &GitRepo,
+    author: &Signature,
+    committer_date_is_author_date: bool,
+) -> Result<Signature> {
+    let committer = signature_from_identity(repo, "GIT_COMMITTER")?;
+    if !committer_date_is_author_date {
+        return Ok(committer);
+    }
+    Signature::new(
+        committer.name,
+        committer.email,
+        author.timestamp,
+        author.timezone.clone(),
+    )
+    .map_err(CliError::Io)
 }
 
 fn rebase_commits_preserving_merges(

@@ -11946,6 +11946,8 @@ fatal: the remote end hung up unexpectedly\n"
             pull_rebase_mode == PullRebaseMode::RebaseMerges,
             pull_rebase_mode == PullRebaseMode::Interactive,
             quiet,
+            false,
+            false,
         );
     }
     if !ff_only

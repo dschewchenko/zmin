@@ -101,6 +101,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         runtime::Command::Rebase {
             abort,
             continue_,
+            committer_date_is_author_date,
             interactive,
             force_rebase: _force_rebase,
             merge: _merge,
@@ -110,6 +111,7 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             no_rebase_merges,
             onto,
             quiet,
+            signoff,
             args,
         } => super::sequencer_commands::rebase(
             abort,
@@ -119,6 +121,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             rebase_merges && !no_rebase_merges,
             interactive,
             quiet,
+            signoff,
+            committer_date_is_author_date,
         ),
         _ => unreachable!("non-sequencer command dispatched to sequencer"),
     }
