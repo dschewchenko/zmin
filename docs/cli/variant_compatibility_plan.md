@@ -22,6 +22,29 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-29 the latest completed batch is a stock-oracle deferral closure
+for the remaining documented Perl-backed legacy helper surface:
+`git cvsimport`, `git cvsexportcommit`, and `git archimport`. This batch did
+not add new stock-matching behavior rows. Instead, it promoted thirty-two open
+doc-option seed tails into the durable deferral inventory because the current
+local stock Git was built with `NO_PERL=1`: `git cvsimport -h`,
+`git cvsexportcommit -h`, and `git archimport -h` all fail before helper
+dispatch, so no subcommand-level Git `2.47.1` oracle exists for these legacy
+bridges in this environment. The census now keeps those option pairs in
+`docs/cli/census/deferred_doc_option_pairs.tsv` and surfaces them through the
+extension/deferred layer rather than the active fix-or-verify queue. This keeps
+the active backlog honest without falsely increasing reviewed-complete coverage
+counts. Focused gates were `git cvsimport -h`, `git cvsexportcommit -h`,
+`git archimport -h`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `7665` matrix rows, `6745` verified rows, `895` invalid-input rows,
+`10` remaining-to-fix-or-verify rows, and `126` extension/deferred rows. The
+active backlog head is now `send-email` (`5`), followed by the single-pair
+tails `apply`, `log`, `rebase`, and the two remaining unclassified source
+guards. The next default follow-up should move to `send-email`, because it is
+now the largest remaining active doc-option family with a live modeled surface.
+
+As of 2026-06-29 the latest completed batch is a stock-oracle deferral closure
 for the remaining documented `git svn` option surface. This batch did not add
 new stock-matching behavior rows. Instead, it promoted all twenty-five
 previously open `svn` doc-option seed tails into the durable deferral inventory
@@ -5635,13 +5658,13 @@ legacy SVN bridge.
 
 The latest adjacent deferred guard classification is `admin_impl.rs`
 `unsupported archimport option` plus the intentionally unsupported `-o`
-old-style branch-name mode. The current stock-Git oracle environment does not
-ship `git-archimport`: `git archimport --bad` exits `1` with
-`git: 'archimport' is not a git command`. That proves only the local
-unavailable-command shape, not GNU Arch bridge option behavior. Keep these
-guards out of closed Git compatibility counts until a real `git-archimport`
-oracle environment is available or the legacy GNU Arch bridge is explicitly
-scoped.
+old-style branch-name mode. The current stock-Git oracle environment exposes
+the command name but was built with `NO_PERL=1`: `git archimport -h` fails
+before helper dispatch with `fatal: git was built without support for
+git-archimport (NO_PERL=1).` That proves only the local helper-disabled shape,
+not GNU Arch bridge option behavior. Keep these guards out of closed Git
+compatibility counts until a real `git-archimport` oracle environment is
+available or the legacy GNU Arch bridge is explicitly scoped.
 
 The latest stock-compatible invalid-input guard classification is
 `transport_impl.rs` `unsupported index-pack option` in the `http-fetch`
@@ -6059,7 +6082,7 @@ keeps the behavior explicitly out of scope.
 | --- | --- | --- | --- |
 | `commit_impl.rs` `git gui` external GUI commands | intentionally external GUI integration, not counted as closed compatibility | local stock Git lists `gui` in `git help -a`, but the broader GUI surface still lacks a durable non-interactive oracle beyond the closed `citool` helper rows | revisit only with a real `git-gui` oracle environment or an explicit decision to bring the remaining GUI surface into current CLI scope |
 | `admin_impl.rs` `unsupported svn command '{command}'` in `git svn` dispatch | legacy external bridge deferral, not counted as closed compatibility | local stock `git-svn` helper is unusable on this arm64 host: `git svn --version` fails before helper startup because Perl loads an x86_64 `SVN::_Core` bundle | revisit only with a real `git-svn` oracle environment or an explicit decision to scope the legacy SVN bridge |
-| `admin_impl.rs` `unsupported archimport option '{arg}'` and intentionally unsupported `git archimport -o` mode | legacy external bridge deferral, not counted as closed compatibility | local stock Git does not ship `git-archimport`: `/usr/bin/git archimport --bad` exits `1` with `git: 'archimport' is not a git command` | revisit only with a real `git-archimport` oracle environment or an explicit decision to scope the legacy GNU Arch bridge |
+| `admin_impl.rs` `unsupported archimport option '{arg}'` and intentionally unsupported `git archimport -o` mode | legacy external bridge deferral, not counted as closed compatibility | local stock Git was built with `NO_PERL=1`: `git archimport -h` fails before helper dispatch with `fatal: git was built without support for git-archimport (NO_PERL=1).` | revisit only with a real `git-archimport` oracle environment or an explicit decision to scope the legacy GNU Arch bridge |
 | `checkout.rs` non-UTF8 index paths on non-Unix targets | platform-oracle deferral, not counted as closed compatibility | the guard is `#[cfg(not(unix))]`; the current macOS oracle host rejects a `bad-\xff.txt` filesystem path with `Illegal byte sequence` before stock Git checkout behavior can be observed | revisit with a Windows/non-Unix oracle that can create or import a repository/index containing the relevant path bytes |
 | `runtime/primitive_adapters.rs` `unsupported object id length`, `unsupported object type ... for patch render`, `unsupported git object type` and `transport discovery is not supported` | internal primitive-runtime validation, not counted as Git `2.47.1` CLI compatibility | source search shows these guards are reached through `GitPrimitiveRuntime` adapters rather than a `git <command>` entry point; no stock-Git CLI oracle applies to the primitive API contract | cover with dedicated primitive API tests before stabilizing the shared runtime; add a Git matrix row only if a Git-compatible CLI path exposes the behavior |
 
