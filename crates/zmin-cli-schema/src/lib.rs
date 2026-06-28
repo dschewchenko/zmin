@@ -3453,6 +3453,8 @@ pub enum Command {
         ita_invisible_in_index: bool,
         #[arg(long = "find-object")]
         find_object: Option<String>,
+        #[arg(long = "diff-merges")]
+        diff_merges: Option<String>,
         #[arg(long = "merge-base", action = ArgAction::SetTrue)]
         merge_base: bool,
         #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]

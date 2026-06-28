@@ -457,6 +457,39 @@ fn diff_family_final_documented_tail_matches_stock_git() {
 }
 
 #[test]
+fn diff_index_combined_tail_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "f.txt", "base\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+
+    git(repo.path(), ["checkout", "-b", "side"]);
+    write_file(repo.path(), "f.txt", "side\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "side"]);
+
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "f.txt", "main\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "main"]);
+
+    let _ = git_status(repo.path(), ["merge", "side"]);
+
+    for args in [
+        ["diff-index", "-c", "HEAD"].as_slice(),
+        ["diff-index", "--cc", "HEAD"].as_slice(),
+        ["diff-index", "--diff-merges=combined", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "diff-index combined tail mismatch for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn diff_noop_option_surface_matches_stock_git_for_porcelain_and_plumbing() {
     let repo = git_init();
     configure_identity(repo.path());

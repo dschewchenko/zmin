@@ -22,6 +22,67 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`diff-index` combined-tail closure across the already modeled merge-conflict
+worktree lane with unmerged index stages and a tree-ish old side. This batch
+added three exact stock-Git rows and promoted the same three documented option
+pairs into the reviewed-complete census set: `diff-index -c`,
+`diff-index --cc`, and `diff-index --diff-merges`.
+The runtime closure stayed intentionally bounded: `diff-index` now accepts the
+documented combined merge-diff spellings through schema and dispatch, maps the
+represented `--diff-merges=combined` spelling onto the stock combined patch
+surface, and renders the current helper-free unmerged lane with the same
+combined parent ids, zero result object id, patch header form, and conflict
+marker hunk body as stock Git. This finishes the documented `diff-index`
+surface without widening into additional raw/stat combined compositions beyond
+the currently modeled merge-conflict patch lane.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_diff_compat diff_index_combined_tail_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_diff_compat diff_index_remaining_documented_common_flags_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|diff-tree|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2743 / 3212`
+- represented documented command-option pairs: `2743 / 3212`
+- matrix rows: `7046`
+- verified rows: `6184`
+- invalid-input rows: `837`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `469`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `diff`: `117 / 117` reviewed-complete documented option pairs,
+  `117 / 117` represented documented option pairs, `291` written rows, `291`
+  classified rows, `287` stock-matching rows, `4` invalid-input rows, and
+  `0` exact-open rows
+- `diff-files`: `118 / 118` reviewed-complete documented option pairs,
+  `118 / 118` represented documented option pairs, `144` written rows, `144`
+  classified rows, `144` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+- `diff-index`: `112 / 112` reviewed-complete documented option pairs,
+  `112 / 112` represented documented option pairs, `146` written rows, `146`
+  classified rows, `146` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+- `diff-tree`: `132 / 132` reviewed-complete documented option pairs,
+  `132 / 132` represented documented option pairs, `171` written rows, `171`
+  classified rows, `171` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it completes the documented `diff-index` tail and with it the full
+documented `diff*` command family, without widening into helper-heavy
+backlogs led by `replay`, `send-email`, `rebase`, `pack-objects`, and `p4`.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `diff` / `diff-files` / `diff-index` / `diff-tree` documented-tail closure
 across the already modeled modified-worktree, worktree-versus-HEAD,
 whitespace-clean plumbing, two-commit history, noted raw tree, and bounded

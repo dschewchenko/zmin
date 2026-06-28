@@ -12,6 +12,12 @@ enum UnmergedStageSelection {
     Theirs = 3,
 }
 
+#[derive(Clone, Copy)]
+enum CombinedDiffMode {
+    Combined,
+    DenseCombined,
+}
+
 pub(crate) fn diff(options: DiffOptions) -> Result<()> {
     if options.combined_all_paths {
         return Err(combined_all_paths_requires_combined_diff_error());
@@ -934,6 +940,45 @@ fn render_diff_files_unmerged_combined(
     )
 }
 
+fn render_diff_index_unmerged_combined(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    index: &GitIndex,
+    old_index: &GitIndex,
+    options: &PlumbingDiffOptions,
+    render_options: DiffRenderOptions,
+    mode: CombinedDiffMode,
+) -> Result<()> {
+    let base_index = stage_selected_index(index, UnmergedStageSelection::Base, false)?;
+    let template_index = if old_index.entries().is_empty() {
+        &base_index
+    } else {
+        old_index
+    };
+    let result_index = worktree_diff_index_snapshot(repo, template_index)?;
+    let pathspecs = options
+        .paths
+        .iter()
+        .map(|path| path_arg_to_repo_relative(repo, path))
+        .collect::<Result<Vec<_>>>()?;
+    print_combined_worktree_patches_with_zero_result(
+        repo,
+        store,
+        &[base_index, old_index.clone()],
+        &result_index,
+        DiffSideSource::WorktreeOrIndex,
+        &pathspecs,
+        CombinedPatchRenderOptions {
+            abbrev_len: render_options.patch_abbrev_len,
+            relative_prefix: render_options.relative_prefix.as_deref(),
+            old_prefix: &render_options.old_prefix,
+            new_prefix: &render_options.new_prefix,
+            dense_combined: matches!(mode, CombinedDiffMode::DenseCombined),
+            line_prefix: None,
+        },
+    )
+}
+
 fn unmerged_diff_entries(indexes: [&GitIndex; 2]) -> Vec<zmin_git_core::IndexDiffEntry> {
     let mut paths = BTreeSet::new();
     for index in indexes {
@@ -1145,6 +1190,11 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
     if options.combined_all_paths {
         return Err(combined_all_paths_requires_combined_diff_error());
     }
+    let combined_mode = parse_plumbing_combined_diff_mode(
+        options.combined,
+        options.dense_combined,
+        options.diff_merges.as_deref(),
+    )?;
     let mut options = options;
     if options.dd || options.remerge_diff {
         options.patch = true;
@@ -1186,12 +1236,29 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         ..render_options
     };
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
-    let index = read_repo_index(&repo)?;
+    let full_index = read_repo_index(&repo)?;
     let treeish = options.treeish.as_deref().ok_or_else(|| CliError::Fatal {
         code: 129,
         message: "diff-index requires a tree-ish".into(),
     })?;
     let old_index = read_treeish_index(&repo, &store, treeish)?;
+    if !options.cached && let Some(mode) = combined_mode && has_unmerged_entries(&full_index) {
+        let render_options = DiffRenderOptions {
+            old_source: DiffSideSource::Index,
+            new_source: DiffSideSource::WorktreeOrIndex,
+            ..render_options
+        };
+        return render_diff_index_unmerged_combined(
+            &repo,
+            &store,
+            &full_index,
+            &old_index,
+            &options,
+            render_options,
+            mode,
+        );
+    }
+    let index = stage_zero_index(&full_index)?;
     let new_index = if options.cached {
         index.clone()
     } else {
@@ -1308,6 +1375,28 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         &entries,
         render_options,
     )
+}
+
+fn parse_plumbing_combined_diff_mode(
+    combined: bool,
+    dense_combined: bool,
+    diff_merges: Option<&str>,
+) -> Result<Option<CombinedDiffMode>> {
+    if dense_combined {
+        return Ok(Some(CombinedDiffMode::DenseCombined));
+    }
+    if combined {
+        return Ok(Some(CombinedDiffMode::Combined));
+    }
+    match diff_merges {
+        None => Ok(None),
+        Some("combined") => Ok(Some(CombinedDiffMode::Combined)),
+        Some("dense-combined") => Ok(Some(CombinedDiffMode::DenseCombined)),
+        Some(value) => Err(CliError::Fatal {
+            code: 128,
+            message: format!("invalid value for '--diff-merges': '{value}'"),
+        }),
+    }
 }
 
 fn combined_all_paths_requires_combined_diff_error() -> CliError {
