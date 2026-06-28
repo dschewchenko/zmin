@@ -4709,6 +4709,10 @@ pub enum Command {
     FastExport {
         #[arg(long = "all", action = ArgAction::Count)]
         all: u8,
+        #[arg(long = "anonymize", action = ArgAction::SetTrue)]
+        anonymize: bool,
+        #[arg(long = "anonymize-map", value_hint = ValueHint::FilePath)]
+        anonymize_map: Option<PathBuf>,
         #[arg(long = "progress")]
         progress: Option<usize>,
         #[arg(long = "signed-tags")]

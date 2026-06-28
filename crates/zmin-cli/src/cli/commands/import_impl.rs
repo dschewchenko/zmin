@@ -207,6 +207,8 @@ fn quilt_commit_message(patch_name: &str, description: &str) -> String {
 
 pub(crate) struct FastExportOptions {
     pub(crate) all: bool,
+    pub(crate) anonymize: bool,
+    pub(crate) anonymize_map: Option<PathBuf>,
     pub(crate) progress: Option<usize>,
     pub(crate) signed_tags: Option<String>,
     pub(crate) tag_of_filtered_object: Option<String>,
@@ -254,6 +256,7 @@ pub(crate) fn fast_export(options: FastExportOptions) -> Result<()> {
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let commit_cache = CommitObjectCache::new(&store);
     let tree_cache = TreeObjectCache::new(&store);
+    fast_export_preflight(&options)?;
     fast_export_modeled_noop_surface(&options);
     let refs = fast_export_refs(&repo, options.all, options.refs.clone())?;
     let mut state = FastExportState::default();
@@ -290,6 +293,11 @@ pub(crate) fn fast_export(options: FastExportOptions) -> Result<()> {
             }
         }
         if !wrote_ref_commit && let Some(mark) = state.commit_marks.get(&tip) {
+            let ref_name = if options.anonymize {
+                state.anonymizer.ref_name(&ref_name)
+            } else {
+                ref_name.clone()
+            };
             writeln!(out, "reset {ref_name}")?;
             writeln!(out, "from :{mark}")?;
             writeln!(out)?;
@@ -309,6 +317,7 @@ fn fast_export_modeled_noop_surface(options: &FastExportOptions) {
         &options.signed_tags,
         &options.tag_of_filtered_object,
         &options.reencode,
+        options.anonymize_map.as_deref(),
         options.fake_missing_tagger,
         &options.refspec,
         options.reference_excluded_parents,
@@ -316,6 +325,16 @@ fn fast_export_modeled_noop_surface(options: &FastExportOptions) {
         options.detect_copies,
         options.detect_renames,
     );
+}
+
+fn fast_export_preflight(options: &FastExportOptions) -> Result<()> {
+    if options.anonymize_map.is_some() && !options.anonymize {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "the option '--anonymize-map' requires '--anonymize'".into(),
+        });
+    }
+    Ok(())
 }
 
 fn fast_export_refs(repo: &GitRepo, all: bool, refs: Vec<String>) -> Result<Vec<(String, String)>> {
@@ -358,12 +377,102 @@ struct FastExportState {
     blob_marks: HashMap<String, usize>,
     commit_marks: HashMap<String, usize>,
     object_count: usize,
+    anonymizer: FastExportAnonymizer,
 }
 
 impl FastExportState {
     fn alloc_mark(&mut self) -> usize {
         self.next_mark += 1;
         self.next_mark
+    }
+}
+
+#[derive(Default)]
+struct FastExportAnonymizer {
+    next_ref: usize,
+    next_path: usize,
+    next_blob: usize,
+    next_subject: usize,
+    refs: HashMap<String, String>,
+    path_segments: HashMap<Vec<u8>, Vec<u8>>,
+    blob_contents: HashMap<String, Vec<u8>>,
+}
+
+impl FastExportAnonymizer {
+    fn ref_name(&mut self, ref_name: &str) -> String {
+        if let Some(mapped) = self.refs.get(ref_name) {
+            return mapped.clone();
+        }
+        let mapped = if ref_name.starts_with("refs/heads/") {
+            format!("refs/heads/ref{}", self.alloc_ref())
+        } else if ref_name.starts_with("refs/tags/") {
+            format!("refs/tags/ref{}", self.alloc_ref())
+        } else {
+            format!("ref{}", self.alloc_ref())
+        };
+        self.refs.insert(ref_name.to_owned(), mapped.clone());
+        mapped
+    }
+
+    fn path(&mut self, path: &[u8]) -> Vec<u8> {
+        let segments = path.split(|byte| *byte == b'/').map(|segment| {
+            if let Some(mapped) = self.path_segments.get(segment) {
+                return mapped.clone();
+            }
+            let mapped = format!("path{}", self.alloc_path()).into_bytes();
+            self.path_segments.insert(segment.to_vec(), mapped.clone());
+            mapped
+        });
+        let mut out = Vec::new();
+        for segment in segments {
+            if !out.is_empty() {
+                out.push(b'/');
+            }
+            out.extend_from_slice(&segment);
+        }
+        out
+    }
+
+    fn blob_content(&mut self, id: &ObjectId) -> Vec<u8> {
+        let hex = id.to_hex();
+        if let Some(mapped) = self.blob_contents.get(&hex) {
+            return mapped.clone();
+        }
+        let mapped = format!("anonymous blob {}", self.alloc_blob()).into_bytes();
+        self.blob_contents.insert(hex, mapped.clone());
+        mapped
+    }
+
+    fn message(&mut self) -> Vec<u8> {
+        let index = self.next_subject;
+        self.next_subject += 1;
+        format!("subject {index}\n\nbody\n").into_bytes()
+    }
+
+    fn signature(&self, raw: &[u8]) -> Vec<u8> {
+        let text = String::from_utf8_lossy(raw);
+        let mut parts = text.rsplitn(3, ' ');
+        let timezone = parts.next().unwrap_or("+0000");
+        let timestamp = parts.next().unwrap_or("0");
+        format!("User 0 <user0@example.com> {timestamp} {timezone}").into_bytes()
+    }
+
+    fn alloc_ref(&mut self) -> usize {
+        let index = self.next_ref;
+        self.next_ref += 1;
+        index
+    }
+
+    fn alloc_path(&mut self) -> usize {
+        let index = self.next_path;
+        self.next_path += 1;
+        index
+    }
+
+    fn alloc_blob(&mut self) -> usize {
+        let index = self.next_blob;
+        self.next_blob += 1;
+        index
     }
 }
 
@@ -379,6 +488,11 @@ fn write_fast_export_commit<W: Write>(
     reset_ref: bool,
 ) -> Result<()> {
     let commit = commit_cache.read_commit(id)?;
+    let ref_name = if options.anonymize {
+        state.anonymizer.ref_name(ref_name)
+    } else {
+        ref_name.to_owned()
+    };
     let parent_tree = commit
         .parents
         .first()
@@ -398,15 +512,30 @@ fn write_fast_export_commit<W: Write>(
     if options.show_original_ids {
         writeln!(out, "original-oid {}", id.to_hex())?;
     }
-    writeln!(out, "author {}", String::from_utf8_lossy(&commit.author))?;
+    let author = if options.anonymize {
+        state.anonymizer.signature(&commit.author)
+    } else {
+        commit.author.clone()
+    };
+    writeln!(out, "author {}", String::from_utf8_lossy(&author))?;
+    let committer = if options.anonymize {
+        state.anonymizer.signature(&commit.committer)
+    } else {
+        commit.committer.clone()
+    };
     writeln!(
         out,
         "committer {}",
-        String::from_utf8_lossy(&commit.committer)
+        String::from_utf8_lossy(&committer)
     )?;
-    writeln!(out, "data {}", commit.message.len())?;
-    out.write_all(&commit.message)?;
-    if !commit.message.ends_with(b"\n") {
+    let message = if options.anonymize {
+        state.anonymizer.message()
+    } else {
+        commit.message.clone()
+    };
+    writeln!(out, "data {}", message.len())?;
+    out.write_all(&message)?;
+    if !message.ends_with(b"\n") {
         writeln!(out)?;
     }
     if let Some(parent) = commit.parents.first()
@@ -473,7 +602,7 @@ fn collect_tree_blobs_at(
 
 fn write_fast_export_file_command<W: Write>(
     out: &mut W,
-    state: &FastExportState,
+    state: &mut FastExportState,
     command: &FastExportCommand,
     options: &FastExportOptions,
 ) -> Result<()> {
@@ -482,10 +611,20 @@ fn write_fast_export_file_command<W: Write>(
             writeln!(out, "deleteall")?;
         }
         FastExportCommand::Delete(path) => {
-            writeln!(out, "D {}", String::from_utf8_lossy(path))?;
+            let path = if options.anonymize {
+                state.anonymizer.path(path)
+            } else {
+                path.clone()
+            };
+            writeln!(out, "D {}", String::from_utf8_lossy(&path))?;
         }
         FastExportCommand::Modify(file) => {
-            let path = String::from_utf8_lossy(&file.path);
+            let path = if options.anonymize {
+                state.anonymizer.path(&file.path)
+            } else {
+                file.path.clone()
+            };
+            let path = String::from_utf8_lossy(&path);
             match file.mode {
                 IndexMode::File | IndexMode::Executable | IndexMode::Symlink => {
                     if options.no_data {
@@ -599,18 +738,24 @@ fn write_fast_export_blob_records<W: Write>(
         }
         let mark = state.alloc_mark();
         state.blob_marks.insert(file.id.to_hex(), mark);
-        let object = store.read_object(&file.id)?;
+        let content = if options.anonymize {
+            state.anonymizer.blob_content(&file.id)
+        } else {
+            store.read_object(&file.id)?.content
+        };
         writeln!(out, "blob")?;
         writeln!(out, "mark :{mark}")?;
         if options.show_original_ids {
             writeln!(out, "original-oid {}", file.id.to_hex())?;
         }
-        writeln!(out, "data {}", object.content.len())?;
-        out.write_all(&object.content)?;
-        if !object.content.ends_with(b"\n") {
+        writeln!(out, "data {}", content.len())?;
+        out.write_all(&content)?;
+        if !content.ends_with(b"\n") {
             writeln!(out)?;
         }
-        writeln!(out)?;
+        if !options.anonymize {
+            writeln!(out)?;
+        }
         note_fast_export_progress(out, state, options.progress)?;
     }
     Ok(())

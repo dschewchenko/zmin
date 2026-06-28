@@ -17,6 +17,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         ),
         runtime::Command::FastExport {
             all,
+            anonymize,
+            anonymize_map,
             progress,
             signed_tags,
             tag_of_filtered_object,
@@ -38,6 +40,8 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
         } => {
             super::import_commands::fast_export(super::import_commands::FastExportOptions {
                 all: all > 0,
+                anonymize,
+                anonymize_map,
                 progress,
                 signed_tags,
                 tag_of_filtered_object,

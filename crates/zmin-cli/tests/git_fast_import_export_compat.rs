@@ -283,3 +283,36 @@ fn fast_export_documented_option_batch_matches_stock_git() {
         &[],
     );
 }
+
+#[test]
+fn fast_export_anonymize_option_family_matches_stock_git() {
+    assert_fast_export_matches_stock_git(&["fast-export", "--anonymize", "--all"], |_, _| {}, &[]);
+    assert_fast_export_matches_stock_git(
+        &["fast-export", "--anonymize", "--anonymize-map=map.txt", "--all"],
+        |git_repo, zmin_repo| {
+            fs::write(git_repo.join("map.txt"), "seed\n").expect("write git anonymize map");
+            fs::write(zmin_repo.join("map.txt"), "seed\n").expect("write zmin anonymize map");
+        },
+        &[],
+    );
+}
+
+#[test]
+fn fast_export_anonymize_map_requires_anonymize_like_stock_git() {
+    let repo = seed_fast_export_repo();
+    fs::write(repo.path().join("map.txt"), "seed\n").expect("write anonymize map");
+    assert_eq!(
+        command_any_output(
+            "git",
+            repo.path(),
+            &["fast-export", "--anonymize-map=map.txt", "--all"],
+            "git fast-export anonymize-map precondition",
+        ),
+        command_any_output(
+            zmin_bin(),
+            repo.path(),
+            &["fast-export", "--anonymize-map=map.txt", "--all"],
+            "zmin fast-export anonymize-map precondition",
+        )
+    );
+}
