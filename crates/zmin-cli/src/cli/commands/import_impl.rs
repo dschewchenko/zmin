@@ -147,6 +147,7 @@ fn apply_quilt_patch(
         stat: false,
         numstat: false,
         summary: false,
+        build_fake_ancestor: None,
         index: true,
         recount: false,
         quiet: false,

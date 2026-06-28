@@ -1,14 +1,16 @@
 mod common;
 
 use std::fs;
+use std::path::Path;
+use std::process::Command;
 
 use tempfile::TempDir;
 
 use common::{
-    command_any_output_with_stdin, command_stdout_bytes, configure_identity, git, git_init,
-    git_status_with_stdin, git_with_env, git_with_stdin, git_with_stdin_args,
+    command_any_output, command_any_output_with_stdin, command_stdout_bytes, configure_identity,
+    git, git_init, git_status_with_stdin, git_with_env, git_with_stdin, git_with_stdin_args,
     run_zmin_status_with_stdin, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file,
-    zmin_bin,
+    stock_git_bin, zmin_bin,
 };
 
 fn apply_base_repo() -> TempDir {
@@ -433,6 +435,75 @@ fn apply_documented_open_option_batch_matches_stock_git() {
             git(git_repo.path(), ["status", "--short"])
         );
     }
+}
+
+#[test]
+fn apply_build_fake_ancestor_matches_stock_git() {
+    let patch = apply_fake_ancestor_patch();
+
+    for args in [
+        ["apply", "--build-fake-ancestor=fake.idx", "p.patch"].as_slice(),
+        ["apply", "--build-fake-ancestor=fake.idx", "--check", "p.patch"].as_slice(),
+    ] {
+        let git_repo = apply_single_file_repo();
+        let zmin_repo = apply_single_file_repo();
+        fs::write(git_repo.path().join("p.patch"), &patch).expect("write git patch");
+        fs::write(zmin_repo.path().join("p.patch"), &patch).expect("write zmin patch");
+
+        assert_eq!(
+            command_any_output("git", git_repo.path(), args, "git apply"),
+            command_any_output(zmin_bin(), zmin_repo.path(), args, "zmin apply"),
+            "args: {args:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(git_repo.path().join("a.txt")).expect("read git worktree"),
+            fs::read_to_string(zmin_repo.path().join("a.txt")).expect("read zmin worktree"),
+            "content args: {args:?}"
+        );
+        assert_eq!(
+            git(git_repo.path(), ["status", "--short"]),
+            git(zmin_repo.path(), ["status", "--short"]),
+            "status args: {args:?}"
+        );
+        assert_eq!(
+            fake_index_stage_output(git_repo.path(), stock_git_bin(), "fake.idx"),
+            fake_index_stage_output(zmin_repo.path(), Path::new(zmin_bin()), "fake.idx"),
+            "fake index rows args: {args:?}"
+        );
+        assert_eq!(
+            fs::read(git_repo.path().join("fake.idx")).expect("read git fake index"),
+            fs::read(zmin_repo.path().join("fake.idx")).expect("read zmin fake index"),
+            "fake index bytes args: {args:?}"
+        );
+    }
+}
+
+fn apply_fake_ancestor_patch() -> String {
+    let repo = apply_single_file_repo();
+    write_file(repo.path(), "a.txt", "two\n");
+    let patch = String::from_utf8(command_stdout_bytes("git", repo.path(), &["diff"]))
+        .expect("diff utf8");
+    write_file(repo.path(), "a.txt", "one\n");
+    patch
+}
+
+fn fake_index_stage_output(repo: &Path, command: &Path, fake_index_name: &str) -> String {
+    let output = Command::new(command)
+        .arg("ls-files")
+        .arg("--stage")
+        .current_dir(repo)
+        .env("GIT_INDEX_FILE", repo.join(fake_index_name))
+        .output()
+        .unwrap_or_else(|error| panic!("run ls-files with fake index: {error}"));
+    assert!(
+        output.status.success(),
+        "ls-files with fake index failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("fake index stdout utf8")
+        .trim_end_matches('\n')
+        .to_owned()
 }
 
 #[test]

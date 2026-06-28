@@ -4111,6 +4111,8 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "summary", action = ArgAction::SetTrue)]
         summary: bool,
+        #[arg(long = "build-fake-ancestor", value_hint = ValueHint::FilePath)]
+        build_fake_ancestor: Option<PathBuf>,
         #[arg(long = "index", action = ArgAction::SetTrue)]
         index: bool,
         #[arg(long = "recount", action = ArgAction::SetTrue)]

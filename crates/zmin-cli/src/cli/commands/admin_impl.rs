@@ -2400,6 +2400,7 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
             stat: false,
             numstat: false,
             summary: false,
+            build_fake_ancestor: None,
             index: false,
             recount: false,
             quiet: false,

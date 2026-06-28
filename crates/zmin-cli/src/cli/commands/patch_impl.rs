@@ -11,6 +11,7 @@ pub(crate) struct ApplyOptions {
     pub(crate) stat: bool,
     pub(crate) numstat: bool,
     pub(crate) summary: bool,
+    pub(crate) build_fake_ancestor: Option<PathBuf>,
     pub(crate) index: bool,
     pub(crate) recount: bool,
     pub(crate) quiet: bool,
@@ -42,6 +43,8 @@ pub(crate) struct ApplyOptions {
 pub(crate) struct ApplyFilePatch {
     pub(crate) old_path: Option<Vec<u8>>,
     pub(crate) new_path: Option<Vec<u8>>,
+    pub(crate) embedded_old_id_prefix: Option<Vec<u8>>,
+    pub(crate) embedded_old_mode: Option<IndexMode>,
     pub(crate) old_mode: Option<IndexMode>,
     pub(crate) new_mode: Option<IndexMode>,
     pub(crate) rename: bool,
@@ -175,6 +178,10 @@ pub(crate) fn apply(options: ApplyOptions) -> Result<()> {
                 "error: patch failed: {rendered}:1\nerror: {rendered}: patch does not apply\n"
             ),
         });
+    }
+    if let Some(fake_ancestor_path) = &options.build_fake_ancestor {
+        write_fake_ancestor_index(fake_ancestor_path, &patches)?;
+        return Ok(());
     }
     if options.three_way {
         eprintln!(
@@ -478,6 +485,39 @@ fn apply_directory_prefix(patches: &mut [ApplyFilePatch], directory: Option<&str
             *new_path = prefixed_apply_path(directory, new_path);
         }
     }
+}
+
+fn write_fake_ancestor_index(path: &Path, patches: &[ApplyFilePatch]) -> Result<()> {
+    let repo = find_repo()?;
+    let runtime = CliPrimitiveRuntime::new_default(&repo);
+    let store = runtime.object_store_adapter().as_object_store();
+    let mut index = GitIndex::new();
+    for patch in patches {
+        let Some(old_id_prefix) = patch.embedded_old_id_prefix.as_ref() else {
+            continue;
+        };
+        if old_id_prefix.iter().all(|byte| *byte == b'0') {
+            continue;
+        }
+        let Some(entry_path) = patch.old_path.as_ref().or(patch.new_path.as_ref()).cloned() else {
+            continue;
+        };
+        let old_id = store
+            .resolve_prefix(
+                std::str::from_utf8(old_id_prefix).map_err(|_| CliError::Fatal {
+                    code: 128,
+                    message: "patch index header object id is not valid UTF-8".into(),
+                })?,
+            )
+            .map_err(CliError::Io)?;
+        let mode = patch
+            .embedded_old_mode
+            .or(patch.old_mode)
+            .or(patch.new_mode)
+            .unwrap_or(IndexMode::File);
+        index.upsert(IndexEntry::new(entry_path, old_id, mode, 0)?)?;
+    }
+    index.write_to_path(path).map_err(CliError::Io)
 }
 
 fn prefixed_apply_path(directory: &str, path: &[u8]) -> Vec<u8> {
@@ -808,6 +848,8 @@ fn read_apply_patch_inputs(paths: &[PathBuf]) -> Result<Vec<u8>> {
 
 fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePatch, usize)> {
     let (mut old_path, mut new_path) = parse_diff_git_paths(lines[start])?;
+    let mut embedded_old_id_prefix = None;
+    let mut embedded_old_mode = None;
     let mut old_mode = None;
     let mut new_mode = None;
     let mut rename = false;
@@ -837,6 +879,10 @@ fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePat
         } else if let Some(path) = line.strip_prefix(b"rename to ") {
             new_path = Some(parse_apply_rename_path(path)?);
             rename = true;
+        } else if let Some(header) = line.strip_prefix(b"index ") {
+            let (old_id_prefix, mode) = parse_apply_index_header(header)?;
+            embedded_old_id_prefix = Some(old_id_prefix);
+            embedded_old_mode = mode;
         } else if let Some(mode) = line.strip_prefix(b"new file mode ") {
             new_mode = Some(parse_index_mode_bytes(mode)?);
         } else if let Some(mode) = line.strip_prefix(b"new mode ") {
@@ -867,6 +913,8 @@ fn parse_apply_file_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyFilePat
         ApplyFilePatch {
             old_path,
             new_path,
+            embedded_old_id_prefix,
+            embedded_old_mode,
             old_mode,
             new_mode,
             rename,
@@ -934,6 +982,33 @@ fn parse_apply_rename_path(path: &[u8]) -> Result<Vec<u8>> {
         });
     }
     Ok(normalized.into_bytes())
+}
+
+fn parse_apply_index_header(header: &[u8]) -> Result<(Vec<u8>, Option<IndexMode>)> {
+    let mut parts = header.splitn(2, |byte| *byte == b' ');
+    let ids = parts.next().ok_or_else(|| CliError::Fatal {
+        code: 128,
+        message: "patch index header is malformed".into(),
+    })?;
+    let mode = parts
+        .next()
+        .map(parse_index_mode_bytes)
+        .transpose()?;
+    let separator = ids
+        .windows(2)
+        .position(|window| window == b"..")
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "patch index header is malformed".into(),
+        })?;
+    let old_id_prefix = ids[..separator].to_vec();
+    if old_id_prefix.is_empty() || !old_id_prefix.iter().all(u8::is_ascii_hexdigit) {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "patch index header is malformed".into(),
+        });
+    }
+    Ok((old_id_prefix, mode))
 }
 
 fn parse_apply_binary_patch(lines: &[&[u8]], start: usize) -> Result<(ApplyBinaryPatch, usize)> {

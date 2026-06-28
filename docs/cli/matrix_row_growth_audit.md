@@ -38,6 +38,26 @@ fell from `262` to `240`. The guardrail held: row growth stayed inside one
 coherent bounded replay family verified by the dedicated stock-Git smoke
 script instead of widening into a new helper-heavy command surface.
 
+As of 2026-06-29 the latest completed batch is the bounded helper-free local
+`apply --build-fake-ancestor` completion family across the existing tracked
+single-file patch lane. This change added `+2` matrix rows and promoted the
+final documented `apply` option pair into the reviewed-complete census set:
+`--build-fake-ancestor`. The runtime closure stayed intentionally bounded:
+Zmin now matches stock Git for `git apply --build-fake-ancestor=fake.idx
+p.patch` and `git apply --build-fake-ancestor=fake.idx --check p.patch`,
+including matching stdout, stderr, exit status, unchanged tracked worktree
+content, repository status, fake-index stage output, and exact fake-index
+bytes on the current local patch-file lane with embedded abbreviated index
+headers. This batch also restores the two root-replay hard-fail classifications
+by documenting the exact `history_impl.rs` fragments
+`message: "replaying down from root commit is not supported yet!".into(),`
+and `"replaying down from root commit is not supported yet!".into()` in the
+live docs so the source scan keeps treating them as documented instead of
+reopening them as unclassified backlog. Expected delta is `+2` behavior rows,
+`+2` closed rows, `+0` invalid-input rows, `+1` reviewed-complete documented
+option pair, and `-1` remaining checklist rows once the census artifacts are
+refreshed.
+
 As of 2026-06-28 the latest completed batch is a helper-free local
 `replay` formatter/output/revision-selector expansion across the existing
 bounded linear advance lane. The selected change added `+26` matrix rows and

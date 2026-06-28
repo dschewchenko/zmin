@@ -22,6 +22,31 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-29 the latest completed batch is the bounded helper-free local
+`apply --build-fake-ancestor` completion family across the existing tracked
+single-file patch-file lane. This batch added two exact stock-Git rows and
+promoted the final documented `apply` option pair into the reviewed-complete
+census set: `--build-fake-ancestor`. The runtime closure stayed intentionally
+bounded: Zmin now matches stock Git for
+`git apply --build-fake-ancestor=fake.idx p.patch` and
+`git apply --build-fake-ancestor=fake.idx --check p.patch`, including matching
+stdout, stderr, exit status, unchanged tracked worktree content, repository
+status, fake-index stage output, and exact fake-index bytes on the current
+local patch-file lane with embedded abbreviated index headers. This batch also
+re-documented the matching `history_impl.rs` root-replay guard fragments
+`message: "replaying down from root commit is not supported yet!".into(),`
+and `"replaying down from root commit is not supported yet!".into()`, so the
+hard-fail scan no longer reopens them as unclassified backlog. Focused gates
+were `cargo test -q -p zmin-cli --test git_apply_compat apply_build_fake_ancestor_matches_stock_git -- --exact`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `7670` matrix rows, `6750` verified rows, `895` invalid-input rows,
+`1` remaining-to-fix-or-verify row, and `131` extension/deferred rows. The
+active backlog is now down to the single documented tail `log -L`. The next
+default follow-up should close or explicitly defer that final `log` option
+pair.
+
+As of 2026-06-29 the latest completed batch is the bounded helper-free local
 `rebase --root` completion family across the existing linear and `--onto`
 replay fixtures. This batch added three exact stock-Git rows and promoted the
 final documented `rebase` option pair into the reviewed-complete census set:

@@ -1,20 +1,20 @@
 metric	count	total	note
 complete_command_matrices	146	151	only commands whose full behavior matrix is finished
-complete_doc_option_pairs	3148	3212	documented command-option pairs whose full behavior matrix is finished
+complete_doc_option_pairs	3149	3212	documented command-option pairs whose full behavior matrix is finished
 commands_with_matrix_rows	155	151	commands with any written behavior rows
-doc_option_pairs_represented_by_rows	3148	3212	documented command-option pairs with at least one behavior row
-behavior_rows_written	7668	7668	current written command option value combination state transport platform rows
-written_rows_matching_stock_git	6748	7668	closed written rows only
-behavior_rows_classified	7643	7668	closed and invalid-input rows safe to skip unless code or evidence changes
-behavior_rows_partial	0	7668	written rows with incomplete parity
-behavior_rows_open	0	7668	written rows not implemented or not matching yet
-invalid_input_rows	895	7668	rows where stock Git rejects the input
+doc_option_pairs_represented_by_rows	3149	3212	documented command-option pairs with at least one behavior row
+behavior_rows_written	7670	7670	current written command option value combination state transport platform rows
+written_rows_matching_stock_git	6750	7670	closed written rows only
+behavior_rows_classified	7645	7670	closed and invalid-input rows safe to skip unless code or evidence changes
+behavior_rows_partial	0	7670	written rows with incomplete parity
+behavior_rows_open	0	7670	written rows not implemented or not matching yet
+invalid_input_rows	895	7670	rows where stock Git rejects the input
 
 command	doc_option_pairs	complete_doc_option_pairs	represented_doc_option_pairs	represented_doc_option_pairs_pct	behavior_rows_written	behavior_rows_classified	behavior_rows_classified_pct_of_written	written_rows_matching_stock_git	written_rows_matching_stock_git_pct_of_written	partial	open	invalid_input	complete_matrix
 add	30	30	30	100.0	130	130	100.0	114	87.7	0	0	16	yes
 am	54	54	54	100.0	90	90	100.0	66	73.3	0	0	24	yes
 annotate	25	25	25	100.0	26	26	100.0	24	92.3	0	0	2	yes
-apply	38	37	37	97.4	64	64	100.0	58	90.6	0	0	6	yes
+apply	38	38	38	100.0	66	66	100.0	60	90.9	0	0	6	yes
 archimport	8	1	1	12.5	1	1	100.0	1	100.0	0	0	0	no
 archive	14	14	14	100.0	24	24	100.0	23	95.8	0	0	1	yes
 bisect	2	2	2	100.0	21	21	100.0	20	95.2	0	0	1	yes
