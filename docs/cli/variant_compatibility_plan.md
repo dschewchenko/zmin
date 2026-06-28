@@ -22,6 +22,57 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`rev-list` represented-tail expansion across the already modeled two-commit
+local history lane, the patch-equivalent symmetric-difference lane, and the
+current helper-free raw-output surface. This batch added nine exact stock-Git
+rows and promoted the same nine documented option pairs into the represented
+census set: `rev-list --bisect`, `--bisect-all`, `--bisect-vars`,
+`--cherry`, `--disk-usage`, `--graph`, `--header`, `--objects-edge`, and
+`--objects-edge-aggressive`.
+The runtime closure stayed intentionally bounded: `rev-list` now accepts and
+matches stock Git for the current helper-free midpoint and distance reporting
+lanes, plain `--cherry` symmetric-difference marker output, commit-only
+`--disk-usage` byte totals on the loose-object local lane, raw `--header`
+records with stock NUL separators, linear `--graph` prefix output, and the
+current no-excluded-edge `--objects-edge*` object listing lane by treating
+those spellings as the bounded stock object-walk surface already modeled here.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat log_and_rev_list_left_right_cherry_boundary_family_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat rev_list_documented_tail_batch_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(rev-list|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2783 / 3212`
+- matrix rows: `7088`
+- verified rows: `6222`
+- invalid-input rows: `841`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `rev-list`: `108 / 117` reviewed-complete documented option pairs,
+  `117 / 117` represented documented option pairs, `169` written rows, `169`
+  classified rows, `156` stock-matching rows, `13` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-expansion batch rather than a reviewed-complete
+closure: it converts the remaining `rev-list` schema gaps into exact stock-Git
+evidence on bounded helper-free lanes, but those nine documented options still
+sit in `doc_option_expansion_required` because wider value, combination, and
+state coverage is still unmodeled.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `show` / `rev-parse` / `index-pack` documented-tail closure across already
 modeled unsigned commit display, no-hideRefs ref-selection, and standalone
 pack-file indexing lanes. This batch added three exact stock-Git rows and

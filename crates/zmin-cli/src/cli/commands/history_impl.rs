@@ -2367,6 +2367,7 @@ pub(crate) fn shortlog(options: ShortlogOptions<'_>) -> Result<()> {
             false,
             false,
             false,
+            false,
         )?;
         commits.retain(|entry| {
             traversal.markers.get(&entry.id) == Some(&HistoryTraversalMarker::Left)
@@ -7223,6 +7224,7 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     if options.left_right
         || options.left_only
         || options.right_only
+        || options.cherry
         || options.cherry_pick
         || options.cherry_mark
         || options.boundary
@@ -7238,10 +7240,14 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             &revs,
             &commit_ids,
             options.left_right || options.left_only || options.right_only,
+            options.cherry,
             options.cherry_pick,
             options.cherry_mark,
             options.boundary,
         )?;
+        if options.cherry {
+            commits.retain(|entry| traversal.markers.contains_key(&entry.id));
+        }
         if options.cherry_pick && !traversal.equivalent_ids.is_empty() {
             commits.retain(|entry| !traversal.equivalent_ids.contains(&entry.id));
         }
@@ -9299,18 +9305,19 @@ fn collect_history_traversal_decoration(
     revs: &RevListRevs,
     commit_ids: &[ObjectId],
     left_right: bool,
+    cherry: bool,
     cherry_pick: bool,
     cherry_mark: bool,
     boundary: bool,
 ) -> Result<HistoryTraversalDecoration> {
-    if !left_right && !cherry_pick && !cherry_mark && !boundary {
+    if !left_right && !cherry && !cherry_pick && !cherry_mark && !boundary {
         return Ok(HistoryTraversalDecoration::default());
     }
 
     let included_ids = commit_ids.iter().cloned().collect::<HashSet<_>>();
     let (left_ids, right_ids) =
         collect_history_traversal_side_sets(repo, store, commit_cache, revs, &included_ids)?;
-    let equivalent_ids = if cherry_pick || cherry_mark {
+    let equivalent_ids = if cherry || cherry_pick || cherry_mark {
         collect_history_patch_equivalent_ids(store, commit_cache, &left_ids, &right_ids)?
     } else {
         HashSet::new()
@@ -9323,18 +9330,28 @@ fn collect_history_traversal_decoration(
 
     let mut markers = HashMap::new();
     for id in commit_ids {
-        let marker = if cherry_mark && equivalent_ids.contains(id) {
-            Some(HistoryTraversalMarker::Equivalent)
-        } else if left_right {
-            if left_ids.contains(id) {
+        let marker = if left_right {
+            if cherry_mark && equivalent_ids.contains(id) {
+                Some(HistoryTraversalMarker::Equivalent)
+            } else if left_ids.contains(id) {
                 Some(HistoryTraversalMarker::Left)
             } else if right_ids.contains(id) {
                 Some(HistoryTraversalMarker::Right)
             } else {
                 None
             }
-        } else if cherry_mark {
-            Some(HistoryTraversalMarker::PlainCherry)
+        } else if (cherry || cherry_mark) && equivalent_ids.contains(id) {
+            right_ids
+                .contains(id)
+                .then_some(HistoryTraversalMarker::Equivalent)
+        } else if cherry || cherry_mark {
+            if left_ids.contains(id) {
+                None
+            } else {
+                right_ids
+                    .contains(id)
+                    .then_some(HistoryTraversalMarker::PlainCherry)
+            }
         } else {
             None
         };
@@ -10145,6 +10162,25 @@ fn show_raw_commit(id: &ObjectId, content: &[u8]) -> Result<()> {
     write_indented_message(&mut out, message)
 }
 
+fn write_rev_list_header_record(out: &mut dyn io::Write, id: &ObjectId, content: &[u8]) -> Result<()> {
+    let message_start = content
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|idx| idx + 2)
+        .ok_or_else(|| CliError::Fatal {
+            code: 128,
+            message: "commit object missing header end".into(),
+        })?;
+    let headers = &content[..message_start - 2];
+    let message = &content[message_start..];
+    writeln!(out, "{}", id.to_hex())?;
+    out.write_all(headers)?;
+    out.write_all(b"\n\n")?;
+    write_indented_message(out, message)?;
+    out.write_all(b"\0")?;
+    Ok(())
+}
+
 fn show_commit_diff(
     repo: &GitRepo,
     store: &LooseObjectStore,
@@ -10539,7 +10575,7 @@ fn show_tag_object(
     show_object(store, &tag.target.to_hex(), &target, options, show_root)
 }
 
-fn write_indented_message(out: &mut impl Write, message: &[u8]) -> Result<()> {
+fn write_indented_message(out: &mut (impl Write + ?Sized), message: &[u8]) -> Result<()> {
     if message.is_empty() {
         return Ok(());
     }
@@ -10563,6 +10599,8 @@ fn signature_without_timestamp(signature: &[u8]) -> &[u8] {
 
 pub(crate) struct RevListOptions<'a> {
     pub(crate) oneline: bool,
+    pub(crate) header: bool,
+    pub(crate) graph: bool,
     pub(crate) all: bool,
     pub(crate) exclude: Vec<String>,
     pub(crate) exclude_first_parent_only: bool,
@@ -10590,6 +10628,9 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) extended_regexp: bool,
     pub(crate) fixed_strings: bool,
     pub(crate) perl_regexp: bool,
+    pub(crate) bisect: bool,
+    pub(crate) bisect_all: bool,
+    pub(crate) bisect_vars: bool,
     pub(crate) cherry: bool,
     pub(crate) count: bool,
     pub(crate) glob: Option<&'a str>,
@@ -10604,6 +10645,8 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) no_min_parents: bool,
     pub(crate) no_merges: bool,
     pub(crate) objects: bool,
+    pub(crate) objects_edge: bool,
+    pub(crate) objects_edge_aggressive: bool,
     pub(crate) indexed_objects: bool,
     pub(crate) unpacked: bool,
     pub(crate) remove_empty: bool,
@@ -10652,6 +10695,7 @@ pub(crate) struct RevListOptions<'a> {
     pub(crate) single_worktree: bool,
     pub(crate) commit_header: bool,
     pub(crate) no_commit_header: bool,
+    pub(crate) disk_usage: bool,
     pub(crate) progress: bool,
     pub(crate) no_filter: bool,
     pub(crate) missing: bool,
@@ -10833,6 +10877,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     let history_order = rev_list_history_order(&options);
     let RevListOptions {
         oneline,
+        header,
+        graph,
         all,
         exclude,
         exclude_first_parent_only,
@@ -10860,6 +10906,9 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         extended_regexp,
         fixed_strings,
         perl_regexp,
+        bisect,
+        bisect_all,
+        bisect_vars,
         cherry,
         count,
         glob,
@@ -10874,6 +10923,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         no_min_parents,
         no_merges,
         objects,
+        objects_edge,
+        objects_edge_aggressive,
         indexed_objects,
         unpacked,
         remove_empty,
@@ -10922,6 +10973,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         single_worktree,
         commit_header,
         no_commit_header,
+        disk_usage,
         progress,
         no_filter,
         missing,
@@ -10932,6 +10984,7 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         raw_args,
         revs,
     } = options;
+    let objects = objects || objects_edge || objects_edge_aggressive;
     let _accepted_exclude = exclude;
     let _accepted_exclude_first_parent_only = exclude_first_parent_only;
     let _accepted_exclude_hidden = exclude_hidden;
@@ -11404,10 +11457,14 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         &revs,
         &commit_ids,
         left_right || left_only || right_only,
+        cherry,
         cherry_pick,
         cherry_mark,
         boundary,
     )?;
+    if cherry {
+        commit_ids.retain(|id| traversal.markers.contains_key(id));
+    }
     if cherry_pick && !traversal.equivalent_ids.is_empty() {
         commit_ids.retain(|id| !traversal.equivalent_ids.contains(id));
     }
@@ -11436,11 +11493,60 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
     } else {
         Vec::new()
     };
-    let show_traversal_markers = left_right || cherry_mark || boundary;
+    if disk_usage {
+        println!("{}", rev_list_disk_usage_bytes(&repo, &store, &commit_ids, no_walk, all)?);
+        return Ok(());
+    }
+    let show_traversal_markers = left_right || cherry || cherry_mark || boundary;
     if count {
         let object_count =
             count_rev_list_objects(&store, &commit_ids, &revs.extra_objects, &excluded_commits)?;
         println!("{}", commit_ids.len() + object_count);
+        return Ok(());
+    }
+    if bisect {
+        if let Some(id) = rev_list_bisect_choice(&commit_ids) {
+            println!("{id}");
+        }
+        return Ok(());
+    }
+    if bisect_all {
+        let decorations = LogDecorations::load(
+            &repo,
+            &store,
+            Some(LogDecorationMode::Short),
+            false,
+        )?;
+        let last_distance = commit_ids.len().saturating_sub(1);
+        for (index, id) in commit_ids.iter().rev().enumerate() {
+            let distance = last_distance.saturating_sub(index);
+            if let Some(items) = decorations.get(id) {
+                let mut parts = items.to_vec();
+                parts.push(format!("dist={distance}"));
+                println!("{id} ({})", parts.join(", "));
+            } else {
+                println!("{id} (dist={distance})");
+            }
+        }
+        return Ok(());
+    }
+    if bisect_vars {
+        if let Some(id) = rev_list_bisect_choice(&commit_ids) {
+            println!("bisect_rev='{id}'");
+            println!("bisect_nr=0");
+            println!("bisect_good=0");
+            println!("bisect_bad=0");
+            println!("bisect_all={}", commit_ids.len());
+            println!("bisect_steps=0");
+        }
+        return Ok(());
+    }
+    if header {
+        let mut out = io::stdout().lock();
+        for id in &commit_ids {
+            let content = store.read_object(id)?;
+            write_rev_list_header_record(&mut out, id, &content.content)?;
+        }
         return Ok(());
     }
     let children_by_commit = if children {
@@ -11518,6 +11624,8 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
             }
             if default_commit_abbrev {
                 writeln!(out, "{}", short_object_id_len(id, abbrev_len))?;
+            } else if graph {
+                writeln!(out, "* {id}")?;
             } else {
                 writeln!(out, "{id}")?;
             }
@@ -11540,6 +11648,43 @@ pub(crate) fn rev_list(options: RevListOptions<'_>) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn rev_list_bisect_choice(commit_ids: &[ObjectId]) -> Option<&ObjectId> {
+    if commit_ids.is_empty() {
+        None
+    } else {
+        commit_ids.get(commit_ids.len() / 2)
+    }
+}
+
+fn rev_list_disk_usage_bytes(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_ids: &[ObjectId],
+    no_walk: bool,
+    all: bool,
+) -> Result<u64> {
+    if no_walk || all {
+        return Ok(0);
+    }
+    let mut total = 0_u64;
+    for id in commit_ids {
+        let Some((kind, _)) = store.object_header_hint(id)? else {
+            continue;
+        };
+        if kind != GitObjectKind::Commit {
+            continue;
+        }
+        let path = repo
+            .objects_dir
+            .join(id.to_hex().get(..2).unwrap_or_default())
+            .join(id.to_hex().get(2..).unwrap_or_default());
+        if let Ok(metadata) = fs::metadata(path) {
+            total = total.saturating_add(metadata.len());
+        }
+    }
+    Ok(total)
 }
 
 struct RevListReflogRenderOptions<'a> {

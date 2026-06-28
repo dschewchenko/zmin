@@ -11,6 +11,31 @@ As of 2026-06-22, do not continue importing rows directly from
 starts from `docs/cli/git_compatibility_census.md` and
 `docs/cli/census/remaining_to_fix_or_verify.tsv`.
 
+As of 2026-06-28 the latest completed batch is a helper-free local
+`rev-list` represented-tail expansion across the existing two-commit local
+history lane, the patch-equivalent symmetric-difference lane, and the current
+helper-free raw-output surface. The selected change added `+9` exact
+stock-Git rows for `--bisect`, `--bisect-all`, `--bisect-vars`, `--cherry`,
+`--disk-usage`, `--graph`, `--header`, `--objects-edge`, and
+`--objects-edge-aggressive`. The runtime closure stayed intentionally narrow:
+`rev-list` now threads the remaining schema spellings into the history
+pipeline, matches stock midpoint and distance reporting on the modeled bisect
+lane, emits stock plain-cherry markers on the symmetric-difference lane,
+reports commit-only disk bytes on the loose-object local lane, writes stock
+NUL-delimited raw header records, renders the stock linear graph prefix lane,
+and treats `--objects-edge*` as the current bounded stock object walk when no
+excluded edges are present. Actual delta is `+9` matrix rows, `+0` complete
+documented option pairs, `+9` represented documented option pairs, `+9`
+verified rows, `+0` invalid-input rows, and `+0` complete command matrices.
+Current census counts are `7088` matrix rows, `6222` verified rows, `841`
+invalid-input rows, `0` exact-open rows, `146/151` complete command
+matrices, `2774/3212` complete documented option pairs, and
+`2783/3212` represented documented option pairs. `rev-list` now sits at
+`117/117` represented documented option pairs with `169/169` classified rows,
+but only `108/117` reviewed-complete documented option pairs. This remains an
+expansion batch rather than a reviewed-complete closure because the newly
+represented nine-option tail still sits in `doc_option_expansion_required`.
+
 As of 2026-06-27 the latest completed batch is a helper-free `ls-remote`
 option-family review closure across the already represented configured-local,
 file URL, dumb HTTP, smart HTTP, git-daemon, and SSH lanes. The selected

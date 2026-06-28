@@ -3610,6 +3610,7 @@ fn log_and_rev_list_left_right_cherry_boundary_family_matches_stock_git() {
     git_with_env(repo.path(), ["commit", "-m", "rightonly"]);
 
     for args in [
+        ["rev-list", "--cherry", "left...main"].as_slice(),
         ["rev-list", "--left-right", "left...main"].as_slice(),
         ["rev-list", "--left-right", "--cherry-pick", "left...main"].as_slice(),
         ["rev-list", "--left-right", "--cherry-mark", "left...main"].as_slice(),
@@ -4077,13 +4078,19 @@ fn rev_list_documented_tail_batch_matches_stock_git() {
 
     for args in [
         ["rev-list", "--alternate-refs", "HEAD"].as_slice(),
+        ["rev-list", "--bisect", "HEAD"].as_slice(),
+        ["rev-list", "--bisect-all", "HEAD"].as_slice(),
+        ["rev-list", "--bisect-vars", "HEAD"].as_slice(),
         ["rev-list", "--commit-header", "HEAD"].as_slice(),
+        ["rev-list", "--disk-usage", "HEAD"].as_slice(),
         ["rev-list", "--exclude=main", "--all"].as_slice(),
         ["rev-list", "--exclude-first-parent-only", "--all"].as_slice(),
         ["rev-list", "--exclude-hidden=fetch", "--all"].as_slice(),
         ["rev-list", "--exclude-promisor-objects", "HEAD"].as_slice(),
         ["rev-list", "--filter-print-omitted", "HEAD"].as_slice(),
         ["rev-list", "--glob=main", "HEAD"].as_slice(),
+        ["rev-list", "--graph", "HEAD"].as_slice(),
+        ["rev-list", "--header", "HEAD"].as_slice(),
         ["rev-list", "--ignore-missing", "HEAD"].as_slice(),
         ["rev-list", "--in-commit-order", "HEAD"].as_slice(),
         ["rev-list", "--indexed-objects", "HEAD"].as_slice(),
@@ -4091,6 +4098,8 @@ fn rev_list_documented_tail_batch_matches_stock_git() {
         ["rev-list", "--no-commit-header", "HEAD"].as_slice(),
         ["rev-list", "--no-filter", "HEAD"].as_slice(),
         ["rev-list", "--no-walk", "HEAD"].as_slice(),
+        ["rev-list", "--objects-edge", "HEAD"].as_slice(),
+        ["rev-list", "--objects-edge-aggressive", "HEAD"].as_slice(),
         ["rev-list", "--remove-empty", "HEAD"].as_slice(),
         ["rev-list", "--right-only", "HEAD...side"].as_slice(),
         ["rev-list", "--show-linear-break", "HEAD"].as_slice(),

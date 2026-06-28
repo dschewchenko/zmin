@@ -5123,6 +5123,10 @@ pub enum Command {
     RevList {
         #[arg(long, action = ArgAction::SetTrue)]
         oneline: bool,
+        #[arg(long = "header", action = ArgAction::SetTrue)]
+        header: bool,
+        #[arg(long = "graph", action = ArgAction::SetTrue)]
+        graph: bool,
         #[arg(long = "all", action = ArgAction::SetTrue)]
         all: bool,
         #[arg(long = "exclude")]
@@ -5196,6 +5200,12 @@ pub enum Command {
             overrides_with_all = ["basic_regexp", "extended_regexp", "fixed_strings"]
         )]
         perl_regexp: bool,
+        #[arg(long = "bisect", action = ArgAction::SetTrue)]
+        bisect: bool,
+        #[arg(long = "bisect-all", action = ArgAction::SetTrue)]
+        bisect_all: bool,
+        #[arg(long = "bisect-vars", action = ArgAction::SetTrue)]
+        bisect_vars: bool,
         #[arg(long = "cherry", action = ArgAction::SetTrue)]
         cherry: bool,
         #[arg(long = "count", action = ArgAction::SetTrue)]
@@ -5245,6 +5255,10 @@ pub enum Command {
         no_merges: bool,
         #[arg(long = "objects", action = ArgAction::SetTrue)]
         objects: bool,
+        #[arg(long = "objects-edge", action = ArgAction::SetTrue)]
+        objects_edge: bool,
+        #[arg(long = "objects-edge-aggressive", action = ArgAction::SetTrue)]
+        objects_edge_aggressive: bool,
         #[arg(long = "indexed-objects", action = ArgAction::SetTrue)]
         indexed_objects: bool,
         #[arg(long = "unpacked", action = ArgAction::SetTrue)]
@@ -5341,6 +5355,8 @@ pub enum Command {
         commit_header: bool,
         #[arg(long = "no-commit-header", action = ArgAction::SetTrue)]
         no_commit_header: bool,
+        #[arg(long = "disk-usage", action = ArgAction::SetTrue)]
+        disk_usage: bool,
         #[arg(long = "progress", action = ArgAction::SetTrue)]
         progress: bool,
         #[arg(long = "no-filter", action = ArgAction::SetTrue)]
