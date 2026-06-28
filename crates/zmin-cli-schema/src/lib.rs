@@ -4325,6 +4325,10 @@ pub enum Command {
         merge: bool,
         #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
         no_stat: bool,
+        #[arg(short = 'r', long = "rebase-merges", action = ArgAction::SetTrue)]
+        rebase_merges: bool,
+        #[arg(long = "no-rebase-merges", action = ArgAction::SetTrue)]
+        no_rebase_merges: bool,
         #[arg(long = "onto")]
         onto: Option<String>,
         #[arg(short = 'q', long = "quiet", action = ArgAction::SetTrue)]

@@ -2035,7 +2035,24 @@ pub(crate) fn rebase(
     };
     let mut commits =
         collect_commits_with_exclusions_cached(&repo, &store, &commit_cache, &revs, None)?;
-    commits.reverse();
+    let contains_merge_commits = commits.iter().any(|commit_id| {
+        commit_cache
+            .read_commit(commit_id)
+            .map(|commit| commit.parents.len() > 1)
+            .unwrap_or(false)
+    });
+    if preserve_merges {
+        commits.reverse();
+    } else if contains_merge_commits {
+        commits.retain(|commit_id| {
+            commit_cache
+                .read_commit(commit_id)
+                .map(|commit| commit.parents.len() <= 1)
+                .unwrap_or(true)
+        });
+    } else {
+        commits.reverse();
+    }
     let interactive_todo = if interactive {
         checkout_worktree(&repo, &store, &new_base_id)?;
         update_head_to_commit(&refs, &new_base_id)?;
@@ -2060,6 +2077,7 @@ pub(crate) fn rebase(
             &commit_cache,
             &new_base_id,
             commits,
+            quiet,
         );
     }
     if let Some(todo) = interactive_todo {
@@ -2579,12 +2597,28 @@ fn rebase_commits_preserving_merges(
     commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
     new_base_id: &ObjectId,
     commits: Vec<ObjectId>,
+    quiet: bool,
 ) -> Result<()> {
     let mut rewritten = HashMap::<String, ObjectId>::new();
-    for commit_id in commits {
+    let total = commits.len();
+    for (index, commit_id) in commits.into_iter().enumerate() {
+        if !quiet {
+            eprint!("Rebasing ({}/{})\r", index + 1, total);
+        }
         let commit = commit_cache.read_commit(&commit_id)?;
         if commit.parents.len() <= 1 {
-            sequencer_pick(default_sequencer_pick_options(vec![commit_id.to_hex()]))?;
+            let first_parent = commit
+                .parents
+                .first()
+                .map(|parent| rewritten_parent(&rewritten, new_base_id, parent))
+                .unwrap_or_else(|| new_base_id.clone());
+            if refs.resolve("HEAD")? != first_parent {
+                checkout_worktree(repo, store, &first_parent)?;
+                update_head_to_commit(refs, &first_parent)?;
+            }
+            let mut options = default_sequencer_pick_options(vec![commit_id.to_hex()]);
+            options.print_summary = false;
+            sequencer_pick(options)?;
             rewritten.insert(commit_id.to_hex(), refs.resolve("HEAD")?);
             continue;
         }
@@ -2602,7 +2636,10 @@ fn rebase_commits_preserving_merges(
         let rebased = rebase_merge_commit(repo, store, commit_cache, &commit, &parents)?;
         rewritten.insert(commit_id.to_hex(), rebased);
     }
-    println!("Successfully rebased and updated HEAD.");
+    if !quiet {
+        let target = current_branch_ref(refs)?.unwrap_or_else(|| "HEAD".to_owned());
+        eprintln!("Successfully rebased and updated {target}.");
+    }
     Ok(())
 }
 
@@ -2681,11 +2718,6 @@ fn rebase_merge_commit(
     let commit = builder.message(original.message.clone())?.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1), &id)?;
-    println!(
-        "[{}] {}",
-        short_object_id(&id),
-        commit_subject(&original.message)
-    );
     Ok(id)
 }
 
