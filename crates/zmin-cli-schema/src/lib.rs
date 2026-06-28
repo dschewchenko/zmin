@@ -4321,12 +4321,27 @@ pub enum Command {
         apply: bool,
         #[arg(long = "allow-empty-message", action = ArgAction::SetTrue)]
         allow_empty_message: bool,
+        #[arg(long = "autosquash", action = ArgAction::SetTrue)]
+        autosquash: bool,
         #[arg(long = "autostash", action = ArgAction::SetTrue)]
         autostash: bool,
         #[arg(long = "continue", action = ArgAction::SetTrue)]
         continue_: bool,
         #[arg(long = "committer-date-is-author-date", action = ArgAction::SetTrue)]
         committer_date_is_author_date: bool,
+        #[arg(long = "empty")]
+        empty: Option<String>,
+        #[arg(
+            short = 'S',
+            long = "gpg-sign",
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "",
+            overrides_with = "no_gpg_sign"
+        )]
+        gpg_sign: Option<String>,
+        #[arg(long = "ignore-date", action = ArgAction::SetTrue)]
+        ignore_date: bool,
         #[arg(short = 'i', long = "interactive", action = ArgAction::SetTrue)]
         interactive: bool,
         #[arg(long = "ignore-whitespace", action = ArgAction::SetTrue)]
@@ -4337,8 +4352,12 @@ pub enum Command {
         fork_point: bool,
         #[arg(long = "keep-empty", action = ArgAction::SetTrue)]
         keep_empty: bool,
+        #[arg(long = "no-autosquash", action = ArgAction::SetTrue)]
+        no_autosquash: bool,
         #[arg(long = "no-autostash", action = ArgAction::SetTrue)]
         no_autostash: bool,
+        #[arg(long = "no-gpg-sign", action = ArgAction::SetTrue)]
+        no_gpg_sign: bool,
         #[arg(short = 'n', long = "no-stat", action = ArgAction::SetTrue)]
         no_stat: bool,
         #[arg(long = "no-ff", action = ArgAction::SetTrue)]
@@ -4349,6 +4368,8 @@ pub enum Command {
         no_keep_empty: bool,
         #[arg(long = "no-reapply-cherry-picks", action = ArgAction::SetTrue)]
         no_reapply_cherry_picks: bool,
+        #[arg(long = "no-reschedule-failed-exec", action = ArgAction::SetTrue)]
+        no_reschedule_failed_exec: bool,
         #[arg(long = "force-rebase", short = 'f', action = ArgAction::SetTrue)]
         force_rebase: bool,
         #[arg(short = 'r', long = "rebase-merges", action = ArgAction::SetTrue)]
@@ -4367,6 +4388,8 @@ pub enum Command {
         quiet: bool,
         #[arg(long = "reapply-cherry-picks", action = ArgAction::SetTrue)]
         reapply_cherry_picks: bool,
+        #[arg(long = "reschedule-failed-exec", action = ArgAction::SetTrue)]
+        reschedule_failed_exec: bool,
         #[arg(long = "rerere-autoupdate", action = ArgAction::SetTrue)]
         rerere_autoupdate: bool,
         #[arg(long = "signoff", action = ArgAction::SetTrue)]

@@ -2404,6 +2404,199 @@ fn rebase_clean_noop_option_family_matches_stock_git() {
 }
 
 #[test]
+fn rebase_extended_clean_metadata_option_family_matches_stock_git() {
+    let cases: [(&str, &[&str], bool, bool); 27] = [
+        ("autosquash_upstream", &["rebase", "--autosquash", "origin/main"], false, false),
+        ("autosquash_branch", &["rebase", "--autosquash", "origin/main", "topic"], true, false),
+        (
+            "autosquash_onto",
+            &["rebase", "--autosquash", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        ("empty_drop_upstream", &["rebase", "--empty=drop", "origin/main"], false, false),
+        ("empty_drop_branch", &["rebase", "--empty=drop", "origin/main", "topic"], true, false),
+        (
+            "empty_drop_onto",
+            &["rebase", "--empty=drop", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        ("gpg_sign_upstream", &["rebase", "--gpg-sign", "origin/main"], false, false),
+        ("gpg_sign_branch", &["rebase", "--gpg-sign", "origin/main", "topic"], true, false),
+        (
+            "gpg_sign_onto",
+            &["rebase", "--gpg-sign", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        ("ignore_date_upstream", &["rebase", "--ignore-date", "origin/main"], false, false),
+        ("ignore_date_branch", &["rebase", "--ignore-date", "origin/main", "topic"], true, false),
+        (
+            "ignore_date_onto",
+            &["rebase", "--ignore-date", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_autosquash_upstream",
+            &["rebase", "--no-autosquash", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_autosquash_branch",
+            &["rebase", "--no-autosquash", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "no_autosquash_onto",
+            &[
+                "rebase",
+                "--no-autosquash",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        ("no_gpg_sign_upstream", &["rebase", "--no-gpg-sign", "origin/main"], false, false),
+        ("no_gpg_sign_branch", &["rebase", "--no-gpg-sign", "origin/main", "topic"], true, false),
+        (
+            "no_gpg_sign_onto",
+            &["rebase", "--no-gpg-sign", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+        (
+            "no_reschedule_failed_exec_upstream",
+            &["rebase", "--no-reschedule-failed-exec", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "no_reschedule_failed_exec_branch",
+            &["rebase", "--no-reschedule-failed-exec", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "no_reschedule_failed_exec_onto",
+            &[
+                "rebase",
+                "--no-reschedule-failed-exec",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        (
+            "reschedule_failed_exec_upstream",
+            &["rebase", "--reschedule-failed-exec", "origin/main"],
+            false,
+            false,
+        ),
+        (
+            "reschedule_failed_exec_branch",
+            &["rebase", "--reschedule-failed-exec", "origin/main", "topic"],
+            true,
+            false,
+        ),
+        (
+            "reschedule_failed_exec_onto",
+            &[
+                "rebase",
+                "--reschedule-failed-exec",
+                "--onto",
+                "origin/main",
+                "origin/oldbase",
+                "topic",
+            ],
+            false,
+            true,
+        ),
+        ("short_gpg_sign_upstream", &["rebase", "-S", "origin/main"], false, false),
+        ("short_gpg_sign_branch", &["rebase", "-S", "origin/main", "topic"], true, false),
+        (
+            "short_gpg_sign_onto",
+            &["rebase", "-S", "--onto", "origin/main", "origin/oldbase", "topic"],
+            false,
+            true,
+        ),
+    ];
+
+    for (name, args, checkout_main, onto_fixture) in cases {
+        let source = if onto_fixture {
+            rebase_onto_fixture_repo()
+        } else {
+            rebase_fixture_repo()
+        };
+        let git_repo = clone_repo_fixture(source.path());
+        let zmin_repo = clone_repo_fixture(source.path());
+        configure_identity(git_repo.path());
+        configure_identity(zmin_repo.path());
+        if onto_fixture {
+            git(git_repo.path(), ["checkout", "-B", "topic", "origin/topic"]);
+            git(
+                zmin_repo.path(),
+                ["checkout", "-B", "topic", "origin/topic"],
+            );
+        } else if checkout_main {
+            git(git_repo.path(), ["checkout", "main"]);
+            git(zmin_repo.path(), ["checkout", "main"]);
+        }
+
+        let git_output = command_output_with_env("git", git_repo.path(), args, &SEQUENCER_ENV, "git");
+        let zmin_output =
+            command_output_with_env(zmin_bin(), zmin_repo.path(), args, &SEQUENCER_ENV, "zmin");
+
+        assert_eq!(zmin_output, git_output, "{name} output");
+        assert_eq!(
+            git(zmin_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            git(git_repo.path(), ["rev-parse", "HEAD^{tree}"]),
+            "{name} tree"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            git(git_repo.path(), ["log", "--format=%s", "--max-count=3"]),
+            "{name} log"
+        );
+        assert_eq!(
+            git(
+                zmin_repo.path(),
+                ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+            ),
+            git(
+                git_repo.path(),
+                ["log", "-1", "--format=%ad|%cd", "--date=raw"],
+            ),
+            "{name} dates"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["log", "-1", "--format=%G?"]),
+            git(git_repo.path(), ["log", "-1", "--format=%G?"]),
+            "{name} signature status"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            git(git_repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+            "{name} branch"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["status", "--short"]),
+            git(git_repo.path(), ["status", "--short"]),
+            "{name} status"
+        );
+    }
+}
+
+#[test]
 fn rebase_apply_backend_option_family_matches_stock_git() {
     let cases: [(&str, &[&str], bool, bool); 6] = [
         ("apply_upstream", &["rebase", "--apply", "origin/main"], false, false),

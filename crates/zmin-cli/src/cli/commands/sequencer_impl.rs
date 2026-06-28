@@ -1974,7 +1974,10 @@ pub(crate) fn rebase(
     quiet: bool,
     signoff: bool,
     committer_date_is_author_date: bool,
+    ignore_date: bool,
     apply: bool,
+    gpg_sign: Option<String>,
+    no_gpg_sign: bool,
     context_lines: Option<usize>,
     stat: bool,
     verbose: bool,
@@ -2116,6 +2119,9 @@ pub(crate) fn rebase(
                         false,
                         signoff,
                         committer_date_is_author_date,
+                        ignore_date,
+                        gpg_sign.clone(),
+                        no_gpg_sign,
                     )?;
                 }
                 RebaseTodoCommand::Squash => {
@@ -2135,6 +2141,9 @@ pub(crate) fn rebase(
                         false,
                         signoff,
                         committer_date_is_author_date,
+                        ignore_date,
+                        gpg_sign.clone(),
+                        no_gpg_sign,
                     )?;
                     write_rebase_edit_state(&repo, &head, &todo[index + 1..])?;
                     eprintln!(
@@ -2173,6 +2182,9 @@ pub(crate) fn rebase(
                 false,
                 signoff,
                 committer_date_is_author_date,
+                ignore_date,
+                gpg_sign.clone(),
+                no_gpg_sign,
             )?);
         }
         if let Some(rebased_head) = rebased_head {
@@ -2536,6 +2548,9 @@ fn rebase_continue() -> Result<()> {
                     false,
                     false,
                     false,
+                    false,
+                    None,
+                    false,
                 )?;
             }
             RebaseTodoCommand::Squash => {
@@ -2707,6 +2722,9 @@ fn rebase_pick_commit_with_message(
     print_summary: bool,
     signoff: bool,
     committer_date_is_author_date: bool,
+    ignore_date: bool,
+    gpg_sign: Option<String>,
+    no_gpg_sign: bool,
 ) -> Result<ObjectId> {
     let tree_cache = TreeObjectCache::new(store);
     if update_worktree && !worktree_clean(repo, store)? {
@@ -2739,7 +2757,19 @@ fn rebase_pick_commit_with_message(
     if current_head.tree == tree {
         return Err(CliError::Message("nothing to commit".into()));
     }
-    let author = signature_from_commit_bytes(&picked.author)?;
+    let picked_author = signature_from_commit_bytes(&picked.author)?;
+    let author = if ignore_date {
+        let now = chrono::Local::now();
+        Signature::new(
+            picked_author.name.clone(),
+            picked_author.email.clone(),
+            now.timestamp(),
+            now.format("%z").to_string(),
+        )
+        .map_err(CliError::Io)?
+    } else {
+        picked_author
+    };
     let committer = rebase_replay_committer_signature(
         repo,
         &author,
@@ -2749,10 +2779,18 @@ fn rebase_pick_commit_with_message(
     if signoff {
         super::commit_commands::append_commit_signoff(&mut message, &committer)?;
     }
-    let commit = CommitBuilder::new(tree, author, committer)
-        .parent(head_id)
-        .message(message.clone())?
-        .encode()?;
+    let builder = CommitBuilder::new(tree, author, committer).parent(head_id);
+    let mut builder = builder.message(message.clone())?;
+    if !no_gpg_sign {
+        if let Some(signature) = super::commit_commands::commit_tree_gpg_signature(
+            repo,
+            &builder,
+            gpg_sign.as_deref(),
+        )? {
+            builder = builder.gpg_signature(signature)?;
+        }
+    }
+    let commit = builder.encode()?;
     let id = store.write_object(GitObjectKind::Commit, &commit)?;
     update_head_to_commit(&refs, &id)?;
     if print_summary {
