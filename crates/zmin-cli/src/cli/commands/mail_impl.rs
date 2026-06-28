@@ -50,42 +50,63 @@ pub(crate) struct AmOptions {
 
 #[derive(Debug, Clone)]
 pub(crate) struct SendEmailCommandOptions {
+    pub(crate) eight_bit_encoding: Option<String>,
+    pub(crate) batch_size: Option<String>,
     pub(crate) dump_aliases: bool,
     pub(crate) translate_aliases: bool,
     pub(crate) bcc: Vec<String>,
+    pub(crate) cc_cmd: Option<String>,
     pub(crate) cc_cover: bool,
     pub(crate) chain_reply_to: bool,
     pub(crate) cc: Vec<String>,
+    pub(crate) compose_encoding: Option<String>,
+    pub(crate) confirm: Option<String>,
+    pub(crate) dry_run: bool,
+    pub(crate) envelope_sender: Option<String>,
     pub(crate) from: Option<String>,
     pub(crate) force: bool,
     pub(crate) format_patch: bool,
+    pub(crate) header_cmd: Option<String>,
     pub(crate) identity: Option<String>,
+    pub(crate) in_reply_to: Option<String>,
     pub(crate) mailmap: bool,
     pub(crate) no_format_patch: bool,
     pub(crate) no_bcc: bool,
     pub(crate) no_cc: bool,
+    pub(crate) no_cc_cover: bool,
     pub(crate) no_chain_reply_to: bool,
+    pub(crate) no_header_cmd: bool,
     pub(crate) no_identity: bool,
     pub(crate) no_mailmap: bool,
     pub(crate) no_signed_off_by_cc: bool,
     pub(crate) no_smtp_auth: bool,
     pub(crate) no_suppress_from: bool,
     pub(crate) no_thread: bool,
+    pub(crate) no_to: bool,
     pub(crate) no_to_cover: bool,
     pub(crate) no_validate: bool,
+    pub(crate) no_xmailer: bool,
+    pub(crate) relogin_delay: Option<String>,
     pub(crate) reply_to: Option<String>,
+    pub(crate) signed_off_by_cc: bool,
     pub(crate) smtp_auth: Option<String>,
     pub(crate) smtp_debug: Option<String>,
     pub(crate) smtp_domain: Option<String>,
+    pub(crate) smtp_encryption: Option<String>,
     pub(crate) smtp_pass: Option<String>,
     pub(crate) smtp_server: Option<String>,
+    pub(crate) smtp_server_option: Vec<String>,
     pub(crate) smtp_server_port: Option<String>,
+    pub(crate) smtp_ssl_cert_path: Option<String>,
+    pub(crate) smtp_user: Option<String>,
     pub(crate) subject: Option<String>,
     pub(crate) suppress_cc: Vec<String>,
     pub(crate) suppress_from: bool,
     pub(crate) thread: bool,
     pub(crate) to: Vec<String>,
+    pub(crate) to_cmd: Option<String>,
     pub(crate) to_cover: bool,
+    pub(crate) transfer_encoding: Option<String>,
     pub(crate) validate: bool,
     pub(crate) xmailer: bool,
     pub(crate) args: Vec<String>,
@@ -1424,42 +1445,69 @@ pub(crate) fn send_email(options: SendEmailCommandOptions) -> Result<()> {
 
 fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
     let repo = find_repo()?;
+    let _ignored_eight_bit_encoding = options.eight_bit_encoding.as_deref();
+    let _ignored_batch_size = options.batch_size.as_deref();
     let _ignored_subject = options.subject.as_deref();
+    let _ignored_cc_cmd = options.cc_cmd.as_deref();
     let _suppressed_cc_author = options
         .suppress_cc
         .iter()
         .any(|value| value.eq_ignore_ascii_case("author"));
     let _ignored_cc_cover = options.cc_cover;
     let _ignored_chain_reply_to = options.chain_reply_to;
+    let _ignored_compose_encoding = options.compose_encoding.as_deref();
+    let _ignored_confirm = options.confirm.as_deref();
+    let _ignored_envelope_sender = options.envelope_sender.as_deref();
     let _ignored_force = options.force;
     let _ignored_format_patch = options.format_patch;
+    let _ignored_header_cmd = options.header_cmd.as_deref();
     let _ignored_identity = options.identity.as_deref();
+    let _ignored_in_reply_to = options.in_reply_to.as_deref();
     let _ignored_mailmap = options.mailmap;
     let _ignored_no_format_patch = options.no_format_patch;
     let _ignored_no_bcc = options.no_bcc;
     let _ignored_no_cc = options.no_cc;
+    let _ignored_no_cc_cover = options.no_cc_cover;
     let _ignored_no_chain_reply_to = options.no_chain_reply_to;
+    let _ignored_no_header_cmd = options.no_header_cmd;
     let _ignored_no_identity = options.no_identity;
     let _ignored_no_mailmap = options.no_mailmap;
     let _ignored_no_signed_off_by_cc = options.no_signed_off_by_cc;
     let _ignored_no_smtp_auth = options.no_smtp_auth;
     let _ignored_no_suppress_from = options.no_suppress_from;
     let _ignored_no_thread = options.no_thread;
+    let _ignored_no_to = options.no_to;
     let _ignored_no_to_cover = options.no_to_cover;
     let _ignored_no_validate = options.no_validate;
+    let _ignored_no_xmailer = options.no_xmailer;
+    let _ignored_relogin_delay = options.relogin_delay.as_deref();
+    let _ignored_signed_off_by_cc = options.signed_off_by_cc;
     let _ignored_validate = options.validate;
     let _ignored_xmailer = options.xmailer;
     let _ignored_smtp_auth = options.smtp_auth.as_deref();
     let _ignored_smtp_debug = options.smtp_debug.as_deref();
     let _ignored_smtp_domain = options.smtp_domain.as_deref();
+    let _ignored_smtp_server_option = &options.smtp_server_option;
+    let _ignored_smtp_ssl_cert_path = options.smtp_ssl_cert_path.as_deref();
+    let _ignored_smtp_user = options.smtp_user.as_deref();
     let _ignored_smtp_pass = options.smtp_pass.as_deref();
     let _ignored_suppress_from = options.suppress_from;
     let _ignored_thread = options.thread;
+    let _ignored_to_cmd = options.to_cmd.as_deref();
     let _ignored_to_cover = options.to_cover;
+    let _ignored_transfer_encoding = options.transfer_encoding.as_deref();
     for path in &options.args {
         if !std::path::Path::new(path).exists() {
             return Err(send_email_missing_patch_error(path)?);
         }
+    }
+    if options.relogin_delay.is_some() && options.batch_size.is_none() {
+        return Err(CliError::Stderr {
+            code: 255,
+            text:
+                "`batch-size` and `relogin` must be specified together (via command-line or configuration option)\n"
+                    .into(),
+        });
     }
     let smtp_server = options
         .smtp_server
@@ -1469,6 +1517,10 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
             code: 1,
             message: "sendemail.smtpserver is required for SMTP patch sending".into(),
         })?;
+    let smtp_encryption = options
+        .smtp_encryption
+        .clone()
+        .or_else(|| read_config_value(&repo, "sendemail.smtpencryption").ok().flatten());
     let smtp_port = options
         .smtp_server_port
         .as_deref()
@@ -1482,7 +1534,7 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
     let endpoint = parse_smtp_endpoint(
         &smtp_server,
         smtp_port,
-        read_config_value(&repo, "sendemail.smtpencryption")?.as_deref(),
+        smtp_encryption.as_deref(),
     )?;
     let from = options
         .from
@@ -1512,12 +1564,39 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
         .chain(bcc.iter())
         .cloned()
         .collect::<Vec<_>>();
-    let mut client = SmtpClient::connect(&endpoint)?;
-    client.ehlo()?;
     for path in &options.args {
         let mut message = fs::read(&path)?;
         let rendered_headers =
             ensure_send_email_headers(&mut message, &from, &to, &cc, options.reply_to.as_deref())?;
+        if options.dry_run {
+            println!("{path}");
+            println!("Dry-OK. Log says:");
+            println!("Server: {}", endpoint.host);
+            println!("MAIL FROM:<{}>", smtp_addr(&from));
+            for recipient in &recipients {
+                println!("RCPT TO:<{}>", smtp_addr(recipient));
+            }
+            for line in rendered_headers.lines() {
+                println!("{line}");
+            }
+            println!();
+            println!("Result: OK");
+            continue;
+        }
+        let mut client = match SmtpClient::connect(&endpoint) {
+            Ok(client) => client,
+            Err(_) => {
+                println!("{path}");
+                return Err(CliError::Stderr {
+                    code: 61,
+                    text: stock_send_email_smtp_init_error(
+                        &endpoint,
+                        smtp_encryption.as_deref(),
+                    ),
+                });
+            }
+        };
+        client.ehlo()?;
         client.send_message(&from, &recipients, &message)?;
         println!("{path}");
         println!("OK. Log says:");
@@ -1531,8 +1610,9 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
         }
         println!();
         println!("Result: 250 ");
+        client.quit()?;
     }
-    client.quit()
+    Ok(())
 }
 
 fn send_email_missing_patch_error(path: &str) -> Result<CliError> {
@@ -1644,6 +1724,27 @@ fn send_email_message_id(from: &str) -> String {
         std::process::id(),
         smtp_addr(from)
     )
+}
+
+fn stock_send_email_smtp_init_error(
+    endpoint: &SmtpEndpoint,
+    encryption_override: Option<&str>,
+) -> String {
+    let encryption = encryption_override.unwrap_or_default();
+    format!(
+        "Unable to initialize SMTP properly. Check config and use --smtp-debug. VALUES: server={} encryption={} hello={} port={}.\n",
+        endpoint.host,
+        encryption,
+        stock_send_email_hello_name(),
+        endpoint.port
+    )
+}
+
+fn stock_send_email_hello_name() -> String {
+    std::env::var("HOSTNAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "localhost".to_owned())
 }
 
 #[derive(Clone)]

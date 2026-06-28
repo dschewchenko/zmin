@@ -5,9 +5,9 @@ use std::io::{BufRead, Read, Write};
 use std::path::Path;
 
 use common::{
-    command_output, configure_identity, git, git_args, git_init, git_with_env, git_with_stdin,
-    git_with_stdin_args, read_named_files, run_zmin, run_zmin_args, run_zmin_with_stdin,
-    run_zmin_with_stdin_args, write_file, zmin_bin,
+    command_failure_output, command_output, configure_identity, git, git_args, git_init,
+    git_with_env, git_with_stdin, git_with_stdin_args, read_named_files, run_zmin,
+    run_zmin_args, run_zmin_with_stdin, run_zmin_with_stdin_args, write_file, zmin_bin,
 };
 use tempfile::TempDir;
 
@@ -211,6 +211,29 @@ fn normalize_send_email_patch_output(text: &str) -> String {
             }
             if line.starts_with("X-Mailer: ") {
                 return "X-Mailer: <normalized-x-mailer>".to_owned();
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_send_email_smtp_init_error(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .lines()
+        .map(|line| {
+            if let Some(prefix) = line
+                .split(" hello=")
+                .next()
+                .filter(|prefix| prefix.starts_with("Unable to initialize SMTP properly."))
+            {
+                let port = line
+                    .split(" port=")
+                    .nth(1)
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .map(|value| value.trim_end_matches('.'))
+                    .unwrap_or("<port>");
+                return format!("{prefix} hello=<normalized-hello> port={port}");
             }
             line.to_owned()
         })
@@ -886,6 +909,90 @@ fn send_email_metadata_noop_option_family_matches_stock_git() {
     assert_eq!(
         normalize_send_email_patch_output(&stock_message),
         normalize_send_email_patch_output(&zmin_message)
+    );
+}
+
+#[test]
+fn send_email_invalid_smtp_noop_option_family_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    let patch = git(repo.path(), ["format-patch", "-1"]);
+    let patch = patch.trim().to_owned();
+    git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
+    git(repo.path(), ["config", "sendemail.smtpserverport", "1"]);
+    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
+
+    let args = [
+        "send-email",
+        "--8bit-encoding=UTF-8",
+        "--batch-size=1",
+        "--cc-cmd=true",
+        "--compose-encoding=UTF-8",
+        "--confirm=never",
+        "--envelope-sender=auto",
+        "--header-cmd=true",
+        "--in-reply-to=<msg@example.test>",
+        "--no-cc-cover",
+        "--no-header-cmd",
+        "--no-to",
+        "--no-xmailer",
+        "--relogin-delay=1",
+        "--signed-off-by-cc",
+        "--smtp-encryption=none",
+        "--smtp-server-option=foo",
+        "--smtp-ssl-cert-path=/tmp/cert.pem",
+        "--smtp-user=test",
+        "--to-cmd=true",
+        "--transfer-encoding=8bit",
+        "--suppress-cc=author",
+        patch.as_str(),
+    ];
+
+    let stock = command_failure_output("git", repo.path(), &args, "git send-email");
+    let zmin = command_failure_output(zmin_bin(), repo.path(), &args, "zmin send-email");
+
+    assert_eq!(stock.0, zmin.0);
+    assert_eq!(stock.1, zmin.1);
+    assert_eq!(
+        normalize_send_email_smtp_init_error(&stock.2),
+        normalize_send_email_smtp_init_error(&zmin.2)
+    );
+}
+
+#[test]
+fn send_email_dry_run_matches_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "one"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "two"]);
+    let patch = git(repo.path(), ["format-patch", "-1"]);
+    let patch = patch.trim().to_owned();
+    git(repo.path(), ["config", "sendemail.smtpserver", "127.0.0.1"]);
+    git(repo.path(), ["config", "sendemail.smtpserverport", "1"]);
+    git(repo.path(), ["config", "sendemail.from", "bench@example.test"]);
+    git(repo.path(), ["config", "sendemail.to", "to1@example.test"]);
+
+    let args = ["send-email", "--dry-run", "--suppress-cc=author", patch.as_str()];
+
+    let stock = command_output("git", repo.path(), &args, "git send-email");
+    let zmin = command_output(zmin_bin(), repo.path(), &args, "zmin send-email");
+
+    assert_eq!(stock.0, zmin.0);
+    assert_eq!(stock.2, zmin.2);
+    assert_eq!(
+        normalize_send_email_patch_output(&stock.1),
+        normalize_send_email_patch_output(&zmin.1)
     );
 }
 

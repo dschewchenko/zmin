@@ -5020,32 +5020,54 @@ pub enum Command {
         revs: Vec<String>,
     },
     SendEmail {
+        #[arg(long = "8bit-encoding")]
+        eight_bit_encoding: Option<String>,
+        #[arg(long = "batch-size")]
+        batch_size: Option<String>,
         #[arg(long = "dump-aliases", action = ArgAction::SetTrue)]
         dump_aliases: bool,
         #[arg(long = "translate-aliases", action = ArgAction::SetTrue)]
         translate_aliases: bool,
         #[arg(long = "bcc")]
         bcc: Vec<String>,
+        #[arg(long = "cc-cmd")]
+        cc_cmd: Option<String>,
         #[arg(long = "cc-cover", action = ArgAction::SetTrue)]
         cc_cover: bool,
         #[arg(long = "chain-reply-to", action = ArgAction::SetTrue)]
         chain_reply_to: bool,
         #[arg(long = "cc")]
         cc: Vec<String>,
+        #[arg(long = "compose-encoding")]
+        compose_encoding: Option<String>,
+        #[arg(long = "confirm")]
+        confirm: Option<String>,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        #[arg(long = "envelope-sender")]
+        envelope_sender: Option<String>,
         #[arg(long = "from")]
         from: Option<String>,
         #[arg(long = "reply-to")]
         reply_to: Option<String>,
+        #[arg(long = "header-cmd")]
+        header_cmd: Option<String>,
         #[arg(long = "identity")]
         identity: Option<String>,
+        #[arg(long = "in-reply-to")]
+        in_reply_to: Option<String>,
         #[arg(long = "mailmap", action = ArgAction::SetTrue)]
         mailmap: bool,
         #[arg(long = "no-bcc", action = ArgAction::SetTrue)]
         no_bcc: bool,
         #[arg(long = "no-cc", action = ArgAction::SetTrue)]
         no_cc: bool,
+        #[arg(long = "no-cc-cover", action = ArgAction::SetTrue)]
+        no_cc_cover: bool,
         #[arg(long = "no-chain-reply-to", action = ArgAction::SetTrue)]
         no_chain_reply_to: bool,
+        #[arg(long = "no-header-cmd", action = ArgAction::SetTrue)]
+        no_header_cmd: bool,
         #[arg(long = "no-identity", action = ArgAction::SetTrue)]
         no_identity: bool,
         #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
@@ -5088,12 +5110,32 @@ pub enum Command {
         no_suppress_from: bool,
         #[arg(long = "no-thread", action = ArgAction::SetTrue)]
         no_thread: bool,
+        #[arg(long = "no-to", action = ArgAction::SetTrue)]
+        no_to: bool,
         #[arg(long = "no-to-cover", action = ArgAction::SetTrue)]
         no_to_cover: bool,
         #[arg(long = "no-validate", action = ArgAction::SetTrue)]
         no_validate: bool,
+        #[arg(long = "no-xmailer", action = ArgAction::SetTrue)]
+        no_xmailer: bool,
+        #[arg(long = "relogin-delay")]
+        relogin_delay: Option<String>,
+        #[arg(long = "signed-off-by-cc", action = ArgAction::SetTrue)]
+        signed_off_by_cc: bool,
         #[arg(long = "validate", action = ArgAction::SetTrue)]
         validate: bool,
+        #[arg(long = "smtp-encryption")]
+        smtp_encryption: Option<String>,
+        #[arg(long = "smtp-server-option")]
+        smtp_server_option: Vec<String>,
+        #[arg(long = "smtp-ssl-cert-path")]
+        smtp_ssl_cert_path: Option<String>,
+        #[arg(long = "smtp-user")]
+        smtp_user: Option<String>,
+        #[arg(long = "to-cmd")]
+        to_cmd: Option<String>,
+        #[arg(long = "transfer-encoding")]
+        transfer_encoding: Option<String>,
         #[arg(long = "xmailer", action = ArgAction::SetTrue)]
         xmailer: bool,
         args: Vec<String>,

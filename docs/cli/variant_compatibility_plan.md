@@ -22,6 +22,46 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`send-email` invalid-SMTP and dry-run closure family across the existing
+explicit patch-file lanes. This batch added twenty-one exact stock-Git rows
+and promoted twenty-one documented `send-email` option pairs into the
+reviewed-complete census set: `--8bit-encoding`, `--batch-size`, `--cc-cmd`,
+`--compose-encoding`, `--confirm`, `--dry-run`, `--envelope-sender`,
+`--header-cmd`, `--in-reply-to`, `--no-cc-cover`, `--no-header-cmd`,
+`--no-to`, `--no-xmailer`, `--relogin-delay`, `--signed-off-by-cc`,
+`--smtp-encryption`, `--smtp-server-option`, `--smtp-ssl-cert-path`,
+`--smtp-user`, `--to-cmd`, and `--transfer-encoding`. The runtime closure
+stayed intentionally bounded: Zmin now matches stock on the current invalid
+SMTP initialization lane where those spellings are accepted but never reach
+their deeper semantics before the shared SMTP startup failure, and it also now
+matches the stock explicit patch-file `--dry-run` preview transcript without
+contacting SMTP. This does not widen `send-email` into compose or annotate
+editor flows, quiet-mode suppression, sendmail transport, or SSL-enabled SMTP
+handshakes. The implementation stays focused on the missing closure only: the
+send-email schema now exposes the twenty-one spellings, the SMTP path now
+emits the stock-shaped initialization failure on the bounded invalid-server
+lane, `--dry-run` now renders the stock preview transcript on the explicit
+patch-file lane, and focused exact compat tests cover both bundles. Focused
+gates were
+`cargo test -q -p zmin-cli --test git_mail_tools_compat send_email_invalid_smtp_noop_option_family_matches_stock_git -- --exact`,
+`cargo test -q -p zmin-cli --test git_mail_tools_compat send_email_dry_run_matches_stock_git -- --exact`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+are now `7599` matrix rows, `6680` verified rows, `894` invalid-input rows,
+`146/151` complete command matrices, and `3109/3212` complete documented
+option pairs. `send-email` now sits at `59/64` reviewed-complete documented
+option pairs with `75/75` classified rows, `74` stock-matching rows, and `1`
+invalid-input row. The overall backlog head is now `svn` (`25`), followed by
+`p4` (`24`), `rebase` (`15`), `cvsimport` (`14`), `cvsexportcommit` (`11`),
+`archimport` (`7`), `send-email` (`5`), then the single-pair tails `log` and
+`apply`; the next default follow-up should choose between finishing the small
+remaining `send-email` tail (`--annotate`, `--compose`, `--quiet`,
+`--sendmail-cmd`, `--smtp-ssl`) or switching back to the larger `svn` / `p4`
+queues.
+
+As of 2026-06-28 the latest completed batch is a helper-free local
 `p4` bounded-clone and dry-run preview family across the existing fake
 Perforce clone and submit lanes. This batch added four exact stock-Git rows
 and promoted four documented `p4` option pairs into the reviewed-complete
