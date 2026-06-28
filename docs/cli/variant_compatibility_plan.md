@@ -22,6 +22,79 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`diff` / `diff-files` / `diff-index` common-tail closure across the already
+modeled modified-worktree, cached porcelain, whitespace-clean plumbing,
+worktree-versus-HEAD, and bounded non-merge lanes. This batch added
+thirty-two exact stock-Git rows and promoted the same thirty-two documented
+option pairs into the reviewed-complete census set:
+`diff --function-context`, `diff -W`, `diff --remerge-diff`,
+`diff --ws-error-highlight`, `diff --diff-merges`, `diff --find-object`,
+`diff --dd`, `diff --no-diff-merges`, `diff -0`,
+`diff --ita-invisible-in-index`, `diff --combined-all-paths`,
+`diff-files --function-context`, `diff-files -W`,
+`diff-files --remerge-diff`, `diff-files --ws-error-highlight`,
+`diff-files --diff-merges`, `diff-files --find-object`, `diff-files --dd`,
+`diff-files --check`, `diff-files --ita-invisible-in-index`,
+`diff-files --no-diff-merges`, `diff-files --combined-all-paths`,
+`diff-index --function-context`, `diff-index -W`,
+`diff-index --remerge-diff`, `diff-index --ws-error-highlight`,
+`diff-index --dd`, `diff-index --check`,
+`diff-index --ita-invisible-in-index`, `diff-index --merge-base`,
+`diff-index --no-diff-merges`, and `diff-index --combined-all-paths`.
+The runtime closure stayed intentionally bounded: schema and dispatch now
+accept the remaining documented helper-free common-diff spellings on these
+three commands, `diff-files` and `diff-index` promote `--dd`,
+`--remerge-diff`, and the currently modeled merge-diff lane to stock patch
+rendering where needed, `--check` matches stock empty-output whitespace-clean
+behavior on the current plumbing fixtures, and `--combined-all-paths` emits
+the stock fatal requiring `-c` or `--cc` without widening into broader
+combined-diff semantics yet.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_diff_compat diff_and_diff_files_remaining_documented_common_flags_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_diff_compat diff_index_remaining_documented_common_flags_match_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(diff|diff-files|diff-index|summary)\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2730 / 3212`
+- represented documented command-option pairs: `2730 / 3212`
+- matrix rows: `7033`
+- verified rows: `6171`
+- invalid-input rows: `837`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `482`
+- implemented but unverified rows: `25`
+
+Per-command position on the touched surface:
+
+- `diff`: `116 / 117` reviewed-complete documented option pairs,
+  `116 / 117` represented documented option pairs, `290` written rows, `290`
+  classified rows, `286` stock-matching rows, `4` invalid-input rows, and
+  `0` exact-open rows
+- `diff-files`: `117 / 118` reviewed-complete documented option pairs,
+  `117 / 118` represented documented option pairs, `143` written rows, `143`
+  classified rows, `143` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+- `diff-index`: `107 / 112` reviewed-complete documented option pairs,
+  `107 / 112` represented documented option pairs, `141` written rows, `141`
+  classified rows, `141` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes the dense helper-free common tail across the remaining
+porcelain and plumbing `diff*` lanes without widening into `diff-index`
+`--find-object` or `--diff-merges`, `diff-tree` merge-base or check-mode
+diagnostics, or the larger helper-heavy backlogs led by `replay`,
+`send-email`, `rebase`, `pack-objects`, and `p4`.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `diff-tree` documented-tail closure across the already modeled single-parent
 header, raw tree diff, noted commit, non-merge combined, modified-blob, and
 no-patch lanes. This batch added twenty-one exact stock-Git rows and promoted

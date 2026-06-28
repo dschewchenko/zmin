@@ -13,6 +13,9 @@ enum UnmergedStageSelection {
 }
 
 pub(crate) fn diff(options: DiffOptions) -> Result<()> {
+    if options.combined_all_paths {
+        return Err(combined_all_paths_requires_combined_diff_error());
+    }
     if options.no_index {
         return diff_no_index(&options);
     }
@@ -109,6 +112,14 @@ pub(crate) fn diff(options: DiffOptions) -> Result<()> {
         options.rename_empty,
         options.no_rename_empty,
         options.dense_combined,
+        options.function_context,
+        options.ita_invisible_in_index,
+        options.find_object.as_deref(),
+        options.diff_merges.as_deref(),
+        options.no_diff_merges,
+        options.remerge_diff,
+        options.dd,
+        options.ws_error_highlight.as_deref(),
     );
     let repo = find_repo()?;
     let relative_prefix =
@@ -535,6 +546,13 @@ fn porcelain_diff_prefixes(
 }
 
 pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
+    if options.combined_all_paths && !options.combined && !options.dense_combined {
+        return Err(combined_all_paths_requires_combined_diff_error());
+    }
+    let mut options = options;
+    if options.combined || options.dense_combined || options.dd || options.remerge_diff || options.diff_merges.is_some() {
+        options.patch = true;
+    }
     let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
     let break_rewrites = parse_break_rewrites_option(options.break_rewrites.as_deref())?;
     let mut detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
@@ -683,6 +701,17 @@ pub(crate) fn diff_files(options: PlumbingDiffOptions) -> Result<()> {
             },
             dirstat_mode.by_file,
             dirstat_mode.cumulative,
+        );
+    }
+    if options.check {
+        return diff_check(
+            &repo,
+            &store,
+            &old_index,
+            &new_index,
+            &entries,
+            render_options.old_source,
+            render_options.new_source,
         );
     }
     render_diff(
@@ -1076,6 +1105,13 @@ fn normalize_dirstat_mode(
 }
 
 pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
+    if options.combined_all_paths {
+        return Err(combined_all_paths_requires_combined_diff_error());
+    }
+    let mut options = options;
+    if options.dd || options.remerge_diff {
+        options.patch = true;
+    }
     let mut detect_renames = parse_find_renames_option(options.find_renames.as_deref())?;
     let break_rewrites = parse_break_rewrites_option(options.break_rewrites.as_deref())?;
     let mut detect_copies = parse_find_copies_option(options.find_copies.as_deref())?;
@@ -1209,6 +1245,17 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
             dirstat_mode.cumulative,
         );
     }
+    if options.check {
+        return diff_check(
+            &repo,
+            &store,
+            &old_index,
+            &new_index,
+            &entries,
+            render_options.old_source,
+            render_options.new_source,
+        );
+    }
     render_diff(
         &repo,
         &store,
@@ -1217,6 +1264,13 @@ pub(crate) fn diff_index(options: PlumbingDiffOptions) -> Result<()> {
         &entries,
         render_options,
     )
+}
+
+fn combined_all_paths_requires_combined_diff_error() -> CliError {
+    CliError::Fatal {
+        code: 128,
+        message: "--combined-all-paths makes no sense without -c or --cc".into(),
+    }
 }
 
 pub(crate) fn diff_tree(options: PlumbingDiffOptions) -> Result<()> {

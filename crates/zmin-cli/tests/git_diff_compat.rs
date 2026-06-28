@@ -328,6 +328,91 @@ fn diff_tree_remaining_documented_header_and_common_diff_flags_match_stock_git()
 }
 
 #[test]
+fn diff_and_diff_files_remaining_documented_common_flags_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    write_file(repo.path(), "b.txt", "staged\n");
+    git(repo.path(), ["add", "b.txt"]);
+    let blob = git(repo.path(), ["rev-parse", "HEAD:a.txt"]);
+
+    for args in [
+        ["diff", "--function-context"].as_slice(),
+        ["diff", "-W"].as_slice(),
+        ["diff", "--remerge-diff"].as_slice(),
+        ["diff", "--ws-error-highlight=old,new,context"].as_slice(),
+        ["diff", "--diff-merges=combined"].as_slice(),
+        ["diff", "--dd"].as_slice(),
+        ["diff", "--no-diff-merges"].as_slice(),
+        ["diff", "-0"].as_slice(),
+        ["diff", "--ita-invisible-in-index", "--cached"].as_slice(),
+        ["diff", "--combined-all-paths"].as_slice(),
+        ["diff-files", "--function-context"].as_slice(),
+        ["diff-files", "-W"].as_slice(),
+        ["diff-files", "--remerge-diff"].as_slice(),
+        ["diff-files", "--ws-error-highlight=old,new,context"].as_slice(),
+        ["diff-files", "--diff-merges=combined"].as_slice(),
+        ["diff-files", "--dd"].as_slice(),
+        ["diff-files", "--check"].as_slice(),
+        ["diff-files", "--ita-invisible-in-index"].as_slice(),
+        ["diff-files", "--no-diff-merges"].as_slice(),
+        ["diff-files", "--combined-all-paths"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "diff-family parity mismatch for {args:?}",
+        );
+    }
+
+    for args in [
+        vec!["diff", "--find-object", blob.trim()],
+        vec!["diff-files", "--find-object", blob.trim()],
+    ] {
+        let refs = args.iter().copied().collect::<Vec<_>>();
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), &refs),
+            command_output("git", repo.path(), &refs),
+            "diff-family parity mismatch for {refs:?}",
+        );
+    }
+}
+
+#[test]
+fn diff_index_remaining_documented_common_flags_match_stock_git() {
+    let repo = git_init();
+    configure_identity(repo.path());
+    write_file(repo.path(), "a.txt", "one\n");
+    git(repo.path(), ["add", "-A"]);
+    git_with_env(repo.path(), ["commit", "-m", "base"]);
+    write_file(repo.path(), "a.txt", "two\n");
+    write_file(repo.path(), "b.txt", "staged\n");
+    git(repo.path(), ["add", "b.txt"]);
+
+    for args in [
+        ["diff-index", "--function-context", "HEAD"].as_slice(),
+        ["diff-index", "-W", "HEAD"].as_slice(),
+        ["diff-index", "--remerge-diff", "HEAD"].as_slice(),
+        ["diff-index", "--ws-error-highlight=old,new,context", "HEAD"].as_slice(),
+        ["diff-index", "--dd", "HEAD"].as_slice(),
+        ["diff-index", "--check", "HEAD"].as_slice(),
+        ["diff-index", "--ita-invisible-in-index", "HEAD"].as_slice(),
+        ["diff-index", "--merge-base", "HEAD"].as_slice(),
+        ["diff-index", "--no-diff-merges", "HEAD"].as_slice(),
+        ["diff-index", "--combined-all-paths", "HEAD"].as_slice(),
+    ] {
+        assert_eq!(
+            command_output(zmin_bin(), repo.path(), args),
+            command_output("git", repo.path(), args),
+            "diff-index parity mismatch for {args:?}",
+        );
+    }
+}
+
+#[test]
 fn diff_noop_option_surface_matches_stock_git_for_porcelain_and_plumbing() {
     let repo = git_init();
     configure_identity(repo.path());

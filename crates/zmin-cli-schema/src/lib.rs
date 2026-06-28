@@ -2901,6 +2901,8 @@ pub enum Command {
         encoding: Option<String>,
         #[arg(long = "oneline", action = ArgAction::SetTrue)]
         oneline: bool,
+        #[arg(short = 'W', long = "function-context", action = ArgAction::SetTrue)]
+        function_context: bool,
         #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
         expand_tabs: bool,
         #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
@@ -2969,6 +2971,22 @@ pub enum Command {
         rename_empty: bool,
         #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
         no_rename_empty: bool,
+        #[arg(short = '0', long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
+        ita_invisible_in_index: bool,
+        #[arg(long = "find-object")]
+        find_object: Option<String>,
+        #[arg(long = "diff-merges")]
+        diff_merges: Option<String>,
+        #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+        no_diff_merges: bool,
+        #[arg(long = "remerge-diff", action = ArgAction::SetTrue)]
+        remerge_diff: bool,
+        #[arg(long = "combined-all-paths", action = ArgAction::SetTrue)]
+        combined_all_paths: bool,
+        #[arg(long = "dd", action = ArgAction::SetTrue)]
+        dd: bool,
+        #[arg(long = "ws-error-highlight")]
+        ws_error_highlight: Option<String>,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -3031,6 +3049,8 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
+        #[arg(long = "check", action = ArgAction::SetTrue)]
+        check: bool,
         #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         dirstat: Option<String>,
         #[arg(long = "cumulative", action = ArgAction::SetTrue)]
@@ -3135,6 +3155,8 @@ pub enum Command {
         encoding: Option<String>,
         #[arg(long = "oneline", action = ArgAction::SetTrue)]
         oneline: bool,
+        #[arg(short = 'W', long = "function-context", action = ArgAction::SetTrue)]
+        function_context: bool,
         #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
         expand_tabs: bool,
         #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
@@ -3203,6 +3225,22 @@ pub enum Command {
         rename_empty: bool,
         #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
         no_rename_empty: bool,
+        #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
+        ita_invisible_in_index: bool,
+        #[arg(long = "find-object")]
+        find_object: Option<String>,
+        #[arg(long = "diff-merges")]
+        diff_merges: Option<String>,
+        #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+        no_diff_merges: bool,
+        #[arg(long = "remerge-diff", action = ArgAction::SetTrue)]
+        remerge_diff: bool,
+        #[arg(long = "combined-all-paths", action = ArgAction::SetTrue)]
+        combined_all_paths: bool,
+        #[arg(long = "dd", action = ArgAction::SetTrue)]
+        dd: bool,
+        #[arg(long = "ws-error-highlight")]
+        ws_error_highlight: Option<String>,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -3235,6 +3273,8 @@ pub enum Command {
         numstat: bool,
         #[arg(long = "shortstat", action = ArgAction::SetTrue)]
         shortstat: bool,
+        #[arg(long = "check", action = ArgAction::SetTrue)]
+        check: bool,
         #[arg(short = 'X', long = "dirstat", num_args = 0..=1, require_equals = true, default_missing_value = "")]
         dirstat: Option<String>,
         #[arg(long = "cumulative", action = ArgAction::SetTrue)]
@@ -3329,6 +3369,8 @@ pub enum Command {
         encoding: Option<String>,
         #[arg(long = "oneline", action = ArgAction::SetTrue)]
         oneline: bool,
+        #[arg(short = 'W', long = "function-context", action = ArgAction::SetTrue)]
+        function_context: bool,
         #[arg(long = "expand-tabs", action = ArgAction::SetTrue)]
         expand_tabs: bool,
         #[arg(long = "no-expand-tabs", action = ArgAction::SetTrue)]
@@ -3397,6 +3439,20 @@ pub enum Command {
         rename_empty: bool,
         #[arg(long = "no-rename-empty", action = ArgAction::SetTrue)]
         no_rename_empty: bool,
+        #[arg(long = "ita-invisible-in-index", action = ArgAction::SetTrue)]
+        ita_invisible_in_index: bool,
+        #[arg(long = "merge-base", action = ArgAction::SetTrue)]
+        merge_base: bool,
+        #[arg(long = "no-diff-merges", action = ArgAction::SetTrue)]
+        no_diff_merges: bool,
+        #[arg(long = "remerge-diff", action = ArgAction::SetTrue)]
+        remerge_diff: bool,
+        #[arg(long = "combined-all-paths", action = ArgAction::SetTrue)]
+        combined_all_paths: bool,
+        #[arg(long = "dd", action = ArgAction::SetTrue)]
+        dd: bool,
+        #[arg(long = "ws-error-highlight")]
+        ws_error_highlight: Option<String>,
         #[arg(long = "quiet", action = ArgAction::SetTrue)]
         quiet: bool,
         #[arg(long = "exit-code", action = ArgAction::SetTrue)]
@@ -6454,6 +6510,7 @@ pub struct DiffOptions {
     pub relative: Option<String>,
     pub no_relative: bool,
     pub unified: Option<String>,
+    pub function_context: bool,
     pub inter_hunk_context: Option<String>,
     pub minimal: bool,
     pub patience: bool,
@@ -6485,6 +6542,14 @@ pub struct DiffOptions {
     pub no_indent_heuristic: bool,
     pub rename_empty: bool,
     pub no_rename_empty: bool,
+    pub ita_invisible_in_index: bool,
+    pub find_object: Option<String>,
+    pub diff_merges: Option<String>,
+    pub no_diff_merges: bool,
+    pub remerge_diff: bool,
+    pub combined_all_paths: bool,
+    pub dd: bool,
+    pub ws_error_highlight: Option<String>,
     pub quiet: bool,
     pub exit_code: bool,
     pub paths: Vec<PathBuf>,
@@ -6550,6 +6615,7 @@ impl Default for DiffOptions {
             relative: None,
             no_relative: false,
             unified: None,
+            function_context: false,
             inter_hunk_context: None,
             minimal: false,
             patience: false,
@@ -6581,6 +6647,14 @@ impl Default for DiffOptions {
             no_indent_heuristic: false,
             rename_empty: false,
             no_rename_empty: false,
+            ita_invisible_in_index: false,
+            find_object: None,
+            diff_merges: None,
+            no_diff_merges: false,
+            remerge_diff: false,
+            combined_all_paths: false,
+            dd: false,
+            ws_error_highlight: None,
             quiet: false,
             exit_code: false,
             paths: Vec::new(),
@@ -6601,6 +6675,7 @@ pub struct PlumbingDiffOptions {
     pub compact_summary: bool,
     pub numstat: bool,
     pub shortstat: bool,
+    pub check: bool,
     pub dirstat: Option<String>,
     pub cumulative: bool,
     pub dirstat_by_file: Option<String>,
@@ -6687,6 +6762,9 @@ pub struct PlumbingDiffOptions {
     pub no_indent_heuristic: bool,
     pub rename_empty: bool,
     pub no_rename_empty: bool,
+    pub ita_invisible_in_index: bool,
+    pub merge_base: bool,
+    pub no_diff_merges: bool,
     pub find_object: Option<String>,
     pub diff_merges: Option<String>,
     pub remerge_diff: bool,
