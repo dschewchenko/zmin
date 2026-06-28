@@ -9486,6 +9486,7 @@ pub(crate) struct ShowOptions<'a> {
     pub(crate) show_notes_by_default: bool,
     pub(crate) standard_notes: bool,
     pub(crate) no_standard_notes: bool,
+    pub(crate) show_signature: bool,
     pub(crate) abbrev_commit: bool,
     pub(crate) no_abbrev_commit: bool,
     pub(crate) root: bool,
@@ -9570,6 +9571,7 @@ fn show_merge_diff_mode(options: &ShowOptions<'_>) -> LogMergeDiffMode {
 }
 
 fn show_with_options(options: ShowOptions<'_>) -> Result<()> {
+    let _accepted_show_signature = options.show_signature;
     let selected_formats = [
         options.patch_with_raw,
         options.patch_with_stat,

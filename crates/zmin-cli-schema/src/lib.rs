@@ -453,6 +453,8 @@ pub enum Command {
         check_self_contained_and_connected: bool,
         #[arg(long = "fix-thin", action = ArgAction::SetTrue)]
         fix_thin: bool,
+        #[arg(long = "progress-title")]
+        progress_title: Option<String>,
         #[arg(short = 'v', action = ArgAction::SetTrue)]
         verbose: bool,
         #[arg(long = "index-version")]
@@ -4986,6 +4988,8 @@ pub enum Command {
         standard_notes: bool,
         #[arg(long = "no-standard-notes", action = ArgAction::SetTrue)]
         no_standard_notes: bool,
+        #[arg(long = "show-signature", action = ArgAction::SetTrue)]
+        show_signature: bool,
         #[arg(long = "abbrev-commit", action = ArgAction::SetTrue)]
         abbrev_commit: bool,
         #[arg(long = "no-abbrev-commit", action = ArgAction::SetTrue)]
@@ -5661,6 +5665,8 @@ pub enum Command {
         glob: Vec<String>,
         #[arg(long = "exclude")]
         exclude: Vec<String>,
+        #[arg(long = "exclude-hidden")]
+        exclude_hidden: Option<String>,
         #[arg(long = "local-env-vars", action = ArgAction::SetTrue)]
         local_env_vars: bool,
         #[arg(long = "flags", action = ArgAction::SetTrue)]
@@ -6932,6 +6938,7 @@ pub struct IndexPackOptions {
     pub fsck_objects: Option<String>,
     pub check_self_contained_and_connected: bool,
     pub fix_thin: bool,
+    pub progress_title: Option<String>,
     pub verbose: bool,
     pub index_version: Option<String>,
     pub threads: Vec<usize>,

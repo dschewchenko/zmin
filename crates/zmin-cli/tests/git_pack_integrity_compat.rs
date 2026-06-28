@@ -3183,6 +3183,7 @@ fn index_pack_documented_option_family_matches_stock_git() {
             "--stdin",
         ]
         .as_slice(),
+        ["index-pack", "--progress-title=title", "input.pack"].as_slice(),
         ["index-pack", "--object-format=sha1", "--stdin"].as_slice(),
         ["index-pack", "--object-format=bogus", "input.pack"].as_slice(),
         ["index-pack", "--promisor=hello", "input.pack"].as_slice(),

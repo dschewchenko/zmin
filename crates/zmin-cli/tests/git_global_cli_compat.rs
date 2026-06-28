@@ -784,6 +784,7 @@ fn rev_parse_ref_selection_family_matches_stock_git() {
 
     for args in [
         ["rev-parse", "--all"].as_slice(),
+        ["rev-parse", "--exclude-hidden=fetch", "--all"].as_slice(),
         ["rev-parse", "--branches"].as_slice(),
         ["rev-parse", "--branches=main*"].as_slice(),
         ["rev-parse", "--tags"].as_slice(),

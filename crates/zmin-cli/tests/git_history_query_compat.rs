@@ -1964,6 +1964,7 @@ fn show_notes_aliases_and_abbrev_commit_family_matches_stock_git() {
         ["show", "--standard-notes", "HEAD"].as_slice(),
         ["show", "--show-notes-by-default", "HEAD"].as_slice(),
         ["show", "--no-standard-notes", "HEAD"].as_slice(),
+        ["show", "--show-signature", "HEAD"].as_slice(),
         ["show", "--abbrev-commit", "HEAD"].as_slice(),
         ["show", "--oneline", "--no-abbrev-commit", "HEAD"].as_slice(),
     ] {

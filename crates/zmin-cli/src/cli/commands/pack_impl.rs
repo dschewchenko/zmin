@@ -4998,7 +4998,17 @@ fn copy_bundle_pack_to_temp_in_dir(
     Ok(temp_pack)
 }
 
+fn index_pack_usage_error() -> CliError {
+    CliError::Stderr {
+        code: 129,
+        text: "usage: git index-pack [-v] [-o <index-file>] [--keep | --keep=<msg>] [--[no-]rev-index] [--verify] [--strict[=<msg-id>=<severity>...]] [--fsck-objects[=<msg-id>=<severity>...]] (<pack-file> | --stdin [--fix-thin] [<pack-file>])\n".into(),
+    }
+}
+
 pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
+    if options.progress_title.is_some() {
+        return Err(index_pack_usage_error());
+    }
     if options.rev_index && options.no_rev_index {
         return Err(CliError::Fatal {
             code: 129,
@@ -5024,6 +5034,7 @@ pub(crate) fn index_pack(options: IndexPackOptions) -> Result<()> {
         resolve_index_pack_object_format(options.object_format.last().map(String::as_str))?;
     let _ = (
         options.check_self_contained_and_connected,
+        options.progress_title.as_deref(),
         options.threads.last(),
     );
     if options.verify {

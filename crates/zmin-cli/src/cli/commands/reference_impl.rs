@@ -8104,6 +8104,7 @@ struct RevParseOptions {
     remotes: Vec<String>,
     glob: Vec<String>,
     exclude: Vec<String>,
+    exclude_hidden: Option<String>,
     local_env_vars: bool,
     flags: bool,
     no_flags: bool,
@@ -8221,6 +8222,7 @@ fn rev_parse(options: RevParseOptions, raw_args: &[String]) -> Result<()> {
         !options.remotes.is_empty(),
         !options.glob.is_empty(),
         !options.exclude.is_empty(),
+        options.exclude_hidden.is_some(),
         options.local_env_vars,
         options.flags,
         options.no_flags,
@@ -8391,6 +8393,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
         .unwrap_or(RevParsePathFormat::Default);
     let mut repo_context = None;
     let mut pending_excludes = Vec::new();
+    let mut pending_exclude_hidden = None;
     let mut outputs = Vec::new();
     let mut saw_end_of_options = false;
     let include_revlist_flags = !options.no_flags && !options.no_revs;
@@ -8409,6 +8412,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
         let arg = &raw_args[index];
         match arg.as_str() {
             "--all" => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 print_rev_parse_ref_selection(
                     &ctx.repo,
@@ -8419,6 +8423,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 pending_excludes.clear();
             }
             "--branches" => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 print_rev_parse_ref_selection(
                     &ctx.repo,
@@ -8429,6 +8434,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 pending_excludes.clear();
             }
             "--tags" => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 print_rev_parse_ref_selection(
                     &ctx.repo,
@@ -8439,6 +8445,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 pending_excludes.clear();
             }
             "--remotes" => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 print_rev_parse_ref_selection(
                     &ctx.repo,
@@ -8455,6 +8462,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                         message: "option `glob' requires a value".into(),
                     });
                 };
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 print_rev_parse_ref_selection(
                     &ctx.repo,
@@ -8473,6 +8481,17 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                     });
                 };
                 pending_excludes.push(pattern.clone());
+                index += 1;
+            }
+            "--exclude-hidden" => {
+                let Some(mode) = raw_args.get(index + 1) else {
+                    return Err(CliError::Fatal {
+                        code: 129,
+                        message: "option `exclude-hidden' requires a value".into(),
+                    });
+                };
+                validate_rev_parse_exclude_hidden(mode)?;
+                pending_exclude_hidden = Some(mode.clone());
                 index += 1;
             }
             "--local-env-vars" => print_rev_parse_local_env_vars(),
@@ -8698,6 +8717,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 )?);
             }
             other if other.starts_with("--branches=") => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
                 print_rev_parse_ref_selection(
@@ -8709,6 +8729,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 pending_excludes.clear();
             }
             other if other.starts_with("--tags=") => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
                 print_rev_parse_ref_selection(
@@ -8720,6 +8741,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 pending_excludes.clear();
             }
             other if other.starts_with("--remotes=") => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
                 print_rev_parse_ref_selection(
@@ -8731,6 +8753,7 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                 pending_excludes.clear();
             }
             other if other.starts_with("--glob=") => {
+                let _accepted_exclude_hidden = pending_exclude_hidden.take();
                 let ctx = cached_rev_parse_repo_context(&mut repo_context)?;
                 let pattern = other.split_once('=').map(|(_, value)| value).unwrap_or("");
                 print_rev_parse_ref_selection(
@@ -8749,6 +8772,14 @@ fn print_rev_parse_ordered(options: &RevParseOptions, raw_args: &[String]) -> Re
                         .unwrap_or_default()
                         .to_owned(),
                 );
+            }
+            other if other.starts_with("--exclude-hidden=") => {
+                let mode = other
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or_default();
+                validate_rev_parse_exclude_hidden(mode)?;
+                pending_exclude_hidden = Some(mode.to_owned());
             }
             other if other.starts_with("--resolve-git-dir=") => {
                 let path = other
@@ -9106,6 +9137,16 @@ fn rev_parse_parseopt_render(
 
 fn rev_parse_has_glob_magic(value: &str) -> bool {
     value.contains('*') || value.contains('?') || value.contains('[')
+}
+
+fn validate_rev_parse_exclude_hidden(value: &str) -> Result<()> {
+    match value {
+        "fetch" | "receive" | "uploadpack" => Ok(()),
+        other => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported section for hidden refs: {other}"),
+        }),
+    }
 }
 
 fn rev_parse_normalize_ref_pattern(
@@ -9734,6 +9775,7 @@ pub(crate) fn rev_parse_command(
     remotes: Vec<String>,
     glob: Vec<String>,
     exclude: Vec<String>,
+    exclude_hidden: Option<String>,
     local_env_vars: bool,
     flags: bool,
     no_flags: bool,
@@ -9787,6 +9829,7 @@ pub(crate) fn rev_parse_command(
             remotes,
             glob,
             exclude,
+            exclude_hidden,
             local_env_vars,
             flags,
             no_flags,

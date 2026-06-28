@@ -22,6 +22,64 @@ mappings and latest completed slices.
 ## Current Slice Pointer
 
 As of 2026-06-28 the latest completed batch is a helper-free local
+`show` / `rev-parse` / `index-pack` documented-tail closure across already
+modeled unsigned commit display, no-hideRefs ref-selection, and standalone
+pack-file indexing lanes. This batch added three exact stock-Git rows and
+promoted the same three documented option pairs into the reviewed-complete
+census set: `show --show-signature`, `rev-parse --exclude-hidden`, and
+`index-pack --progress-title`.
+The runtime closure stayed intentionally bounded: `show` now accepts
+`--show-signature` on the current unsigned helper-free lane and preserves
+stock output; `rev-parse` now accepts `--exclude-hidden=<mode>` with stock
+mode validation and stock-compatible no-op behavior on the current ref
+selection lane without any hideRefs config; and `index-pack` now matches the
+current stock usage rejection for `--progress-title` rather than widening into
+custom progress rendering semantics.
+
+Focused verification was
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo check -p zmin-cli -p zmin-cli-schema`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_history_query_compat show_notes_aliases_and_abbrev_commit_family_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_global_cli_compat rev_parse_ref_selection_family_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo test -p zmin-cli --test git_pack_integrity_compat index_pack_documented_option_family_matches_stock_git -- --exact --nocapture`,
+`CARGO_TARGET_DIR=/private/tmp/skron-codex-target cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`,
+`tools/git-compat-command-summary.sh --tsv | rg '^(show|rev-parse|index-pack|summary)\t|^complete_command_matrices\t|^complete_doc_option_pairs\t|^behavior_rows_written\t|^written_rows_matching_stock_git\t|^behavior_rows_classified\t|^invalid_input_rows\t'`,
+and `git diff --check`.
+
+Actual durable readiness/status after this batch:
+
+- complete command matrices: `146 / 151`
+- complete documented command-option pairs: `2774 / 3212`
+- represented documented command-option pairs: `2774 / 3212`
+- matrix rows: `7079`
+- verified rows: `6213`
+- invalid-input rows: `841`
+- open or partial exact rows: `0`
+- remaining to fix or verify rows: `438`
+- implemented but unverified rows: `3`
+
+Per-command position on the touched surface:
+
+- `show`: `15 / 15` reviewed-complete documented option pairs,
+  `15 / 15` represented documented option pairs, `50` written rows, `50`
+  classified rows, `50` stock-matching rows, `0` invalid-input rows, and
+  `0` exact-open rows
+- `rev-parse`: `51 / 51` reviewed-complete documented option pairs,
+  `51 / 51` represented documented option pairs, `112` written rows, `112`
+  classified rows, `103` stock-matching rows, `9` invalid-input rows, and
+  `0` exact-open rows
+- `index-pack`: `16 / 16` reviewed-complete documented option pairs,
+  `16 / 16` represented documented option pairs, `34` written rows, `34`
+  classified rows, `23` stock-matching rows, `11` invalid-input rows, and
+  `0` exact-open rows
+
+This is an implementation-plus-review closure batch rather than a census-only
+promotion: it closes three near-complete command tails in one iteration
+without widening into signed-commit rendering, hideRefs filtering semantics,
+or custom progress-title output behavior.
+
+As of 2026-06-28 the previous completed batch is a helper-free local
 `clone` documented-tail closure across the already modeled local source lane
 with one top-level file plus one nested path and a bounded missing-bundle
 warning fixture. This batch added thirteen exact stock-Git rows and promoted
