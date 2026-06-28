@@ -21,6 +21,44 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the final bounded local `p4 clone`
+completion family across the existing fake Perforce depot import fixture. This
+batch added four exact stock-Git rows and promoted the final four documented
+`p4` option pairs into the reviewed-complete census set: `--bare`,
+`--changesfile`, `--destination`, and `--keep-path`. The runtime closure stayed
+intentionally bounded: Zmin now matches stock on the current fake clone lanes
+where `--keep-path` fails early with the exact missing-destination stderr and no
+repository creation; `--destination destdir` preserves the stock usage text and
+the exact `Depot paths must start with "//": <target>` stderr when an extra
+positional target collides with the destination mode; `--changesfile` produces
+the stock no-checkout transcript with the carriage-return progress line, leaves
+refs absent in an initialized non-bare repository, and keeps clean status; and
+`--bare` now matches the stock bare repository shape, `HEAD` target, ref
+topology, commit message, revision-suffixed tree payload, and worktree-less
+status failure. This does not widen `p4` beyond the existing fake Perforce
+oracle or into broader helper-backed workflows; it closes the remaining
+documented clone-side family only. The implementation stayed focused on the
+missing closure: clone parsing now preserves the destination conflict positional,
+the clone runtime branches into stock-shaped bounded bare and changesfile lanes,
+and the final failure tails emit the stock usage and stderr without creating
+repositories. Two exact compat tests cover all four rows while checking exact
+stdout, stderr, exit status, and repository shape/state where relevant. Focused
+gates were `cargo test -q -p zmin-cli --test git_foreign_scm_compat p4_`,
+`cargo check -q -p zmin-cli -p zmin-cli-schema`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts
+should now move to `7665` matrix rows, `6745` verified rows, `895` invalid-input
+rows, `146/151` complete command matrices, and `3147/3212` complete documented
+option pairs once the reviewed-complete census artifacts are regenerated. `p4`
+should close at `29/29` reviewed-complete documented option pairs with `32/32`
+classified rows, `32` stock-matching rows, and `0` invalid-input rows. The
+overall backlog head should then become `svn` (`25`), followed by `cvsimport`
+(`14`), `cvsexportcommit` (`11`), `archimport` (`7`), `send-email` (`5`), and
+the single-pair tails `rebase`, `log`, and `apply`; the next default follow-up
+should move off `p4` and onto the largest remaining foreign-SCM/doc-option
+group, which is now `svn`.
+
 As of 2026-06-29 the latest completed batch is a bounded local `p4 submit`
 prepare/shelve/export-labels family across the existing fake Perforce submit
 fixture. This batch added four exact stock-Git rows and promoted four

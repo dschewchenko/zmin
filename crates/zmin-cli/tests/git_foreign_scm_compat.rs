@@ -567,6 +567,152 @@ fn p4_clone_import_local_matches_stock_git() {
 }
 
 #[test]
+fn p4_clone_failure_tail_option_family_matches_stock_git() {
+    for extra_args in [
+        ["--keep-path"].as_slice(),
+        ["--destination", "destdir"].as_slice(),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let bin = dir.path().join("bin");
+        let data = dir.path().join("p4-data");
+        let stock_target = dir.path().join("stock-project");
+        let zmin_target = dir.path().join("zmin-project");
+        fs::create_dir_all(&data).expect("create p4 data");
+        fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
+        fs::create_dir_all(data.join("dir")).expect("create p4 dir");
+        fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
+        write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
+
+        let mut stock_args = vec!["p4", "clone", "--branch", "master"];
+        stock_args.extend_from_slice(extra_args);
+        stock_args.push("//depot/project");
+        stock_args.push(stock_target.to_str().expect("stock target path"));
+        let stock = run_command_with_path(
+            stock_git_bin().to_str().expect("stock git path"),
+            dir.path(),
+            &bin,
+            &stock_args,
+        );
+        assert_ne!(stock.0, 0, "stock clone unexpectedly succeeded");
+
+        let mut zmin_args = vec!["p4", "clone", "--branch", "master"];
+        zmin_args.extend_from_slice(extra_args);
+        zmin_args.push("//depot/project");
+        zmin_args.push(zmin_target.to_str().expect("zmin target path"));
+        let zmin = run_command_with_path(
+            zmin_bin(),
+            dir.path(),
+            &bin,
+            &zmin_args,
+        );
+        assert_ne!(zmin.0, 0, "zmin clone unexpectedly succeeded");
+
+        assert_eq!(zmin.0, stock.0);
+        assert_eq!(
+            normalize_p4_clone_stdout(&zmin.1),
+            normalize_p4_clone_stdout(&stock.1)
+        );
+        assert_eq!(
+            normalize_p4_clone_stderr(&zmin.2),
+            normalize_p4_clone_stderr(&stock.2)
+        );
+        assert_eq!(stock_target.exists(), zmin_target.exists());
+    }
+}
+
+#[test]
+fn p4_clone_repo_shape_option_family_matches_stock_git() {
+    for extra_args in [
+        ["--changesfile", "__CHANGESFILE__"].as_slice(),
+        ["--bare"].as_slice(),
+    ] {
+        let dir = TempDir::new().expect("temp dir");
+        let bin = dir.path().join("bin");
+        let data = dir.path().join("p4-data");
+        let stock_target = dir.path().join("stock-project");
+        let zmin_target = dir.path().join("zmin-project");
+        fs::create_dir_all(&data).expect("create p4 data");
+        fs::write(data.join("a.txt"), b"alpha\n").expect("write p4 a");
+        fs::create_dir_all(data.join("dir")).expect("create p4 dir");
+        fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write p4 b");
+        let changesfile = dir.path().join("changes.txt");
+        fs::write(&changesfile, b"2\n").expect("write changes file");
+        write_fake_p4(&bin, &data, &dir.path().join("unused-p4.log"));
+
+        let mut stock_args = vec!["p4", "clone", "--branch", "master"];
+        if extra_args[0] == "--changesfile" {
+            stock_args.extend_from_slice(&[
+                "--changesfile",
+                changesfile.to_str().expect("changesfile path"),
+            ]);
+        } else {
+            stock_args.extend_from_slice(extra_args);
+        }
+        stock_args.push("//depot/project");
+        stock_args.push(stock_target.to_str().expect("stock target path"));
+        let stock = run_command_with_path(
+            stock_git_bin().to_str().expect("stock git path"),
+            dir.path(),
+            &bin,
+            &stock_args,
+        );
+        assert_eq!(stock.0, 0, "stock clone stderr: {}", stock.2);
+
+        let mut zmin_args = vec!["p4", "clone", "--branch", "master"];
+        if extra_args[0] == "--changesfile" {
+            zmin_args.extend_from_slice(&[
+                "--changesfile",
+                changesfile.to_str().expect("changesfile path"),
+            ]);
+        } else {
+            zmin_args.extend_from_slice(extra_args);
+        }
+        zmin_args.push("//depot/project");
+        zmin_args.push(zmin_target.to_str().expect("zmin target path"));
+        let zmin = run_command_with_path(
+            zmin_bin(),
+            dir.path(),
+            &bin,
+            &zmin_args,
+        );
+        assert_eq!(zmin.0, 0, "zmin clone stderr: {}", zmin.2);
+
+        assert_eq!(
+            normalize_p4_clone_stdout(&zmin.1),
+            normalize_p4_clone_stdout(&stock.1)
+        );
+        assert_eq!(
+            normalize_p4_clone_stderr(&zmin.2),
+            normalize_p4_clone_stderr(&stock.2)
+        );
+
+        if extra_args[0] == "--changesfile" {
+            assert!(stock_target.join(".git").is_dir());
+            assert!(zmin_target.join(".git").is_dir());
+            assert_eq!(git_maybe(&stock_target, ["show-ref"]), git_maybe(&zmin_target, ["show-ref"]));
+            assert_eq!(git(&stock_target, ["status", "--short"]), git(&zmin_target, ["status", "--short"]));
+            assert_eq!(list_dir_names(&stock_target), list_dir_names(&zmin_target));
+        } else {
+            assert!(!stock_target.join(".git").exists());
+            assert!(!zmin_target.join(".git").exists());
+            assert_eq!(show_ref_names(&stock_target), show_ref_names(&zmin_target));
+            assert!(show_ref_hashes_are_uniform(&stock_target));
+            assert!(show_ref_hashes_are_uniform(&zmin_target));
+            assert_eq!(
+                git(&stock_target, ["log", "-1", "--format=%B", "HEAD"]),
+                git(&zmin_target, ["log", "-1", "--format=%B", "HEAD"])
+            );
+            assert_eq!(
+                git(&stock_target, ["ls-tree", "-r", "--name-only", "HEAD"]),
+                git(&zmin_target, ["ls-tree", "-r", "--name-only", "HEAD"])
+            );
+            assert_eq!(git_maybe(&stock_target, ["status", "--short"]), git_maybe(&zmin_target, ["status", "--short"]));
+            assert_eq!(list_dir_names(&stock_target), list_dir_names(&zmin_target));
+        }
+    }
+}
+
+#[test]
 fn p4_submit_opens_changed_files_and_submits_head() {
     let dir = TempDir::new().expect("temp dir");
     let bin = dir.path().join("bin");
@@ -1730,6 +1876,57 @@ fn copy_dir_recursive(source: &std::path::Path, destination: &std::path::Path) {
             fs::copy(&source_path, &destination_path).expect("copy file");
         }
     }
+}
+
+fn git_maybe<const N: usize>(repo: &std::path::Path, args: [&str; N]) -> (i32, String, String) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("run git");
+    (
+        output.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+        String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    )
+}
+
+fn list_dir_names(path: &std::path::Path) -> Vec<String> {
+    let mut names = fs::read_dir(path)
+        .expect("read dir")
+        .map(|entry| {
+            entry
+                .expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn show_ref_names(repo: &std::path::Path) -> Vec<String> {
+    let (_, stdout, stderr) = git_maybe(repo, ["show-ref"]);
+    assert!(stderr.is_empty(), "unexpected show-ref stderr: {stderr}");
+    let mut names = stdout
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn show_ref_hashes_are_uniform(repo: &std::path::Path) -> bool {
+    let (_, stdout, stderr) = git_maybe(repo, ["show-ref"]);
+    assert!(stderr.is_empty(), "unexpected show-ref stderr: {stderr}");
+    let hashes = stdout
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .collect::<Vec<_>>();
+    !hashes.is_empty() && hashes.windows(2).all(|pair| pair[0] == pair[1])
 }
 
 #[cfg(unix)]

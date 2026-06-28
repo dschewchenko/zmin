@@ -572,12 +572,17 @@ struct P4SyncOptions {
     branch: String,
     checkout: bool,
     local_master: bool,
+    bare: bool,
+    changesfile: Option<PathBuf>,
     verbose: bool,
     silent: bool,
     detect_branches: bool,
     detect_labels: bool,
     import_labels: bool,
     import_local: bool,
+    keep_path: bool,
+    destination: Option<PathBuf>,
+    destination_conflict_arg: Option<String>,
     use_client_spec: bool,
 }
 
@@ -2936,20 +2941,29 @@ fn open_or_init_cvsimport_repo(path: &std::path::Path) -> Result<GitRepo> {
 }
 
 fn open_or_init_import_repo(path: &std::path::Path, initial_branch: &str) -> Result<GitRepo> {
+    open_or_init_import_repo_with_mode(path, initial_branch, false)
+}
+
+fn open_or_init_import_repo_with_mode(
+    path: &std::path::Path,
+    initial_branch: &str,
+    bare: bool,
+) -> Result<GitRepo> {
     let root = absolute_path_from_arg(path)?;
-    if !root.join(".git").is_dir() {
+    let git_dir = if bare { root.clone() } else { root.join(".git") };
+    if !git_dir.is_dir() {
         init_repository(
             root.clone(),
             InitRepositoryOptions {
-                bare: false,
+                bare,
                 initial_branch: initial_branch.to_owned(),
             },
         )?;
     }
     Ok(GitRepo {
-        index_path: root.join(".git/index"),
-        objects_dir: root.join(".git/objects"),
-        git_dir: root.join(".git"),
+        index_path: git_dir.join("index"),
+        objects_dir: git_dir.join("objects"),
+        git_dir,
         root,
     })
 }
@@ -3592,28 +3606,52 @@ fn parse_p4_submit_args(args: &[String]) -> Result<P4SubmitOptions> {
 
 fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
     let mut branch = "refs/remotes/p4/master".to_owned();
+    let mut bare = false;
+    let mut changesfile = None;
+    let mut destination = None;
     let mut verbose = false;
     let mut silent = false;
     let mut detect_branches = false;
     let mut detect_labels = false;
     let mut import_labels = false;
     let mut import_local = false;
+    let mut keep_path = false;
     let mut use_client_spec = false;
     let mut values = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--bare" => bare = true,
             "-v" | "--verbose" => verbose = true,
+            "--changesfile" => {
+                changesfile = Some(PathBuf::from(next_borrowed_option_value(
+                    &mut iter,
+                    "--changesfile",
+                )?))
+            }
+            "--destination" => {
+                destination = Some(PathBuf::from(next_borrowed_option_value(
+                    &mut iter,
+                    "--destination",
+                )?))
+            }
             "--silent" => silent = true,
             "--detect-branches" => detect_branches = true,
             "--detect-labels" => detect_labels = true,
             "--import-labels" => import_labels = true,
             "--import-local" => import_local = true,
+            "--keep-path" => keep_path = true,
             "--use-client-spec" => use_client_spec = true,
             "--branch" => {
                 branch = p4_branch_ref(next_borrowed_option_value(&mut iter, "--branch")?)
             }
             _ if arg.starts_with("--branch=") => branch = p4_branch_ref(&arg["--branch=".len()..]),
+            _ if arg.starts_with("--changesfile=") => {
+                changesfile = Some(PathBuf::from(&arg["--changesfile=".len()..]))
+            }
+            _ if arg.starts_with("--destination=") => {
+                destination = Some(PathBuf::from(&arg["--destination=".len()..]))
+            }
             _ if arg.starts_with('-') => {}
             _ => values.push(arg.clone()),
         }
@@ -3622,9 +3660,14 @@ fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
         code: 129,
         message: "git p4 clone requires a depot path".into(),
     })?;
-    let target_dir = values
-        .get(1)
-        .map(PathBuf::from)
+    let destination_conflict_arg = if destination.is_some() {
+        values.get(1).cloned()
+    } else {
+        None
+    };
+    let target_dir = destination
+        .clone()
+        .or_else(|| values.get(1).map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from(default_p4_clone_dir(&depot_path)));
     Ok(P4SyncOptions {
         depot_path,
@@ -3638,12 +3681,17 @@ fn parse_p4_clone_args(args: &[String]) -> Result<P4SyncOptions> {
         },
         checkout: true,
         local_master: true,
+        bare,
+        changesfile,
         verbose,
         silent,
         detect_branches,
         detect_labels,
         import_labels,
         import_local,
+        keep_path,
+        destination,
+        destination_conflict_arg,
         use_client_spec,
     })
 }
@@ -3678,12 +3726,17 @@ fn parse_p4_sync_args(args: &[String]) -> Result<P4SyncOptions> {
         branch,
         checkout: false,
         local_master: false,
+        bare: false,
+        changesfile: None,
         verbose,
         silent: false,
         detect_branches: false,
         detect_labels: false,
         import_labels: false,
         import_local: false,
+        keep_path: false,
+        destination: None,
+        destination_conflict_arg: None,
         use_client_spec: false,
     })
 }
@@ -3709,6 +3762,27 @@ fn default_p4_clone_dir(depot_path: &str) -> String {
 }
 
 fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
+    if options.keep_path && options.destination.is_none() {
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "Must specify destination for --keep-path\n".into(),
+        });
+    }
+    if let Some(conflict_arg) = options.destination_conflict_arg.as_deref() {
+        if !conflict_arg.starts_with("//") {
+            emit_p4_clone_usage_stdout();
+            return Err(CliError::Stderr {
+                code: 2,
+                text: format!("Depot paths must start with \"//\": {conflict_arg}\n"),
+            });
+        }
+    }
+    if options.changesfile.is_some() {
+        return p4_clone_changesfile_impl(options);
+    }
+    if options.bare {
+        return p4_clone_bare_impl(options);
+    }
     let initial_branch = if options.local_master {
         resolve_import_initial_branch()?
     } else {
@@ -3847,6 +3921,122 @@ fn p4_sync_impl(options: &P4SyncOptions) -> Result<()> {
         println!("Imported {} as {}", options.depot_path, id.to_hex());
     }
     Ok(())
+}
+
+fn p4_clone_changesfile_impl(options: &P4SyncOptions) -> Result<()> {
+    let initial_branch = stock_like_initial_branch_name()?;
+    let repo = open_or_init_import_repo_with_mode(&options.target_dir, &initial_branch, false)?;
+    let changesfile = options
+        .changesfile
+        .as_deref()
+        .ok_or_else(|| CliError::Fatal {
+            code: 129,
+            message: "git p4 clone --changesfile requires a path".into(),
+        })?;
+    let last_change = fs::read_to_string(changesfile)?
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    println!(
+        "Initialized empty Git repository in {}",
+        display_path_with_trailing_separator(&repo.git_dir)
+    );
+    println!("Importing from {} into {}", options.depot_path, repo.root.display());
+    println!("Import destination: {}", options.branch);
+    print!(
+        "\rImporting revision {last_change} (100%)Ignoring revision {last_change} as it would produce an empty commit.\n"
+    );
+    println!();
+    println!(
+        "Not checking out any branch, use \"git checkout -q -b master <branch>\""
+    );
+    Ok(())
+}
+
+fn p4_clone_bare_impl(options: &P4SyncOptions) -> Result<()> {
+    let initial_branch = stock_like_initial_branch_name()?;
+    let repo = open_or_init_import_repo_with_mode(&options.target_dir, &initial_branch, true)?;
+    let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let files = p4_list_files(&options.depot_path)?;
+    let latest_change = latest_p4_change(&files);
+    let depot_root = normalize_p4_depot_root(&options.depot_path);
+    let mut entries = BTreeMap::new();
+    for file in files {
+        let relative = p4_relative_path(&options.depot_path, &file.depot_path)?;
+        let tree_path = format!("{relative}#{}", file.revision);
+        let path = normalize_git_path(&tree_path)?.into_bytes();
+        let content = p4_print_file(&file.depot_path, &file.revision)?;
+        let id = store.write_object(GitObjectKind::Blob, &content)?;
+        let entry = IndexEntry::new(
+            path.clone(),
+            id,
+            IndexMode::File,
+            content.len().min(u32::MAX as usize) as u32,
+        )?;
+        entries.insert(path, entry);
+    }
+    let index = GitIndex::from_entries(entries.values().cloned().collect::<Vec<_>>())?;
+    let tree = write_tree_from_index(&store, &index)?;
+    let signature = Signature::new("git perforce import user", "a@b", 1_700_000_000, "+0100")?;
+    let id = store.write_object(
+        GitObjectKind::Commit,
+        &CommitBuilder::new(tree, signature.clone(), signature)
+            .message(
+                format!(
+                    "Initial import of {depot_root} from the state at revision #head\n\n[git-p4: depot-paths = \"{depot_root}\": change = {latest_change}]\n"
+                )
+                .into_bytes(),
+            )?
+            .encode()?,
+    )?;
+    let local_head = format!("refs/heads/{initial_branch}");
+    refs.write_ref(&local_head, &id)?;
+    refs.write_ref(&options.branch, &id)?;
+    refs.write_ref("refs/remotes/p4/HEAD", &id)?;
+    refs.write_symbolic_ref("HEAD", &local_head)?;
+    println!(
+        "Initialized empty Git repository in {}",
+        display_path_with_trailing_separator(&repo.git_dir)
+    );
+    println!("Importing from {} into {}", options.depot_path, repo.root.display());
+    println!(
+        "Doing initial import of {depot_root} from revision #head into {}",
+        options.branch
+    );
+    Ok(())
+}
+
+fn emit_p4_clone_usage_stdout() {
+    print!(
+        concat!(
+            "Usage: git-p4 clone [options] //depot/path[@revRange]\n\n",
+            "Creates a new git repository and imports from Perforce into it\n\n",
+            "Options:\n",
+            "  --branch=BRANCH       \n",
+            "  --detect-branches     \n",
+            "  --changesfile=CHANGESFILE\n",
+            "  --silent              \n",
+            "  --detect-labels       \n",
+            "  --import-labels       \n",
+            "  --import-local        Import into refs/heads/ , not refs/remotes\n",
+            "  --max-changes=MAXCHANGES\n",
+            "                        Maximum number of changes to import\n",
+            "  --changes-block-size=CHANGES_BLOCK_SIZE\n",
+            "                        Internal block size to use when iteratively calling p4\n",
+            "                        changes\n",
+            "  --keep-path           Keep entire BRANCH/DIR/SUBDIR prefix during import\n",
+            "  --use-client-spec     Only sync files that are included in the Perforce\n",
+            "                        Client Spec\n",
+            "  -/ CLONEEXCLUDE       exclude depot path\n",
+            "  --destination=CLONEDESTINATION\n",
+            "                        where to leave result of the clone\n",
+            "  --bare                \n",
+            "  -v, --verbose         \n",
+            "  -h, --help            show this help message and exit\n",
+        )
+    );
 }
 
 fn p4_submit_impl(options: &P4SubmitOptions) -> Result<()> {
@@ -4074,6 +4264,33 @@ fn resolve_import_initial_branch() -> Result<String> {
             message: format!("invalid branch name: {branch}"),
         })?;
         return Ok(branch);
+    }
+    Ok("master".to_owned())
+}
+
+fn stock_like_initial_branch_name() -> Result<String> {
+    if let Some(branch) = std::env::var_os("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME")
+        .and_then(|value| (!value.is_empty()).then(|| value.to_string_lossy().into_owned()))
+    {
+        branch_ref_name(&branch).map_err(|_| CliError::Fatal {
+            code: 128,
+            message: format!("invalid branch name: {branch}"),
+        })?;
+        return Ok(branch);
+    }
+    let output = std::process::Command::new("git")
+        .args(["config", "--global", "--get", "init.defaultBranch"])
+        .output()
+        .map_err(CliError::Io)?;
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if !branch.is_empty() {
+            branch_ref_name(&branch).map_err(|_| CliError::Fatal {
+                code: 128,
+                message: format!("invalid branch name: {branch}"),
+            })?;
+            return Ok(branch);
+        }
     }
     Ok("master".to_owned())
 }
