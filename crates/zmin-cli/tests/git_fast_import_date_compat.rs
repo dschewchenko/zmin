@@ -750,3 +750,124 @@ bogus
         loose_object_file_count(git_repo.path())
     );
 }
+
+#[test]
+fn fast_import_additional_value_and_order_families_match_stock_git() {
+    let raw_date_stream = "\
+commit refs/heads/main
+author A U Thor <author@example.test> 0 +0000
+committer C O Mitter <committer@example.test> 1 +0000
+data <<EOF
+raw date
+EOF
+M 100644 inline a.txt
+data <<EOF
+contents
+EOF
+";
+    for args in [
+        &["fast-import", "--date-format=raw"][..],
+        &["fast-import", "--date-format=raw-permissive"],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, raw_date_stream);
+        let zmin_output =
+            command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, raw_date_stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        assert_eq!(
+            normalize_fast_import_statistics_stderr(&zmin_output.2),
+            normalize_fast_import_statistics_stderr(&git_output.2),
+            "stderr for {args:?}"
+        );
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+
+    let stream = "\
+blob
+mark :1
+data 6
+hello
+
+commit refs/heads/main
+committer A <a@example.test> 0 +0000
+data 8
+initial
+M 100644 :1 a.txt
+
+done
+";
+
+    for args in [
+        &["fast-import", "--active-branches=0"][..],
+        &["fast-import", "--active-branches=2"],
+        &["fast-import", "--depth=2"],
+        &["fast-import", "--big-file-threshold=2"],
+        &["fast-import", "--cat-blob-fd=0"],
+        &["fast-import", "--cat-blob-fd=1"],
+        &["fast-import", "--max-pack-size=2m"],
+        &["fast-import", "--quiet", "--stats"],
+        &["fast-import", "--done", "--stats"],
+        &["fast-import", "--done", "--quiet"],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        if args == ["fast-import", "--done", "--quiet"] {
+            assert_eq!(zmin_output.2, git_output.2, "stderr for {args:?}");
+            assert!(zmin_output.2.is_empty(), "quiet should suppress stats for {args:?}");
+        } else {
+            assert_eq!(
+                normalize_fast_import_statistics_stderr(&zmin_output.2),
+                normalize_fast_import_statistics_stderr(&git_output.2),
+                "stderr for {args:?}"
+            );
+        }
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+
+    for args in [
+        &["fast-import", "--stats", "--quiet"][..],
+        &["fast-import", "--max-pack-size=2"],
+    ] {
+        let git_repo = git_init();
+        let zmin_repo = git_init();
+        let git_output = command_with_stdin_output("git", git_repo.path(), args, stream);
+        let zmin_output = command_with_stdin_output(zmin_bin(), zmin_repo.path(), args, stream);
+        assert_eq!(zmin_output.0, git_output.0, "exit for {args:?}");
+        assert_eq!(zmin_output.1, git_output.1, "stdout for {args:?}");
+        if args[1] == "--stats" {
+            assert_eq!(zmin_output.2, git_output.2, "stderr for {args:?}");
+            assert!(zmin_output.2.is_empty(), "quiet should suppress stats for {args:?}");
+        } else {
+            assert_eq!(
+                normalize_fast_import_warning_and_statistics_stderr(
+                    &zmin_output.2,
+                    "warning: max-pack-size is now in bytes, assuming --max-pack-size=2m"
+                ),
+                normalize_fast_import_warning_and_statistics_stderr(
+                    &git_output.2,
+                    "warning: max-pack-size is now in bytes, assuming --max-pack-size=2m"
+                ),
+                "stderr for {args:?}"
+            );
+        }
+        assert_eq!(
+            git(zmin_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            git(git_repo.path(), ["cat-file", "-p", "refs/heads/main:a.txt"]),
+            "imported content for {args:?}"
+        );
+    }
+}

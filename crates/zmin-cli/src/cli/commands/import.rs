@@ -1,6 +1,9 @@
 use crate::runtime;
 
-pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), runtime::CliError> {
+pub(crate) fn dispatch(
+    command: runtime::Command,
+    raw_args: &[String],
+) -> std::result::Result<(), runtime::CliError> {
     match command {
         runtime::Command::Quiltimport {
             dry_run,
@@ -82,27 +85,31 @@ pub(crate) fn dispatch(command: runtime::Command) -> std::result::Result<(), run
             relative_marks,
             rewrite_submodules_from,
             rewrite_submodules_to,
-        } => super::import_commands::fast_import(super::import_commands::FastImportOptions {
-            date_format,
-            quiet,
-            stats,
-            force,
-            done,
-            allow_unsafe_features,
-            active_branches,
-            depth,
-            big_file_threshold,
-            cat_blob_fd,
-            export_marks,
-            export_pack_edges,
-            import_marks,
-            import_marks_if_exists,
-            max_pack_size,
-            no_relative_marks,
-            relative_marks,
-            rewrite_submodules_from,
-            rewrite_submodules_to,
-        }),
+        } => {
+            let (quiet, stats) =
+                super::import_commands::resolve_fast_import_stats_mode(raw_args, quiet, stats);
+            super::import_commands::fast_import(super::import_commands::FastImportOptions {
+                date_format,
+                quiet,
+                stats,
+                force,
+                done,
+                allow_unsafe_features,
+                active_branches,
+                depth,
+                big_file_threshold,
+                cat_blob_fd,
+                export_marks,
+                export_pack_edges,
+                import_marks,
+                import_marks_if_exists,
+                max_pack_size,
+                no_relative_marks,
+                relative_marks,
+                rewrite_submodules_from,
+                rewrite_submodules_to,
+            })
+        }
         _ => unreachable!("non-import command dispatched to import"),
     }
 }

@@ -294,7 +294,7 @@ pub(crate) fn dispatch(
         | crate::runtime::Command::ImapSend { .. }) => mail::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Quiltimport { .. }
         | crate::runtime::Command::FastExport { .. }
-        | crate::runtime::Command::FastImport { .. }) => import::dispatch(command),
+        | crate::runtime::Command::FastImport { .. }) => import::dispatch(command, raw_args),
         command @ (crate::runtime::Command::Merge { .. }
         | crate::runtime::Command::Mergetool { .. }
         | crate::runtime::Command::MergeTree { .. }

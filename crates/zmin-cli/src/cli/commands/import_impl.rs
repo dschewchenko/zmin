@@ -932,6 +932,26 @@ fn fast_import_modeled_noop_surface(options: &FastImportOptions) {
     );
 }
 
+pub(crate) fn resolve_fast_import_stats_mode(
+    raw_args: &[String],
+    quiet: bool,
+    stats: bool,
+) -> (bool, bool) {
+    let mut last_mode = None;
+    for arg in raw_args.iter().skip(1) {
+        match arg.as_str() {
+            "--quiet" => last_mode = Some("quiet"),
+            "--stats" => last_mode = Some("stats"),
+            _ => {}
+        }
+    }
+    match last_mode {
+        Some("quiet") => (true, false),
+        Some("stats") => (false, true),
+        _ => (quiet, stats),
+    }
+}
+
 fn fast_import_preflight(git_dir: &Path, options: &FastImportOptions) -> Result<()> {
     if let Some(value) = options.relative_marks.as_deref() {
         return Err(fast_import_crash_error(
@@ -969,6 +989,7 @@ impl FastImportDateFormat {
     fn from_cli(value: Option<&str>, git_dir: &std::path::Path) -> Result<Self> {
         match value {
             None | Some("raw") => Ok(Self::Raw),
+            Some("raw-permissive") => Ok(Self::Raw),
             Some("rfc2822") => Ok(Self::Rfc2822),
             Some("now") => Ok(Self::Now),
             Some(value) => Err(fast_import_crash_error(
