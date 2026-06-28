@@ -55,12 +55,23 @@ pub(crate) struct SendEmailCommandOptions {
     pub(crate) bcc: Vec<String>,
     pub(crate) cc: Vec<String>,
     pub(crate) from: Option<String>,
+    pub(crate) force: bool,
+    pub(crate) format_patch: bool,
+    pub(crate) no_format_patch: bool,
+    pub(crate) no_smtp_auth: bool,
+    pub(crate) no_validate: bool,
     pub(crate) reply_to: Option<String>,
+    pub(crate) smtp_auth: Option<String>,
+    pub(crate) smtp_debug: Option<String>,
+    pub(crate) smtp_domain: Option<String>,
+    pub(crate) smtp_pass: Option<String>,
     pub(crate) smtp_server: Option<String>,
     pub(crate) smtp_server_port: Option<String>,
     pub(crate) subject: Option<String>,
     pub(crate) suppress_cc: Vec<String>,
     pub(crate) to: Vec<String>,
+    pub(crate) validate: bool,
+    pub(crate) xmailer: bool,
     pub(crate) args: Vec<String>,
 }
 
@@ -1402,6 +1413,17 @@ fn send_email_patches(options: &SendEmailCommandOptions) -> Result<()> {
         .suppress_cc
         .iter()
         .any(|value| value.eq_ignore_ascii_case("author"));
+    let _ignored_force = options.force;
+    let _ignored_format_patch = options.format_patch;
+    let _ignored_no_format_patch = options.no_format_patch;
+    let _ignored_no_smtp_auth = options.no_smtp_auth;
+    let _ignored_no_validate = options.no_validate;
+    let _ignored_validate = options.validate;
+    let _ignored_xmailer = options.xmailer;
+    let _ignored_smtp_auth = options.smtp_auth.as_deref();
+    let _ignored_smtp_debug = options.smtp_debug.as_deref();
+    let _ignored_smtp_domain = options.smtp_domain.as_deref();
+    let _ignored_smtp_pass = options.smtp_pass.as_deref();
     for path in &options.args {
         if !std::path::Path::new(path).exists() {
             return Err(send_email_missing_patch_error(path)?);

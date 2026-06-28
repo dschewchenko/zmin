@@ -5032,6 +5032,14 @@ pub enum Command {
         from: Option<String>,
         #[arg(long = "reply-to")]
         reply_to: Option<String>,
+        #[arg(long = "smtp-auth")]
+        smtp_auth: Option<String>,
+        #[arg(long = "smtp-debug")]
+        smtp_debug: Option<String>,
+        #[arg(long = "smtp-domain")]
+        smtp_domain: Option<String>,
+        #[arg(long = "smtp-pass")]
+        smtp_pass: Option<String>,
         #[arg(long = "smtp-server")]
         smtp_server: Option<String>,
         #[arg(long = "smtp-server-port")]
@@ -5042,6 +5050,20 @@ pub enum Command {
         suppress_cc: Vec<String>,
         #[arg(long = "to")]
         to: Vec<String>,
+        #[arg(long = "force", action = ArgAction::SetTrue)]
+        force: bool,
+        #[arg(long = "format-patch", action = ArgAction::SetTrue)]
+        format_patch: bool,
+        #[arg(long = "no-format-patch", action = ArgAction::SetTrue)]
+        no_format_patch: bool,
+        #[arg(long = "no-smtp-auth", action = ArgAction::SetTrue)]
+        no_smtp_auth: bool,
+        #[arg(long = "no-validate", action = ArgAction::SetTrue)]
+        no_validate: bool,
+        #[arg(long = "validate", action = ArgAction::SetTrue)]
+        validate: bool,
+        #[arg(long = "xmailer", action = ArgAction::SetTrue)]
+        xmailer: bool,
         args: Vec<String>,
     },
     ImapSend {
