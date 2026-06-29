@@ -21,6 +21,27 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is a reviewed-complete promotion
+for `citool`. No new runtime behavior or matrix rows were needed: the command
+already had a fully classified bounded helper-launch surface in
+`docs/cli/matrices/citool_v2_47.tsv`, plus the focused stock-oracle proof in
+`git_citool_compat::citool_helper_option_shapes_match_stock_git`. This batch
+simply promoted that existing evidence into
+`docs/cli/census/reviewed_complete_command_matrices.tsv`, which closes
+`citool` as a finished baseline command without widening the broader external
+`git gui` surface. Focused gates were
+`cargo test -q -p zmin-cli --test git_citool_compat citool_helper_option_shapes_match_stock_git -- --exact`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `147/151` complete command matrices, `3150/3212` complete documented
+option pairs, `7672` matrix rows, `6753` verified rows, `896` invalid-input
+rows, `0` implemented-but-unverified rows, `0` remaining-to-fix-or-verify
+rows, and `131` extension/deferred rows. The remaining baseline-incomplete
+command set is now only `archimport`, `cvsimport`, `cvsexportcommit`, and
+`svn`, so the next default follow-up should move back to the larger deferred
+legacy-helper closure tail rather than continue command-promotion cleanup.
+
 As of 2026-06-29 the latest completed batch is an evidence-hygiene closure for
 the remaining schema-additional Git tails `scalar`, `reflog-delete`, and
 `reflog-drop`. This batch added one bounded invalid-input stock-Git row for
