@@ -177,6 +177,7 @@ fn cvsimport_runs_cvsps_when_patchset_file_is_not_provided() {
     assert!(cvsps_invocation.contains("module"));
 }
 
+
 #[cfg(unix)]
 #[test]
 fn p4_clone_imports_head_revision_into_git_refs_and_worktree() {
@@ -1535,6 +1536,108 @@ fn archimport_imports_tree_snapshot_into_git_repo() {
     assert!(log.contains("get --no-pristine archive@example.test/project--main--1--base-0"));
 }
 
+#[cfg(unix)]
+#[test]
+fn archimport_noop_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let stock_bin = dir.path().join("stock-bin");
+    let zmin_bin_dir = dir.path().join("zmin-bin");
+    let data = dir.path().join("arch-data");
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let stock_temp = dir.path().join("stock-temp");
+    let zmin_temp = dir.path().join("zmin-temp");
+    let stock_home = dir.path().join("stock-home");
+    let zmin_home = dir.path().join("zmin-home");
+    fs::create_dir_all(data.join("dir")).expect("create arch dir");
+    fs::create_dir_all(data.join("{arch}")).expect("create arch metadata");
+    fs::write(data.join("a.txt"), b"alpha\n").expect("write arch a");
+    fs::write(data.join("dir/b.txt"), b"bravo\n").expect("write arch b");
+    fs::write(data.join("{arch}/internal"), b"ignored\n").expect("write arch metadata");
+    fs::create_dir_all(&stock_target).expect("create stock target");
+    fs::create_dir_all(&zmin_target).expect("create zmin target");
+    fs::create_dir_all(&stock_home).expect("create stock home");
+    fs::create_dir_all(&zmin_home).expect("create zmin home");
+    write_fake_tla(&stock_bin, &data, &dir.path().join("stock-tla.log"));
+    write_fake_tla(&zmin_bin_dir, &data, &dir.path().join("zmin-tla.log"));
+
+    let stock = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        &stock_bin,
+        &[("HOME", stock_home.to_str().expect("stock home path"))],
+        &[
+            "archimport",
+            "-f",
+            "-T",
+            "-a",
+            "-D",
+            "1",
+            "-t",
+            stock_temp.to_str().expect("stock temp path"),
+            "archive@example.test/project--main--1--base-0:master",
+        ],
+    );
+    assert_eq!(stock.0, 0, "stock git stderr: {}", stock.2);
+
+    let zmin = run_command_with_path_and_env(
+        zmin_bin(),
+        &zmin_target,
+        &zmin_bin_dir,
+        &[("HOME", zmin_home.to_str().expect("zmin home path"))],
+        &[
+            "archimport",
+            "-f",
+            "-T",
+            "-a",
+            "-D",
+            "1",
+            "-t",
+            zmin_temp.to_str().expect("zmin temp path"),
+            "archive@example.test/project--main--1--base-0:master",
+        ],
+    );
+    assert_eq!(zmin.0, 0, "zmin stderr: {}", zmin.2);
+
+    assert_eq!(stock.1, zmin.1);
+    assert_eq!(
+        normalize_archimport_stderr(&stock.2),
+        normalize_archimport_stderr(&zmin.2)
+    );
+    assert_eq!(
+        visible_non_git_file_contents(&stock_target),
+        visible_non_git_file_contents(&zmin_target)
+    );
+    assert_eq!(
+        git(&stock_target, ["rev-parse", "--abbrev-ref", "HEAD"]),
+        git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"])
+    );
+    assert_eq!(
+        git(&stock_target, ["log", "-1", "--format=%B"]),
+        git(&zmin_target, ["log", "-1", "--format=%B"])
+    );
+    assert!(stock_target.join("dir/b.txt").exists());
+    assert!(zmin_target.join("dir/b.txt").exists());
+    assert!(!stock_target.join("{arch}/internal").exists());
+    assert!(!zmin_target.join("{arch}/internal").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn archimport_help_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &["archimport", "-h"],
+    );
+    let zmin = run_command_with_path(zmin_bin(), dir.path(), dir.path(), &["archimport", "-h"]);
+    assert_eq!(stock.0, zmin.0);
+    assert_eq!(stock.1, zmin.1);
+    assert_eq!(stock.2, zmin.2);
+}
+
 #[test]
 fn archimport_rejects_invalid_or_unsupported_invocations() {
     let dir = TempDir::new().expect("temp dir");
@@ -1723,7 +1826,11 @@ fn run_command_with_path_and_env(
         std::iter::once(path_prefix.to_path_buf()).chain(std::env::split_paths(&current_path)),
     )
     .expect("join PATH");
-    let home = cwd.join("home");
+    let home = envs
+        .iter()
+        .find(|(key, _)| *key == "HOME")
+        .map(|(_, value)| std::path::PathBuf::from(value))
+        .unwrap_or_else(|| cwd.join("home"));
     fs::create_dir_all(&home).expect("create command home");
     let mut command = Command::new(program);
     command
@@ -1758,6 +1865,37 @@ fn run_command_with_path_and_env(
     )
 }
 
+fn visible_non_git_file_contents(root: &std::path::Path) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    collect_visible_non_git_file_contents(root, root, &mut files);
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    files
+}
+
+fn collect_visible_non_git_file_contents(
+    root: &std::path::Path,
+    current: &std::path::Path,
+    files: &mut Vec<(String, String)>,
+) {
+    for entry in fs::read_dir(current).expect("read tree dir") {
+        let entry = entry.expect("read tree entry");
+        let path = entry.path();
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        if path.is_dir() {
+            collect_visible_non_git_file_contents(root, &path, files);
+        } else {
+            let rel = path
+                .strip_prefix(root)
+                .expect("strip tree prefix")
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push((rel, fs::read_to_string(&path).expect("read tree file")));
+        }
+    }
+}
+
 fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
     stdout
         .lines()
@@ -1773,6 +1911,18 @@ fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
                 }
             }
             line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn normalize_archimport_stderr(stderr: &str) -> String {
+    stderr
+        .lines()
+        .filter(|line| {
+            !line.starts_with(
+                "Use of each() on hash after insertion without resetting hash iterator",
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -2087,8 +2237,10 @@ fn write_fake_tla(bin: &std::path::Path, data: &std::path::Path, log: &std::path
     fs::write(
         &script,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = get ]; then mkdir -p \"$4\"; cp -R '{}/.' \"$4/\"; exit 0; fi\nexit 1\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = abrowse ]; then printf '        %s (initial import)\\n' '{}'; printf '          2001-01-01 00:00:00\\n'; exit 0; fi\nif [ \"$1\" = my-default-archive ]; then printf '%s\\n' '{}'; exit 0; fi\nif [ \"$1\" = cat-log ] || [ \"$1\" = cat-archive-log ]; then printf 'Summary: import arch history\\n'; printf 'Creator: Test User <test@example.test>\\n'; printf '\\n'; printf 'import arch history\\n'; exit 0; fi\nif [ \"$1\" = get ]; then last=''; for arg in \"$@\"; do last=\"$arg\"; done; mkdir -p \"$last\"; cp -R '{}/.' \"$last/\"; exit 0; fi\nexit 1\n",
             log.display(),
+            "archive@example.test/project--main--1--base-0",
+            "archive@example.test",
             data.display()
         ),
     )

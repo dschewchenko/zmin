@@ -633,6 +633,14 @@ struct ArchImportOptions {
     verbose: bool,
 }
 
+struct ArchImportCommitMetadata {
+    author_name: String,
+    author_email: String,
+    timestamp: i64,
+    timezone: String,
+    message: String,
+}
+
 #[derive(Debug, Clone)]
 struct ArchImportRoot {
     revision: String,
@@ -3164,10 +3172,11 @@ fn append_cvs_revision_map(repo: &GitRepo, patchset: &CvsPatchSet, id: &ObjectId
 
 fn archimport(args: Vec<String>) -> Result<()> {
     if args.iter().any(|arg| arg == "-h" || arg == "--help") {
-        println!(
-            "usage: git archimport [-v] [-f] [-T] [-D depth] [-t tempdir] <archive/branch[:git-branch]>..."
-        );
-        return Ok(());
+        return Err(CliError::Stderr {
+            code: 1,
+            text: "usage: git archimport     # fetch/update GIT from Arch\n       [ -h ] [ -v ] [ -o ] [ -a ] [ -f ] [ -T ] [ -D depth ] [ -t tempdir ]\n       repository/arch-branch [ repository/arch-branch] ...\n"
+                .into(),
+        });
     }
     let options = parse_archimport_args(&args)?;
     let repo = open_or_init_cvsimport_repo(Path::new("."))?;
@@ -3182,12 +3191,20 @@ fn archimport(args: Vec<String>) -> Result<()> {
     };
 
     for (idx, root) in options.roots.iter().enumerate() {
-        let ref_name = archimport_branch_ref(&root.branch)?;
+        let _ = archimport_branch_ref(&root.branch)?;
+        let ref_name = archimport_branch_ref(&archimport_default_branch_name(&root.revision))?;
+        let existing_parent = refs.resolve(&ref_name).ok();
         let checkout_dir = temp_root.join(format!("tree-{idx}"));
         if checkout_dir.exists() {
             fs::remove_dir_all(&checkout_dir)?;
         }
         let arch_client = std::env::var("ARCH_CLIENT").unwrap_or_else(|_| "tla".to_owned());
+        if idx == 0 && existing_parent.is_none() {
+            println!("Starting import from {}", root.revision);
+            println!("Will import patchsets using the fast strategy");
+            println!("Renamed directories and permission changes will be missed");
+        }
+        println!(" * Starting to work on {}", root.revision);
         run_arch_command(
             &arch_client,
             &["get", "--no-pristine", &root.revision],
@@ -3195,24 +3212,20 @@ fn archimport(args: Vec<String>) -> Result<()> {
         )?;
         let index = archimport_index_from_tree(&store, &checkout_dir)?;
         let tree = write_tree_from_index(&store, &index)?;
+        let metadata = archimport_commit_metadata(&arch_client, &checkout_dir, &root.revision)?;
         let signature = Signature::new(
-            "GNU Arch",
-            "archimport@example.invalid",
-            current_unix_timestamp()?,
-            "+0000",
+            &metadata.author_name,
+            &metadata.author_email,
+            metadata.timestamp,
+            &metadata.timezone,
         )?;
-        let mut builder = CommitBuilder::new(tree, signature.clone(), signature);
-        if let Ok(parent) = refs.resolve(&ref_name) {
+        let mut builder = CommitBuilder::new(tree.clone(), signature.clone(), signature);
+        if let Some(parent) = existing_parent {
             builder = builder.parent(parent);
         }
-        let message = format!(
-            "Import from GNU Arch {}\n\n\
-             git-archimport-id: {}\n",
-            root.revision, root.revision
-        );
         let id = store.write_object(
             GitObjectKind::Commit,
-            &builder.message(message.into_bytes())?.encode()?,
+            &builder.message(metadata.message.into_bytes())?.encode()?,
         )?;
         refs.write_ref(&ref_name, &id)?;
         fs::create_dir_all(repo.git_dir.join("archimport/tags"))?;
@@ -3223,12 +3236,14 @@ fn archimport(args: Vec<String>) -> Result<()> {
             format!("{}\n", id.to_hex()),
         )?;
         if idx == 0 {
-            refs.write_symbolic_ref("HEAD", &ref_name)?;
+            let head_ref = archimport_initial_head_ref();
+            refs.write_ref(&head_ref, &id)?;
+            refs.write_symbolic_ref("HEAD", &head_ref)?;
             checkout_worktree(&repo, &store, &id)?;
         }
-        if options.verbose {
-            println!("Imported {} as {}", root.revision, id.to_hex());
-        }
+        println!(" * Committed {}", root.revision);
+        println!("   + tree   {}", tree.to_hex());
+        println!("   + commit {}", id.to_hex());
     }
     Ok(())
 }
@@ -3323,12 +3338,143 @@ fn archimport_private_tag_name(revision: &str) -> String {
     revision.replace('/', ",")
 }
 
+fn archimport_initial_head_ref() -> String {
+    let branch = std::env::var("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "master".to_owned());
+    format!("refs/heads/{branch}")
+}
+
+fn archimport_commit_metadata(
+    client: &str,
+    checkout_dir: &Path,
+    revision: &str,
+) -> Result<ArchImportCommitMetadata> {
+    let log = run_arch_text_command(
+        client,
+        &[
+            "cat-log",
+            "-d",
+            checkout_dir.to_str().ok_or_else(|| CliError::Fatal {
+                code: 128,
+                message: "archimport checkout path is not valid UTF-8".into(),
+            })?,
+            revision,
+        ],
+    )?;
+    let (summary, body, author_name, author_email) = archimport_parse_log_message(&log);
+    let (timestamp, timezone) = archimport_revision_timestamp(client, revision)?;
+    Ok(ArchImportCommitMetadata {
+        author_name,
+        author_email,
+        timestamp,
+        timezone,
+        message: format!("{summary}\n\n{body}\n\ngit-archimport-id: {revision}\n"),
+    })
+}
+
+fn archimport_parse_log_message(log: &str) -> (String, String, String, String) {
+    let mut summary = None;
+    let mut author_name = None;
+    let mut author_email = None;
+    let mut in_body = false;
+    let mut body_lines = Vec::new();
+    for line in log.lines() {
+        if in_body {
+            body_lines.push(line);
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("Summary:") {
+            summary = Some(value.trim().to_owned());
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("Creator: ") {
+            if let Some((name, email)) = value.rsplit_once('<') {
+                author_name = Some(name.trim().to_owned());
+                author_email = Some(email.trim_end_matches('>').trim().to_owned());
+            }
+            continue;
+        }
+        if line.is_empty() {
+            in_body = true;
+        }
+    }
+    while body_lines.first().is_some_and(|line| line.is_empty()) {
+        body_lines.remove(0);
+    }
+    let body = if body_lines.is_empty() {
+        summary
+            .clone()
+            .unwrap_or_else(|| "empty commit message".to_owned())
+    } else {
+        body_lines.join("\n")
+    };
+    let summary = summary.unwrap_or_else(|| {
+        body_lines
+            .first()
+            .map(|line| (*line).to_owned())
+            .unwrap_or_else(|| "empty commit message".to_owned())
+    });
+    (
+        summary,
+        body,
+        author_name.unwrap_or_else(|| "GNU Arch".to_owned()),
+        author_email.unwrap_or_else(|| "archimport@example.invalid".to_owned()),
+    )
+}
+
+fn archimport_revision_timestamp(client: &str, revision: &str) -> Result<(i64, String)> {
+    let browse = run_arch_text_command(client, &["abrowse", "-fkD", "--merges", revision])?;
+    for line in browse.lines() {
+        if let Some(value) = line.trim_start().strip_prefix("20")
+            && line.starts_with("          ")
+        {
+            let timestamp = chrono::NaiveDateTime::parse_from_str(
+                &format!("20{value}"),
+                "%Y-%m-%d %H:%M:%S",
+            )
+            .map_err(|err| CliError::Fatal {
+                code: 128,
+                message: format!("invalid archimport abrowse date for '{revision}': {err}"),
+            })?
+            .and_utc()
+            .timestamp();
+            return Ok((timestamp, "+0000".to_owned()));
+        }
+    }
+    Err(CliError::Fatal {
+        code: 128,
+        message: format!("missing archimport abrowse date for '{revision}'"),
+    })
+}
+
 fn run_arch_command(client: &str, args: &[&str], checkout_dir: &Path) -> Result<()> {
     let output = arch_command(client, args, checkout_dir)
         .output()
         .map_err(CliError::Io)?;
     if output.status.success() {
         Ok(())
+    } else {
+        Err(CliError::Fatal {
+            code: output.status.code().unwrap_or(1),
+            message: format!(
+                "{} {} failed: {}",
+                client,
+                args.join(" "),
+                String::from_utf8_lossy(&output.stderr).trim_end()
+            ),
+        })
+    }
+}
+
+fn run_arch_text_command(client: &str, args: &[&str]) -> Result<String> {
+    let output = foreign_scm_command(client)
+        .args(args)
+        .output()
+        .map_err(CliError::Io)?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
         Err(CliError::Fatal {
             code: output.status.code().unwrap_or(1),

@@ -21,6 +21,31 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded `archimport`
+helper-tail closure family across the existing fake-tla initial import lane
+with the x86_64 Homebrew stock-Git oracle wrapper. This batch added six exact
+stock-Git rows, completed the documented `archimport` option pairs `-D`, `-T`,
+`-a`, `-f`, `-h`, and `-t`, and removed those rows from the durable deferral
+inventory. The runtime closure stayed intentionally bounded: Zmin now matches
+stock Git for short-help usage stderr and for the current empty-repository
+initial import lane under `-f -T -a -D 1 -t <tempdir>`, including matching
+stdout, normalized stderr, exit status, imported snapshot content, exact
+commit message payload, commit metadata, Arch-derived side refs, initial `HEAD`
+branch shape, and repository side effects, while leaving the intentionally
+unsupported `-o` old-style branch-name mode as the single remaining deferred
+`archimport` option. Focused gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat archimport_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3161/3212` complete documented
+option pairs, `7683` matrix rows, `6764` verified rows, `896` invalid-input
+rows, `0` implemented-but-unverified rows, and `0` remaining-to-fix-or-verify
+rows. The active backlog still lives entirely in deferred helper-option tails,
+now led by `svn` (`25`), `cvsimport` (`14`), `cvsexportcommit` (`11`), and
+`archimport` (`1`), so the next default follow-up should continue rebinding
+the foreign helper oracle rather than reopen helper-free command families.
+
 As of 2026-06-29 the latest completed batch is the bounded `send-email`
 helper-tail closure family across the existing dry-run patch-file lane with an
 x86_64 Homebrew stock-Git oracle. This batch added five exact stock-Git rows,
