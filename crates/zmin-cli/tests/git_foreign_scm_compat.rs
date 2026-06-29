@@ -1667,7 +1667,7 @@ fn svn_clone_imports_head_tree_into_git_svn_ref_and_worktree() {
     );
     assert_eq!(
         git(&target, ["rev-parse", "refs/remotes/git-svn"]),
-        git(&target, ["rev-parse", "refs/heads/master"])
+        git(&target, ["rev-parse", "HEAD"])
     );
     assert_eq!(
         git(&target, ["config", "--get", "svn-remote.svn.url"]),
@@ -1717,6 +1717,218 @@ fn svn_dcommit_adds_deletes_commits_and_updates_git_svn_ref() {
     assert_eq!(
         git(&target, ["rev-parse", "refs/remotes/git-svn"]),
         git(&target, ["rev-parse", "HEAD"])
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn svn_clone_revision_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (_repo_url, trunk_url) = create_local_svn_trunk_history(dir.path());
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let envs = [("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")];
+
+    let stock = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", "-r", "2", &trunk_url, stock_target.to_str().expect("stock target")],
+    );
+    let zmin = run_command_with_path_and_env(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", "-r", "2", &trunk_url, zmin_target.to_str().expect("zmin target")],
+    );
+    assert_eq!(stock.0, 0, "stock stderr: {}", stock.2);
+    assert_eq!(zmin.0, 0, "zmin stderr: {}", zmin.2);
+    assert_eq!(
+        visible_non_git_file_contents(&stock_target),
+        visible_non_git_file_contents(&zmin_target)
+    );
+    assert_eq!(
+        git(&stock_target, ["rev-parse", "--abbrev-ref", "HEAD"]),
+        git(&zmin_target, ["rev-parse", "--abbrev-ref", "HEAD"])
+    );
+    assert_eq!(
+        git(&stock_target, ["config", "--get", "svn-remote.svn.url"]),
+        git(&zmin_target, ["config", "--get", "svn-remote.svn.url"])
+    );
+    assert_eq!(
+        git(&stock_target, ["cat-file", "-p", "refs/remotes/git-svn:a.txt"]),
+        git(&zmin_target, ["cat-file", "-p", "refs/remotes/git-svn:a.txt"])
+    );
+    assert_eq!(
+        fs::read_to_string(stock_target.join("a.txt")).expect("read stock a"),
+        "alpha\n"
+    );
+    assert_eq!(
+        fs::read_to_string(zmin_target.join("a.txt")).expect("read zmin a"),
+        "alpha\n"
+    );
+
+    let stock_long = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &[
+            "svn",
+            "clone",
+            "--revision",
+            "2",
+            &trunk_url,
+            dir.path()
+                .join("stock-project-long")
+                .to_str()
+                .expect("stock target long"),
+        ],
+    );
+    let zmin_long = run_command_with_path_and_env(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &[
+            "svn",
+            "clone",
+            "--revision",
+            "2",
+            &trunk_url,
+            dir.path()
+                .join("zmin-project-long")
+                .to_str()
+                .expect("zmin target long"),
+        ],
+    );
+    assert_eq!(stock_long.0, zmin_long.0);
+    assert_eq!(
+        visible_non_git_file_contents(&dir.path().join("stock-project-long")),
+        visible_non_git_file_contents(&dir.path().join("zmin-project-long"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn svn_dcommit_dry_run_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (_repo_url, trunk_url) = create_local_svn_trunk_history(dir.path());
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let envs = [("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")];
+
+    let stock_clone = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", &trunk_url, stock_target.to_str().expect("stock target")],
+    );
+    assert_eq!(stock_clone.0, 0, "stock clone stderr: {}", stock_clone.2);
+    let zmin_clone = run_command_with_path_and_env(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", &trunk_url, zmin_target.to_str().expect("zmin target")],
+    );
+    assert_eq!(zmin_clone.0, 0, "zmin clone stderr: {}", zmin_clone.2);
+
+    configure_identity(&stock_target);
+    configure_identity(&zmin_target);
+    for target in [&stock_target, &zmin_target] {
+        fs::write(target.join("a.txt"), b"alpha\nsecond\nchanged\n").expect("modify a");
+        fs::write(target.join("new.txt"), b"new\n").expect("write new");
+        fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+        git(target, ["add", "-A"]);
+        git_with_env(target, ["commit", "-m", "svn submit change"]);
+    }
+
+    let stock_short = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "-n"],
+    );
+    let zmin_short = run_command_with_path_and_env(
+        zmin_bin(),
+        &zmin_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "-n"],
+    );
+    assert_eq!(stock_short.0, zmin_short.0);
+    assert_eq!(stock_short.2, zmin_short.2);
+    assert_eq!(
+        normalize_svn_dcommit_dry_run_stdout(&stock_short.1),
+        normalize_svn_dcommit_dry_run_stdout(&zmin_short.1)
+    );
+
+    let stock_long = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "--dry-run"],
+    );
+    let zmin_long = run_command_with_path_and_env(
+        zmin_bin(),
+        &zmin_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "--dry-run"],
+    );
+    assert_eq!(stock_long.0, zmin_long.0);
+    assert_eq!(stock_long.2, zmin_long.2);
+    assert_eq!(
+        normalize_svn_dcommit_dry_run_stdout(&stock_long.1),
+        normalize_svn_dcommit_dry_run_stdout(&zmin_long.1)
+    );
+
+    let stock_quiet_short = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "-q", "-n"],
+    );
+    let zmin_quiet_short = run_command_with_path_and_env(
+        zmin_bin(),
+        &zmin_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "-q", "-n"],
+    );
+    assert_eq!(stock_quiet_short.0, zmin_quiet_short.0);
+    assert_eq!(stock_quiet_short.2, zmin_quiet_short.2);
+    assert_eq!(
+        normalize_svn_dcommit_dry_run_stdout(&stock_quiet_short.1),
+        normalize_svn_dcommit_dry_run_stdout(&zmin_quiet_short.1)
+    );
+
+    let stock_quiet_long = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "--quiet", "--dry-run"],
+    );
+    let zmin_quiet_long = run_command_with_path_and_env(
+        zmin_bin(),
+        &zmin_target,
+        dir.path(),
+        &envs,
+        &["svn", "dcommit", "--quiet", "--dry-run"],
+    );
+    assert_eq!(stock_quiet_long.0, zmin_quiet_long.0);
+    assert_eq!(stock_quiet_long.2, zmin_quiet_long.2);
+    assert_eq!(
+        normalize_svn_dcommit_dry_run_stdout(&stock_quiet_long.1),
+        normalize_svn_dcommit_dry_run_stdout(&zmin_quiet_long.1)
     );
 }
 
@@ -2591,6 +2803,67 @@ fn write_fake_svn(bin: &std::path::Path, data: &std::path::Path, log: &std::path
     )
     .expect("write fake svn");
     make_executable(&script);
+}
+
+#[cfg(unix)]
+fn create_local_svn_trunk_history(root: &std::path::Path) -> (String, String) {
+    let repo = root.join("local-svn-repo");
+    let wc = root.join("local-svn-wc");
+    let wc2 = root.join("local-svn-wc-2");
+    let status = Command::new("svnadmin")
+        .args(["create", repo.to_str().expect("repo path")])
+        .status()
+        .expect("run svnadmin create");
+    assert!(status.success(), "svnadmin create failed");
+    let repo_url = format!("file://{}", repo.display());
+    let status = Command::new("svn")
+        .args(["mkdir", &format!("{repo_url}/trunk"), "-m", "create trunk"])
+        .status()
+        .expect("run svn mkdir");
+    assert!(status.success(), "svn mkdir failed");
+    let trunk_url = format!("{repo_url}/trunk");
+    let status = Command::new("svn")
+        .args(["checkout", &trunk_url, wc.to_str().expect("wc path")])
+        .status()
+        .expect("run svn checkout");
+    assert!(status.success(), "svn checkout failed");
+    fs::write(wc.join("a.txt"), b"alpha\n").expect("write a");
+    fs::create_dir_all(wc.join("dir")).expect("create dir");
+    fs::write(wc.join("dir/b.txt"), b"bravo\n").expect("write b");
+    let status = Command::new("svn")
+        .args([
+            "add",
+            wc.join("a.txt").to_str().expect("a path"),
+            wc.join("dir").to_str().expect("dir path"),
+        ])
+        .status()
+        .expect("run svn add");
+    assert!(status.success(), "svn add failed");
+    let status = Command::new("svn")
+        .args(["commit", wc.to_str().expect("wc path"), "-m", "initial import"])
+        .status()
+        .expect("run svn commit");
+    assert!(status.success(), "svn commit failed");
+
+    let status = Command::new("svn")
+        .args(["checkout", &trunk_url, wc2.to_str().expect("wc2 path")])
+        .status()
+        .expect("run svn checkout 2");
+    assert!(status.success(), "svn checkout 2 failed");
+    fs::write(wc2.join("a.txt"), b"alpha\nsecond\n").expect("write second");
+    let status = Command::new("svn")
+        .args(["commit", wc2.to_str().expect("wc2 path"), "-m", "second import"])
+        .status()
+        .expect("run svn commit 2");
+    assert!(status.success(), "svn commit 2 failed");
+
+    (repo_url, trunk_url)
+}
+
+#[cfg(unix)]
+fn normalize_svn_dcommit_dry_run_stdout(stdout: &str) -> String {
+    let hash = regex::Regex::new(r"[0-9a-f]{40}").expect("hash regex");
+    hash.replace_all(stdout, "<oid>").into_owned()
 }
 
 #[cfg(windows)]

@@ -21,6 +21,29 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded `svn`
+real-local-oracle helper-tail closure across the x86_64 Homebrew stock-Git
+wrapper plus a real local SVN repository. This batch added six exact
+stock-Git rows, completed the documented `svn` option pairs `-r`,
+`--revision`, `-n`, `--dry-run`, `-q`, and `--quiet`, and removed those rows
+from the durable deferral inventory. The runtime closure stayed intentionally
+bounded: Zmin now matches stock Git for revision-selected historical trunk
+snapshot import on the current real-local-SVN lane and for dry-run `dcommit`
+transcript shape on the current one-commit-ahead local change lane, including
+the stock `Committing to ...` prelude, `diff-tree <head>~1 <head>` body, zero
+stderr, zero exit, and quiet no-op parity, without widening into full
+`git-svn` history replay, stdlayout remote layout, or live submit semantics.
+Focused gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat svn_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3178/3212` complete documented
+option pairs, `7700` matrix rows, `6781` verified rows, `896` invalid-input
+rows, `0` implemented-but-unverified rows, and `0` remaining-to-fix-or-verify
+rows. The active backlog still lives entirely in deferred helper-option tails,
+now only `svn` (`19`), `cvsimport` (`14`), and `archimport` (`1`).
+
 As of 2026-06-29 the latest completed batch is the bounded `cvsexportcommit`
 final helper-tail closure across the existing x86_64 Homebrew stock-Git oracle
 wrapper, fake-CVS export lane, and branch-backed same-worktree lane. This

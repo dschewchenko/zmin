@@ -608,6 +608,7 @@ struct SvnSyncOptions {
     checkout: bool,
     local_master: bool,
     verbose: bool,
+    revision: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -4971,12 +4972,19 @@ fn svn(args: Vec<String>) -> Result<()> {
 fn parse_svn_clone_args(args: &[String]) -> Result<SvnSyncOptions> {
     let mut verbose = false;
     let mut stdlayout = false;
+    let mut revision = None;
     let mut values = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "-v" | "--verbose" => verbose = true,
             "-s" | "--stdlayout" => stdlayout = true,
+            "-r" | "--revision" => {
+                revision = Some(next_borrowed_option_value(&mut iter, arg)?.to_owned());
+            }
+            _ if arg.starts_with("--revision=") => {
+                revision = Some(arg["--revision=".len()..].to_owned());
+            }
             "--prefix" | "--trunk" | "-T" | "--tags" | "-t" | "--branches" | "-b" => {
                 let _ = next_borrowed_option_value(&mut iter, arg)?;
             }
@@ -5002,17 +5010,25 @@ fn parse_svn_clone_args(args: &[String]) -> Result<SvnSyncOptions> {
         checkout: true,
         local_master: true,
         verbose,
+        revision,
     })
 }
 
 fn parse_svn_fetch_args(args: &[String]) -> Result<SvnSyncOptions> {
     let repo = find_repo()?;
     let mut verbose = false;
+    let mut revision = None;
     let mut url = None;
     let mut args_iter = args.iter();
-    for arg in args_iter.by_ref() {
+    while let Some(arg) = args_iter.next() {
         match arg.as_str() {
             "-v" | "--verbose" => verbose = true,
+            "-r" | "--revision" => {
+                revision = Some(next_borrowed_option_value(&mut args_iter, arg)?.to_owned());
+            }
+            _ if arg.starts_with("--revision=") => {
+                revision = Some(arg["--revision=".len()..].to_owned());
+            }
             _ if arg.starts_with('-') => {}
             _ => url = Some(arg.clone()),
         }
@@ -5034,6 +5050,7 @@ fn parse_svn_fetch_args(args: &[String]) -> Result<SvnSyncOptions> {
         checkout: false,
         local_master: false,
         verbose,
+        revision,
     })
 }
 
@@ -5129,31 +5146,25 @@ fn svn_dcommit_impl(options: &SvnDcommitOptions) -> Result<()> {
         return Ok(());
     }
 
+    if options.dry_run {
+        println!("Committing to {url} ...");
+        println!("diff-tree {}~1 {}", head_id.to_hex(), head_id.to_hex());
+        return Ok(());
+    }
+
     for path in &added {
         let path = p4_submit_path(path)?;
-        if options.dry_run {
-            println!("svn add {path}");
-        } else {
-            run_svn_command_in(&repo.root, &["add", &path])?;
-        }
+        run_svn_command_in(&repo.root, &["add", &path])?;
     }
     for path in &deleted {
         let path = p4_submit_path(path)?;
-        if options.dry_run {
-            println!("svn delete {path}");
-        } else {
-            run_svn_command_in(&repo.root, &["delete", &path])?;
-        }
+        run_svn_command_in(&repo.root, &["delete", &path])?;
     }
     let message = admin_commit_subject(&head_commit.message);
-    if options.dry_run {
-        println!("svn commit -m {message}");
-    } else {
-        run_svn_command_in(&repo.root, &["commit", "-m", &message])?;
-        refs.write_ref(&options.ref_name, &head_id)?;
-        if options.verbose {
-            println!("Committed {} to {}", head_id.to_hex(), url);
-        }
+    run_svn_command_in(&repo.root, &["commit", "-m", &message])?;
+    refs.write_ref(&options.ref_name, &head_id)?;
+    if options.verbose {
+        println!("Committed {} to {}", head_id.to_hex(), url);
     }
     Ok(())
 }
@@ -5174,8 +5185,8 @@ fn svn_sync_impl(options: &SvnSyncOptions) -> Result<()> {
             .collect::<BTreeMap<_, _>>(),
         Err(_) => BTreeMap::new(),
     };
-    for path in svn_list_files(&options.url)? {
-        let content = svn_cat_file(&options.url, &path)?;
+    for path in svn_list_files(&options.url, options.revision.as_deref())? {
+        let content = svn_cat_file(&options.url, options.revision.as_deref(), &path)?;
         let id = store.write_object(GitObjectKind::Blob, &content)?;
         let path_bytes = normalize_git_path(&path)?.into_bytes();
         let entry = IndexEntry::new(
@@ -5207,8 +5218,12 @@ fn svn_sync_impl(options: &SvnSyncOptions) -> Result<()> {
     set_config_value(&repo, "svn-remote.svn.url", &options.url)?;
     set_config_value(&repo, "svn-remote.svn.fetch", &options.ref_name)?;
     if options.local_master {
-        refs.write_ref("refs/heads/master", &id)?;
-        refs.write_symbolic_ref("HEAD", "refs/heads/master")?;
+        let local_branch = std::env::var_os("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME")
+            .and_then(|value| (!value.is_empty()).then(|| value.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| default_branch_name(&repo).unwrap_or_else(|_| "master".to_owned()));
+        let head_ref = format!("refs/heads/{local_branch}");
+        refs.write_ref(&head_ref, &id)?;
+        refs.write_symbolic_ref("HEAD", &head_ref)?;
     }
     if options.checkout {
         checkout_worktree(&repo, &store, &id)?;
@@ -5219,8 +5234,11 @@ fn svn_sync_impl(options: &SvnSyncOptions) -> Result<()> {
     Ok(())
 }
 
-fn svn_list_files(url: &str) -> Result<Vec<String>> {
-    let output = run_svn_command(&["list", "-R", url])?;
+fn svn_list_files(url: &str, revision: Option<&str>) -> Result<Vec<String>> {
+    let output = match revision {
+        Some(revision) => run_svn_command(&["list", "-R", "-r", revision, url])?,
+        None => run_svn_command(&["list", "-R", url])?,
+    };
     Ok(output
         .lines()
         .map(str::trim)
@@ -5229,10 +5247,15 @@ fn svn_list_files(url: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-fn svn_cat_file(url: &str, path: &str) -> Result<Vec<u8>> {
+fn svn_cat_file(url: &str, revision: Option<&str>, path: &str) -> Result<Vec<u8>> {
     let full_url = format!("{}/{}", url.trim_end_matches('/'), path);
-    let output = foreign_scm_command("svn")
-        .args(["cat", &full_url])
+    let mut command = foreign_scm_command("svn");
+    command.arg("cat");
+    if let Some(revision) = revision {
+        command.args(["-r", revision]);
+    }
+    let output = command
+        .arg(&full_url)
         .output()
         .map_err(CliError::Io)?;
     if output.status.success() {
