@@ -535,6 +535,12 @@ struct CvsExportCommitOptions {
 }
 
 #[derive(Debug, Clone)]
+struct CvsExportCommitSameWorktreeState {
+    original_head: zmin_git_core::RefTarget,
+    original_head_id: ObjectId,
+}
+
+#[derive(Debug, Clone)]
 struct CvsImportOptions {
     head_branch: String,
     verbose: bool,
@@ -2323,6 +2329,13 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
             message: format!("{} is not a CVS checkout", cvs_dir.display()),
         });
     }
+    let same_worktree_state = if options.same_worktree {
+        Some(cvsexportcommit_prepare_same_worktree(
+            &repo, &store, parent_id.as_ref(), &options,
+        )?)
+    } else {
+        None
+    };
 
     let old_index = match parent_id.as_ref() {
         Some(parent_id) => read_treeish_index(&repo, &store, &parent_id.to_hex())?,
@@ -2396,7 +2409,9 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
 
     println!("Applying");
     if options.same_worktree {
+        let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
         checkout_worktree(&repo, &store, &commit_id)?;
+        refs.write_head_direct(&commit_id)?;
     } else {
         let work_repo = GitRepo {
             root: cvs_dir.clone(),
@@ -2508,6 +2523,9 @@ fn cvsexportcommit(args: Vec<String>) -> Result<()> {
         println!("   {}", cvsexportcommit_commit_command(&options, &files));
     }
     remove_file_if_exists(&cvs_dir.join(".cvsexportcommit.diff"))?;
+    if let Some(state) = same_worktree_state.as_ref() {
+        cvsexportcommit_restore_same_worktree(&repo, &store, state)?;
+    }
     Ok(())
 }
 
@@ -2628,6 +2646,67 @@ fn cvsexportcommit_parent(
                     .into(),
         }),
     }
+}
+
+fn cvsexportcommit_prepare_same_worktree(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    parent_id: Option<&ObjectId>,
+    options: &CvsExportCommitOptions,
+) -> Result<CvsExportCommitSameWorktreeState> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    let original_head = refs.read_head()?;
+    let original_head_id = refs.resolve("HEAD")?;
+    if let Some(parent_id) = parent_id {
+        if options.verbose {
+            println!("Resetting to {}", parent_id.to_hex());
+        }
+        checkout_worktree(repo, store, parent_id)?;
+        refs.write_head_direct(parent_id)?;
+    }
+    Ok(CvsExportCommitSameWorktreeState {
+        original_head,
+        original_head_id,
+    })
+}
+
+fn cvsexportcommit_restore_same_worktree(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    state: &CvsExportCommitSameWorktreeState,
+) -> Result<()> {
+    let refs = RefStore::new(&repo.git_dir, GitHashAlgorithm::Sha1);
+    checkout_worktree(repo, store, &state.original_head_id)?;
+    if let zmin_git_core::RefTarget::Direct(detached_id) = refs.read_head()? {
+        eprintln!(
+            "Previous HEAD position was {} {}",
+            cvsexportcommit_short_id(&detached_id),
+            cvsexportcommit_commit_subject(store, &detached_id)?
+        );
+    }
+    eprintln!(
+        "HEAD is now at {} {}",
+        cvsexportcommit_short_id(&state.original_head_id),
+        cvsexportcommit_commit_subject(store, &state.original_head_id)?
+    );
+    match &state.original_head {
+        zmin_git_core::RefTarget::Symbolic(target) => refs.write_head_symbolic(target)?,
+        zmin_git_core::RefTarget::Direct(id) => refs.write_head_direct(id)?,
+    }
+    Ok(())
+}
+
+fn cvsexportcommit_short_id(id: &ObjectId) -> String {
+    id.to_hex().chars().take(7).collect()
+}
+
+fn cvsexportcommit_commit_subject(store: &LooseObjectStore, id: &ObjectId) -> Result<String> {
+    let commit = CommitObjectCache::new(store).read_commit(id)?;
+    Ok(String::from_utf8_lossy(&commit.message)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_owned())
 }
 
 fn cvsexportcommit_workdir(repo: &GitRepo, options: &CvsExportCommitOptions) -> Result<PathBuf> {

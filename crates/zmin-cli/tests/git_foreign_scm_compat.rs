@@ -194,6 +194,111 @@ fn cvsexportcommit_keyword_reverse_failure_matches_stock_git() {
     assert_eq!(normalize_cvs_log(&stock_log), normalize_cvs_log(&zmin_log));
 }
 
+#[cfg(unix)]
+#[test]
+fn cvsexportcommit_force_parent_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let base = dir.path().join("base");
+    let stock_cvs = dir.path().join("stock-cvs");
+    let zmin_cvs = dir.path().join("zmin-cvs");
+    let stock_bin = dir.path().join("stock-bin");
+    let zmin_bin_dir = dir.path().join("zmin-bin");
+    let source = dir.path().join("source");
+    let base_commit = setup_cvsexportcommit_force_parent_fixture(&base, &source, &stock_cvs, &zmin_cvs);
+    write_fake_cvs(&stock_bin, &dir.path().join("force-parent-stock.log"));
+    write_fake_cvs(&zmin_bin_dir, &dir.path().join("force-parent-zmin.log"));
+
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        &source,
+        &stock_bin,
+        &[
+            "cvsexportcommit",
+            "-P",
+            "-w",
+            stock_cvs.to_str().expect("stock cvs path"),
+            &base_commit,
+            "HEAD",
+        ],
+    );
+    let zmin = run_command_with_path(
+        zmin_bin(),
+        &source,
+        &zmin_bin_dir,
+        &[
+            "cvsexportcommit",
+            "-P",
+            "-w",
+            zmin_cvs.to_str().expect("zmin cvs path"),
+            &base_commit,
+            "HEAD",
+        ],
+    );
+
+    assert_eq!(
+        zmin.0, stock.0,
+        "stock stdout:\n{}\nstock stderr:\n{}\nzmin stdout:\n{}\nzmin stderr:\n{}",
+        stock.1, stock.2, zmin.1, zmin.2
+    );
+    assert_eq!(zmin.1, stock.1);
+    assert_eq!(zmin.2, stock.2);
+    assert_eq!(
+        visible_non_git_file_contents(&stock_cvs),
+        visible_non_git_file_contents(&zmin_cvs)
+    );
+    let stock_log =
+        fs::read_to_string(dir.path().join("force-parent-stock.log")).expect("read stock cvs log");
+    let zmin_log =
+        fs::read_to_string(dir.path().join("force-parent-zmin.log")).expect("read zmin cvs log");
+    assert_eq!(normalize_cvs_log(&stock_log), normalize_cvs_log(&zmin_log));
+}
+
+#[cfg(unix)]
+#[test]
+fn cvsexportcommit_same_worktree_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let seed = dir.path().join("seed");
+    let stock_source = dir.path().join("stock-source");
+    let zmin_source = dir.path().join("zmin-source");
+    let stock_bin = dir.path().join("stock-bin");
+    let zmin_bin_dir = dir.path().join("zmin-bin");
+    setup_cvsexportcommit_same_worktree_fixture(&seed);
+    copy_dir_recursive(&seed, &stock_source);
+    copy_dir_recursive(&seed, &zmin_source);
+    write_fake_cvs(&stock_bin, &dir.path().join("same-worktree-stock.log"));
+    write_fake_cvs(&zmin_bin_dir, &dir.path().join("same-worktree-zmin.log"));
+
+    let stock = run_command_with_path(
+        stock_git_bin().to_str().expect("stock git path"),
+        &stock_source,
+        &stock_bin,
+        &["cvsexportcommit", "-W", "refs/heads/export-target"],
+    );
+    let zmin = run_command_with_path(
+        zmin_bin(),
+        &zmin_source,
+        &zmin_bin_dir,
+        &["cvsexportcommit", "-W", "refs/heads/export-target"],
+    );
+
+    assert_eq!(
+        zmin.0, stock.0,
+        "stock stdout:\n{}\nstock stderr:\n{}\nzmin stdout:\n{}\nzmin stderr:\n{}",
+        stock.1, stock.2, zmin.1, zmin.2
+    );
+    assert_eq!(zmin.1, stock.1);
+    assert_eq!(zmin.2, stock.2);
+    assert_eq!(
+        visible_non_git_file_contents(&stock_source),
+        visible_non_git_file_contents(&zmin_source)
+    );
+    let stock_log = fs::read_to_string(dir.path().join("same-worktree-stock.log"))
+        .expect("read stock cvs log");
+    let zmin_log = fs::read_to_string(dir.path().join("same-worktree-zmin.log"))
+        .expect("read zmin cvs log");
+    assert_eq!(normalize_cvs_log(&stock_log), normalize_cvs_log(&zmin_log));
+}
+
 #[test]
 fn cvsimport_imports_cvsps_patchsets_into_git_commits() {
     let dir = TempDir::new().expect("temp dir");
@@ -2108,6 +2213,65 @@ fn setup_cvsexportcommit_fixture(
     fs::write(source.join("dir/new.txt"), b"new\n").expect("write new");
     git(source, ["add", "-A"]);
     git_with_env(source, ["commit", "-m", "export me"]);
+}
+
+fn setup_cvsexportcommit_force_parent_fixture(
+    seed: &std::path::Path,
+    source: &std::path::Path,
+    stock_cvs: &std::path::Path,
+    zmin_cvs: &std::path::Path,
+) -> String {
+    git(
+        seed.parent().expect("seed parent"),
+        ["init", "-b", "main", seed.to_str().expect("seed path")],
+    );
+    configure_identity(seed);
+    fs::write(seed.join("a.txt"), b"base\n").expect("write a");
+    fs::write(seed.join("remove.txt"), b"remove\n").expect("write remove");
+    git(seed, ["add", "-A"]);
+    git_with_env(seed, ["commit", "-m", "base"]);
+    let base_commit = git(seed, ["rev-parse", "HEAD"]);
+    fs::write(seed.join("a.txt"), b"base\nmiddle\n").expect("write middle a");
+    git(seed, ["add", "a.txt"]);
+    git_with_env(seed, ["commit", "-m", "middle"]);
+    fs::write(seed.join("a.txt"), b"base\nmiddle\nchanged\n").expect("write head a");
+    fs::remove_file(seed.join("remove.txt")).expect("remove file");
+    fs::create_dir_all(seed.join("dir")).expect("create dir");
+    fs::write(seed.join("dir/new.txt"), b"new\n").expect("write new");
+    git(seed, ["add", "-A"]);
+    git_with_env(seed, ["commit", "-m", "export me"]);
+
+    fs::create_dir_all(stock_cvs.join("CVS")).expect("create stock CVS marker");
+    fs::create_dir_all(zmin_cvs.join("CVS")).expect("create zmin CVS marker");
+    fs::write(stock_cvs.join("a.txt"), b"base\n").expect("write stock cvs a");
+    fs::write(stock_cvs.join("remove.txt"), b"remove\n").expect("write stock cvs remove");
+    fs::write(zmin_cvs.join("a.txt"), b"base\n").expect("write zmin cvs a");
+    fs::write(zmin_cvs.join("remove.txt"), b"remove\n").expect("write zmin cvs remove");
+    copy_dir_recursive(seed, source);
+
+    base_commit
+}
+
+fn setup_cvsexportcommit_same_worktree_fixture(source: &std::path::Path) {
+    git(
+        source.parent().expect("source parent"),
+        ["init", "-b", "main", source.to_str().expect("source path")],
+    );
+    configure_identity(source);
+    fs::write(source.join("a.txt"), b"base\n").expect("write a");
+    fs::write(source.join("remove.txt"), b"remove\n").expect("write remove");
+    git(source, ["add", "-A"]);
+    git_with_env(source, ["commit", "-m", "base"]);
+    git(source, ["branch", "cvs-parent"]);
+    git(source, ["checkout", "-b", "export-target"]);
+    fs::write(source.join("a.txt"), b"base\nchanged\n").expect("modify a");
+    fs::remove_file(source.join("remove.txt")).expect("delete remove");
+    fs::create_dir_all(source.join("dir")).expect("create source dir");
+    fs::write(source.join("dir/new.txt"), b"new\n").expect("write new");
+    git(source, ["add", "-A"]);
+    git_with_env(source, ["commit", "-m", "export me"]);
+    git(source, ["checkout", "cvs-parent"]);
+    fs::create_dir_all(source.join("CVS")).expect("create CVS marker");
 }
 
 fn normalize_git_p4_usage_stdout(stdout: &str) -> String {
