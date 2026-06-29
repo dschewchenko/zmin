@@ -7122,3 +7122,16 @@ Next helper-free family candidates now remain:
   verified exact rows; the remaining `rev-list` tail is the smaller
   special-output cluster around `--bisect*`, `--disk-usage`, `--graph`,
   `--header`, `--objects-edge*`, and any still-unmodeled `--cherry` surface.
+2026-06-29 `log -L` bounded helper-free top-of-file root lane
+
+- This slice closes the final active documented `log` option pair by threading
+  `-L` through the `Log` schema/runtime path and adding a narrow stock-matching
+  renderer for `git log -L 1,1:a.txt HEAD --` on the current single-commit
+  local lane.
+- The implementation stays intentionally bounded: it currently accepts numeric
+  top-of-file ranges that start at line `1`, renders the stock commit header
+  plus focused hunk without mode or index lines, and reuses the existing log
+  formatter plus unified-hunk machinery instead of opening a wider
+  line-evolution engine.
+- Focused verification was `cargo check -q -p zmin-cli -p zmin-cli-schema` and
+  `cargo test -q -p zmin-cli --test git_history_query_compat log_line_range_matches_stock_git_for_top_of_file_root_lane -- --exact`.

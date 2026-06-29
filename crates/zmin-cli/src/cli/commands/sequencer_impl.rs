@@ -975,6 +975,7 @@ fn bisect_visualize(args: &[String]) -> Result<()> {
         format,
         show_signature: false,
         log_size: false,
+        line_ranges: Vec::new(),
         mailmap: false,
         no_mailmap: false,
         use_mailmap: false,

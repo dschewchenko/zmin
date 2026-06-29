@@ -4035,6 +4035,18 @@ fn log_remaining_documented_tail_matches_stock_git() {
 }
 
 #[test]
+fn log_line_range_matches_stock_git_for_top_of_file_root_lane() {
+    let repo = git_init();
+    git(repo.path(), ["checkout", "-b", "main"]);
+    write_commit_with_date(repo.path(), "a.txt", "one\ntwo\n", "1700000000 +0000", "base");
+
+    assert_eq!(
+        run_zmin_args(repo.path(), &["log", "-L", "1,1:a.txt", "HEAD", "--"]),
+        git_args(repo.path(), &["log", "-L", "1,1:a.txt", "HEAD", "--"])
+    );
+}
+
+#[test]
 fn log_output_surface_tail_matches_stock_git() {
     let repo = git_init();
     git(repo.path(), ["checkout", "-b", "main"]);

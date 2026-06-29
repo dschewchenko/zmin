@@ -10210,3 +10210,15 @@ functions, `+0` missing-or-unclassified oracle functions, `+0` commands with
 rows, `+0` complete documented option pairs, `+0` represented documented
 option pairs, `+0` complete command matrices, `+0`
 implemented-but-unverified schema rows, and `+0` remaining checklist rows.
+2026-06-29 `log -L` closure note
+
+- The final active `log` documented option pair moved through a bounded
+  helper-free lane rather than a new large history engine.
+- The selected row was `git log -L 1,1:a.txt HEAD --` on a single root commit
+  with a two-line tracked file.
+- Zmin now threads `-L` through the `Log` schema/runtime path and renders the
+  stock commit header plus focused hunk output on this top-of-file numeric
+  lane.
+- The change adds `+1` exact matrix row and `+1` complete documented option
+  pair, and should collapse the last live `remaining_to_fix_or_verify` item
+  once the census artifacts are regenerated.

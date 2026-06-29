@@ -3614,6 +3614,13 @@ enum BlameLineRange {
     Function(String),
 }
 
+#[derive(Debug, Clone)]
+struct LogLineRangeSpec {
+    start: usize,
+    end: usize,
+    path: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 enum BlameRangeEnd {
     ToEnd,
@@ -7058,6 +7065,7 @@ pub(crate) struct LogOptions<'a> {
     pub(crate) format: Option<&'a str>,
     pub(crate) show_signature: bool,
     pub(crate) log_size: bool,
+    pub(crate) line_ranges: Vec<String>,
     pub(crate) mailmap: bool,
     pub(crate) no_mailmap: bool,
     pub(crate) use_mailmap: bool,
@@ -7672,8 +7680,8 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
     let merge_diff_mode = options.merge_diff_mode(&repo, diff_format)?;
     let store = LooseObjectStore::new(repo.objects_dir.clone(), GitHashAlgorithm::Sha1);
     let (parsed_revs, implicit_pathspecs) =
-        split_log_implicit_pathspecs(&repo, parsed_log_revs.revs);
-    let mut parsed_pathspecs = parsed_log_revs.pathspecs;
+        split_log_implicit_pathspecs(&repo, parsed_log_revs.revs.clone());
+    let mut parsed_pathspecs = parsed_log_revs.pathspecs.clone();
     parsed_pathspecs.extend(implicit_pathspecs);
     let pathspecs = parsed_pathspecs
         .iter()
@@ -7714,6 +7722,28 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
             options.no_standard_notes,
         ),
     )?;
+    let line_range_specs = options
+        .line_ranges
+        .iter()
+        .map(|value| parse_log_line_range_spec(value))
+        .collect::<Result<Vec<_>>>()?;
+    if !line_range_specs.is_empty() {
+        return log_with_line_ranges(
+            &repo,
+            &store,
+            &commit_cache,
+            &options,
+            &format,
+            &decorations,
+            &notes,
+            date_mode,
+            expand_tabs,
+            &parsed_log_revs,
+            &pathspecs,
+            &revs,
+            line_range_specs,
+        );
+    }
     let pickaxe_options = PickaxeOptions {
         string: parsed_log_revs.pickaxe_string.as_deref(),
         regex: parsed_log_revs.pickaxe_regex.as_deref(),
@@ -8094,6 +8124,225 @@ fn log_with_options(options: LogOptions<'_>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn parse_log_line_range_spec(value: &str) -> Result<LogLineRangeSpec> {
+    let Some((range, path)) = value.rsplit_once(':') else {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported log line range '{value}'"),
+        });
+    };
+    if path.is_empty() {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported log line range '{value}'"),
+        });
+    }
+    match parse_blame_line_range(range)? {
+        BlameLineRange::Numeric { start, end } if start == 1 && end >= start => Ok(LogLineRangeSpec {
+            start,
+            end,
+            path: path.to_owned(),
+        }),
+        _ => Err(CliError::Fatal {
+            code: 128,
+            message: format!("unsupported log line range '{value}'"),
+        }),
+    }
+}
+
+fn log_with_line_ranges(
+    repo: &GitRepo,
+    store: &LooseObjectStore,
+    commit_cache: &CommitObjectCache<'_, LooseObjectStore>,
+    options: &LogOptions<'_>,
+    format: &LogFormat<'_>,
+    decorations: &LogDecorations,
+    notes: &LogNotes,
+    date_mode: LogDateMode<'_>,
+    expand_tabs: bool,
+    parsed_log_revs: &LogParsedRevs,
+    pathspecs: &[Vec<u8>],
+    revs: &RevListRevs,
+    line_range_specs: Vec<LogLineRangeSpec>,
+) -> Result<()> {
+    if !pathspecs.is_empty()
+        || parsed_log_revs.pickaxe_string.is_some()
+        || parsed_log_revs.pickaxe_regex.is_some()
+        || parsed_log_revs.patch
+        || parsed_log_revs.pickaxe_regex_mode
+        || parsed_log_revs.pickaxe_all
+        || parsed_log_revs.decorate.is_some()
+        || parsed_log_revs.clear_decorations
+        || !parsed_log_revs.ignore_matching_lines.is_empty()
+        || parsed_log_revs.format.is_some()
+        || parsed_log_revs.pretty.is_some()
+        || options.walk_reflogs
+        || options.reflog
+        || options.no_walk
+        || options.do_walk
+        || options.first_parent
+        || options.reverse
+        || options.zero
+        || options.parents
+        || options.graph
+        || options.log_size
+        || options.oneline
+        || options.all
+        || options.max_count.is_some()
+        || options.skip.is_some()
+    {
+        return Err(CliError::Fatal {
+            code: 128,
+            message: "unsupported log -L option combination".into(),
+        });
+    }
+
+    let commits = collect_commit_objects_with_exclusions_cached(repo, store, commit_cache, revs, None)?;
+    let abbrev_len = if options.no_abbrev_commit {
+        GitHashAlgorithm::Sha1.digest_len() * 2
+    } else {
+        7
+    };
+    let default_commit_abbrev = options.abbrev_commit && !options.no_abbrev_commit;
+    let mut out = io::stdout().lock();
+
+    for (spec_idx, spec) in line_range_specs.iter().enumerate() {
+        let path_bytes = normalize_git_path(&spec.path)?.into_bytes();
+        let mut wrote_any = false;
+        for entry in &commits {
+            let commit = entry.commit.as_ref();
+            if commit.parents.len() > 1 {
+                return Err(CliError::Fatal {
+                    code: 128,
+                    message: format!("unsupported log line range '{}'", options.line_ranges[spec_idx]),
+                });
+            }
+            let new_lines = commit_file_lines_cached(store, commit_cache, &entry.id, &path_bytes)?;
+            let old_lines = if let Some(parent) = commit.parents.first() {
+                commit_file_lines_cached(store, commit_cache, parent, &path_bytes)?
+            } else {
+                Vec::new()
+            };
+            let selected_new = select_log_line_range_lines(&new_lines, spec.start, spec.end);
+            let selected_old = select_log_line_range_lines(&old_lines, spec.start, spec.end);
+            if selected_old == selected_new {
+                continue;
+            }
+            if wrote_any {
+                out.write_all(b"\n")?;
+            }
+            let rendered = render_log_with_note_mode(
+                format,
+                &entry.id,
+                commit,
+                None,
+                false,
+                abbrev_len,
+                None,
+                default_commit_abbrev,
+                expand_tabs,
+                decorations,
+                notes,
+                date_mode,
+                options.standard_notes && !options.show_notes,
+            )?;
+            out.write_all(rendered.as_bytes())?;
+            out.write_all(b"\n")?;
+            write_log_line_range_patch(
+                &mut out,
+                &spec.path,
+                !commit.parents.is_empty(),
+                !new_lines.is_empty(),
+                &join_log_line_range_lines(&selected_old),
+                &join_log_line_range_lines(&selected_new),
+            )?;
+            wrote_any = true;
+        }
+    }
+    Ok(())
+}
+
+fn select_log_line_range_lines(lines: &[Vec<u8>], start: usize, end: usize) -> Vec<Vec<u8>> {
+    lines
+        .iter()
+        .skip(start.saturating_sub(1))
+        .take(end.saturating_sub(start).saturating_add(1))
+        .cloned()
+        .collect()
+}
+
+fn join_log_line_range_lines(lines: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(lines.iter().map(Vec::len).sum());
+    for line in lines {
+        out.extend_from_slice(line);
+    }
+    out
+}
+
+fn write_log_line_range_patch(
+    out: &mut impl Write,
+    path: &str,
+    parent_exists: bool,
+    new_exists: bool,
+    old: &[u8],
+    new: &[u8],
+) -> Result<()> {
+    writeln!(out, "diff --git a/{path} b/{path}")?;
+    let old_label = if parent_exists {
+        format!("a/{path}")
+    } else {
+        "/dev/null".to_owned()
+    };
+    let new_label = if new_exists {
+        format!("b/{path}")
+    } else {
+        "/dev/null".to_owned()
+    };
+    writeln!(out, "--- {old_label}")?;
+    writeln!(out, "+++ {new_label}")?;
+    let mut hunk = Vec::new();
+    write_unified_full_file_hunk(&mut hunk, old, new, path, HunkFormatOptions::default())?;
+    out.write_all(normalize_log_line_range_hunk_header(&hunk).as_bytes())?;
+    Ok(())
+}
+
+fn normalize_log_line_range_hunk_header(hunk: &[u8]) -> String {
+    let text = String::from_utf8_lossy(hunk);
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        if let Some(rest) = line.strip_prefix("@@ ") {
+            if let Some((ranges, suffix)) = rest.split_once(" @@") {
+                let mut parts = ranges.split_whitespace();
+                if let (Some(old_range), Some(new_range), None) =
+                    (parts.next(), parts.next(), parts.next())
+                {
+                    out.push_str("@@ ");
+                    out.push_str(&normalize_log_line_range_token(old_range));
+                    out.push(' ');
+                    out.push_str(&normalize_log_line_range_token(new_range));
+                    out.push_str(" @@");
+                    out.push_str(suffix);
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+    }
+    out
+}
+
+fn normalize_log_line_range_token(token: &str) -> String {
+    if token.contains(',') || token.len() < 2 {
+        return token.to_owned();
+    }
+    let (prefix, value) = token.split_at(1);
+    if value == "0" {
+        token.to_owned()
+    } else {
+        format!("{prefix}{value},1")
+    }
 }
 
 fn log_message_size(message: &[u8]) -> usize {
@@ -10425,6 +10674,7 @@ fn show_via_log(options: ShowOptions<'_>) -> Result<()> {
         format: options.format,
         show_signature: options.show_signature,
         log_size: false,
+        line_ranges: Vec::new(),
         mailmap: false,
         no_mailmap: false,
         use_mailmap: false,

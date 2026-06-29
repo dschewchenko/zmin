@@ -4701,6 +4701,8 @@ pub enum Command {
         show_signature: bool,
         #[arg(long = "log-size", action = ArgAction::SetTrue)]
         log_size: bool,
+        #[arg(short = 'L')]
+        line_ranges: Vec<String>,
         #[arg(long = "mailmap", action = ArgAction::SetTrue)]
         mailmap: bool,
         #[arg(long = "no-mailmap", action = ArgAction::SetTrue)]
