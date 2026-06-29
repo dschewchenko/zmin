@@ -1932,6 +1932,112 @@ fn svn_dcommit_dry_run_option_family_matches_stock_git() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn svn_dcommit_noop_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (_repo_url, trunk_url) = create_local_svn_trunk_history(dir.path());
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let authors_file = dir.path().join("authors.txt");
+    let authors_prog = dir.path().join("authors-prog.sh");
+    let envs = [("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")];
+    let svn_author = svn_log_author_name(&trunk_url);
+    fs::write(
+        &authors_file,
+        format!("{svn_author} = Test User <test@example.test>\n"),
+    )
+    .expect("write authors file");
+    fs::write(
+        &authors_prog,
+        "#!/bin/sh\nprintf 'Test User <test@example.test>\\n'\n",
+    )
+    .expect("write authors prog");
+    make_executable(&authors_prog);
+
+    let stock_clone = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", &trunk_url, stock_target.to_str().expect("stock target")],
+    );
+    assert_eq!(stock_clone.0, 0, "stock clone stderr: {}", stock_clone.2);
+    let zmin_clone = run_command_with_path_and_env(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", &trunk_url, zmin_target.to_str().expect("zmin target")],
+    );
+    assert_eq!(zmin_clone.0, 0, "zmin clone stderr: {}", zmin_clone.2);
+
+    configure_identity(&stock_target);
+    configure_identity(&zmin_target);
+    for target in [&stock_target, &zmin_target] {
+        fs::write(target.join("a.txt"), b"alpha\nsecond\nchanged\n").expect("modify a");
+        fs::write(target.join("new.txt"), b"new\n").expect("write new");
+        fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+        git(target, ["add", "-A"]);
+        git_with_env(target, ["commit", "-m", "svn submit change"]);
+    }
+
+    let authors_file_path = authors_file.to_str().expect("authors file path");
+    let authors_prog_path = authors_prog.to_str().expect("authors prog path");
+    let cases: [(&str, &[&str]); 14] = [
+        ("edit_short", &["svn", "dcommit", "-n", "-e"]),
+        ("edit_long", &["svn", "dcommit", "--dry-run", "--edit"]),
+        ("rmdir", &["svn", "dcommit", "--dry-run", "--rmdir"]),
+        ("find_copies_short", &["svn", "dcommit", "-n", "-l3"]),
+        (
+            "find_copies_long",
+            &["svn", "dcommit", "--dry-run", "--find-copies-harder"],
+        ),
+        ("merge_short", &["svn", "dcommit", "-n", "-m"]),
+        ("merge_long", &["svn", "dcommit", "--dry-run", "--merge"]),
+        ("strategy_short", &["svn", "dcommit", "-n", "-s", "recursive"]),
+        (
+            "strategy_long",
+            &["svn", "dcommit", "--dry-run", "--strategy", "recursive"],
+        ),
+        ("use_log_author", &["svn", "dcommit", "--dry-run", "--use-log-author"]),
+        (
+            "add_author_from",
+            &["svn", "dcommit", "--dry-run", "--add-author-from"],
+        ),
+        (
+            "authors_file_short",
+            &["svn", "dcommit", "-n", "-A", authors_file_path],
+        ),
+        (
+            "authors_file_long",
+            &["svn", "dcommit", "--dry-run", "--authors-file", authors_file_path],
+        ),
+        (
+            "authors_prog",
+            &["svn", "dcommit", "--dry-run", "--authors-prog", authors_prog_path],
+        ),
+    ];
+
+    for (label, args) in cases {
+        let stock = run_command_with_path_and_env(
+            stock_git_bin().to_str().expect("stock git path"),
+            &stock_target,
+            dir.path(),
+            &envs,
+            args,
+        );
+        let zmin = run_command_with_path_and_env(zmin_bin(), &zmin_target, dir.path(), &envs, args);
+        assert_eq!(stock.0, zmin.0, "{label}: stock stderr: {}", stock.2);
+        assert_eq!(stock.2, zmin.2, "{label}: stock stdout: {}", stock.1);
+        assert_eq!(
+            normalize_svn_dcommit_dry_run_stdout(&stock.1),
+            normalize_svn_dcommit_dry_run_stdout(&zmin.1),
+            "{label}"
+        );
+    }
+}
+
 #[test]
 fn archimport_imports_tree_snapshot_into_git_repo() {
     let dir = TempDir::new().expect("temp dir");
@@ -2864,6 +2970,33 @@ fn create_local_svn_trunk_history(root: &std::path::Path) -> (String, String) {
 fn normalize_svn_dcommit_dry_run_stdout(stdout: &str) -> String {
     let hash = regex::Regex::new(r"[0-9a-f]{40}").expect("hash regex");
     hash.replace_all(stdout, "<oid>").into_owned()
+}
+
+#[cfg(unix)]
+fn svn_log_author_name(url: &str) -> String {
+    let output = Command::new("svn")
+        .args(["log", "-q", "-r", "1", url])
+        .output()
+        .expect("run svn log");
+    assert!(
+        output.status.success(),
+        "svn log failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("svn log stdout utf8");
+    stdout
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            if line.starts_with('r') && line.contains('|') {
+                let mut parts = line.split('|').map(str::trim);
+                let _revision = parts.next()?;
+                parts.next().map(str::to_owned)
+            } else {
+                None
+            }
+        })
+        .expect("svn log author")
 }
 
 #[cfg(windows)]
