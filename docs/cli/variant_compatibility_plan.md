@@ -21,6 +21,30 @@ mappings and latest completed slices.
 
 ## Current Slice Pointer
 
+As of 2026-06-29 the latest completed batch is the bounded `svn init` plus
+`dcommit` helper-tail closure across the x86_64 Homebrew stock-Git wrapper
+and the existing real-local-SVN dry-run lane. This batch added four stock-Git
+rows, completed the documented `svn` option pairs `--shared`, `--template`,
+`-p`, and `--rebase-merges`, and removed those rows from the durable
+deferral inventory. The runtime closure stayed intentionally bounded: Zmin now
+matches stock Git for local `svn init --shared=true` and
+`svn init --template=<template-dir>` repository initialization side effects,
+including init stdout shape, HEAD target, `svn-remote.svn.*` config,
+`core.sharedRepository`, and template hook/config materialization, and it also
+matches stock Git for rejecting `git svn dcommit -n -p` and
+`git svn dcommit --dry-run --rebase-merges` with the same unknown-option
+stderr and nonzero exit before the bounded dry-run lane can proceed. Focused
+gates were
+`ZMIN_STOCK_GIT=/tmp/.../git cargo test -q -p zmin-cli --test git_foreign_scm_compat svn_ -- --nocapture`,
+`cargo run -q -p zmin-cli --bin zmin -- compat --profile v2-47 --format json > /tmp/zmin-v2-47-schema.json`,
+`python3 tools/git-compat-census.py --root . --zmin-schema-json /tmp/zmin-v2-47-schema.json`,
+`tools/git-cli-readiness-status.sh`, and `git diff --check`. Durable counts are
+now `151/151` complete command matrices, `3196/3212` complete documented
+option pairs, `7718` matrix rows, `6797` verified rows, `898` invalid-input
+rows, `0` implemented-but-unverified rows, and `0` remaining-to-fix-or-verify
+rows. The active backlog still lives entirely in deferred helper-option tails,
+now only `svn` (`1`), `cvsimport` (`14`), and `archimport` (`1`).
+
 As of 2026-06-29 the latest completed batch is the bounded `svn dcommit`
 dry-run no-op helper-tail closure across the x86_64 Homebrew stock-Git
 wrapper plus a real local SVN repository. This batch added fourteen exact

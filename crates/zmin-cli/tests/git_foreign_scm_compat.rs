@@ -2038,6 +2038,177 @@ fn svn_dcommit_noop_option_family_matches_stock_git() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn svn_init_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let template = dir.path().join("template");
+    fs::create_dir_all(template.join("hooks")).expect("create template hooks");
+    fs::write(template.join("hooks/ignored.sample"), b"#!/bin/sh\n").expect("write template hook");
+    fs::write(template.join("config"), b"[custom]\n\tvalue = from-template\n")
+        .expect("write template config");
+    let url = "file:///tmp/zmin-svn-init";
+
+    for (label, stock_args, zmin_args) in [
+        (
+            "shared",
+            vec![
+                "svn".to_owned(),
+                "init".to_owned(),
+                "--shared=true".to_owned(),
+                url.to_owned(),
+                dir.path()
+                    .join("stock-shared")
+                    .to_str()
+                    .expect("stock shared path")
+                    .to_owned(),
+            ],
+            vec![
+                "svn".to_owned(),
+                "init".to_owned(),
+                "--shared=true".to_owned(),
+                url.to_owned(),
+                dir.path()
+                    .join("zmin-shared")
+                    .to_str()
+                    .expect("zmin shared path")
+                    .to_owned(),
+            ],
+        ),
+        (
+            "template",
+            vec![
+                "svn".to_owned(),
+                "init".to_owned(),
+                format!("--template={}", template.display()),
+                url.to_owned(),
+                dir.path()
+                    .join("stock-template")
+                    .to_str()
+                    .expect("stock template path")
+                    .to_owned(),
+            ],
+            vec![
+                "svn".to_owned(),
+                "init".to_owned(),
+                format!("--template={}", template.display()),
+                url.to_owned(),
+                dir.path()
+                    .join("zmin-template")
+                    .to_str()
+                    .expect("zmin template path")
+                    .to_owned(),
+            ],
+        ),
+    ] {
+        let stock_target = std::path::PathBuf::from(
+            stock_args.last().expect("stock target").clone(),
+        );
+        let zmin_target = std::path::PathBuf::from(zmin_args.last().expect("zmin target").clone());
+        let stock_arg_refs = stock_args.iter().map(String::as_str).collect::<Vec<_>>();
+        let zmin_arg_refs = zmin_args.iter().map(String::as_str).collect::<Vec<_>>();
+        let stock = run_command_with_path(
+            stock_git_bin().to_str().expect("stock git path"),
+            dir.path(),
+            dir.path(),
+            &stock_arg_refs,
+        );
+        let zmin = run_command_with_path(zmin_bin(), dir.path(), dir.path(), &zmin_arg_refs);
+
+        assert_eq!(stock.0, zmin.0, "{label}: stock stderr: {}", stock.2);
+        assert_eq!(
+            normalize_svn_init_stdout(&stock.1),
+            normalize_svn_init_stdout(&zmin.1),
+            "{label}"
+        );
+        assert_eq!(stock.2, zmin.2, "{label}");
+        assert_eq!(
+            fs::read_to_string(stock_target.join(".git/HEAD")).expect("read stock HEAD"),
+            fs::read_to_string(zmin_target.join(".git/HEAD")).expect("read zmin HEAD"),
+            "{label}"
+        );
+        for key in [
+            "svn-remote.svn.url",
+            "svn-remote.svn.fetch",
+            "core.sharedRepository",
+            "custom.value",
+        ] {
+            assert_eq!(
+                git_maybe(&stock_target, ["config", "--get", key]),
+                git_maybe(&zmin_target, ["config", "--get", key]),
+                "{label} {key}"
+            );
+        }
+        assert_eq!(
+            list_dir_names(&stock_target.join(".git/hooks")),
+            list_dir_names(&zmin_target.join(".git/hooks")),
+            "{label} hooks"
+        );
+        assert_eq!(
+            visible_non_git_file_contents(&stock_target),
+            visible_non_git_file_contents(&zmin_target),
+            "{label} worktree"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn svn_dcommit_rebase_merges_option_family_matches_stock_git() {
+    let dir = TempDir::new().expect("temp dir");
+    let (_repo_url, trunk_url) = create_local_svn_trunk_history(dir.path());
+    let stock_target = dir.path().join("stock-project");
+    let zmin_target = dir.path().join("zmin-project");
+    let envs = [("GIT_TEST_DEFAULT_INITIAL_BRANCH_NAME", "main")];
+
+    let stock_clone = run_command_with_path_and_env(
+        stock_git_bin().to_str().expect("stock git path"),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", &trunk_url, stock_target.to_str().expect("stock target")],
+    );
+    assert_eq!(stock_clone.0, 0, "stock clone stderr: {}", stock_clone.2);
+    let zmin_clone = run_command_with_path_and_env(
+        zmin_bin(),
+        dir.path(),
+        dir.path(),
+        &envs,
+        &["svn", "clone", &trunk_url, zmin_target.to_str().expect("zmin target")],
+    );
+    assert_eq!(zmin_clone.0, 0, "zmin clone stderr: {}", zmin_clone.2);
+
+    configure_identity(&stock_target);
+    configure_identity(&zmin_target);
+    for target in [&stock_target, &zmin_target] {
+        fs::write(target.join("a.txt"), b"alpha\nsecond\nchanged\n").expect("modify a");
+        fs::write(target.join("new.txt"), b"new\n").expect("write new");
+        fs::remove_file(target.join("dir/b.txt")).expect("remove b");
+        git(target, ["add", "-A"]);
+        git_with_env(target, ["commit", "-m", "svn submit change"]);
+    }
+
+    for (label, args) in [
+        ("rebase_merges_short", &["svn", "dcommit", "-n", "-p"][..]),
+        (
+            "rebase_merges_long",
+            &["svn", "dcommit", "--dry-run", "--rebase-merges"][..],
+        ),
+    ] {
+        let stock = run_command_with_path_and_env(
+            stock_git_bin().to_str().expect("stock git path"),
+            &stock_target,
+            dir.path(),
+            &envs,
+            args,
+        );
+        let zmin = run_command_with_path_and_env(zmin_bin(), &zmin_target, dir.path(), &envs, args);
+        assert_eq!(stock.0, zmin.0, "{label}: stock stderr: {}", stock.2);
+        assert_eq!(stock.1, zmin.1, "{label}");
+        assert_eq!(stock.2, zmin.2, "{label}");
+    }
+}
+
 #[test]
 fn archimport_imports_tree_snapshot_into_git_repo() {
     let dir = TempDir::new().expect("temp dir");
@@ -2970,6 +3141,16 @@ fn create_local_svn_trunk_history(root: &std::path::Path) -> (String, String) {
 fn normalize_svn_dcommit_dry_run_stdout(stdout: &str) -> String {
     let hash = regex::Regex::new(r"[0-9a-f]{40}").expect("hash regex");
     hash.replace_all(stdout, "<oid>").into_owned()
+}
+
+#[cfg(unix)]
+fn normalize_svn_init_stdout(stdout: &str) -> String {
+    stdout
+        .replace("/private/var/", "/var/")
+        .replace("stock-shared", "<target>")
+        .replace("zmin-shared", "<target>")
+        .replace("stock-template", "<target>")
+        .replace("zmin-template", "<target>")
 }
 
 #[cfg(unix)]

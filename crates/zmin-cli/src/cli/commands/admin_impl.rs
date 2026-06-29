@@ -612,6 +612,14 @@ struct SvnSyncOptions {
 }
 
 #[derive(Debug, Clone)]
+struct SvnInitOptions {
+    url: String,
+    target_dir: PathBuf,
+    shared: Option<String>,
+    template: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
 struct P4SubmitOptions {
     branch: String,
     dry_run: bool,
@@ -4939,10 +4947,21 @@ fn svn(args: Vec<String>) -> Result<()> {
             svn_sync_impl(&options)
         }
         "init" => {
-            let options = parse_svn_clone_args(&args[1..])?;
+            let options = parse_svn_init_args(&args[1..])?;
+            core_commands::init_command(
+                Some(options.target_dir.clone()),
+                false,
+                options.template.clone(),
+                None,
+                options.shared.clone(),
+                None,
+                None,
+                None,
+                false,
+            )?;
             let repo = open_or_init_cvsimport_repo(&options.target_dir)?;
             set_config_value(&repo, "svn-remote.svn.url", &options.url)?;
-            set_config_value(&repo, "svn-remote.svn.fetch", "refs/remotes/git-svn")?;
+            set_config_value(&repo, "svn-remote.svn.fetch", ":refs/remotes/git-svn")?;
             Ok(())
         }
         "fetch" => {
@@ -5054,6 +5073,50 @@ fn parse_svn_fetch_args(args: &[String]) -> Result<SvnSyncOptions> {
     })
 }
 
+fn parse_svn_init_args(args: &[String]) -> Result<SvnInitOptions> {
+    let mut shared = None;
+    let mut template = None;
+    let mut values = Vec::new();
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--shared" => shared = Some("1".to_owned()),
+            "--template" => {
+                template = Some(PathBuf::from(next_borrowed_option_value(&mut iter, arg)?));
+            }
+            _ if arg.starts_with("--shared=") => {
+                shared = Some(svn_init_shared_value(&arg["--shared=".len()..]));
+            }
+            _ if arg.starts_with("--template=") => {
+                template = Some(PathBuf::from(&arg["--template=".len()..]));
+            }
+            _ if arg.starts_with('-') => {}
+            _ => values.push(arg.clone()),
+        }
+    }
+    let url = values.first().cloned().ok_or_else(|| CliError::Fatal {
+        code: 129,
+        message: "git svn init requires an SVN URL".into(),
+    })?;
+    let target_dir = values
+        .get(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(default_svn_clone_dir(&url)));
+    Ok(SvnInitOptions {
+        url,
+        target_dir,
+        shared,
+        template,
+    })
+}
+
+fn svn_init_shared_value(raw: &str) -> String {
+    match raw {
+        "true" => "1".to_owned(),
+        value => value.to_owned(),
+    }
+}
+
 fn parse_svn_dcommit_args(args: &[String]) -> Result<SvnDcommitOptions> {
     let mut ref_name = "refs/remotes/git-svn".to_owned();
     let mut dry_run = false;
@@ -5063,6 +5126,8 @@ fn parse_svn_dcommit_args(args: &[String]) -> Result<SvnDcommitOptions> {
         match arg.as_str() {
             "-n" | "--dry-run" => dry_run = true,
             "-v" | "--verbose" => verbose = true,
+            "-p" => return Err(svn_unknown_option("p")),
+            "--rebase-merges" => return Err(svn_unknown_option("rebase-merges")),
             "--id" => {
                 let id = next_borrowed_option_value(&mut iter, "--id")?;
                 ref_name = format!("refs/remotes/{id}");
@@ -5079,6 +5144,13 @@ fn parse_svn_dcommit_args(args: &[String]) -> Result<SvnDcommitOptions> {
         dry_run,
         verbose,
     })
+}
+
+fn svn_unknown_option(option: &str) -> CliError {
+    CliError::Stderr {
+        code: 1,
+        text: format!("Unknown option: {option}"),
+    }
 }
 
 fn default_svn_clone_dir(url: &str) -> String {
